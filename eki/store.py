@@ -183,6 +183,24 @@ class Store:
                 " WHERE conversation_id = ? ORDER BY id", (conversation_id,)).fetchall()
         return [dict(r) for r in rows]
 
+    def made(self, limit: int = 400) -> List[Dict[str, Any]]:
+        """Answers that may hold something made — a fence or a picture — newest
+        first, each with the thread it belongs to.
+
+        Deliberately coarse. What counts as an artifact is decided in one
+        place, by the reader that draws the chat; this only spares it the
+        answers that are plainly nothing but words."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT t.id, t.conversation_id, c.title, c.archived, t.content,"
+                "       t.backend, t.created_at"
+                " FROM turns t JOIN conversations c ON c.id = t.conversation_id"
+                " WHERE t.role = 'assistant'"
+                "   AND (t.content LIKE '%```%' OR t.content LIKE '%![%'"
+                "        OR t.content LIKE '%.png%' OR t.content LIKE '%.jpg%')"
+                " ORDER BY t.id DESC LIMIT ?", (max(1, min(int(limit), 2000)),)).fetchall()
+        return [dict(r) for r in rows]
+
     def search(self, text: str, limit: int = 30) -> List[Dict[str, Any]]:
         """Conversations containing this text, newest first, with the hit."""
         like = f"%{text}%"

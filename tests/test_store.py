@@ -76,3 +76,20 @@ def test_pin_rename_archive_delete(tmp_path):
     assert s.delete_conversation(b)
     assert s.search("newer") == [] and s.turns(b) == []
     assert not s.set_conversation("nope", pinned=True)
+
+
+def test_made_lists_answers_that_hold_something_across_threads(tmp_path):
+    s = Store(tmp_path / "t.db")
+    a = s.new_conversation()
+    s.add_turn(a, "user", "a page please ```html")            # a question is not an answer
+    s.add_turn(a, "assistant", "here:\n```html\n<html><body>hi</body></html>\n```", "claude")
+    s.add_turn(a, "assistant", "just words", "claude")
+    b = s.new_conversation()
+    s.add_turn(b, "user", "draw a fox")
+    s.add_turn(b, "assistant", "\n![a fox](/pics/fox.png)\n", "flux")
+
+    made = s.made()
+    assert [(m["conversation_id"], m["backend"]) for m in made] == [(b, "flux"), (a, "claude")]
+    assert made[0]["title"] == "draw a fox"
+    assert len(s.made(limit=1)) == 1
+    s.close()

@@ -56,8 +56,11 @@ def test_build_joins_boards_catalogue_and_memory(tmp_path, monkeypatch):
          "baseModels": {"models": [{"id": "Qwen/Qwen3.8-27B"}]},
          "safetensors": {"parameters": {"U32": 26_893_352_960}}},
         {"id": "mlx-community/Nobody-7B-4bit", "downloads": 9, "pipeline_tag": "text-generation",
-         "baseModels": {"models": [{"id": "someone/Nobody-7B"}]},
+         "baseModels": {"models": [{"id": "someone/Nobody-7B"}]}, "createdAt": "2024-01-01T00:00:00Z",
          "safetensors": {"parameters": {"U32": 7_000_000_000}}},
+        {"id": "mlx-community/Brand-New-9B-4bit", "downloads": 900, "pipeline_tag": "text-generation",
+         "baseModels": {"models": [{"id": "someone/Brand-New-9B"}]}, "createdAt": "2099-01-01T00:00:00Z",
+         "trendingScore": 7, "safetensors": {"parameters": {"U32": 9_000_000_000}}},
     ]
     hybrid = {"num_hidden_layers": 64, "num_key_value_heads": 4, "num_attention_heads": 24,
               "head_dim": 256, "max_position_embeddings": 262144,
@@ -74,7 +77,10 @@ def test_build_joins_boards_catalogue_and_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(suggest, "_config", fake_config)
     monkeypatch.setattr(suggest, "CONFIGS", tmp_path / "configs.json")
     got = asyncio.run(suggest.build(37.4, 21.9, ["mlx-community/Qwen3.8-27B-4bit"]))
-    assert len(got["suggestions"]) == 1                      # Nobody-7B is on no board
+    assert len(got["suggestions"]) == 1                      # the unscored ones are not ranked
+    # never scored and not new: nothing to say; new and trending: the second list
+    assert [t["name"] for t in got["trending"]] == ["Brand-New-9B"]
+    assert got["trending"][0]["params_b"] == 9.0 and not got["trending"][0]["scored"]
     it = got["suggestions"][0]
     assert it["repo"] == "mlx-community/Qwen3.8-27B-4bit"   # the MTP build never counts
     assert it["installed"] and it["label"] == "Best on this Mac"

@@ -39,6 +39,9 @@ CATALOGUE = 1000
 #: bases shown, and bases whose builds get their config read
 SHOWN = 8
 SHORTLIST = 16
+#: models the boards haven't scored, shown by trending — a release the
+#: boards will take months to reach is here the week it lands
+TRENDING = 4
 
 #: the plain mlx_lm quantisations, which every mlx_lm can load; the rest
 #: are experiments (OptiQ, mxfp4, nvfp4), multi-token-prediction builds
@@ -144,7 +147,7 @@ async def catalogue(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
         ("author", "mlx-community"), ("sort", "downloads"), ("direction", "-1"),
         ("limit", str(CATALOGUE)), ("expand[]", "safetensors"), ("expand[]", "downloads"),
         ("expand[]", "baseModels"), ("expand[]", "config"), ("expand[]", "pipeline_tag"),
-        ("expand[]", "createdAt")])
+        ("expand[]", "createdAt"), ("expand[]", "trendingScore")])
     r.raise_for_status()
     return [m for m in r.json() if (m.get("pipeline_tag") or "") in ("text-generation", "image-text-to-text")]
 
@@ -211,45 +214,57 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
             if not base_id:
                 continue
             base = public_scores.resolve("mlx", base_id)
-            if base is None:
-                continue
             # the boards' family fallback may land on a sibling ("qwen3-30b-a3b"
             # → the thinking variant); a build is only credited with its own scores
-            if base != public_scores.base_name(base_id) and "thinking" in base:
-                continue
-            slots = public_scores.scores(base)
+            if base is not None and base != public_scores.base_name(base_id) and "thinking" in base:
+                base = None
+            slots = public_scores.scores(base) if base else {}
             rolled = _rollup(slots)
-            if not rolled or not _trusted(base, slots):
-                continue
-            entry = by_base.setdefault(base, {"base": base, "scores": rolled, "slots": slots, "builds": [],
-                                              "name": _name(base), "date": _date(base)})
+            scored = bool(base and rolled and _trusted(base, slots))
+            if not scored:                          # known only by use: the second list
+                if (row.get("createdAt") or "") < _year_ago():
+                    continue                        # not new and never scored: nothing to say for it
+                base, rolled, slots = public_scores.base_name(base_id), {}, {}
+            entry = by_base.setdefault(base, {
+                "base": base, "scores": rolled, "slots": slots, "builds": [], "scored": scored,
+                "name": _name(base) if scored else base_id.split("/")[-1],
+                "date": _date(base) if scored else "", "trending": 0.0,
+                "params_b": _params(row, base_id)})
             bits = _bits(row)
             if bits >= 3:                           # 2-bit builds lose too much to recommend
                 entry["builds"].append({"repo": row["id"], "bits": bits, "downloads": row.get("downloads", 0),
                                         "weights_gb": weights_gb(row, bits), "plain": plain})
+                entry["trending"] = max(entry["trending"], float(row.get("trendingScore") or 0))
         for entry in by_base.values():
             if any(b["plain"] for b in entry["builds"]):
                 entry["builds"] = [b for b in entry["builds"] if b["plain"]]
-        ranked = sorted(supersede([e for e in by_base.values() if e["builds"]]),
-                        key=lambda e: e["scores"]["overall"], reverse=True)
+        entries = [e for e in by_base.values() if e["builds"]]
+        # the boards rank; trending separates what the boards can't
+        ranked = sorted(supersede([e for e in entries if e["scored"]]),
+                        key=lambda e: (e["scores"]["overall"], e["trending"]), reverse=True)
+        # what the boards don't know yet: by trending, then the biggest that fits
+        unranked = sorted([e for e in entries if not e["scored"]],
+                          key=lambda e: (e["trending"], e["params_b"]), reverse=True)
         # a build whose weights alone don't fit is out before any config is read
-        shortlist = []
-        for entry in ranked:
-            entry["builds"] = [b for b in entry["builds"] if b["weights_gb"] + OVERHEAD_GB < ceiling_gb]
-            if entry["builds"]:
-                shortlist.append(entry)
-            if len(shortlist) >= SHORTLIST:
-                break
+        shortlist, trending = [], []
+        for pool, out_, limit in ((ranked, shortlist, SHORTLIST), (unranked, trending, TRENDING * 3)):
+            for entry in pool:
+                entry["builds"] = [b for b in entry["builds"] if b["weights_gb"] + OVERHEAD_GB < ceiling_gb]
+                if entry["builds"]:
+                    out_.append(entry)
+                if len(out_) >= limit:
+                    break
         await asyncio.gather(*[_config(client, b["repo"], configs)
-                               for e in shortlist for b in e["builds"]])
+                               for e in shortlist + trending for b in e["builds"]])
     try:
         CONFIGS.parent.mkdir(parents=True, exist_ok=True)
         CONFIGS.write_text(json.dumps(configs))
     except OSError:
         pass
-    have = {public_scores.resolve("mlx", r) for r in installed}
-    out = []
-    for entry in shortlist:
+    have = {public_scores.resolve("mlx", r) or public_scores.base_name(r) for r in installed}
+    out, fresh = [], []
+    for entry in shortlist + trending:
+        listing = out if entry["scored"] else fresh
         for b in entry["builds"]:
             cfg = configs.get(b["repo"]) or {}
             room = ceiling_gb - b["weights_gb"] - OVERHEAD_GB
@@ -263,8 +278,9 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
         pick = _choose(entry["builds"], ceiling_gb)
         if pick is None:
             continue
-        out.append({
+        listing.append({
             "base": entry["base"], "name": entry["name"], "repo": pick["repo"], "bits": pick["bits"],
+            "trending": round(entry["trending"], 1), "params_b": entry["params_b"], "scored": entry["scored"],
             "weights_gb": pick["weights_gb"], "need_gb": pick["need_gb"], "context": pick["context"],
             "native": pick["native"], "fits_now": pick["fits_now"], "downloads": pick["downloads"],
             "scores": entry["scores"], "estimated": entry.get("estimated", []),
@@ -274,8 +290,23 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
                         "context": b["context"], "fits": b["fits"]}
                        for b in sorted(entry["builds"], key=lambda b: b["bits"]) if b is not pick],
         })
-    return {"suggestions": _label(out[:SHOWN]), "ceiling_gb": ceiling_gb, "free_gb": free_gb,
+    return {"suggestions": _label(out[:SHOWN]), "trending": fresh[:TRENDING],
+            "ceiling_gb": ceiling_gb, "free_gb": free_gb,
             "built": int(time.time()), "attribution": public_scores.attribution()}
+
+
+def _year_ago() -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - 365 * 86400))
+
+
+def _params(row: Dict[str, Any], base_id: str) -> float:
+    """Billions of parameters: from the name when it says, else counted."""
+    from .profile import params_from_name
+    named = params_from_name(base_id) or params_from_name(row["id"])
+    if named:
+        return named
+    params = (row.get("safetensors") or {}).get("parameters") or {}
+    return round(sum(params.values()) / 1e9, 1)
 
 
 def _entry(base: str) -> Dict[str, Any]:

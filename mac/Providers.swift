@@ -100,6 +100,9 @@ struct Suggestion: Codable, Identifiable, Hashable {
     let installed: Bool
     var label: String? = ""
     var others: [Other]? = []
+    var trending: Double? = 0
+    var params_b: Double? = 0
+    var scored: Bool? = true
     /// board slots inherited from an older generation of the same line
     var estimated: [String]? = []
     var supersedes: [String]? = []
@@ -129,6 +132,8 @@ struct Suggestion: Codable, Identifiable, Hashable {
 
 struct Suggestions: Codable {
     let suggestions: [Suggestion]
+    /// new releases the boards haven't scored, by how much they're being used
+    var trending: [Suggestion]? = []
     let ceiling_gb: Double
     let free_gb: Double
     var attribution: String? = ""
@@ -716,41 +721,58 @@ struct AddModelSheet: View {
         .help("Ranked by public benchmark results for the base model, among builds that fit "
               + "in this Mac's memory. Once a model is measured here, that number takes over.")
         if let suggested {
-            ForEach(suggested.suggestions) { s in
-                Button {
-                    selected = CatalogModel(repo: s.repo, downloads: s.downloads, likes: 0, task: "text-generation")
-                    Task { await loadFit() }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(s.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink)
-                            if let label = s.label, !label.isEmpty {
-                                Tag(text: label, color: Palette.accent)
-                            }
-                            if s.installed { Tag(text: "installed", color: Palette.ok) }
-                        }
-                        Text("\(s.bits)-bit · \(String(format: "%.1f", s.need_gb)) GB · up to \(s.context / 1024)k context"
-                             + (s.fits_now ? "" : " · room needed"))
-                            .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
-                        if !s.scoreLine.isEmpty {
-                            Text(s.scoreLine).font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
-                                .help(s.scoreHelp)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 9).padding(.vertical, 6)
-                    .background(selected?.repo == s.repo ? Palette.fill : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 6))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+            ForEach(suggested.suggestions) { s in suggestionRow(s) }
             if suggested.suggestions.isEmpty && !suggesting {
                 Text("Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
                     .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
                     .padding(.horizontal, 9)
             }
+            if let fresh = suggested.trending, !fresh.isEmpty {
+                Text("New and trending — not on the boards yet")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Palette.inkFaint)
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 9).padding(.top, 10).padding(.bottom, 2)
+                    .help("Released within the year and being downloaded a lot, but no public benchmark "
+                          + "has scored them yet. Ordered by how much they're used, then by size. "
+                          + "eki measures one itself once it's installed.")
+                ForEach(fresh) { s in suggestionRow(s) }
+            }
         }
+    }
+
+    private func suggestionRow(_ s: Suggestion) -> some View {
+        Button {
+            selected = CatalogModel(repo: s.repo, downloads: s.downloads, likes: 0, task: "text-generation")
+            Task { await loadFit() }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(s.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink)
+                    if let label = s.label, !label.isEmpty {
+                        Tag(text: label, color: Palette.accent)
+                    }
+                    if s.installed { Tag(text: "installed", color: Palette.ok) }
+                }
+                Text("\(s.bits)-bit · \(String(format: "%.1f", s.need_gb)) GB · up to \(s.context / 1024)k context"
+                     + (s.fits_now ? "" : " · room needed"))
+                    .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                if !s.scoreLine.isEmpty {
+                    Text(s.scoreLine).font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                        .help(s.scoreHelp)
+                } else if s.scored == false {
+                    Text("\(s.downloads.formatted()) downloads this month"
+                         + ((s.params_b ?? 0) > 0 ? " · \(String(format: "%g", s.params_b ?? 0))B parameters" : ""))
+                        .font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(selected?.repo == s.repo ? Palette.fill : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func loadSuggestions() async {

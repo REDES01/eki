@@ -197,3 +197,21 @@ def test_install_refuses_a_settings_file_it_cannot_parse(isolated):
     with pytest.raises(RuntimeError):
         claude_bridge.install(python="/usr/bin/python3")
     assert isolated.read_text() == "{ not json"
+
+
+def test_a_per_model_limit_is_shown_but_kept_out_of_the_meters():
+    # Claude Code reports extra windows for particular models on some plans;
+    # they are read by shape, so one nobody has seen before still lands right
+    reading = claude_quota.parse({"observed_at": NOW, "rate_limits": {
+        "seven_day_fable": {"used_percentage": 3, "resets_at": NOW + 86400},
+        "five_hour": {"used_percentage": 41, "resets_at": NOW + 600},
+        "seven_day": {"used_percentage": 12, "resets_at": NOW + 86400},
+        "seven_day_opus": {"used_percentage": 55, "resets_at": NOW + 86400},
+        "quarterly_widget": {"used_percentage": 7}}}, NOW)
+    labels = [(w.label, w.primary) for w in reading.windows]
+    # account-wide first, then the per-model ones
+    assert labels[:2] == [("5H", True), ("WEEK", True)]
+    assert ("FABLE WEEK", False) in labels and ("OPUS WEEK", False) in labels
+    assert ("QUARTERLY WIDGET", False) in labels
+    assert all(w.window_seconds == 7 * 86400
+               for w in reading.windows if w.label.endswith("WEEK"))

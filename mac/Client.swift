@@ -145,8 +145,11 @@ struct UsageWindow: Codable, Hashable, Identifiable {
     let resets_at: Int?
     let window_seconds: Int?
     let kind: String                  // "window" | "credits"
+    /// false for a limit that covers one model rather than the whole account
+    var primary: Bool? = true
 
     var id: String { key }
+    var isPrimary: Bool { primary ?? true }
 }
 
 struct ProviderUsage: Codable, Hashable, Identifiable {
@@ -160,15 +163,23 @@ struct ProviderUsage: Codable, Hashable, Identifiable {
 
     var id: String { provider }
 
+    /// The two the menu bar draws: account-wide windows, not per-model ones —
+    /// a Fable or Opus allowance is worth seeing in Usage, but it isn't what
+    /// "how much is left" means at a glance.
+    private var meterable: [UsageWindow] {
+        let real = windows.filter { $0.kind == "window" }
+        let account = real.filter(\.isPrimary)
+        return account.isEmpty ? real : account
+    }
+
     /// Shortest window first — the one that bites soonest.
     var short: UsageWindow? {
-        windows.filter { $0.kind == "window" }.min { ($0.window_seconds ?? 0) < ($1.window_seconds ?? 0) }
+        meterable.min { ($0.window_seconds ?? 0) < ($1.window_seconds ?? 0) }
     }
     /// Longest window, when there is more than one.
     var long: UsageWindow? {
-        let real = windows.filter { $0.kind == "window" }
-        guard real.count > 1 else { return nil }
-        return real.max { ($0.window_seconds ?? 0) < ($1.window_seconds ?? 0) }
+        guard meterable.count > 1 else { return nil }
+        return meterable.max { ($0.window_seconds ?? 0) < ($1.window_seconds ?? 0) }
     }
 }
 
@@ -237,9 +248,11 @@ actor EngineClient {
         return url
     }
 
-    private func request(_ method: String, _ path: String, body: Any? = nil) throws -> URLRequest {
+    private func request(_ method: String, _ path: String, body: Any? = nil,
+                         timeout: TimeInterval? = nil) throws -> URLRequest {
         var req = URLRequest(url: url(path))
         req.httpMethod = method
+        if let timeout { req.timeoutInterval = timeout }
         if let body {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -248,8 +261,8 @@ actor EngineClient {
     }
 
     func decode<T: Decodable>(_ type: T.Type, _ method: String, _ path: String,
-                                      body: Any? = nil) async throws -> T {
-        let req = try request(method, path, body: body)
+                              body: Any? = nil, timeout: TimeInterval? = nil) async throws -> T {
+        let req = try request(method, path, body: body, timeout: timeout)
         let data: Data
         let response: URLResponse
         do {
@@ -362,7 +375,9 @@ actor EngineClient {
 
     /// Start a throwaway Claude Code session and read its status line.
     func probeClaude() async throws -> UsageReport {
-        try await decode(UsageReport.self, "POST", "api/usage/claude-probe")
+        // it starts a Claude Code session and waits for its status line; a
+        // minute and a half is normal, and the default 30s is not enough
+        try await decode(UsageReport.self, "POST", "api/usage/claude-probe", timeout: 240)
     }
 
     func setClaudeBridge(_ enabled: Bool) async throws -> UsageReport {

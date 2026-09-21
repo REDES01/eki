@@ -23,6 +23,9 @@ class Window:
     resets_at: Optional[int] = None   # unix seconds
     window_seconds: Optional[int] = None
     kind: str = "window"              # "window" | "credits"
+    #: False for a limit that covers one model rather than the whole account —
+    #: shown in full, but not what the menu bar's two meters are about
+    primary: bool = True
 
 
 @dataclass

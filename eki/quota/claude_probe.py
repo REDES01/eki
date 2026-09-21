@@ -52,9 +52,22 @@ def trusted(folder: Path = PROBE_DIR) -> bool:
     return bool(isinstance(entry, dict) and entry.get("hasTrustDialogAccepted"))
 
 
+def _has_limits() -> bool:
+    """A reading with numbers in it.
+
+    Claude Code renders its status line as soon as the session opens, before
+    it has asked the API anything — so the first render carries no limits at
+    all. Waiting for the file to change is not enough; it has to change into
+    something with limits in it.
+    """
+    try:
+        return bool(json.loads(READING.read_text()).get("rate_limits"))
+    except (OSError, ValueError):
+        return False
+
+
 def _drive(binary: str, deadline: float) -> Tuple[bool, str]:
     """Run one tiny session in a pty. Returns (a reading arrived, detail)."""
-    before = READING.stat().st_mtime if READING.exists() else 0.0
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
     pid, fd = pty.fork()
     if pid == 0:                                    # child: becomes Claude Code
@@ -91,11 +104,12 @@ def _drive(binary: str, deadline: float) -> Tuple[bool, str]:
             if sent_at is None and (ready or time.time() - started > 15):
                 os.write(fd, PROMPT.encode() + b"\r")
                 sent_at = time.time()
-            if sent_at and READING.exists() and READING.stat().st_mtime > before:
+            if _has_limits():
                 # the status line rendered with limits in it: that's the whole job
                 return True, "read from a fresh Claude Code session"
-            if sent_at and time.time() - sent_at > 75:
-                detail = "Claude Code answered but reported no limits"
+            if sent_at and time.time() - sent_at > 90:
+                detail = ("Claude Code answered but its status line reported no "
+                          "limits — that's what an API-key login looks like")
                 break
     finally:
         _end(pid, fd)

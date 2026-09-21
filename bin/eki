@@ -1,0 +1,8 @@
+#!/bin/bash
+# The `eki` command, for a checkout: this repo's venv, this repo's source.
+# A packaged Eki.app ships its own copy of this as Contents/Helpers/eki-cli.
+src="$0"
+while [ -L "$src" ]; do src="$(readlink "$src")"; done
+root="$(cd "$(dirname "$src")/.." && pwd)"
+export PYTHONPATH="$root"     # run from wherever you are, not from the repo
+exec "$root/.venv/bin/python" -m eki.cli "$@"

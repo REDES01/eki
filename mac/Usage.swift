@@ -46,8 +46,11 @@ struct UsageRow: View {
             Text(window.label)
                 .font(.system(size: 10.5, weight: .semibold))
                 .tracking(0.5)
-                .foregroundStyle(Palette.inkMuted)
-                .frame(width: 44, alignment: .leading)
+                .foregroundStyle(window.isPrimary ? Palette.inkMuted : Palette.inkFaint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                // wide enough for a per-model label like "FABLE WEEK"
+                .frame(width: 74, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Palette.fill)

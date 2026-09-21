@@ -93,6 +93,9 @@ final class AppModel: ObservableObject {
                 return detail
             }
             return body.isEmpty ? "Claude Code didn't report any limits." : body
+        } catch ClientError.offline {
+            return "The refresh didn't finish in time. It takes about a minute; "
+                 + "if it keeps failing, ~/.eki/engine.log says why."
         } catch {
             return error.localizedDescription
         }

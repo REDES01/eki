@@ -122,7 +122,9 @@ class CodexBackend(Backend):
             # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
             # input instead of answering ("Reading additional input from stdin")
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # a line can carry a whole image (the judge reading a picture)
+            limit=16 * 1024 * 1024)
 
         seen_any = False
         last_error = ""

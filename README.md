@@ -233,6 +233,15 @@ posts it. Results come back through ComfyUI's own API into `~/.eki/images`,
 so its output folder is nobody's business. A workflow with a LoadImage
 node can edit pictures as well as draw them.
 
+Image models are measured too (`eki/measure_images.py`): twelve fixed
+prompts whose success is a list of plain facts — is there a cat, is it
+left of the dog, are there exactly three apples, does the sign say OPEN —
+drawn by the model and checked one picture at a time by the cheapest
+model here that can see (Claude Code on a subscription before a metered
+API). The share of facts that hold is the score, in the same registry as
+everything else. Pictures are free; the judge isn't, so eki runs this on
+its own only when that window is nearly idle.
+
 What that model *is* is read from its own files, not typed in
 (`eki/profile.py`): the build's bits and group size, its weights on disk,
 its layers and how many keep a growing cache, whether its chat template

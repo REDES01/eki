@@ -42,6 +42,7 @@ from . import codex_live
 from . import discover_models
 from . import live
 from . import measure
+from . import measure_images
 from . import secrets
 from . import settings as settings_mod
 from . import titles
@@ -839,6 +840,17 @@ class Engine:
                     table.pop(key, None)
         return closed
 
+    def _seer(self) -> Optional[Backend]:
+        """A model that can look at a picture, cheapest first: Claude Code on
+        a subscription before a metered API — never a local image model."""
+        able = [b for b in self.backends
+                if b.info.capabilities.vision and b.info.capabilities.text and self.get(b.key) is not None]
+        able.sort(key=lambda b: (b.info.kind != "claude_code", b.info.cost.tier))
+        for b in able:
+            if self._is_up(b.key) is not False:
+                return adapters.build(b.info, self.options.get(b.key, {}))
+        return None
+
     def _titler(self, exclude: str = "") -> Optional[Backend]:
         """A local model that's up and answers in words, cheapest first —
         the router model if it's loaded, else whatever local server is."""
@@ -974,11 +986,19 @@ class Engine:
             # a local grader only, and never the model being measured
             return self._titler(exclude=provider)
 
-        yield f"Running the battery against {provider} {model}…\n".replace("  ", " ")
+        is_image = priors.class_of(backend.info.kind, options, backend.info.capabilities) == "image"
+        if is_image:
+            seer = self._seer()
+            yield (f"Drawing {len(measure_images.ITEMS)} pictures with {provider}, checked by "
+                   f"{seer.info.label if seer else 'nobody'}…\n")
+            battery = measure_images.run(subject, lambda: seer)
+        else:
+            yield f"Running the battery against {provider} {model}…\n".replace("  ", " ")
+            battery = measure.run(subject, judge)
         final: Dict[str, Any] = {}
         recorded: Dict[str, Dict[str, Any]] = {}
         try:
-            async for piece in measure.run(subject, judge):
+            async for piece in battery:
                 if isinstance(piece, dict) and "slot" in piece:
                     # kept the moment a slot completes, so a run cut short
                     # still leaves what it learned
@@ -1115,9 +1135,13 @@ class Engine:
         for backend in self.backends:
             key = backend.info.key
             rec = self.registry.get(key, "")
-            if rec is None or not rec.enabled or rec.klass == "image":
+            if rec is None or not rec.enabled:
                 continue
-            wanted = {f"{s['task']}/{s['difficulty']}" for s in bench.SETS.values()}
+            image = rec.klass == "image"
+            if image:
+                wanted = {measure_images.SLOT}
+            else:
+                wanted = {f"{s['task']}/{s['difficulty']}" for s in bench.SETS.values()}
             solid = {slot for slot, m in rec.measured.items() if m.get("n", 0) >= SOLID_ITEMS}
             complete = wanted <= solid
             last = done.get(f"{key}/", {}).get("at", 0)
@@ -1136,6 +1160,16 @@ class Engine:
                 ok, why = self._quota_idle(key)
                 if not ok:
                     hold = f"waiting for a quieter window ({why})"
+            if image and not hold:
+                # the pictures are free; the judge that looks at them isn't
+                seer = next((b for b in self.backends if b.info.capabilities.vision
+                             and b.info.capabilities.text), None)
+                if seer is None:
+                    hold = "no model here can look at pictures"
+                else:
+                    ok, why = self._quota_idle(seer.key)
+                    if not ok:
+                        hold = f"waiting for {seer.info.label}'s window to be quieter ({why})"
             out.append({"provider": key, "hold": hold})
         return out
 

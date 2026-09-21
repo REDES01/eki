@@ -263,5 +263,5 @@ async def run(backend: Backend, judge: Optional[Callable[[], Optional[Backend]]]
 
 def summary(results: Dict[str, Dict[str, Any]]) -> str:
     bits = [f"{slot} {r['score']:.2f} ({r['n']})" for slot, r in results.items()
-            if slot.split("/")[0] in TASKS]
+            if slot.split("/")[0] in TASKS or slot.startswith("image/")]
     return ", ".join(bits) if bits else "nothing measured"

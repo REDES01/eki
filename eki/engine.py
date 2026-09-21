@@ -1040,7 +1040,8 @@ class Engine:
             self.registry.record_speed(provider, model, final["tok_s"])
         note = f" ({final['skipped']} needed a judge and none was up)" if final.get("skipped") else ""
         speed = f" at {final['tok_s']} tokens/s" if final.get("tok_s") else ""
-        yield f"\nMeasured{speed}: {measure.summary(results)}{note}\n"
+        shown = results or {slot: {"score": r["score"], "n": r["n"]} for slot, r in recorded.items()}
+        yield f"\nMeasured{speed}: {measure.summary(shown)}{note}\n"
 
     # ---- on a timetable -------------------------------------------------
 

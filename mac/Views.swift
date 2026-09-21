@@ -109,8 +109,18 @@ struct Sidebar: View {
                     RailRow(icon: "slider.horizontal.3", title: "Models & routing",
                             selected: pane == .models) { choose(.models) }
 
-                    let pinned = model.conversations.filter(\.isPinned)
-                    let rest = model.conversations.filter { !$0.isPinned }
+                    // what you're waiting on comes first, then what you keep
+                    let working = model.conversations.filter { $0.live == true }
+                    let pinned = model.conversations.filter { $0.isPinned && $0.live != true }
+                    let rest = model.conversations.filter { !$0.isPinned && $0.live != true }
+                    if !working.isEmpty && model.search.isEmpty {
+                        SectionLabel(text: "Working")
+                            .padding(.horizontal, 11).padding(.top, 16).padding(.bottom, 6)
+                        ForEach(working) { row in
+                            ChatRow(row: row, selected: pane == .chat(row.id),
+                                    rename: { renaming = row }) { choose(.chat(row.id)) }
+                        }
+                    }
                     if !pinned.isEmpty && model.search.isEmpty {
                         SectionLabel(text: "Pinned")
                             .padding(.horizontal, 11).padding(.top, 16).padding(.bottom, 6)
@@ -280,9 +290,6 @@ struct ChatRow: View {
                     .menuIndicator(.hidden)
                     .tint(Palette.inkMuted)
                     .fixedSize()
-                } else if row.live == true {
-                    // something in this thread is still being answered
-                    Dot(color: Palette.ok, size: 6, pulsing: true)
                 } else if row.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 8))
@@ -295,6 +302,13 @@ struct ChatRow: View {
             .background(selected ? Palette.accentSoft
                                  : (hovering ? Palette.fill.opacity(0.8) : .clear),
                         in: RoundedRectangle(cornerRadius: 7))
+            .overlay(alignment: .leading) {
+                if row.live == true {
+                    // being answered right now: a pulse at the very left
+                    Dot(color: Palette.ok, size: 5, pulsing: true)
+                        .padding(.leading, 3)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

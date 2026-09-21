@@ -202,3 +202,14 @@ def test_the_model_label_does_not_overrule_an_outright_ask():
     c = classify.Classifier(Wrong(), use_model=True)
     assert run(c.label("generate an image of a fox")).task == "image"
     assert run(c.label("say hi")).task == "chat"
+
+
+def test_the_model_cannot_talk_a_picture_edit_into_chat():
+    class Wrong:
+        misses = 0
+
+        async def label(self, prompt):
+            return classify.Label(task="chat", difficulty="easy", source="model")
+    c = classify.Classifier(Wrong(), use_model=True)
+    assert run(c.label("make it bluer", after_image=True)).task == "image"
+    assert run(c.label("make it bluer")).task == "chat"

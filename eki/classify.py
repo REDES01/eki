@@ -79,6 +79,55 @@ def asks_for_image(prompt: str) -> bool:
     return bool(_MAKE_IMAGE.search(text))
 
 
+#: A picture was the last thing in the thread, and this reads as a change to
+#: it: "make it bluer", "remove the hat", "now at sunset", "换成蓝色". Only ever
+#: consulted when the previous answer *was* a picture — on their own these
+#: words mean nothing of the sort.
+_EDIT_IMAGE = re.compile(
+    r"\b(make (it|that|this|them|her|him|the \w+)|change|replace|swap|remove|erase|"
+    r"delete|get rid of|add|put|give (it|him|her|them)|turn (it|the|this|that)|"
+    r"recolou?r|brighten|darken|lighten|sharpen|blur|zoom|crop|rotate|flip|mirror|"
+    r"same (but|image|picture|thing|one|scene|style)|but (with|in|at|on|make)|"
+    r"with(out)? (a|an|the|more|less|no|some)|instead|(more|less|fewer|no) \w+|"
+    r"background|foreground|lighting|colou?rs?|style|"
+    r"bluer|redder|greener|darker|lighter|brighter|warmer|cooler|softer|sharper|"
+    r"bigger|smaller|larger|closer|wider|taller|shorter|older|younger|happier|cuter|"
+    r"realistic|cartoon|anime|night|daytime|sunset|sunrise)\b"
+    r"|^\s*(ok(ay)?[, ]+)?(now|and|also|but|then)\b"
+    r"|改|换|換|变成|變成|再来|再來|再画|更|加上|加个|去掉|删掉|刪掉|背景|颜色|顏色"
+    r"|もっと|にして|変えて|消して|追加|足して|もう一|背景|色を", re.I)
+#: nothing but "again": the same request, another roll of the dice
+_REDO_IMAGE = re.compile(
+    r"^\W*(please )?(try again|again|once more|one more( time)?|redo( it)?|regenerate( it)?|"
+    r"(give me |make |show me |do |try )?(another|a different|a new)"
+    r"( one| version| take| variation| try)?|再来一(张|張|次|个)|再画一(张|張)|重新(生成|画)|"
+    r"もう一(枚|度|回)|やり直して?)(,? please)?\W*$", re.I)
+_BACKREF = re.compile(r"\b(same|it|this one|that one|the (last|previous) (one|image|picture))\b"
+                      r"|这张|這張|那张|那張|刚才|剛才|さっき|この|その", re.I)
+_QUESTION = re.compile(r"^\s*(what|why|how|which|who|where|when|is|are|was|does|did|do)\b", re.I)
+
+
+def image_followup(prompt: str) -> str:
+    """What this says about the picture just shown: "edit", "redo", or "".
+
+    The caller has established that a picture *was* just shown; this only
+    reads the words. A request that names a new picture outright ("generate an
+    image of a dog") is a fresh one unless it points back at the last ("the
+    same cat, but…")."""
+    text = prompt.strip()
+    if not text or len(text) > 400:
+        return ""
+    if _REDO_IMAGE.match(text):
+        return "redo"
+    if _CODE.search(text) or _ABOUT_IMAGE.search(text) or _QUESTION.match(text):
+        return ""
+    if not _EDIT_IMAGE.search(text):
+        return ""
+    if asks_for_image(text) and not _BACKREF.search(text):
+        return ""
+    return "edit"
+
+
 _FILE = re.compile(r"\b[\w\-./]+\.(py|ts|tsx|js|jsx|json|ya?ml|md|txt|swift|go|rs|toml|cfg|lock)\b")
 _REPO_VERB = re.compile(r"\b(add|create|fix|bump|update|rename|remove|delete|move|migrate|"
                         r"refactor|run|split|upgrade|implement|convert|set up|format)\b", re.I)
@@ -123,15 +172,20 @@ _SIMPLE = re.compile(r"\b(explain|compare|why|walk me through|plan|design|help m
 _EASY = re.compile(r"^(hi|hey|hello|thanks|thank you|yes|no|ok(ay)?)\b", re.I)
 
 
-def rules(prompt: str, has_folder: bool = False) -> Label:
+def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> Label:
     """The obvious cases, for free. Order is the whole design: a request that
-    names a folder is a repo change whatever else it says."""
+    names a folder is a repo change whatever else it says.
+
+    ``after_image`` says the last answer in the thread was a picture, which
+    is what makes "make it bluer" an image request rather than small talk."""
     text = prompt.strip()
     if has_folder:
         task = "repo"
     elif _REPO.search(text) or (_FILE.search(text) and _REPO_VERB.search(text)):
         task = "repo"
     elif asks_for_image(text) or (_IMAGE.search(text) and not _CODE.search(text)):
+        task = "image"
+    elif after_image and image_followup(text):
         task = "image"
     elif _RESEARCH.search(text):
         task = "research"
@@ -263,8 +317,9 @@ class Classifier:
         self.model = model
         self.use_model = use_model
 
-    async def label(self, prompt: str, has_folder: bool = False) -> Label:
-        fallback = rules(prompt, has_folder)
+    async def label(self, prompt: str, has_folder: bool = False,
+                    after_image: bool = False) -> Label:
+        fallback = rules(prompt, has_folder, after_image)
         if not (self.use_model and self.model) or self.model.misses >= 3:
             return fallback
         got = await self.model.label(prompt)
@@ -274,4 +329,6 @@ class Classifier:
             got.task = "repo"           # the folder is a fact, not an opinion
         elif asks_for_image(prompt):
             got.task = "image"          # so is "generate an image of…"
+        elif after_image and image_followup(prompt):
+            got.task = "image"          # and "make it bluer", said to a picture
         return got

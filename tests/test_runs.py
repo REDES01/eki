@@ -344,3 +344,83 @@ async def test_parallel_runs_do_not_share_an_adapter(tmp_path):
     sessions = {eng.store.session(s["conversation"], "echo") for s in starts}
     assert len(sessions) == 3
     await eng.runner.stop()
+
+
+# ---- a picture, then a word about it --------------------------------------
+
+@register("painter")
+class Painter(Backend):
+    """Draws nothing, but says what it was asked to draw and from what."""
+
+    calls = []
+    out = ""
+
+    async def health(self):
+        return Health(True, "painter")
+
+    async def stream(self, messages, **kw):
+        Painter.calls.append(dict(kw))
+        path = Path(Painter.out) / f"pic{len(Painter.calls)}.png"
+        path.write_bytes(b"png")
+        yield f"\n![pic]({path})\n"
+
+
+def studio(tmp_path) -> Engine:
+    cfg = echo_config(tmp_path)
+    cfg.backends.append(BackendInfo(
+        key="flux", kind="painter", label="flux",
+        capabilities=Capabilities(text=False, images_out=True), cost=Cost(tier=0)))
+    cfg.options["flux"] = {}
+    Painter.calls, Painter.out = [], str(tmp_path)
+    return Engine(cfg, owner=True)
+
+
+async def say(eng, prompt, cid=""):
+    started = await eng.ask(prompt, conversation=cid)
+    await settle(eng.runs, started["run"])
+    return started["conversation"], eng.store.turns(started["conversation"])[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_change_to_a_picture_goes_back_to_the_image_model(tmp_path):
+    eng = studio(tmp_path)
+    cid, first = await say(eng, "generate an image of a cat")
+    assert first["backend"] == "flux"
+
+    _, second = await say(eng, "make it bluer", cid)
+    assert second["backend"] == "flux"
+    assert Painter.calls[1]["edit"] == str(tmp_path / "pic1.png")
+    assert Painter.calls[1]["prompt"] == "make it bluer"
+
+    # and the edit is itself a picture, so the next change builds on it
+    _, third = await say(eng, "remove the background", cid)
+    assert third["backend"] == "flux"
+    assert Painter.calls[2]["edit"] == str(tmp_path / "pic2.png")
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_try_again_repeats_what_made_the_picture(tmp_path):
+    eng = studio(tmp_path)
+    cid, _ = await say(eng, "generate an image of a cat")
+    await say(eng, "try again", cid)
+    assert Painter.calls[1]["prompt"] == "generate an image of a cat"
+    assert "edit" not in Painter.calls[1]
+
+    await say(eng, "make it bluer", cid)
+    await say(eng, "another one", cid)              # the edit again, not a new cat
+    assert Painter.calls[3]["prompt"] == "make it bluer"
+    assert Painter.calls[3]["edit"] == Painter.calls[2]["edit"]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_words_after_a_picture_are_still_words(tmp_path):
+    eng = studio(tmp_path)
+    cid, _ = await say(eng, "generate an image of a cat")
+    _, answer = await say(eng, "what model did you use?", cid)
+    assert answer["backend"] == "echo"
+    # the thread has moved on: "make it shorter" is now about the words
+    _, later = await say(eng, "make it shorter", cid)
+    assert later["backend"] == "echo"
+    await eng.runner.stop()

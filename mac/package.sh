@@ -19,7 +19,8 @@ mkdir -p "$OUT"
 ZIP="$OUT/Eki-$VERSION.zip"
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
-shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+# the checksum file names the zip alone, so it verifies from wherever it's downloaded
+(cd "$OUT" && shasum -a 256 "$(basename "$ZIP")" | tee "$(basename "$ZIP").sha256")
 echo "packaged: $ZIP ($(du -sh "$ZIP" | cut -f1))"
 echo
 echo "Unsigned builds: the person downloading opens it once from"

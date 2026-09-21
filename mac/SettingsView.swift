@@ -249,8 +249,8 @@ struct RoutingSettings: View {
                         .onSubmit(save)
                 }
                 Text("The Python environment eki runs mlx_lm with, and where downloaded "
-                     + "weights live. Models are sized against a \(settings.context_budget / 1024)k "
-                     + "context when eki works out whether they fit.")
+                     + "weights live. Each model's context window is worked out from its own "
+                     + "config and the memory beside its weights — see the Models pane.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

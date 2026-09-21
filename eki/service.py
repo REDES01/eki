@@ -32,6 +32,7 @@ from . import codex_host
 from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
+from . import profile as profile_mod
 from . import migrate
 from . import secrets
 from . import bench
@@ -594,10 +595,10 @@ async def catalog_fit(repo: str) -> Any:
         d = await deploy_mod.details(repo)
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
-    budget = int(deploy_mod.settings()["context_budget"])
-    room = deploy_mod.fit(d, engine().models.memory().free_gb, budget)
+    room = deploy_mod.fit(d, engine().models.memory().free_gb)
+    prof = profile_mod.from_hub(repo, d).as_dict()
     d.pop("config", None)
-    return {**d, **room}
+    return {**d, **room, "profile": prof}
 
 
 @app.post("/api/deploy")

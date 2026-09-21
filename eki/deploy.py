@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
+from . import context
 from . import settings as settings_mod
 
 HF = "https://huggingface.co"
@@ -76,25 +77,8 @@ async def search(query: str = "", limit: int = 30) -> List[Dict[str, Any]]:
     return out[:limit]
 
 
-def _text_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    return config.get("text_config") or config.get("llm_config") or config
-
-
-def kv_gb(config: Dict[str, Any], tokens: int) -> float:
-    """fp16 KV cache for `tokens` of context.
-
-    Hybrid models (Qwen3.5/3.8, Gemma 3n…) list `layer_types`; only the
-    full-attention layers keep a cache that grows with the context, the
-    linear/sliding ones hold a fixed state, so those are counted alone."""
-    c = _text_config(config)
-    layers = c.get("num_hidden_layers") or 0
-    types = c.get("layer_types")
-    if isinstance(types, list) and types:
-        layers = sum(1 for t in types if t == "full_attention")
-    heads = c.get("num_attention_heads") or 0
-    kv_heads = c.get("num_key_value_heads") or heads
-    head_dim = c.get("head_dim") or ((c.get("hidden_size") or 0) // heads if heads else 0)
-    return round(2 * layers * kv_heads * head_dim * 2 * tokens / 1024**3, 2)
+_text_config = context._text_config
+kv_gb = context.kv_gb                               # the estimate lives with the window logic
 
 
 async def details(repo: str) -> Dict[str, Any]:
@@ -125,11 +109,21 @@ async def details(repo: str) -> Dict[str, Any]:
     }
 
 
-def fit(d: Dict[str, Any], free_gb: float, context: int) -> Dict[str, Any]:
-    """Will it run beside what's already loaded? Weights + KV + overhead."""
-    context = min(context, d.get("context") or context)
-    need = round(d["weights_gb"] + kv_gb(d.get("config") or {}, context) + OVERHEAD_GB, 1)
-    return {"need_gb": need, "free_gb": free_gb, "context": context,
+def fit(d: Dict[str, Any], free_gb: float) -> Dict[str, Any]:
+    """Will it run beside what's already loaded, and with how much context?
+
+    The window is sized the way a model already here gets it (see
+    eki/context.py): from its config, against the memory left beside its
+    weights, under the speed cap. Need = weights + that cache + overhead.
+    A repo without a config gets the smallest window and an honest guess.
+    """
+    config = d.get("config") or {}
+    room = free_gb - d["weights_gb"] - OVERHEAD_GB
+    window = context.size(config, room)
+    tokens = window.tokens if window else min(context.STEPS[0], d.get("context") or context.STEPS[0])
+    need = round(d["weights_gb"] + kv_gb(config, tokens) + OVERHEAD_GB, 1)
+    return {"need_gb": need, "free_gb": free_gb, "context": tokens,
+            "window": window.as_dict() if window else None,
             "fits": need <= free_gb,
             "verdict": ("fits" if need <= free_gb * 0.85 else
                         "tight" if need <= free_gb else "too big")}

@@ -89,6 +89,10 @@ struct ModelFit: Codable, Hashable {
     let free_gb: Double
     let fits: Bool
     let verdict: String
+    /// how the window was sized (see eki/context.py); nil when the repo has no config
+    var window: ContextWindow? = nil
+    /// what the build is, from the Hub's config and file list
+    var profile: ModelProfile? = nil
 }
 
 struct HubSettings: Codable, Hashable {
@@ -630,8 +634,21 @@ struct AddModelSheet: View {
             VStack(alignment: .leading, spacing: 9) {
                 Text(selected.repo.replacingOccurrences(of: "mlx-community/", with: ""))
                     .font(.system(size: 13.5, weight: .medium))
+                if let summary = fit.profile?.summary {
+                    Text(summary)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 row("Download", String(format: "%.1f GB", fit.download_gb))
                 row("Needs", String(format: "%.1f GB with a %dk context", fit.need_gb, fit.context / 1024))
+                if let window = fit.window {
+                    row("Context", window.limited_by == "memory"
+                        ? "\(window.tokens / 1024)k — what fits beside its weights now (native \(window.native / 1024)k)"
+                        : window.limited_by == "speed"
+                        ? "\(window.tokens / 1024)k — the speed cap (native \(window.native / 1024)k)"
+                        : "\(window.tokens / 1024)k — the model's maximum")
+                }
                 row("Free now", String(format: "%.1f GB", fit.free_gb))
                 if !fit.license.isEmpty { row("License", fit.license) }
                 HStack(spacing: 6) {

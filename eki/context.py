@@ -15,8 +15,6 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
-from . import deploy
-
 #: windows are picked from these, never in between: Codex and Claude Code
 #: compact at a margin below the number they're given, and a round figure
 #: is one a person can reason about
@@ -62,8 +60,30 @@ def _k(n: int) -> str:
     return f"{n // 1024}k"
 
 
+def _text_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config.get("text_config") or config.get("llm_config") or config
+
+
+def kv_gb(config: Dict[str, Any], tokens: int) -> float:
+    """fp16 KV cache for `tokens` of context.
+
+    Hybrid models (Qwen3.5/3.8, Gemma 3n…) list `layer_types`; only the
+    full-attention layers keep a cache that grows with the context, the
+    linear/sliding ones hold a fixed state, so those are counted alone."""
+    c = _text_config(config)
+    layers = c.get("num_hidden_layers") or 0
+    types = c.get("layer_types")
+    if isinstance(types, list) and types:
+        layers = sum(1 for t in types if t == "full_attention")
+    heads = c.get("num_attention_heads") or 0
+    kv_heads = c.get("num_key_value_heads") or heads
+    head_dim = c.get("head_dim") or ((c.get("hidden_size") or 0) // heads if heads else 0)
+    return round(2 * layers * kv_heads * head_dim * 2 * tokens / 1024**3, 2)
+
+
 def read_config(repo: str) -> Optional[Dict[str, Any]]:
     """The model's config.json from the Hugging Face cache, if downloaded."""
+    from . import deploy                            # deploy sizes with this module
     snap = deploy.snapshot_dir(repo)
     if snap is None:
         return None
@@ -74,8 +94,7 @@ def read_config(repo: str) -> Optional[Dict[str, Any]]:
 
 
 def native(config: Dict[str, Any]) -> int:
-    text = config.get("text_config") or config.get("llm_config") or config
-    return int(text.get("max_position_embeddings") or 0)
+    return int(_text_config(config).get("max_position_embeddings") or 0)
 
 
 def size(config: Dict[str, Any], room_gb: float, cap: int = SPEED_CAP) -> Optional[Window]:
@@ -85,7 +104,7 @@ def size(config: Dict[str, Any], room_gb: float, cap: int = SPEED_CAP) -> Option
     limit = native(config)
     if not limit:
         return None
-    per_token = deploy.kv_gb(config, 1 << 20) / (1 << 20)   # GB per token, rounding kept small
+    per_token = kv_gb(config, 1 << 20) / (1 << 20)          # GB per token, rounding kept small
     budget = max(0.0, room_gb) * KV_SHARE
     chosen, why = STEPS[0], ""
     for step in STEPS:

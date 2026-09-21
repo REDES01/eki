@@ -1190,11 +1190,12 @@ class Engine:
             raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
         if not d["weights_gb"]:
             raise BackendError(f"{repo} has no safetensors weights")
-        budget = int(deploy_mod.settings()["context_budget"])
-        room = deploy_mod.fit(d, self.models.memory().free_gb, budget)
-        yield (f"{d['weights_gb']} GB of weights; needs about {room['need_gb']} GB with a "
-               f"{room['context'] // 1024}k context — {room['verdict']} "
-               f"({room['free_gb']} GB free now).\n")
+        room = deploy_mod.fit(d, self.models.memory().free_gb)
+        prof = profile_mod.from_hub(repo, d)
+        yield prof.describe() + ".\n"
+        yield (f"Needs about {room['need_gb']} GB with a {room['context'] // 1024}k context"
+               + (f" ({room['window']['limited_by']}-limited)" if room.get("window") else "")
+               + f" — {room['verdict']} ({room['free_gb']} GB free now).\n")
         if d["license"]:
             yield f"License: {d['license']}.\n"
 

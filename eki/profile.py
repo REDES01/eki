@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import deploy, public_scores
+from . import context, public_scores
 
 #: overhead the server itself adds to the weights once loaded (runtime,
 #: compiled kernels, the tokenizer): what `gb` means before it's measured
@@ -91,6 +91,7 @@ def _text(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def read(repo: str) -> Optional[Profile]:
     """The profile of a downloaded build, or None when its files aren't here."""
+    from . import deploy                            # deploy profiles with this module
     snap = deploy.snapshot_dir(repo)
     if snap is None:
         return None
@@ -101,6 +102,14 @@ def read(repo: str) -> Optional[Profile]:
     return from_files(repo, config, snap)
 
 
+def from_hub(repo: str, details: Dict[str, Any]) -> Profile:
+    """Before the download: what the Hub's file list and config say."""
+    p = from_files(repo, details.get("config") or {}, None)
+    p.weights_gb = float(details.get("weights_gb") or 0)
+    p.sampling = dict(details.get("sampling") or {})
+    return p
+
+
 def from_files(repo: str, config: Dict[str, Any], snap: Optional[Path]) -> Profile:
     text = _text(config)
     quant = config.get("quantization") or config.get("quantization_config") or {}
@@ -108,6 +117,7 @@ def from_files(repo: str, config: Dict[str, Any], snap: Optional[Path]) -> Profi
     types = text.get("layer_types")
     attention = (sum(1 for t in types if t == "full_attention")
                  if isinstance(types, list) and types else layers)
+    from . import deploy
     gen: Dict[str, Any] = {}
     template: Optional[str] = None
     weights = 0.0
@@ -133,7 +143,7 @@ def from_files(repo: str, config: Dict[str, Any], snap: Optional[Path]) -> Profi
         weights_gb=round(weights / 1024**3, 2),
         native_context=int(text.get("max_position_embeddings") or 0),
         layers=layers, attention_layers=attention,
-        kv_per_token_kb=round(deploy.kv_gb(config, 1 << 20) / (1 << 20) * 1024 * 1024, 1),
+        kv_per_token_kb=round(context.kv_gb(config, 1 << 20) / (1 << 20) * 1024 * 1024, 1),
         sampling=deploy.sampling(gen),
         thinking_switch=bool(template and "enable_thinking" in template),
         tools=None if template is None else ("tool_call" in template or "tools" in template),

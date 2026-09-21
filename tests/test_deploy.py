@@ -18,10 +18,23 @@ def test_kv_estimate_reads_nested_text_config():
 
 def test_fit_verdicts():
     d = {"weights_gb": 10.0, "context": 8192, "config": {}}
-    assert deploy.fit(d, 20.0, 32768)["verdict"] == "fits"
-    assert deploy.fit(d, 11.5, 32768)["verdict"] == "tight"
-    assert deploy.fit(d, 5.0, 32768)["verdict"] == "too big"
-    assert deploy.fit(d, 20.0, 32768)["context"] == 8192       # capped by the model
+    assert deploy.fit(d, 20.0)["verdict"] == "fits"
+    assert deploy.fit(d, 11.5)["verdict"] == "tight"
+    assert deploy.fit(d, 5.0)["verdict"] == "too big"
+    assert deploy.fit(d, 20.0)["context"] == 8192              # no config: the smallest window
+
+
+def test_fit_sizes_the_window_like_a_model_already_here():
+    hybrid = {"num_hidden_layers": 64, "num_key_value_heads": 4, "num_attention_heads": 24,
+              "head_dim": 256, "max_position_embeddings": 262144,
+              "layer_types": ["linear_attention"] * 48 + ["full_attention"] * 16}
+    d = {"weights_gb": 14.9, "context": 262144, "config": hybrid}
+    roomy = deploy.fit(d, 30.0)          # 30 − 14.9 − 1.2 = 13.9 GB beside the weights → 128k (8 GB)
+    assert roomy["context"] == 131072 and roomy["window"]["limited_by"] == "speed"
+    assert roomy["need_gb"] == 24.1 and roomy["verdict"] == "fits"
+    tight = deploy.fit(d, 20.0)          # 3.9 GB beside → 2.9 usable → 32k (2 GB)
+    assert tight["context"] == 32768 and tight["window"]["limited_by"] == "memory"
+    assert tight["fits"]
 
 
 def test_sampling_only_what_was_published():

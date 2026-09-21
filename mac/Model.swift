@@ -275,6 +275,13 @@ final class AppModel: ObservableObject {
                                                        archived: showArchived) {
             conversations = fresh
         }
+        // the open thread's program carried on by itself: follow that run
+        if !conversationID.isEmpty, liveRun.isEmpty,
+           let view = try? await client.conversation(conversationID),
+           let run = view.active_run {
+            turns = view.turns
+            attach(run)
+        }
     }
 
     func refreshConversations() async {

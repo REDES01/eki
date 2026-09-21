@@ -314,6 +314,7 @@ def test_a_turn_the_program_took_by_itself_becomes_a_turn_in_the_thread(tmp_path
         assert "background" in turns[1]["content"]
         assert turns[2]["content"].startswith("The download finished")
         assert turns[2]["reason"] == "carried on by itself"
+
         assert json.loads(turns[2]["meta"])["continued"] is True
         # and the next question gets its own answer, not the stale one
         again = await eng.ask("hello", conversation=cid, backend_key="claude_code")
@@ -328,4 +329,24 @@ def test_a_turn_the_program_took_by_itself_becomes_a_turn_in_the_thread(tmp_path
         assert text.startswith("Echo: hello")
         await eng.quota.stop()
         await eng.close()
+    run(go())
+
+
+def test_background_task_events_read_as_lines():
+    async def go():
+        s = await _session()
+        try:
+            got = await _collect(s, "start a background download")
+            notes = [e["text"] for e in got if e["kind"] == "note"]
+            assert notes == ["In the background: curl model.gguf"]
+            assert s.background == {"t1": "curl model.gguf"}
+            await asyncio.sleep(0.6)                 # the program carries on
+            assert s.stirred()
+            later = [e async for e in s.turn(until_quiet=0.5)]
+            texts = [e["text"] for e in later if e["kind"] == "note"]
+            assert texts[0] == "curl model.gguf — 2.0 of 7.6 GB"
+            assert texts[1] == "Background task completed: model.gguf downloaded"
+            assert any(e["kind"] == "result" for e in later) and not s.background
+        finally:
+            await s.close()
     run(go())

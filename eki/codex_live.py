@@ -451,14 +451,17 @@ class CodexSession:
     def stirred(self) -> bool:
         return not self.busy and not self._events.empty()
 
-    async def turn(self, timeout: float = 600.0) -> AsyncIterator[Dict[str, Any]]:
+    async def turn(self, timeout: float = 600.0, until_quiet: float = 0.0) -> AsyncIterator[Dict[str, Any]]:
         self.busy = True
         try:
             while True:
                 waiting = bool(self._pending)
                 try:
-                    ev = await asyncio.wait_for(self._events.get(), timeout=None if waiting else timeout)
+                    ev = await asyncio.wait_for(self._events.get(),
+                                                timeout=None if waiting else (until_quiet or timeout))
                 except asyncio.TimeoutError:
+                    if until_quiet:
+                        return
                     raise RuntimeError("Codex went quiet for too long")
                 self.last_used = time.time()
                 yield ev

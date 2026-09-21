@@ -106,10 +106,15 @@ while True:
     elif "background" in prompt:
         # a task started in the background: the turn ends, and a moment
         # later the program carries on by itself with a turn of its own
+        out({"type": "system", "subtype": "task_started", "task_id": "t1", "description": "curl model.gguf"})
         text("Started the download in the background.")
         result("Started the download in the background.")
         import time as _t
         _t.sleep(0.3)
+        out({"type": "system", "subtype": "task_progress", "task_id": "t1", "description": "curl model.gguf",
+             "summary": "2.0 of 7.6 GB", "usage": {"total_tokens": 0, "tool_uses": 1, "duration_ms": 300}})
+        out({"type": "system", "subtype": "task_notification", "task_id": "t1", "status": "completed",
+             "output_file": "/tmp/t1.txt", "summary": "model.gguf downloaded"})
         out({"type": "assistant", "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": "tu9", "name": "Bash", "input": {"command": "ls downloads"}}]}})
         text("The download finished; the file is in place.")

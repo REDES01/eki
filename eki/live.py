@@ -46,6 +46,9 @@ class LiveSession:
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.session_id: str = ""
         self.model: str = ""
+        #: background tasks the program has going, by id — a download it
+        #: kicked off, a subagent — the reason a thread may stir on its own
+        self.background: Dict[str, str] = {}
         #: what Claude Code reports for the model once a turn has finished;
         #: until then, what its family is known to have
         self.context_window: int = 200_000
@@ -247,6 +250,26 @@ class LiveSession:
                 meta = event.get("compact_metadata") or {}
                 self._events.put_nowait({"kind": "note",
                                          "text": f"Context compacted ({meta.get('trigger', 'auto')})"})
+            # work the program runs in the background — a long download, a
+            # subagent — shown as it goes, the way the terminal shows it
+            elif sub == "task_started" and not event.get("ambient"):
+                what = str(event.get("description") or "a task")
+                self.background[str(event.get("task_id"))] = what
+                self._events.put_nowait({"kind": "note", "text": f"In the background: {what}"})
+            elif sub == "task_progress" and not event.get("ambient"):
+                what = str(event.get("summary") or event.get("last_tool_name") or "").strip()
+                if what:
+                    self._events.put_nowait({"kind": "note",
+                                             "text": f"{str(event.get('description') or 'background task')[:60]} — {what[:120]}"})
+            elif sub == "task_notification" and not event.get("ambient"):
+                self.background.pop(str(event.get("task_id")), None)
+                status = str(event.get("status") or "finished")
+                summary = str(event.get("summary") or "").strip()
+                self._events.put_nowait({"kind": "note",
+                                         "text": f"Background task {status}" + (f": {summary[:160]}" if summary else "")})
+            elif sub == "background_tasks_changed":
+                self.background = {str(t.get("task_id")): str(t.get("description") or "")
+                                   for t in (event.get("tasks") or []) if not t.get("ambient")}
             elif sub == "commands_changed" and isinstance(event.get("commands"), list):
                 self.commands = [c for c in event["commands"] if isinstance(c, dict) and c.get("name")
                                  and c["name"] not in self._terminal_only]
@@ -306,11 +329,14 @@ class LiveSession:
         finished and it carried on. Those events are a turn of its own."""
         return not self.busy and not self._events.empty()
 
-    async def turn(self, timeout: float = 600.0) -> AsyncIterator[Dict[str, Any]]:
+    async def turn(self, timeout: float = 600.0, until_quiet: float = 0.0
+                   ) -> AsyncIterator[Dict[str, Any]]:
         """Events of the turn in progress, up to and including its result.
 
         While a question or permission is pending the clock stops: the
-        program is waiting on you, not stuck.
+        program is waiting on you, not stuck. With `until_quiet`, a lull of
+        that many seconds ends the turn instead — for a turn the program
+        took by itself, which may be a few progress lines and no result.
         """
         self.busy = True
         try:
@@ -318,8 +344,10 @@ class LiveSession:
                 waiting = bool(self._pending)
                 try:
                     ev = await asyncio.wait_for(self._events.get(),
-                                                timeout=None if waiting else timeout)
+                                                timeout=None if waiting else (until_quiet or timeout))
                 except asyncio.TimeoutError:
+                    if until_quiet:
+                        return
                     raise RuntimeError("Claude Code went quiet for too long")
                 self.last_used = time.time()
                 yield ev

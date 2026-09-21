@@ -746,13 +746,18 @@ class Engine:
         reason = "carried on by itself"
         yield {"backend": backend.key, "reason": reason}
         parts: List[str] = []
+        lines: List[str] = []
         meta: Dict[str, Any] = {"run": run["id"], "continued": True}
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
         try:
-            async for chunk in self._live_turn(run, cid, backend, "", send=False):
+            # a lull of a few seconds ends it: progress lines on their own
+            # never come with a result
+            async for chunk in self._live_turn(run, cid, backend, "", send=False, until_quiet=8.0):
                 if isinstance(chunk, str):
                     parts.append(chunk)
+                elif isinstance(chunk, dict) and chunk.get("kind") == "activity":
+                    lines.append(str(chunk.get("text") or ""))
                 yield chunk
         except BackendError as e:
             self.store.add_turn(cid, "assistant", "".join(parts) or f"[failed: {e}]", backend.key, reason,
@@ -761,11 +766,17 @@ class Engine:
         usage = dict(getattr(backend, "last_usage", {}) or {})
         if usage:
             meta["usage"] = usage
-        self.store.add_turn(cid, "assistant", "".join(parts) or "*[did something without saying]*",
-                            backend.key, reason, meta=meta)
+        text = "".join(parts).strip()
+        if not text and not lines:
+            return                                  # nothing worth a turn
+        if not text:
+            # only progress: the lines are the turn, kept in the thread
+            text = "\n".join(f"*{ln}*" for ln in lines if ln)
+        self.store.add_turn(cid, "assistant", text, backend.key, reason, meta=meta)
 
     async def _live_turn(self, run: Dict[str, Any], cid: str, backend: Backend,
-                         model: str, send: bool = True) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+                         model: str, send: bool = True, until_quiet: float = 0.0
+                         ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         """One turn through the open session: text as it streams, tool
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
@@ -790,7 +801,7 @@ class Engine:
                     await session.send(prompt)
                 send = True                         # a nudge, if one follows, is sent
                 tail: List[str] = []                # words since the last tool call
-                async for ev in session.turn():
+                async for ev in session.turn(until_quiet=until_quiet):
                     kind = ev["kind"]
                     if kind == "text":
                         tail.append(ev["text"])

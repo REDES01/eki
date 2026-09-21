@@ -51,6 +51,10 @@ final class AppModel: ObservableObject {
 
     // choices the user makes
     @AppStorage("preferredBackend") var preferredBackend: String = ""   // "" = let it route
+    /// a model behind that provider, "" = routed per message ("claude:opus" is sent)
+    @AppStorage("preferredModel") var preferredModel: String = ""
+    /// the models the registry lists behind each provider, for the picker
+    @Published var registry: [RegistryModel] = []
     @AppStorage("lastRepo") var lastRepo: String = ""
 
     let client = EngineClient()
@@ -226,7 +230,9 @@ final class AppModel: ObservableObject {
         async let r = try? await client.runs()
         async let m = try? await client.models()
         async let p = try? await client.policy()
+        async let reg = try? await client.registry()
         backends = await b ?? []
+        registry = await reg ?? registry
         conversations = await c ?? []
         runs = await r ?? []
         for run in runs where run.isLive && run.kind == "deploy" && !deploys.contains(run.id) {
@@ -383,9 +389,11 @@ final class AppModel: ObservableObject {
         chatError = ""
         Task {
             do {
+                let asked = preferredBackend.isEmpty || preferredModel.isEmpty
+                    ? preferredBackend : preferredBackend + ":" + preferredModel
                 let started = try await client.ask(prompt: prompt,
                                                    conversation: conversationID,
-                                                   backend: preferredBackend, repo: repo)
+                                                   backend: asked, repo: repo)
                 conversationID = started.conversation
                 // the engine has written the question; show the stored thread
                 await reload(reattach: false)
@@ -468,6 +476,12 @@ final class AppModel: ObservableObject {
         routedTo = ""
         activity = []
         prompt = nil
+    }
+
+    /// The named models behind a provider, enabled, for the picker.
+    func modelsBehind(_ key: String) -> [RegistryModel] {
+        registry.filter { $0.provider == key && $0.enabled && !$0.isDefault }
+            .sorted { $0.label < $1.label }
     }
 
     // ---- answering the program ---------------------------------------------

@@ -157,3 +157,48 @@ def test_rules_beat_chance_on_the_seed_set():
     got = [classify.rules(r["p"]) for r in rows]
     # tuned on this set, so this is a regression guard, not a claim of accuracy
     assert score(rows, got)["task"] >= 0.85
+
+
+# ---- saying "generate an image" is enough --------------------------------
+
+@pytest.mark.parametrize("prompt", [
+    "generate an image of a cat",
+    "generation image: a red fox in snow",
+    "generate image of a lighthouse at dusk",
+    "make me an image of tokyo at night",
+    "create a picture with a dragon",
+    "can you generate a pic of my dog as an astronaut",
+    "i want a image, a cyberpunk station",
+    "image: brass compass on a map",
+    "生成一张图片：东京车站",
+    "画一只猫",
+    "駅の画像を生成して",
+])
+def test_asking_for_a_picture_in_words_is_an_image_request(prompt):
+    assert classify.asks_for_image(prompt)
+    assert classify.rules(prompt).task == "image"
+
+
+@pytest.mark.parametrize("prompt", [
+    "generate a function that resizes an image in python",
+    "what image formats support transparency?",
+    "describe this image",
+    "make this image smaller",
+    "make the picture clearer in my essay intro",
+    "create a plan to resize the image",
+])
+def test_a_picture_as_the_subject_is_not_a_request_to_draw(prompt):
+    assert not classify.asks_for_image(prompt)
+    assert classify.rules(prompt).task != "image"
+
+
+def test_the_model_label_does_not_overrule_an_outright_ask():
+    class Wrong:
+        misses = 0
+
+        async def label(self, prompt):
+            return classify.Label(task="chat", difficulty="easy", source="model")
+
+    c = classify.Classifier(Wrong(), use_model=True)
+    assert run(c.label("generate an image of a fox")).task == "image"
+    assert run(c.label("say hi")).task == "chat"

@@ -3,8 +3,10 @@
 //
 // Models answer in Markdown whether or not you asked them to, so rendering it
 // is not a nicety: unrendered, every answer arrives full of asterisks and
-// fence backticks. This handles the four things that actually show up —
-// headings, lists, inline emphasis and code — and deliberately stops there.
+// fence backticks. This handles the things that actually show up — headings,
+// lists, inline emphasis, code and pictures — and deliberately stops there.
+// A fence that is a page, a drawing or a diagram becomes a card that opens
+// beside the chat (Artifacts.swift); a picture is shown (Images.swift).
 import AppKit
 import SwiftUI
 
@@ -13,6 +15,7 @@ enum Block: Identifiable {
     case code(String, language: String)
     case heading(String, level: Int)
     case bullet([String])
+    case image(alt: String, source: String)
 
     var id: String {
         switch self {
@@ -20,6 +23,7 @@ enum Block: Identifiable {
         case .code(let s, let l): return "c" + l + s
         case .heading(let s, let l): return "h\(l)" + s
         case .bullet(let items): return "b" + items.joined()
+        case .image(_, let source): return "i" + source
         }
     }
 }
@@ -71,6 +75,11 @@ enum MarkdownParser {
                     level: hashes))
                 continue
             }
+            if let picture = imageLine(trimmed) {
+                flushParagraph(); flushBullets()
+                out.append(picture)
+                continue
+            }
             if let item = bulletBody(trimmed) {
                 flushParagraph()
                 bullets.append(item)
@@ -85,6 +94,30 @@ enum MarkdownParser {
         }
         flushParagraph(); flushBullets()
         return out
+    }
+
+    private static let pictureTypes: Set<String> =
+        ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"]
+
+    /// A line that is nothing but a picture: `![alt](where)`, or — what the
+    /// image backend wrote before it learned Markdown — a bare path to one.
+    static func imageLine(_ line: String) -> Block? {
+        if line.hasPrefix("!["), line.hasSuffix(")"),
+           let close = line.range(of: "](") {
+            let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<close.lowerBound])
+            var source = String(line[close.upperBound..<line.index(before: line.endIndex)])
+            // ![alt](path "title")
+            if let quote = source.range(of: " \""), source.hasSuffix("\"") {
+                source = String(source[..<quote.lowerBound])
+            }
+            source = source.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
+            return source.isEmpty ? nil : .image(alt: alt, source: source)
+        }
+        if line.hasPrefix("/") || line.hasPrefix("~/"), !line.contains("](") {
+            let ext = (line as NSString).pathExtension.lowercased()
+            if pictureTypes.contains(ext) { return .image(alt: "", source: line) }
+        }
+        return nil
     }
 
     /// "- thing", "* thing", "1. thing" → "thing"
@@ -170,7 +203,14 @@ struct MarkdownText: View {
                     }
 
                 case .code(let code, let language):
-                    CodeBlock(code: code, language: language)
+                    if let artifact = Artifact(code: code, language: language) {
+                        ArtifactCard(artifact: artifact)
+                    } else {
+                        CodeBlock(code: code, language: language)
+                    }
+
+                case .image(let alt, let source):
+                    InlineImage(alt: alt, source: source)
                 }
             }
         }

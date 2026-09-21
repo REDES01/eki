@@ -817,13 +817,29 @@ struct BackendPicker: View {
 
     var body: some View {
         Menu {
-            Button { model.preferredBackend = "" } label: {
+            Button { pick("", "") } label: {
                 Text("Auto — cheapest that fits")
             }
             Divider()
             ForEach(model.backends.filter(\.answers)) { backend in
-                Button { model.preferredBackend = backend.key } label: {
-                    Text("\(backend.key) · \(backend.priceWord)")
+                let models = model.modelsBehind(backend.key)
+                if models.isEmpty {
+                    Button { pick(backend.key, "") } label: {
+                        Text("\(backend.key) · \(backend.priceWord)")
+                    }
+                } else {
+                    // a provider with models behind it: the router's pick, or one by name
+                    Menu("\(backend.key) · \(backend.priceWord)") {
+                        Button { pick(backend.key, "") } label: {
+                            Text("Auto — the router picks the model")
+                        }
+                        Divider()
+                        ForEach(models) { m in
+                            Button { pick(backend.key, m.model) } label: {
+                                Text(m.label + (m.cost.map { String(format: "  ×%g", $0) } ?? ""))
+                            }
+                        }
+                    }
                 }
             }
         } label: {
@@ -833,7 +849,8 @@ struct BackendPicker: View {
                     Text("Auto")
                 } else {
                     Dot(color: Palette.backend(model.preferredBackend), size: 6)
-                    Text(model.preferredBackend)
+                    Text(model.preferredModel.isEmpty ? model.preferredBackend
+                         : "\(model.preferredBackend) · \(model.preferredModel)")
                 }
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
@@ -849,6 +866,11 @@ struct BackendPicker: View {
         // the app-wide accent would make this idle control shout
         .tint(Palette.inkMuted)
         .help("Auto picks the cheapest backend that can do the job and has quota left")
+    }
+
+    private func pick(_ key: String, _ modelName: String) {
+        model.preferredBackend = key
+        model.preferredModel = modelName
     }
 }
 

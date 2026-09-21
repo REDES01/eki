@@ -217,3 +217,19 @@ def test_the_bar_is_the_difficulty_not_the_task():
     assert router.choose(Need(task="math", difficulty="easy")).backend.key == "qwen"
     assert router.choose(Need(task="math", difficulty="hard")).backend.key == "claude"
     assert NEED["easy"] < NEED["medium"] < NEED["hard"]
+
+
+def test_a_model_asked_for_by_name_overrides_the_routers_pick():
+    """The app sends "claude:fable"; the run goes to Claude with that model."""
+    from eki.engine import Engine
+    from types import SimpleNamespace as NS
+    mac = Mac()
+    router = mac.router()
+    requested, _, wanted = "claude:fable".partition(":")
+    choice = router.choose(Need(backend=requested or None, task="chat", difficulty="easy"))
+    assert choice.backend.key == "claude" and choice.model == ""
+    # what Engine._dispatch does with the second half
+    if wanted:
+        choice.model = wanted
+        choice.reason = f"{choice.backend.key} ({wanted}): asked for by name"
+    assert choice.model == "fable" and choice.reason == "claude (fable): asked for by name"

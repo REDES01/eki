@@ -291,11 +291,16 @@ class Engine:
 
         cid = run["conversation_id"]
         label = await self._label(run)
+        # "claude" asks for the provider; "claude:opus" for one of its models
+        requested, _, wanted_model = (run["requested"] or "").partition(":")
         need = Need(repo=bool(run["cwd"]), tools=bool(run["cwd"]),
                     images_out=bool(run["images"]) or label.task == "image",
-                    backend=run["requested"] or None,
+                    backend=requested or None,
                     task=label.task, difficulty=label.difficulty)
         choice = self.router.choose(need)
+        if choice.backend is not None and wanted_model:
+            choice.model = wanted_model
+            choice.reason = f"{choice.backend.key} ({wanted_model}): asked for by name"
         if choice.backend is None:
             why = choice.reason
             if choice.rejected:

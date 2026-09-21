@@ -49,6 +49,36 @@ class Label:
 _IMAGE = re.compile(r"\b(draw|paint(ing)?|render|illustration|logo|watercolou?r|sketch|"
                     r"generate an image|image of|picture of|photo of|comic|poster|wallpaper|"
                     r"isometric|icon of|product shot|cinematic)\b", re.I)
+#: Saying it outright — "generate an image…", "make me a picture of…", "画一只猫".
+#: A verb of making, then a word for a picture a few words later. This one is a
+#: fact about the request rather than a guess, so the model's label never
+#: overrides it.
+_MAKE_IMAGE = re.compile(
+    r"\b(generat(e|es|ing|ion)|creat(e|ing)|make|making|produce|draw|paint|render|"
+    r"give me|show me|i (want|need|would like|'d like))\b"
+    r"(?:\W+(?!(?:the|this|that|these|those|my|your|our|its)\b)\w+){0,4}?\W+"
+    r"(?<!\bthe )(?<!\bthis )(?<!\bthat )(?<!\bmy )"
+    r"(images?|pictures?|pics?|photos?|illustrations?|artworks?|drawings?|paintings?|"
+    r"portraits?|wallpapers?|logos?|icons?|posters?)\b"
+    r"|^\s*/?(image|img|picture)\s*[:：]"
+    r"|(生成|画|做|来|給我|给我|创建).{0,8}(图|圖|画像|照片|插画|壁纸)"
+    r"|(画像|イラスト|絵|写真).{0,6}(生成|作って|描いて|作成|ください)"
+    r"|^\s*画(一|个|張|张|只|幅)", re.I)
+#: …unless the picture is the *input*: a thing to read, resize or talk about
+_ABOUT_IMAGE = re.compile(
+    r"\b(describe|caption|explain|analy[sz]e|read|ocr|resize|compress|crop|convert|"
+    r"upload|load|parse|what('s| is) in)\b(?:\W+\w+){0,3}?\W+(this|that|the|my|an?)\W+"
+    r"(image|picture|photo|pic)\b", re.I)
+
+
+def asks_for_image(prompt: str) -> bool:
+    """True when the request says, in words, that the answer is a picture."""
+    text = prompt.strip()
+    if _CODE.search(text) or _ABOUT_IMAGE.search(text):
+        return False
+    return bool(_MAKE_IMAGE.search(text))
+
+
 _FILE = re.compile(r"\b[\w\-./]+\.(py|ts|tsx|js|jsx|json|ya?ml|md|txt|swift|go|rs|toml|cfg|lock)\b")
 _REPO_VERB = re.compile(r"\b(add|create|fix|bump|update|rename|remove|delete|move|migrate|"
                         r"refactor|run|split|upgrade|implement|convert|set up|format)\b", re.I)
@@ -101,7 +131,7 @@ def rules(prompt: str, has_folder: bool = False) -> Label:
         task = "repo"
     elif _REPO.search(text) or (_FILE.search(text) and _REPO_VERB.search(text)):
         task = "repo"
-    elif _IMAGE.search(text) and not _CODE.search(text):
+    elif asks_for_image(text) or (_IMAGE.search(text) and not _CODE.search(text)):
         task = "image"
     elif _RESEARCH.search(text):
         task = "research"
@@ -242,4 +272,6 @@ class Classifier:
             return fallback
         if has_folder:
             got.task = "repo"           # the folder is a fact, not an opinion
+        elif asks_for_image(prompt):
+            got.task = "image"          # so is "generate an image of…"
         return got

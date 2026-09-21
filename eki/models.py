@@ -351,6 +351,9 @@ class ModelManager:
         """Run a launch script detached, so the server outlives this process."""
         proc = await asyncio.create_subprocess_exec(
             "/bin/sh", "-c", os.path.expanduser(command),
+            # a launch script written for a person may open a browser tab;
+            # this tells it nobody asked for one
+            env={**os.environ, "EKI_STARTED": "1"},
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,

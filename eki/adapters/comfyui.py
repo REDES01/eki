@@ -99,7 +99,7 @@ class ComfyBackend(Backend):
             raise BackendError("no prompt to draw")
 
         seed = int(kw.get("seed") or random.randint(0, 2**31 - 1))
-        prefix = f"hub_{int(time.time())}"
+        prefix = f"eki_{int(time.time())}"
         graph = flux2_graph(prompt, self.width, self.height, self.steps, seed, prefix)
 
         try:
@@ -119,8 +119,12 @@ class ComfyBackend(Backend):
         images = await self._await_result(pid)
         if not images:
             raise BackendError("ComfyUI finished without producing an image")
+        # Markdown, with the file's real path: the app shows the picture, the
+        # terminal shows where it is, and the transcript stays plain text
+        alt = " ".join(prompt.split())[:80].replace("[", "(").replace("]", ")")
         for name in images:
-            yield f"{os.path.join(self.output_dir, name)}\n"
+            path = os.path.join(self.output_dir, name)
+            yield f"\n![{alt}]({path.replace(' ', '%20')})\n"
 
     async def _await_result(self, pid: str) -> List[str]:
         """Poll the history until this prompt has outputs (or the clock runs out)."""
@@ -140,8 +144,9 @@ class ComfyBackend(Backend):
             names: List[str] = []
             for node in (entry.get("outputs") or {}).values():
                 for image in node.get("images", []):
-                    if image.get("filename"):
-                        names.append(image["filename"])
+                    if image.get("filename") and image.get("type", "output") == "output":
+                        names.append(os.path.join(image.get("subfolder") or "",
+                                                  image["filename"]))
             if names:
                 return names
             if status.get("completed"):

@@ -46,7 +46,7 @@ swiftc -O -target arm64-apple-macos14.0 \
   -framework AppKit -framework SwiftUI -framework ServiceManagement \
   -o "$MACOS/Eki" \
   EkiApp.swift Client.swift Model.swift Theme.swift Markdown.swift \
-  Views.swift Downloads.swift Models.swift \
+  Views.swift Downloads.swift Models.swift Live.swift \
   Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift
 
 if [ "$FULL" = "1" ]; then

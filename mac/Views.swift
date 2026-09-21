@@ -428,7 +428,16 @@ struct ChatPane: View {
                                                reason: model.routedTo),
                                     streaming: true)
                     }
-                    if model.sending && model.streaming.isEmpty {
+                    if !model.activity.isEmpty && model.sending {
+                        ActivityLines(lines: model.activity)
+                    }
+                    if let prompt = model.prompt {
+                        if prompt.kind == "ask" {
+                            AskCard(prompt: prompt).id(prompt.id)
+                        } else {
+                            PermissionCard(prompt: prompt).id(prompt.id)
+                        }
+                    } else if model.sending && model.streaming.isEmpty {
                         Thinking(reason: model.routedTo)
                     }
                     if !model.chatError.isEmpty {
@@ -653,9 +662,56 @@ struct Composer: View {
     @Binding var draft: String
     @Binding var repo: String
     @FocusState private var focused: Bool
+    @State private var picked = 0
+    @State private var keys = MenuKeys()
 
     private var empty: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Typing "/" lists Claude Code's commands — the ones it reports for
+    /// this thread — narrowed as you type. ↑↓ move, Tab or ↩ complete.
+    private var suggestions: [SlashCommand] {
+        guard draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace) else { return [] }
+        let typed = String(draft.dropFirst()).lowercased()
+        // plain commands before plugin-namespaced ones, prefix matches first
+        let ordered = model.commands.sorted { ($0.name.contains(":") ? 1 : 0, $0.name)
+                                             < ($1.name.contains(":") ? 1 : 0, $1.name) }
+        let starts = ordered.filter { $0.name.lowercased().hasPrefix(typed) }
+        let within = ordered.filter {
+            !$0.name.lowercased().hasPrefix(typed) && $0.name.lowercased().contains(typed)
+        }
+        return starts + within
+    }
+
+    /// While the menu shows: ↑↓ move, Tab completes, ↩ completes (or sends
+    /// a command already complete), Esc closes.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        let list = suggestions
+        guard !list.isEmpty, focused else { return false }
+        let current = min(picked, list.count - 1)
+        switch event.keyCode {
+        case 125: picked = min(list.count - 1, current + 1); return true           // ↓
+        case 126: picked = max(0, current - 1); return true                        // ↑
+        case 48: complete(list[current]); return true                              // ⇥
+        case 36 where !event.modifierFlags.contains(.shift):                       // ↩
+            submit(); return true
+        case 53: draft = ""; return true                                           // ⎋
+        default: return false
+        }
+    }
+
+    private func complete(_ c: SlashCommand) {
+        draft = "/" + c.name + ((c.argumentHint ?? "").isEmpty ? "" : " ")
+        picked = 0
+    }
+
+    private func submit() {
+        if !suggestions.isEmpty, draft.dropFirst().lowercased() != suggestions[min(picked, suggestions.count - 1)].name.lowercased() {
+            complete(suggestions[min(picked, suggestions.count - 1)])
+        } else {
+            send()
+        }
     }
 
     var body: some View {
@@ -664,6 +720,12 @@ struct Composer: View {
                 CostStrip(cost: cost)
             }
             VStack(spacing: 0) {
+                if !suggestions.isEmpty {
+                    CommandMenu(commands: suggestions, picked: min(picked, suggestions.count - 1)) { c in
+                        complete(c)
+                    }
+                    Divider().overlay(Palette.hairline)
+                }
                 // A vertical TextField rather than a TextEditor: an editor
                 // takes every point of height offered and the composer ends up
                 // half the window. This grows line by line and stops at eight.
@@ -674,7 +736,13 @@ struct Composer: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 11)
                     .focused($focused)
-                    .onSubmit(send)          // ⇧↩ still makes a new line
+                    .onSubmit(submit)        // ⇧↩ still makes a new line
+                    .onChange(of: draft) { _, now in
+                        if now.hasPrefix("/") { model.loadCommands(cwd: repo) }
+                        picked = 0
+                    }
+                    .onAppear { keys.install(handleKey) }
+                    .onDisappear { keys.remove() }
 
                 HStack(spacing: 8) {
                     BackendPicker()

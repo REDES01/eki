@@ -33,6 +33,12 @@ DEFAULTS: Dict[str, Any] = {
     #: Claude, Codex and API providers, when their windows are nearly idle),
     #: or "off"
     "auto_measure": "local",
+    #: keep Claude Code open under eki's interface — streaming, its slash
+    #: commands, its questions and permission prompts as cards — rather than
+    #: one silent run per message
+    "live_claude": True,
+    #: appended to Claude Code's own system prompt
+    "claude_system_prompt": "",
 }
 
 

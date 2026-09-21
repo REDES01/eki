@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
                 stopped = await eng.models.reap_idle()
                 if stopped:
                     log.info("unloaded idle: %s", ", ".join(stopped))
+                closed = await eng.reap_live()
+                if closed:
+                    log.info("closed %d idle Claude Code session(s)", closed)
             except Exception:                       # noqa: BLE001
                 log.exception("idle reaper")
 
@@ -202,6 +205,37 @@ def run_diff(rid: str) -> Any:
     return {"id": rid, "diff": engine().diff(rid)}
 
 
+class AnswerBody(BaseModel):
+    request_id: str
+    response: Dict[str, Any]          # {"behavior": "allow", "updatedInput": …} or a deny
+
+
+@app.post("/api/runs/{rid}/answer")
+async def run_answer(rid: str, body: AnswerBody) -> Any:
+    """Your answer to a question Claude Code asked, or to a permission prompt."""
+    eng = engine()
+    if not eng.runs.get(rid):
+        raise HTTPException(404, "no such run")
+    if not await eng.answer(rid, body.request_id, body.response):
+        raise HTTPException(409, "nothing is waiting for that answer")
+    event = {"event": "answered", "request_id": body.request_id}
+    eng.runner.activity.setdefault(rid, []).append(event)
+    eng.runner._publish(rid, event)
+    return {"ok": True}
+
+
+@app.get("/api/conversations/{cid}/commands")
+async def conversation_commands(cid: str, cwd: str = "") -> Any:
+    """The slash commands Claude Code offers in this thread."""
+    return {"commands": await engine().commands_for(cid, cwd)}
+
+
+@app.get("/api/commands")
+async def folder_commands(cwd: str = "") -> Any:
+    """The same, for a thread that hasn't started: a session is opened ahead."""
+    return {"commands": await engine().commands_for("", cwd)}
+
+
 @app.get("/api/runs/{rid}/stream")
 async def run_stream(rid: str) -> StreamingResponse:
     eng = engine()
@@ -222,6 +256,8 @@ async def run_stream(rid: str) -> StreamingResponse:
                            "reason": snap.get("reason") or ""})
             if seen:
                 yield sse({"event": "output", "text": snap["output"], "end": seen})
+            for event in list(eng.runner.activity.get(rid) or []):
+                yield sse(event)              # tool lines, and a prompt still open
             if snap.get("state") in TERMINAL:
                 if snap.get("error"):
                     yield sse({"event": "error", "message": snap["error"]})

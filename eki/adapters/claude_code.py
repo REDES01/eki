@@ -102,6 +102,23 @@ class ClaudeCodeBackend(Backend):
                      "--permission-mode", self.permission_mode]
         return argv
 
+    def live_argv(self, cwd: Optional[str], resume: Optional[str], session_id: str) -> List[str]:
+        """The two-way streaming mode (see eki/live.py): the program stays up
+        between turns, streams partial text, and sends its questions and
+        permission prompts over stdio instead of a terminal."""
+        argv = [self.bin, "--output-format", "stream-json", "--verbose",
+                "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
+                "--include-partial-messages"]
+        keep_login = self._no_bare_flag()
+        if keep_login:
+            argv.append(keep_login)
+        if self.model:
+            argv += ["--model", self.model]
+        argv += ["--resume", resume] if resume else ["--session-id", session_id]
+        if cwd:
+            argv += ["--add-dir", cwd, "--permission-mode", self.permission_mode]
+        return argv
+
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
         if not self.bin:
             raise BackendError("claude not found — install Claude Code or set binary")

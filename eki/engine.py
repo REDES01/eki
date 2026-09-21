@@ -28,6 +28,7 @@ from . import deploy as deploy_mod
 from . import bench
 from . import classify
 from . import discover_models
+from . import live
 from . import measure
 from . import secrets
 from . import settings as settings_mod
@@ -64,6 +65,13 @@ class Engine:
         self.runner = Runner(self.runs, self._dispatch)
         self._health: Dict[str, Tuple[float, Any]] = {}
         self._side_tasks: set = set()               # titles and the like
+        #: Claude Code kept open per conversation (see eki/live.py)
+        self.live: Dict[str, live.LiveSession] = {}
+        #: a question or permission prompt a run is waiting on: run id → event
+        self.pending: Dict[str, Dict[str, Any]] = {}
+        #: sessions opened ahead of a thread (for the composer's command list,
+        #: and a faster first answer), by folder; adopted by the first run
+        self.warm: Dict[str, live.LiveSession] = {}
 
     # ---- backends ----------------------------------------------------
 
@@ -339,9 +347,13 @@ class Engine:
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
         parts: List[str] = []
+        stream = (self._live_turn(run, cid, backend, choice.model)
+                  if backend.info.kind == "claude_code" and self.settings.get("live_claude", True)
+                  else backend.stream(history, **kw))
         try:
-            async for chunk in backend.stream(history, **kw):
-                parts.append(chunk)
+            async for chunk in stream:
+                if isinstance(chunk, str):
+                    parts.append(chunk)
                 yield chunk
         except BackendError as e:
             if cid:
@@ -383,6 +395,145 @@ class Engine:
             task = asyncio.create_task(self._entitle(cid))
             self._side_tasks.add(task)
             task.add_done_callback(self._side_tasks.discard)
+
+    # ---- Claude Code, kept open --------------------------------------
+
+    async def _live_session(self, cid: str, backend: Backend, cwd: str) -> live.LiveSession:
+        """The conversation's session, started or resumed as needed."""
+        session = self.live.get(cid)
+        if session is not None and session.alive:
+            return session
+        resume = self.store.session(cid, backend.key) if cid else None
+        warm = self.warm.pop(cwd or "", None)
+        if warm is not None and warm.alive and not warm.busy and not resume:
+            if cid:
+                self.live[cid] = warm
+            return warm
+        if warm is not None:
+            await warm.close()
+        import uuid
+        argv = backend.live_argv(cwd or None, resume, str(uuid.uuid4()))   # type: ignore[attr-defined]
+        session = live.LiveSession(argv, cwd or None, None,
+                                   str(self.settings.get("claude_system_prompt", "")))
+        try:
+            await session.start()
+        except RuntimeError as e:
+            if resume:
+                # the old session is gone (deleted, or another machine's): start over
+                argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))  # type: ignore[attr-defined]
+                session = live.LiveSession(argv, cwd or None, None,
+                                           str(self.settings.get("claude_system_prompt", "")))
+                await session.start()
+            else:
+                raise BackendError(str(e))
+        if cid:
+            self.live[cid] = session
+        return session
+
+    async def _live_turn(self, run: Dict[str, Any], cid: str, backend: Backend,
+                         model: str) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+        """One turn through the open session: text as it streams, tool
+        activity as lines, questions and permission prompts as events the
+        app turns into cards and answers through `answer()`."""
+        session = await self._live_session(cid, backend, run["cwd"] or "")
+        if model and session.model and model not in session.model:
+            try:
+                await session.set_model(model)
+            except RuntimeError:
+                pass
+        rid = run["id"]
+        usage: Dict[str, Any] = {}
+        try:
+            await session.send(run["prompt"])
+            async for ev in session.turn():
+                kind = ev["kind"]
+                if kind == "text":
+                    yield ev["text"]
+                elif kind == "activity":
+                    yield {"kind": "activity", "text": live.summarize_activity(ev["tool"], ev["input"])}
+                elif kind == "note":
+                    yield {"kind": "activity", "text": ev["text"]}
+                elif kind in ("ask", "permission"):
+                    self.pending[rid] = {**ev, "run": rid}
+                    yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
+                elif kind == "cancel":
+                    self.pending.pop(rid, None)
+                    yield {"kind": "cancel", "request_id": ev["request_id"]}
+                elif kind == "rate_limit":
+                    self._note_rate_limits(ev["info"])
+                elif kind == "result":
+                    usage = ev.get("usage") or {}
+                    if ev.get("is_error"):
+                        raise BackendError(str(ev.get("result") or "Claude Code reported an error")[:300])
+                elif kind == "exit":
+                    self.live.pop(cid, None)
+                    raise BackendError(f"Claude Code stopped: {ev.get('error', '')}"[:300])
+        except (asyncio.CancelledError, GeneratorExit):
+            self.pending.pop(rid, None)
+            if session.alive:
+                await session.interrupt()
+            raise
+        except RuntimeError as e:
+            raise BackendError(str(e))
+        finally:
+            self.pending.pop(rid, None)
+        backend.last_usage = usage                                          # type: ignore[attr-defined]
+        backend.last_session = session.session_id                           # type: ignore[attr-defined]
+
+    def _note_rate_limits(self, info: Dict[str, Any]) -> None:
+        """Claude Code reports its windows as it goes; the quota board may
+        use them (see quota.claude) — for now they're kept on the engine."""
+        self.last_rate_limits = info
+
+    async def answer(self, rid: str, request_id: str, response: Dict[str, Any]) -> bool:
+        """The user's answer to a question or permission prompt of a run."""
+        pending = self.pending.get(rid)
+        if not pending or pending.get("request_id") != request_id:
+            return False
+        run = self.runs.get(rid) or {}
+        session = self.live.get(run.get("conversation_id", ""))
+        if session is None:
+            return False
+        ok = await session.answer(request_id, response)
+        if ok:
+            self.pending.pop(rid, None)
+        return ok
+
+    async def commands_for(self, cid: str = "", cwd: str = "") -> List[Dict[str, Any]]:
+        """The slash commands for a thread; for a thread not started yet, a
+        session is opened ahead for its folder and kept for the first run."""
+        session = self.live.get(cid) if cid else None
+        if session is None or not session.alive:
+            session = self.warm.get(cwd or "")
+        if session is None or not session.alive:
+            backend = next((b for b in self.backends if b.info.kind == "claude_code"
+                            and getattr(b, "bin", None)), None)
+            if backend is None or not self.settings.get("live_claude", True):
+                return []
+            import uuid
+            argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))   # type: ignore[attr-defined]
+            session = live.LiveSession(argv, cwd or None, None,
+                                       str(self.settings.get("claude_system_prompt", "")))
+            try:
+                await session.start()
+            except RuntimeError:
+                return []
+            self.warm[cwd or ""] = session
+        return list(session.commands)
+
+    async def reap_live(self, now: Optional[float] = None) -> int:
+        """Close sessions idle for a while; they resume by id when needed."""
+        now = now or time.time()
+        closed = 0
+        for table in (self.live, self.warm):
+            for key, session in list(table.items()):
+                if not session.busy and now - session.last_used > live.IDLE_SECONDS:
+                    await session.close()
+                    table.pop(key, None)
+                    closed += 1
+                elif not session.alive:
+                    table.pop(key, None)
+        return closed
 
     def _titler(self, exclude: str = "") -> Optional[Backend]:
         """A local model that's up and answers in words, cheapest first —
@@ -725,6 +876,12 @@ class Engine:
         return (stat.stdout + "\n" + full.stdout).strip()
 
     async def close(self) -> None:
+        for session in list(self.live.values()) + list(self.warm.values()):
+            try:
+                await session.close()
+            except Exception:                       # noqa: BLE001
+                pass
+        self.live.clear()
         for b in self.backends:
             try:
                 await b.close()

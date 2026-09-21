@@ -183,6 +183,8 @@ class Runner:
         self.dispatch = dispatch                 # async (run) -> AsyncIterator[str]
         self.tasks: Dict[str, asyncio.Task] = {}
         self._listeners: Dict[str, List[asyncio.Queue]] = {}
+        #: activity and prompts of live runs, replayed to a watcher who joins late
+        self.activity: Dict[str, List[Dict[str, Any]]] = {}
 
     @property
     def running(self) -> List[str]:
@@ -241,6 +243,13 @@ class Runner:
         offset = 0
         try:
             async for chunk in stream:
+                if isinstance(chunk, dict) and "kind" in chunk:
+                    # what the program is doing, or what it's asking — shown
+                    # in the thread, kept for a watcher who joins late
+                    event = {"event": chunk["kind"], **{k: v for k, v in chunk.items() if k != "kind"}}
+                    self.activity.setdefault(rid, []).append(event)
+                    self._publish(rid, event)
+                    continue
                 if isinstance(chunk, dict):       # a routing note, not an answer
                     self.store.update(rid, backend=chunk.get("backend"),
                                       reason=chunk.get("reason"))
@@ -267,6 +276,7 @@ class Runner:
             self._state(rid, "failed", ended_at=int(time.time()))
         finally:
             self.tasks.pop(rid, None)
+            self.activity.pop(rid, None)
 
     async def stop(self) -> None:
         """Shutdown: nothing is left orphaned, and nothing claims to run."""

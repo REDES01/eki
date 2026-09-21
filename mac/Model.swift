@@ -39,6 +39,13 @@ final class AppModel: ObservableObject {
     @Published var liveRun: String = ""          // the run being watched, if any
     @Published var streaming: String = ""        // its words so far
     @Published var routedTo: String = ""
+    /// what the program is doing right now, a line per tool call
+    @Published var activity: [String] = []
+    /// a question or permission prompt the run is waiting on
+    @Published var prompt: PendingPrompt? = nil
+    /// slash commands for the composer, by thread (or folder, before a thread)
+    @Published var commands: [SlashCommand] = []
+    private var commandsKey = "\u{0}"
     @Published var chatError: String = ""
     @Published var cost: CostReport?
 
@@ -408,6 +415,8 @@ final class AppModel: ObservableObject {
         liveRun = run
         streaming = ""
         routedTo = ""
+        activity = []
+        prompt = nil
         watcher = Task { [weak self] in
             guard let self else { return }
             let stream = await self.client.watch(run: run)
@@ -421,6 +430,12 @@ final class AppModel: ObservableObject {
                         self.streaming += event.text ?? ""
                     case "error":
                         self.chatError = event.message ?? "something went wrong"
+                    case "activity":
+                        if let line = event.text { self.activity.append(line) }
+                    case "ask", "permission":
+                        self.prompt = PendingPrompt(run: run, event: event)
+                    case "cancel", "answered":
+                        if self.prompt?.requestID == event.request_id { self.prompt = nil }
                     default:
                         break
                     }
@@ -436,6 +451,8 @@ final class AppModel: ObservableObject {
             guard self.liveRun == run else { return }
             if let fresh { self.turns = fresh.turns }
             self.streaming = ""
+            self.activity = []
+            self.prompt = nil
             self.liveRun = ""
             await self.refreshCost()
             await self.refreshLive()
@@ -449,6 +466,33 @@ final class AppModel: ObservableObject {
         liveRun = ""
         streaming = ""
         routedTo = ""
+        activity = []
+        prompt = nil
+    }
+
+    // ---- answering the program ---------------------------------------------
+
+    func answer(_ p: PendingPrompt, with response: [String: Any]) {
+        prompt = nil
+        Task {
+            do {
+                try await client.answer(run: p.run, request: p.requestID, response: response)
+            } catch {
+                chatError = "couldn't send the answer: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// The commands the composer can offer: the thread's, or the folder's
+    /// for a thread that hasn't started. Fetched once per thread/folder.
+    func loadCommands(cwd: String) {
+        let key = conversationID + "|" + cwd
+        guard key != commandsKey else { return }
+        commandsKey = key
+        Task {
+            let got = (try? await client.commands(conversation: conversationID, cwd: cwd)) ?? []
+            if commandsKey == key { commands = got }
+        }
     }
 
     /// The Stop button: this one does mean the work.
@@ -517,5 +561,33 @@ final class AppModel: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.prompt = "Use folder"
         return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+}
+
+
+/// A question Claude Code asked, or a permission it wants, waiting on you.
+struct PendingPrompt: Identifiable, Equatable {
+    let run: String
+    let requestID: String
+    let kind: String                  // "ask" | "permission"
+    let questions: [AskQuestion]
+    let input: JSONValue
+    let tool: String
+    let title: String
+    let description: String
+    let suggestions: [JSONValue]
+
+    var id: String { requestID }
+
+    init(run: String, event: RunEvent) {
+        self.run = run
+        requestID = event.request_id ?? ""
+        kind = event.event ?? "ask"
+        questions = event.questions ?? []
+        input = event.input ?? .object([:])
+        tool = event.tool ?? ""
+        title = event.title ?? ""
+        description = event.description ?? ""
+        suggestions = event.suggestions ?? []
     }
 }

@@ -232,13 +232,84 @@ struct PolicyDTO: Codable, Hashable {
 
 /// One event off a run's stream.
 struct RunEvent: Codable {
-    var event: String?          // route | output | state | error
+    var event: String?          // route | output | state | error | activity | ask | permission | cancel | answered
     var text: String?
     var end: Int?
     var message: String?
     var backend: String?
     var reason: String?
     var state: String?
+    // a question Claude Code asked, or a permission it wants (see eki/live.py)
+    var request_id: String?
+    var questions: [AskQuestion]?
+    var input: JSONValue?
+    var tool: String?
+    var title: String?
+    var description: String?
+    var suggestions: [JSONValue]?
+}
+
+struct AskQuestion: Codable, Hashable {
+    struct Option: Codable, Hashable {
+        let label: String
+        var description: String? = ""
+    }
+    let question: String
+    var header: String? = ""
+    var options: [Option]? = []
+    var multiSelect: Bool? = false
+}
+
+/// Any JSON, kept as-is: tool inputs and permission suggestions are passed
+/// back to the program untouched.
+enum JSONValue: Codable, Hashable {
+    case string(String), number(Double), bool(Bool), null
+    case array([JSONValue]), object([String: JSONValue])
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let n = try? c.decode(Double.self) { self = .number(n) }
+        else if let s = try? c.decode(String.self) { self = .string(s) }
+        else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
+        else if let o = try? c.decode([String: JSONValue].self) { self = .object(o) }
+        else { throw DecodingError.dataCorruptedError(in: c, debugDescription: "not JSON") }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let s): try c.encode(s)
+        case .number(let n): try c.encode(n)
+        case .bool(let b): try c.encode(b)
+        case .null: try c.encodeNil()
+        case .array(let a): try c.encode(a)
+        case .object(let o): try c.encode(o)
+        }
+    }
+
+    /// Back to Foundation, for a request body.
+    var any: Any {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? Int(n) : n
+        case .bool(let b): return b
+        case .null: return NSNull()
+        case .array(let a): return a.map(\.any)
+        case .object(let o): return o.mapValues(\.any)
+        }
+    }
+
+    subscript(key: String) -> JSONValue? {
+        if case .object(let o) = self { return o[key] }
+        return nil
+    }
+
+    var stringValue: String? {
+        if case .string(let s) = self { return s }
+        return nil
+    }
 }
 
 enum ClientError: LocalizedError {
@@ -315,6 +386,23 @@ actor EngineClient {
         let body: [String: Any] = ["prompt": prompt, "conversation": conversation,
                                    "backend": backend, "repo": repo]
         return try await decode(Started.self, "POST", "api/ask", body: body)
+    }
+
+    /// Answer a question or a permission prompt of a run.
+    func answer(run id: String, request: String, response: [String: Any]) async throws {
+        struct W: Codable { let ok: Bool }
+        _ = try await decode(W.self, "POST", "api/runs/\(id)/answer",
+                             body: ["request_id": request, "response": response])
+    }
+
+    /// The slash commands Claude Code offers in a thread (or for a folder,
+    /// before a thread has one).
+    func commands(conversation: String, cwd: String) async throws -> [SlashCommand] {
+        struct W: Codable { let commands: [SlashCommand] }
+        let escaped = cwd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let path = conversation.isEmpty ? "api/commands?cwd=\(escaped)"
+                                        : "api/conversations/\(conversation)/commands?cwd=\(escaped)"
+        return try await decode(W.self, "GET", path).commands
     }
 
     func cancel(run id: String) async {
@@ -464,4 +552,14 @@ actor EngineClient {
         if let ceiling = policy.quota_ceiling { body["quota_ceiling"] = ceiling }
         return try await decode(PolicyDTO.self, "PUT", "api/policy", body: body)
     }
+}
+
+
+/// A slash command Claude Code offers, as it describes it.
+struct SlashCommand: Codable, Hashable, Identifiable {
+    let name: String
+    var description: String? = ""
+    var argumentHint: String? = ""
+
+    var id: String { name }
 }

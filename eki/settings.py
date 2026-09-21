@@ -39,8 +39,14 @@ DEFAULTS: Dict[str, Any] = {
     "live_claude": True,
     #: the same for Codex, through its app-server (eki/codex_live.py)
     "live_codex": True,
+    "skills_local": True,        # eki loads skills for models with no loader of their own
     #: appended to Claude Code's own system prompt
     "claude_system_prompt": "",
+    #: serve eki's own tools to Claude Code in-process (eki/mcpbridge.py):
+    #: the other backends, pictures, and the screen
+    "claude_tools": True,
+    #: the screen among them — computer use: eki_screenshot, eki_click, eki_type…
+    "claude_screen": True,
     #: "auto": Claude Code and Codex run commands and edit files without
     #: asking (their own "skip permissions" modes); "ask": each one that
     #: needs a say becomes a card in the thread. Questions they ask *you*

@@ -283,6 +283,34 @@ Claude Code is not driven this way: it speaks only Anthropic's API, and
 pointing it at another model would mean running Anthropic's program outside
 what it supports.
 
+## Claude Code under eki
+
+A Claude Code thread in eki is the real program, kept open in its streaming
+mode, with everything the terminal shows drawn by eki instead: its words as
+they stream, a line per tool call, its questions and permission prompts as
+cards, the model thinking in grey, and its slash commands in the composer.
+The panels the terminal draws — `/mcp`, `/model`, `/permissions`, `/usage`,
+`/context`, `/rewind`, `/agents`, `/hooks` — open in eki when you type them
+(or from the sliders button beside the composer); each is one control
+request the program answers, so what you see is what the terminal would
+show. An MCP server that needs signing in is authenticated from the `/mcp`
+panel, through the program, not around it. `docs/claude-code.md` lists the
+protocol and what maps to what.
+
+Claude Code also gets eki's own tools, served in-process (no second server,
+no port): `eki_capabilities` (what this Mac can do), `eki_ask` (a step
+delegated to a local or prose model) and `eki_image` (a picture from the
+image model) — and, on a Mac, its own built-in computer-use server (the
+terminal's 24 screen tools), which eki starts for each session since the
+headless program doesn't bring it by itself. Codex gets the same through a
+stdio server, `eki mcp`, with eki's own screen tools in place of the
+built-in. Both switches are in Settings → Routing.
+
+MCP servers you add in eki's `/mcp` panel go into `~/.eki/mcp.json` and are
+rendered into both CLIs — Claude Code per session (nothing written into
+`~/.claude`), Codex in a managed block of its `config.toml`. A server Claude
+Code already has can be shared with Codex from the same panel.
+
 ## Claude and Codex usage
 
 eki shows what's left of your Claude plan the way Claude Code's own `/usage`

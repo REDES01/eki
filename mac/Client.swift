@@ -308,6 +308,13 @@ struct RunEvent: Codable {
     // context: how full the window is (see eki/context.py)
     var used: Int?
     var window: Int?
+    // an MCP server asking you something (elicitation), or a dialog
+    var server: String?
+    var mode: String?
+    var url: String?
+    var schema: JSONValue?
+    var dialog: String?
+    var payload: JSONValue?
 }
 
 struct AskQuestion: Codable, Hashable {
@@ -443,10 +450,25 @@ actor EngineClient {
 
     /// Start a run. Returns as soon as the engine has written the question.
     func ask(prompt: String, conversation: String, backend: String,
-             repo: String) async throws -> Started {
+             repo: String, attachments: [String] = []) async throws -> Started {
         let body: [String: Any] = ["prompt": prompt, "conversation": conversation,
-                                   "backend": backend, "repo": repo]
+                                   "backend": backend, "repo": repo, "attachments": attachments]
         return try await decode(Started.self, "POST", "api/ask", body: body)
+    }
+
+    /// A pasted or dropped picture, kept by the engine; its path goes into the ask.
+    func upload(image data: Data, name: String) async throws -> String {
+        struct W: Codable { let path: String }
+        return try await decode(W.self, "POST", "api/attachments",
+                                body: ["data": data.base64EncodedString(), "name": name]).path
+    }
+
+    /// `@file` completion: paths in the folder matching what's typed.
+    func files(cwd: String, query: String) async throws -> [String] {
+        struct W: Codable { struct S: Codable { let path: String }; let suggestions: [S] }
+        var comps = URLComponents()
+        comps.queryItems = [URLQueryItem(name: "cwd", value: cwd), URLQueryItem(name: "q", value: query)]
+        return try await decode(W.self, "GET", "api/files?" + (comps.percentEncodedQuery ?? "")).suggestions.map(\.path)
     }
 
     /// Answer a question or a permission prompt of a run.
@@ -643,4 +665,93 @@ struct SlashCommand: Codable, Hashable, Identifiable {
     var argumentHint: String? = ""
 
     var id: String { name }
+}
+
+// ---- Claude Code's panels, asked through eki (see Engine.claude_control) ----
+
+extension EngineClient {
+    /// One control request to the thread's Claude Code session. The reply
+    /// is whatever the program said, as JSON — the panels read what they need.
+    func claude(_ op: String, conversation: String = "", cwd: String = "", backend: String = "",
+                args: [String: Any] = [:], timeout: TimeInterval = 90) async throws -> JSONValue {
+        try await decode(JSONValue.self, "POST", "api/agent/control",
+                         body: ["op": op, "conversation": conversation, "cwd": cwd,
+                                "backend": backend, "args": args],
+                         timeout: timeout)
+    }
+
+    func mcpRegistry() async throws -> JSONValue {
+        try await decode(JSONValue.self, "GET", "api/mcp")
+    }
+
+    func mcpPut(_ name: String, spec: [String: Any]) async throws -> JSONValue {
+        try await decode(JSONValue.self, "PUT", "api/mcp/\(name)", body: spec)
+    }
+
+    func mcpEnabled(_ name: String, enabled: Bool, backend: String = "") async throws -> JSONValue {
+        try await decode(JSONValue.self, "POST", "api/mcp/\(name)/enabled",
+                         body: ["enabled": enabled, "backend": backend])
+    }
+
+    func mcpDelete(_ name: String) async throws -> JSONValue {
+        try await decode(JSONValue.self, "DELETE", "api/mcp/\(name)")
+    }
+
+    // ---- skills: one store, a view per backend (eki/skills.py) ----------
+
+    func skills() async throws -> JSONValue {
+        try await decode(JSONValue.self, "GET", "api/skills")
+    }
+
+    func skill(_ name: String) async throws -> JSONValue {
+        try await decode(JSONValue.self, "GET", "api/skills/\(name)")
+    }
+
+    func skillPut(_ name: String, body: [String: Any]) async throws -> JSONValue {
+        try await decode(JSONValue.self, "PUT", "api/skills/\(name)", body: body)
+    }
+
+    func skillEnabled(_ name: String, enabled: Bool, backend: String = "") async throws -> JSONValue {
+        try await decode(JSONValue.self, "POST", "api/skills/\(name)/enabled",
+                         body: ["enabled": enabled, "backend": backend])
+    }
+
+    func skillDelete(_ name: String) async throws -> JSONValue {
+        try await decode(JSONValue.self, "DELETE", "api/skills/\(name)")
+    }
+
+    func skillsImport(_ names: [String] = []) async throws -> JSONValue {
+        try await decode(JSONValue.self, "POST", "api/skills/import", body: ["names": names])
+    }
+}
+
+extension JSONValue {
+    var arrayValue: [JSONValue] {
+        if case .array(let a) = self { return a }
+        return []
+    }
+    var objectValue: [String: JSONValue] {
+        if case .object(let o) = self { return o }
+        return [:]
+    }
+    var doubleValue: Double? {
+        if case .number(let n) = self { return n }
+        return nil
+    }
+    var intValue: Int? { doubleValue.map { Int($0) } }
+    var boolValue: Bool? {
+        if case .bool(let b) = self { return b }
+        return nil
+    }
+    /// A string for a label: strings as they are, numbers and bools plainly.
+    var text: String {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? String(Int(n)) : String(n)
+        case .bool(let b): return b ? "yes" : "no"
+        case .null: return ""
+        case .array(let a): return a.map(\.text).joined(separator: ", ")
+        case .object: return String(describing: any)
+        }
+    }
 }

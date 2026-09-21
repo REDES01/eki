@@ -60,10 +60,16 @@ echo "compiling…"
 swiftc -O -target arm64-apple-macos14.0 \
   -framework AppKit -framework SwiftUI -framework ServiceManagement -framework WebKit \
   -o "$MACOS/Eki" \
-  EkiApp.swift Client.swift Model.swift Theme.swift Markdown.swift \
-  Artifacts.swift Gallery.swift Images.swift ImageViewer.swift \
-  Views.swift Downloads.swift Models.swift Live.swift Schedules.swift \
+  EkiApp.swift Client.swift Model.swift Theme.swift Scale.swift Markdown.swift \
+  Artifacts.swift Gallery.swift Images.swift ImageViewer.swift Swipes.swift \
+  Views.swift Downloads.swift Models.swift Live.swift ClaudeCode.swift Schedules.swift \
   Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift
+
+# The input helper behind eki's screen tools (eki/mcpbridge.py): a tiny
+# CGEvent program, so the Python engine never links AppKit itself.
+mkdir -p "$HELPERS"
+swiftc -O -target arm64-apple-macos14.0 -framework AppKit -framework CoreGraphics \
+  -o "$HELPERS/eki-hid" tools/hid.swift
 
 if [ "$FULL" = "1" ]; then
   ./bundle_python.sh

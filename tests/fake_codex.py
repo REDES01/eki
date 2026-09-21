@@ -59,6 +59,47 @@ while True:
         notify("thread/compacted", {"threadId": THREAD})
     elif method == "turn/interrupt":
         out({"jsonrpc": "2.0", "id": rid, "result": {}})
+    # what the panels ask (Engine.codex_control), shaped like the real app-server
+    elif method == "mcpServerStatus/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"data": [
+            {"name": "docs", "runtimeStatus": None, "pluginId": None, "serverInfo": {"name": "docs"},
+             "tools": {"search": {"description": "find"}}, "toolsError": None, "authStatus": "unsupported"},
+            {"name": "gh", "runtimeStatus": None, "pluginId": None, "serverInfo": None, "tools": {},
+             "toolsError": None, "authStatus": "unauthenticated"}]}})
+    elif method == "mcpServer/oauth/login":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"authorizationUrl": "https://auth.example/codex"}})
+    elif method == "config/mcpServer/reload":
+        out({"jsonrpc": "2.0", "id": rid, "result": {}})
+    elif method == "model/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"data": [
+            {"id": "gpt-x", "model": "gpt-x", "displayName": "GPT X", "description": "d", "hidden": False,
+             "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]},
+            {"id": "old", "model": "old", "displayName": "Old", "hidden": True}]}})
+    elif method == "account/read":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"account": {"type": "chatgpt", "email": "c@example.com", "planType": "plus"}}})
+    elif method == "account/rateLimits/read":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"rateLimits": {"planType": "plus",
+             "primary": {"usedPercent": 23, "windowDurationMins": 43200, "resetsAt": 1791819817},
+             "credits": {"hasCredits": False}}}})
+    elif method == "account/usage/read":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"summary": {"lifetimeTokens": 5}, "dailyUsageBuckets": []}})
+    elif method == "skills/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"data": [{"cwd": "/tmp", "skills": [
+            {"name": "docx", "description": "Word", "path": "/s/docx"}]}]}})
+    elif method == "hooks/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"data": [{"cwd": "/tmp", "hooks": [
+            {"event": "PreToolUse", "matcher": "Bash", "command": "echo hi"}]}]}})
+    elif method == "config/read":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"config": {"model": "gpt-x"}}})
+    elif method == "permissionProfile/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"data": [{"id": ":read-only", "allowed": True},
+                                                           {"id": ":danger-full-access", "allowed": False}]}})
+    elif method == "plugin/list":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"marketplaces": [{"name": "m", "plugins": [{"id": "p@m", "name": "p"}]}]}})
+    elif method == "thread/rollback":
+        out({"jsonrpc": "2.0", "id": rid, "result": {"rolledBack": params.get("numTurns")}})
+    elif method == "thread/name/set":
+        out({"jsonrpc": "2.0", "id": rid, "result": {}})
     elif method == "turn/start":
         turns += 1
         text = params["input"][0]["text"]

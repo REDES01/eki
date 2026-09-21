@@ -26,8 +26,10 @@ async def _collect(session, prompt, answer=None):
     await session.send(prompt)
     got = []
     async for ev in session.turn():
+        if ev["kind"] == "checkpoint":              # tested on its own
+            continue
         got.append(ev)
-        if ev["kind"] in ("ask", "permission") and answer is not None:
+        if ev["kind"] in ("ask", "permission", "elicitation") and answer is not None:
             await session.answer(ev["request_id"], answer(ev))
     return got
 
@@ -48,7 +50,7 @@ def test_a_turn_streams_text_and_tool_lines_then_a_result():
         s = await _session()
         try:
             got = await _collect(s, "hello")
-            kinds = [e["kind"] for e in got]
+            kinds = [e["kind"] for e in got if e["kind"] != "checkpoint"]
             assert kinds == ["activity", "text", "text", "context", "result"]
             assert "".join(e["text"] for e in got if e["kind"] == "text") == "Echo: hello (claude-sonnet-5)"
             assert live.summarize_activity(got[0]["tool"], got[0]["input"]) == "Reading README.md"
@@ -69,7 +71,7 @@ def test_a_question_waits_for_the_answer_and_carries_on():
                 return {"behavior": "allow",
                         "updatedInput": {**ev["input"], "answers": {"Red or blue?": "Blue"}}}
             got = await _collect(s, "please ask me", reply)
-            assert [e["kind"] for e in got][:2] == ["activity", "ask"]
+            assert [e["kind"] for e in got if e["kind"] != "checkpoint"][:2] == ["activity", "ask"]
             assert "".join(e["text"] for e in got if e["kind"] == "text") == "You chose Blue."
             assert s.pending() == []
         finally:
@@ -186,7 +188,8 @@ def test_a_claude_run_streams_asks_and_records_the_turn(tmp_path, monkeypatch):
         turns = eng.store.turns(cid)
         assert turns[-1]["role"] == "assistant" and turns[-1]["content"] == "You chose Red."
         assert eng.store.session(cid, "claude")                     # resumable later
-        assert [c["name"] for c in await eng.commands_for(cid)] == ["compact", "review"]
+        assert await eng.commands_for(cid) == []                                   # Auto: nothing until a backend is picked
+        assert [c["name"] for c in await eng.commands_for(cid, backend_key="claude")][:2] == ["compact", "review"]   # then eki's panels
         # the session stays open for the next turn, and idles out later
         assert cid in eng.live and eng.live[cid].alive
         assert await eng.reap_live(now=eng.live[cid].last_used + 10) == 0
@@ -217,8 +220,9 @@ def test_a_session_opened_for_the_command_list_is_adopted_by_the_first_run(tmp_p
     eng = Engine(cfg)
 
     async def go():
-        names = [c["name"] for c in await eng.commands_for("", "")]
-        assert names == ["compact", "review"] and "" in eng.warm
+        assert await eng.commands_for("", "") == []                                # Auto: nothing
+        names = [c["name"] for c in await eng.commands_for("", "", backend_key="claude")]
+        assert names[:2] == ["compact", "review"] and "mcp" in names and "" in eng.warm
         warm = eng.warm[""]
         started = await eng.ask("hello")
         q = eng.runner.subscribe(started["run"])

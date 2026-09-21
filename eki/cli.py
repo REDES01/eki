@@ -312,6 +312,72 @@ def cmd_models(cfg, args) -> int:
     return 0
 
 
+def cmd_skills(args) -> int:
+    """The skill store, without needing the service up (eki/skills.py)."""
+    from . import skills
+    act, name = args.action, args.name
+    try:
+        if act == "list":
+            skills.boot()
+            rows = skills.list_skills()
+            for s in rows:
+                on = ",".join(s["backends"]) if s["enabled"] else "off"
+                bad = [b for b, v in s["views"].items() if v == "conflict"]
+                warn = f"  (name taken in {', '.join(bad)})" if bad else ""
+                print(f"{s['name']:24} [{on}]{warn}\n    {s['description'][:110]}")
+            loose = [u for u in skills.unmanaged() if not u["held"]]
+            if loose:
+                print(f"\n{len(loose)} skill(s) in the CLIs' own folders; `eki skills import` takes them in:")
+                for u in loose:
+                    print(f"  {u['backend']:7} {u['path']}")
+            if not rows and not loose:
+                print(f"no skills yet — `eki skills new <name> -d \"when to use it\"` ({skills.STORE})")
+            return 0
+        if act in ("show", "cat"):
+            print(skills.source(name), end="")
+            return 0
+        if act == "new":
+            body = sys.stdin.read() if not sys.stdin.isatty() else f"# {name}\n\nInstructions go here.\n"
+            if args.file:
+                text = Path(args.file).expanduser().read_text()
+                s = skills.put(name, text=text, description=args.description or "")
+            else:
+                s = skills.put(name, description=args.description or "", body=body,
+                               backends=args.backends.split(",") if args.backends else None)
+            print(s.get("path", ""))
+            return 0
+        if act == "edit":
+            path = Path(skills.get(name)["path"]) / "SKILL.md" if skills.get(name) else None
+            if path is None:
+                raise KeyError(name)
+            subprocess.run([os.environ.get("EDITOR", "vi"), str(path)])
+            skills.put(name, text=path.read_text(), message=f"edit {name}")
+            return 0
+        if act in ("on", "off"):
+            skills.set_enabled(name, act == "on", args.backend or "")
+            return 0
+        if act == "rm":
+            skills.remove(name)
+            return 0
+        if act == "import":
+            print(json.dumps(skills.import_existing([name] if name else None), indent=2))
+            return 0
+        if act == "sync":
+            print(json.dumps(skills.sync(), indent=2))
+            return 0
+        if act == "log":
+            for h in skills.history(30, name):
+                print(f"{h['commit']}  {h['date']}  {h['message']}")
+            return 0
+    except KeyError:
+        print(f"no such skill: {name}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    return 1
+
+
 def cmd_agent(args) -> int:
     if args.action == "install":
         # a hand-started engine holds the port; the agent's would fail to bind
@@ -374,6 +440,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     m.add_argument("-f", "--force", action="store_true",
                    help="start it even if the memory ceiling says no")
 
+    k = sub.add_parser("skills", help="one set of skills for Claude Code, Codex and local models")
+    k.add_argument("action", nargs="?", default="list",
+                   choices=["list", "show", "cat", "new", "edit", "on", "off", "rm",
+                            "import", "sync", "log"])
+    k.add_argument("name", nargs="?", default="")
+    k.add_argument("-d", "--description", default="", help="new: when a model should use it")
+    k.add_argument("-f", "--file", default="", help="new: a SKILL.md to take as is")
+    k.add_argument("--for", dest="backend", default="",
+                   help="on/off: only for claude, codex or local")
+    k.add_argument("--backends", default="", help="new: comma list (default all)")
+
     g = sub.add_parser("agent", help="start the engine at login")
     g.add_argument("action", nargs="?", default="status",
                    choices=["install", "uninstall", "restart", "status"])
@@ -381,13 +458,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
+    sub.add_parser("mcp", help="serve eki's tools over stdio (MCP) for Codex and other clients")
 
     args = ap.parse_args(argv)
 
+    if args.cmd == "mcp":
+        from . import mcpbridge
+        depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
+        from . import settings as settings_mod
+        bridge = mcpbridge.RemoteBridge(mcpbridge.RemoteEngine(args.service), depth=depth + 1,
+                                        screen=bool(settings_mod.load().get("claude_screen", True)))
+        asyncio.run(mcpbridge.serve_stdio(bridge))
+        return 0
     if args.cmd == "serve":
         from .service import main as serve_main
         return serve_main(["-c", args.config, "--host", args.host,
                            "--port", str(args.port)])
+    if args.cmd == "skills":
+        return cmd_skills(args)
     if args.cmd == "agent":
         return cmd_agent(args)
     if args.cmd == "runs":

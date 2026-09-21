@@ -43,6 +43,14 @@ final class AppModel: ObservableObject {
     @Published var activity: [String] = []
     /// a question or permission prompt the run is waiting on
     @Published var prompt: PendingPrompt? = nil
+    /// the model thinking, while it does (Claude Code's grey text)
+    @Published var thinking: String = ""
+    /// one of Claude Code's panels, drawn by eki (see ClaudeCode.swift)
+    @Published var claudePanel: ClaudePanel? = nil
+    /// a line to show briefly after a panel action (rewound, renamed…)
+    @Published var notice: String = ""
+    /// text a panel wants in the composer (a skill to use): picked up once
+    @Published var draftRequest: String = ""
     /// slash commands for the composer, by thread (or folder, before a thread)
     @Published var commands: [SlashCommand] = []
     private var commandsKey = "\u{0}"
@@ -397,17 +405,61 @@ final class AppModel: ObservableObject {
         cost = try? await client.cost(conversationID)
     }
 
+    /// pictures pasted or dropped into the composer, waiting to go with the next question
+    @Published var attachments: [Attachment] = []
+
+    struct Attachment: Identifiable, Equatable {
+        let id = UUID()
+        let path: String
+        let image: NSImage
+    }
+
+    /// Keep a picture for the next question (pasted, dropped, or from a file).
+    func attach(image: NSImage, name: String = "image.png") {
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        Task {
+            do {
+                let path = try await client.upload(image: png, name: name)
+                attachments.append(Attachment(path: path, image: image))
+            } catch {
+                chatError = "couldn't keep the picture: \(plainError(error))"
+            }
+        }
+    }
+
     func send(_ text: String, repo: String) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !sending else { return }
+        guard !prompt.isEmpty || !attachments.isEmpty, !sending else { return }
         chatError = ""
+        // the program's own panels: drawn by eki rather than sent as text —
+        // only when Claude Code or Codex is the picked backend
+        if let panel = ClaudePanel(command: prompt), !usesAgent {
+            // not sent to whatever Auto or a local model would pick
+            say("\(panel.title): pick Claude Code or Codex beside the composer first")
+            return
+        }
+        if usesAgent, let panel = ClaudePanel(command: prompt) {
+            if panel == .model {
+                say("The model is picked beside the composer")
+                return
+            }
+            if panel.availableFor(codex: usesCodex) {
+                claudePanel = panel
+            } else {
+                say("\(agentName) has no \(panel.title.lowercased()) panel")
+            }
+            return
+        }
         Task {
             do {
                 let asked = preferredBackend.isEmpty || preferredModel.isEmpty
                     ? preferredBackend : preferredBackend + ":" + preferredModel
-                let started = try await client.ask(prompt: prompt,
+                let pictures = attachments.map(\.path)
+                let started = try await client.ask(prompt: prompt.isEmpty ? "(see the picture)" : prompt,
                                                    conversation: conversationID,
-                                                   backend: asked, repo: repo)
+                                                   backend: asked, repo: repo, attachments: pictures)
+                attachments = []
                 conversationID = started.conversation
                 // the engine has written the question; show the stored thread
                 await reload(reattach: false)
@@ -471,8 +523,10 @@ final class AppModel: ObservableObject {
                         if let line = event.text { self.activity.append(line) }
                     case "context":
                         if let used = event.used { self.liveContext = ContextUse(used: used, window: event.window ?? 0) }
-                    case "ask", "permission":
+                    case "ask", "permission", "elicitation", "dialog":
                         self.prompt = PendingPrompt(run: run, event: event)
+                    case "thinking":
+                        self.thinking += event.text ?? ""
                     case "cancel", "answered":
                         if self.prompt?.requestID == event.request_id { self.prompt = nil }
                     default:
@@ -491,6 +545,7 @@ final class AppModel: ObservableObject {
             if let fresh { self.turns = fresh.turns }
             self.streaming = ""
             self.activity = []
+            self.thinking = ""
             self.prompt = nil
             self.liveContext = nil
             self.liveRun = ""
@@ -507,8 +562,45 @@ final class AppModel: ObservableObject {
         streaming = ""
         routedTo = ""
         activity = []
+        thinking = ""
         prompt = nil
         liveContext = nil
+    }
+
+    /// One of Claude Code's control requests for the thread on screen
+    /// (or the folder, before a thread). Errors land in the chat banner.
+    func claude(_ op: String, args: [String: Any] = [:], timeout: TimeInterval = 90) async -> JSONValue? {
+        do {
+            return try await client.claude(op, conversation: conversationID, cwd: lastRepo,
+                                           backend: preferredBackend, args: args, timeout: timeout)
+        } catch {
+            chatError = "\(agentName): \(plainError(error))"
+            return nil
+        }
+    }
+
+    /// The program the panels talk to, by the picked backend: "claude_code"
+    /// or "codex" kind, else "" — the panels and their commands show only then.
+    var agentKind: String {
+        backends.first { $0.key == preferredBackend }?.kind ?? ""
+    }
+    var usesClaude: Bool { agentKind == "claude_code" }
+    var usesCodex: Bool { agentKind == "codex" }
+    var usesAgent: Bool { usesClaude || usesCodex }
+    var agentName: String { usesCodex ? "Codex" : "Claude Code" }
+
+    /// The engine's error text without the HTTP wrapping.
+    func plainError(_ error: Error) -> String {
+        let s = error.localizedDescription
+        if let r = s.range(of: "\"detail\":\""), let e = s[r.upperBound...].range(of: "\"}") {
+            return String(s[r.upperBound..<e.lowerBound])
+        }
+        return s
+    }
+
+    func say(_ text: String) {
+        notice = text
+        Task { try? await Task.sleep(for: .seconds(4)); if notice == text { notice = "" } }
     }
 
     /// The named models behind a provider, enabled, for the picker.
@@ -643,13 +735,22 @@ final class AppModel: ObservableObject {
 struct PendingPrompt: Identifiable, Equatable {
     let run: String
     let requestID: String
-    let kind: String                  // "ask" | "permission"
+    let kind: String                  // "ask" | "permission" | "elicitation" | "dialog"
     let questions: [AskQuestion]
     let input: JSONValue
     let tool: String
     let title: String
     let description: String
     let suggestions: [JSONValue]
+    // an MCP server asking (elicitation): its form, or a URL to visit
+    let server: String
+    let message: String
+    let mode: String
+    let url: String
+    let schema: JSONValue
+    // a dialog of a kind eki doesn't draw specially
+    let dialog: String
+    let payload: JSONValue
 
     var id: String { requestID }
 
@@ -663,5 +764,75 @@ struct PendingPrompt: Identifiable, Equatable {
         title = event.title ?? ""
         description = event.description ?? ""
         suggestions = event.suggestions ?? []
+        server = event.server ?? ""
+        message = event.message ?? ""
+        mode = event.mode ?? "form"
+        url = event.url ?? ""
+        schema = event.schema ?? .object([:])
+        dialog = event.dialog ?? ""
+        payload = event.payload ?? .object([:])
+    }
+}
+
+/// The terminal's panels eki draws itself. Typed as a slash command they
+/// open here instead of going to the program as text.
+enum ClaudePanel: String, Identifiable, CaseIterable {
+    case mcp, model, permissions, usage, context, rewind, tasks, agents, hooks, status, config, memory, skills, plugins
+
+    var id: String { rawValue }
+
+    /// The panels a program has: Codex has no tasks, agents or memory;
+    /// plugins is Codex's. `model` is nobody's — eki's picker owns it.
+    func availableFor(codex: Bool) -> Bool {
+        switch self {
+        case .model: return false
+        case .tasks, .agents, .memory: return !codex
+        case .plugins: return codex
+        default: return true
+        }
+    }
+
+    static func panels(codex: Bool) -> [ClaudePanel] {
+        allCases.filter { $0.availableFor(codex: codex) }
+    }
+
+    init?(command: String) {
+        let word = command.lowercased().split(separator: " ").first.map(String.init) ?? ""
+        switch word {
+        case "/mcp": self = .mcp
+        case "/model", "/effort", "/fast": self = .model
+        case "/permissions": self = .permissions
+        case "/usage", "/cost", "/usage-credits", "/extra-usage": self = .usage
+        case "/context": self = .context
+        case "/rewind": self = .rewind
+        case "/tasks", "/bashes": self = .tasks
+        case "/hooks": self = .hooks
+        case "/agents": self = .agents
+        case "/status", "/help": self = .status
+        case "/config", "/output-style": self = .config
+        case "/memory": self = .memory
+        case "/skills", "/skill": self = .skills
+        case "/plugins", "/plugin": self = .plugins
+        default: return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .mcp: return "MCP servers"
+        case .model: return "Model"
+        case .permissions: return "Permissions"
+        case .usage: return "Usage"
+        case .context: return "Context"
+        case .rewind: return "Rewind"
+        case .tasks: return "Background tasks"
+        case .hooks: return "Hooks"
+        case .agents: return "Agents"
+        case .status: return "Status"
+        case .config: return "Settings"
+        case .memory: return "Memory"
+        case .skills: return "Skills"
+        case .plugins: return "Plugins"
+        }
     }
 }

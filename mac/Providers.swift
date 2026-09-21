@@ -231,13 +231,13 @@ struct SizeSlider: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack {
-                Text("Parameters").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.inkMuted)
+                Text("Parameters").font(.zoomed(size: 11, weight: .medium)).foregroundStyle(Palette.inkMuted)
                 Spacer()
                 if !range.isAll {
                     Button {
                         range = .all
                     } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise").font(.system(size: 11))
+                        Label("Reset", systemImage: "arrow.counterclockwise").font(.zoomed(size: 11))
                     }
                     .buttonStyle(.plain).foregroundStyle(Palette.inkMuted)
                 }
@@ -249,7 +249,7 @@ struct SizeSlider: View {
                     ForEach(0..<count, id: \.self) { i in
                         let chosen = i == range.lo || i == range.hi
                         Text(SizeRange.labels[i])
-                            .font(.system(size: 10.5, weight: chosen ? .semibold : .regular))
+                            .font(.zoomed(size: 10.5, weight: chosen ? .semibold : .regular))
                             .foregroundStyle(chosen ? Palette.ink : Palette.inkFaint)
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(chosen ? Palette.fill : Color.clear, in: RoundedRectangle(cornerRadius: 4))
@@ -333,6 +333,8 @@ struct HubSettings: Codable, Hashable {
     var auto_measure: String = "local"
     var permissions: String = "auto"
     var claude_system_prompt: String = ""
+    var claude_tools: Bool = true
+    var claude_screen: Bool = true
 }
 
 extension EngineClient {
@@ -353,6 +355,8 @@ extension EngineClient {
             "auto_measure": settings.auto_measure,
             "permissions": settings.permissions,
             "claude_system_prompt": settings.claude_system_prompt,
+            "claude_tools": settings.claude_tools,
+            "claude_screen": settings.claude_screen,
         ])
     }
 
@@ -475,7 +479,7 @@ struct ProviderCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 7) {
                         Text(provider.label)
-                            .font(.system(size: 13.5, weight: .medium))
+                            .font(.zoomed(size: 13.5, weight: .medium))
                             .foregroundStyle(inAuto ? Palette.ink : Palette.inkFaint)
                         if isFirst { Tag(text: "first choice", color: Palette.accent) }
                         if !provider.ok && provider.runtime.port == nil {
@@ -484,7 +488,7 @@ struct ProviderCard: View {
                         if codexNeedsHost { Tag(text: "can't edit files", color: Palette.inkMuted) }
                     }
                     Text(detail)
-                        .font(.system(size: 11.5))
+                        .font(.zoomed(size: 11.5))
                         .foregroundStyle(Palette.inkMuted)
                         .lineLimit(1)
                         .help(provider.detail)
@@ -515,7 +519,7 @@ struct ProviderCard: View {
                     Button("Remove…", role: .destructive) { confirmRemove = true }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.zoomed(size: 12, weight: .medium))
                         .foregroundStyle(Palette.inkMuted)
                         .frame(width: 22, height: 22)
                 }
@@ -588,8 +592,8 @@ struct ReplaceKeySheet: View {
             Text("New API key for \(provider.label)").font(.hubTitle)
             SecureField("Paste the key", text: $key).textFieldStyle(.roundedBorder)
             Text("Stored in your Keychain, never in eki's files.")
-                .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
-            if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger) }
+                .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+            if !error.isEmpty { Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
@@ -606,7 +610,7 @@ struct ReplaceKeySheet: View {
                 .disabled(key.isEmpty)
             }
         }
-        .padding(22)
+        .padding(.all, 22)
         .frame(width: 420)
     }
 }
@@ -675,7 +679,7 @@ struct AddProviderSheet: View {
                 }
             }
         }
-        .padding(22)
+        .padding(.all, 22)
     }
 }
 
@@ -689,14 +693,14 @@ struct TemplateRow: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(template.title).font(.system(size: 13, weight: .medium))
+                    Text(template.title).font(.zoomed(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink)
-                    Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    Text(detail).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
                         .lineLimit(1)
                 }
                 Spacer()
                 Tag(text: template.note.isEmpty ? "tier \(template.tier)" : template.note)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                Image(systemName: "chevron.right").font(.zoomed(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.inkFaint)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
@@ -759,7 +763,7 @@ struct ProviderForm: View {
                 Text(template.title).font(.hubTitle)
                 Spacer()
             }
-            Text(template.blurb).font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+            Text(template.blurb).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
 
             field("Name") { TextField(template.title, text: $label).textFieldStyle(.roundedBorder) }
             if template.needs == "url" {
@@ -771,13 +775,13 @@ struct ProviderForm: View {
                 field("API key") { SecureField("Paste the key", text: $apiKey)
                     .textFieldStyle(.roundedBorder) }
                 Text("Kept in your Keychain. eki never writes it to a file.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
             }
             if template.needs == "binary" {
                 Text(template.found.map { "Uses \($0), signed in with your own account. "
                     + "eki runs it; it never reads its login." }
                      ?? "Install it and sign in first; eki runs it as you.")
-                    .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                    .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
             }
             if let probe, !probe.models.isEmpty, template.needs != "binary" {
                 field("Model") {
@@ -793,11 +797,11 @@ struct ProviderForm: View {
                     Image(systemName: probe.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(probe.ok ? Palette.ok : Palette.danger)
                     Text(probe.ok ? "Reachable · \(probe.detail)" : probe.detail)
-                        .font(.system(size: 12)).lineLimit(2)
+                        .font(.zoomed(size: 12)).lineLimit(2)
                 }
             }
             if !error.isEmpty {
-                Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger)
+                Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
             }
             Spacer()
             HStack {
@@ -811,7 +815,7 @@ struct ProviderForm: View {
                     .disabled(busy || !ready || needsModel)
             }
         }
-        .padding(22)
+        .padding(.all, 22)
         .onAppear {
             url = template.found ?? template.options.base_url ?? ""
             if isComfy { Task { await loadComfy() } }
@@ -861,13 +865,13 @@ struct ProviderForm: View {
                 .onChange(of: templateID) { modelFile = ""; check = nil }
             }
             if let t = comfy.templates.first(where: { $0.id == templateID }) {
-                Text(t.note).font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                Text(t.note).font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
             }
         } else if workflowSource == "import" {
             HStack(spacing: 8) {
                 Button("Choose a workflow file…") { importing = true }.buttonStyle(GhostButton())
                 Text("In ComfyUI: Workflow → Export (API). The editor's own save file won't do.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
                 if case .success(let file) = result { Task { await importWorkflow(file) } }
@@ -879,10 +883,10 @@ struct ProviderForm: View {
                     Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .foregroundStyle(check.ok ? Palette.ok : Palette.warn)
                     Text("eki fills: \(check.summary)" + (check.can_edit ? " — can edit pictures too" : ""))
-                        .font(.system(size: 12))
+                        .font(.zoomed(size: 12))
                 }
                 ForEach(check.problems, id: \.self) { p in
-                    Text(p).font(.system(size: 11.5)).foregroundStyle(Palette.danger)
+                    Text(p).font(.zoomed(size: 11.5)).foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -923,7 +927,7 @@ struct ProviderForm: View {
 
     private func field<C: View>(_ name: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(name).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Palette.inkMuted)
+            Text(name).font(.zoomed(size: 11.5, weight: .medium)).foregroundStyle(Palette.inkMuted)
             content()
         }
     }
@@ -984,7 +988,7 @@ struct AddModelSheet: View {
             }
             Text("Paste anything — a Hugging Face link, a .gguf file, a folder of weights, "
                  + "a server's address — or pick from what fits this Mac. eki works out the rest.")
-                .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 TextField("Paste a link, org/name, file, folder or http://…", text: $pasted)
@@ -1029,10 +1033,10 @@ struct AddModelSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(m.format == "gguf" ? m.repo
                                          : m.repo.replacingOccurrences(of: "mlx-community/", with: ""))
-                                        .font(.system(size: 12.5))
+                                        .font(.zoomed(size: 12.5))
                                         .foregroundStyle(Palette.ink)
                                     Text("\(m.downloads.formatted()) downloads")
-                                        .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                                        .font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 9).padding(.vertical, 6)
@@ -1043,7 +1047,7 @@ struct AddModelSheet: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(4)
+                    .padding(.all, 4)
                 }
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
                 .overlay(RoundedRectangle(cornerRadius: Metric.radius)
@@ -1051,9 +1055,9 @@ struct AddModelSheet: View {
                 .frame(width: 300)
                 fitPanel.frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger) }
+            if !error.isEmpty { Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger) }
         }
-        .padding(22)
+        .padding(.all, 22)
         .frame(width: 680, height: 600)
         .task { await search() }
         .task { await loadSuggestions() }
@@ -1064,7 +1068,7 @@ struct AddModelSheet: View {
     private func heading(_ text: String, top: CGFloat = 4, help: String = "") -> some View {
         HStack(spacing: 6) {
             Text(text)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.zoomed(size: 10.5, weight: .semibold))
                 .foregroundStyle(Palette.inkFaint)
                 .textCase(.uppercase)
             if text.hasPrefix("Suggested") && suggesting { ProgressView().controlSize(.mini) }
@@ -1089,7 +1093,7 @@ struct AddModelSheet: View {
                 Text(range.isAll
                      ? "Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB."
                      : "Nothing on the boards in this size fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
                     .padding(.horizontal, 9)
             }
             let fresh = (suggested.trending ?? []).filter(admitted)
@@ -1110,7 +1114,7 @@ struct AddModelSheet: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(s.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink)
+                    Text(s.name).font(.zoomed(size: 12.5)).foregroundStyle(Palette.ink)
                     if let label = s.label, !label.isEmpty {
                         Tag(text: label, color: Palette.accent)
                     }
@@ -1118,14 +1122,14 @@ struct AddModelSheet: View {
                 }
                 Text("\(s.bits)-bit · \(String(format: "%.1f", s.need_gb)) GB · up to \(s.context / 1024)k context"
                      + (s.fits_now ? "" : " · room needed"))
-                    .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
                 if !s.scoreLine.isEmpty {
-                    Text(s.scoreLine).font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                    Text(s.scoreLine).font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkMuted)
                         .help(s.scoreHelp)
                 } else if s.scored == false {
                     Text("\(s.downloads.formatted()) downloads this month"
                          + ((s.params_b ?? 0) > 0 ? " · \(String(format: "%g", s.params_b ?? 0))B parameters" : ""))
-                        .font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                        .font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkMuted)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1145,17 +1149,17 @@ struct AddModelSheet: View {
             case "hub", "gguf_file", "mlx_dir":
                 VStack(alignment: .leading, spacing: 3) {
                     Text(id.kind == "hub" ? (id.repo ?? "") : ((id.path ?? "") as NSString).lastPathComponent)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.zoomed(size: 12.5, weight: .medium))
                     if let fit = id.fit {
                         if let summary = fit.profile?.summary {
-                            Text(summary).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                            Text(summary).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Text(String(format: "Needs %.1f GB with a %dk context · ", fit.need_gb, fit.context / 1024)
                              + (!fit.fits ? "too big for this Mac"
                                 : fit.fits_now == false ? "fits; starts once other models unload" : "fits")
                              + (id.kind == "hub" ? String(format: " · %.1f GB download", fit.download_gb) : " · already on disk"))
-                            .font(.system(size: 11.5)).foregroundStyle(fit.fits ? Palette.inkMuted : Palette.warn)
+                            .font(.zoomed(size: 11.5)).foregroundStyle(fit.fits ? Palette.inkMuted : Palette.warn)
                     }
                 }
                 Spacer()
@@ -1173,13 +1177,13 @@ struct AddModelSheet: View {
                 .buttonStyle(AccentButton()).disabled(!(id.fit?.fits ?? false) || (id.fit?.gated ?? false))
             case "server":
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(id.message ?? "A server").font(.system(size: 12.5, weight: .medium))
+                    Text(id.message ?? "A server").font(.zoomed(size: 12.5, weight: .medium))
                     if let models = id.models, !models.isEmpty {
                         Text("Serving: " + models.prefix(4).joined(separator: ", ") + (models.count > 4 ? "…" : ""))
-                            .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
                     }
                     Text("Add it as a provider — eki routes to it and measures it; you keep running it.")
-                        .font(.system(size: 11.5)).foregroundStyle(Palette.inkFaint)
+                        .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkFaint)
                 }
                 Spacer()
                 Button("Add provider…") {
@@ -1189,12 +1193,12 @@ struct AddModelSheet: View {
                 .buttonStyle(AccentButton())
             default:
                 Image(systemName: "questionmark.circle").foregroundStyle(Palette.inkMuted)
-                Text(id.message ?? "eki didn't recognise that.").font(.system(size: 12))
+                Text(id.message ?? "eki didn't recognise that.").font(.zoomed(size: 12))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
             }
         }
-        .padding(10)
+        .padding(.all, 10)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
         .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.hairline, lineWidth: 1))
     }
@@ -1221,16 +1225,16 @@ struct AddModelSheet: View {
         } else if let fit, let selected {
             VStack(alignment: .leading, spacing: 9) {
                 Text(selected.repo.replacingOccurrences(of: "mlx-community/", with: ""))
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(.zoomed(size: 13.5, weight: .medium))
                 if let summary = fit.profile?.summary {
                     Text(summary)
-                        .font(.system(size: 11.5))
+                        .font(.zoomed(size: 11.5))
                         .foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if fit.format == "gguf", let files = fit.files, !files.isEmpty {
                     HStack(spacing: 8) {
-                        Text("Quantization").font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                        Text("Quantization").font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                             .frame(width: 84, alignment: .leading)
                         Picker("", selection: Binding(
                             get: { fit.quant ?? "" },
@@ -1263,12 +1267,12 @@ struct AddModelSheet: View {
                          : (fit.verdict == "tight" ? "Fits, but only just"
                             : "Fits on this Mac")
                            + (fit.fits_now == false ? " — starts once other models unload to make room" : ""))
-                        .font(.system(size: 12))
+                        .font(.zoomed(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if fit.gated {
                     Text("Gated: accept its terms on Hugging Face first.")
-                        .font(.system(size: 12)).foregroundStyle(Palette.danger)
+                        .font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
                 }
                 Spacer()
                 HStack {
@@ -1287,19 +1291,19 @@ struct AddModelSheet: View {
                     .disabled(fit.gated)
                 }
                 Text("Runs in the background — close this and watch it under Local servers.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
             }
         } else {
             Text("Pick a model to see whether it fits.")
-                .font(.system(size: 12)).foregroundStyle(Palette.inkFaint)
+                .font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
         }
     }
 
     private func row(_ k: String, _ v: String) -> some View {
         HStack {
-            Text(k).font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+            Text(k).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                 .frame(width: 70, alignment: .leading)
-            Text(v).font(.system(size: 12).monospacedDigit())
+            Text(v).font(.zoomed(size: 12).monospacedDigit())
         }
     }
 

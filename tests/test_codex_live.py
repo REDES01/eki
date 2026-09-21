@@ -185,7 +185,8 @@ def test_a_codex_run_goes_through_the_open_session(tmp_path, monkeypatch):
         assert events[-1]["state"] == "done"
         assert "".join(e.get("text", "") for e in events if e["event"] == "output") == "You chose Red."
         assert eng.store.session(cid, "codex") == "thread-1"
-        assert [c["name"] for c in await eng.commands_for(cid)][0] == "compact"
+        assert await eng.commands_for(cid) == []                                   # Auto: nothing until a backend is picked
+        assert [c["name"] for c in await eng.commands_for(cid, backend_key="codex")][0] == "compact"
         await eng.quota.stop()
         await eng.close()
     run(go())
@@ -224,6 +225,72 @@ def test_a_local_model_that_stops_to_announce_is_nudged(tmp_path, monkeypatch):
         assert "Echo: Go ahead" in text            # the second turn happened
         session = eng.live[started["conversation"]]
         assert "same turn" in session.developer_instructions
+        await eng.quota.stop()
+        await eng.close()
+    run(go())
+
+
+def test_the_panels_for_codex_answer_in_the_same_shape_as_claudes(tmp_path, monkeypatch):
+    """One panel draws both programs: Codex's app-server replies are put in
+    the shape Claude Code's control channel gives (Engine.codex_control)."""
+    from eki import secrets, settings, mcpregistry
+    from eki.adapters import codex as cx
+    from eki.adapters.base import BackendInfo, Capabilities, Cost, BackendError
+    from eki.config import Config
+    from eki.engine import Engine
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(mcpregistry, "PATH", tmp_path / "mcp.json")
+    monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", tmp_path / "config.toml")
+    cfg = Config(db_path=str(tmp_path / "eki.db"))
+    cfg.backends = [BackendInfo(key="codex", kind="codex", label="Codex", cost=Cost(tier=50),
+                                capabilities=Capabilities(context_tokens=200000, repo=True, tools=True))]
+    cfg.options = {"codex": {"binary": FAKE[0]}}
+    monkeypatch.setattr(cx.CodexBackend, "live_argv", lambda self: FAKE)
+    eng = Engine(cfg)
+
+    async def go():
+        # the picked backend decides which program answers, before any thread
+        panel = await eng.agent_control("mcp", backend_key="codex")
+        assert {s["name"]: s["status"] for s in panel["servers"]} == {"docs": "connected", "gh": "needs-auth"}
+        assert panel["servers"][0]["tools"][0]["name"] == "search"
+        with pytest.raises(BackendError):
+            await eng.agent_control("mcp")                                 # Auto: nobody to ask
+        r = await eng.codex_control("mcp_authenticate", key="codex", name="gh")
+        assert r["reply"]["authorizationUrl"].startswith("https://")
+        assert "servers" in await eng.codex_control("mcp_apply", key="codex")
+        assert (tmp_path / "config.toml").read_text().count(mcpregistry.BEGIN) == 1
+        models = await eng.codex_control("models", key="codex")
+        assert [m["value"] for m in models["models"]] == ["gpt-x"]          # hidden ones left out
+        assert models["models"][0]["supportedEffortLevels"] == ["low", "high"]
+        assert models["account"] == {"email": "c@example.com", "subscriptionType": "plus", "apiProvider": "chatgpt"}
+        usage = (await eng.codex_control("usage", key="codex"))["usage"]
+        w = usage["rate_limits"]["model_scoped"][0]
+        assert w["display_name"] == "30-day window" and w["utilization"] == 0.23 and w["resets_at"].endswith("Z")
+        assert usage["subscription_type"] == "plus"
+        assert [s["name"] for s in (await eng.codex_control("skills", key="codex"))["skills"]] == ["docx"]
+        hooks = (await eng.codex_control("hooks", key="codex"))["hooks"]["hooks"]
+        assert hooks[0]["event"] == "PreToolUse" and hooks[0]["displayText"] == "echo hi"
+        rules = (await eng.codex_control("rules", key="codex"))["rules"]["state"]["rules"]
+        assert {r["ruleContent"]: r["behavior"] for r in rules} == {":read-only": "allow", ":danger-full-access": "deny"}
+        assert (await eng.codex_control("permission_mode", key="codex", mode="plan"))["permission_mode"] == "plan"
+        rules = (await eng.codex_control("rules", key="codex"))["rules"]["state"]["rules"]
+        assert rules[0] == {"toolName": "sandbox", "ruleContent": "readOnly", "behavior": "allow", "source": "this thread"}
+        assert (await eng.codex_control("effort", key="codex", effort="high"))["effort"] == "high"
+        assert (await eng.codex_control("settings", key="codex"))["settings"]["config"]["model"] == "gpt-x"
+        assert (await eng.codex_control("plugins", key="codex"))["plugins"]["marketplaces"][0]["name"] == "m"
+        assert (await eng.codex_control("rewind", key="codex", turns=2))["rewind"] == {"rolledBack": 2}
+        assert (await eng.codex_control("rename", key="codex", title="t"))["ok"]
+        status = await eng.codex_control("status", key="codex")
+        assert status["alive"] and status["permission_mode"] == "plan"
+        with pytest.raises(BackendError):
+            await eng.codex_control("mcp_toggle", key="codex", name="docs", enabled=False)
+        with pytest.raises(BackendError):
+            await eng.codex_control("nothing", key="codex")
+        # the commands: Codex's minus /model, plus its panels; Claude's are not among them
+        names = [c["name"] for c in await eng.commands_for("", "", backend_key="codex")]
+        assert "compact" in names and "model" not in names and "plugins" in names
+        assert "memory" not in names and "tasks" not in names
         await eng.quota.stop()
         await eng.close()
     run(go())

@@ -29,6 +29,9 @@ import httpx
 from pydantic import BaseModel
 
 from . import catalog
+from . import mcpregistry
+from . import skills as skills_mod
+from .adapters.base import BackendError
 from . import codex_host
 from . import config as config_mod
 from . import providers as providers_mod
@@ -66,6 +69,10 @@ def sse(payload: Dict[str, Any]) -> str:
 async def lifespan(app: FastAPI):
     eng: Engine = STATE["engine"]
     eng.quota.start()
+    # one skill store, linked into both CLIs' folders (eki/skills.py)
+    report = await asyncio.to_thread(skills_mod.boot)
+    if report.get("linked") or report.get("conflicts") or report.get("error"):
+        log.info("skills: %s", report)
 
     async def reap() -> None:
         # unload local models eki started once they've sat unused a while
@@ -196,6 +203,32 @@ class AskBody(BaseModel):
     width: int = 0
     height: int = 0
     batch: int = 0
+    #: pictures on this Mac to show with the question and give to the program
+    attachments: List[str] = []
+
+
+class AttachmentBody(BaseModel):
+    data: str                 # base64
+    name: str = "image.png"
+
+
+@app.post("/api/attachments")
+def attachment_create(body: AttachmentBody) -> Any:
+    """A pasted or dropped picture, kept under ~/.eki/attachments so the
+    thread can show it later; the path goes into the ask."""
+    import base64
+    import uuid as uuid_mod
+    ext = (body.name.rsplit(".", 1)[-1].lower() if "." in body.name else "png")
+    if ext not in ("png", "jpg", "jpeg", "webp", "gif"):
+        ext = "png"
+    folder = Path("~/.eki/attachments").expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid_mod.uuid4().hex[:12]}.{ext}"
+    try:
+        path.write_bytes(base64.b64decode(body.data))
+    except (ValueError, OSError) as e:
+        raise HTTPException(400, f"not an image: {e}")
+    return {"path": str(path)}
 
 
 class PolicyBody(BaseModel):
@@ -214,7 +247,8 @@ async def ask(body: AskBody) -> Any:
     return await engine().ask(body.prompt, conversation=body.conversation,
                               backend_key=body.backend, repo=body.repo,
                               images=body.images,
-                              image={"width": body.width, "height": body.height, "batch": body.batch})
+                              image={"width": body.width, "height": body.height, "batch": body.batch},
+                              attachments=body.attachments)
 
 
 @app.get("/api/runs")
@@ -277,6 +311,172 @@ async def run_answer(rid: str, body: AnswerBody) -> Any:
     eng.runner.activity.setdefault(rid, []).append(event)
     eng.runner._publish(rid, event)
     return {"ok": True}
+
+
+# ---- Claude Code under eki: what its panels show ----------------------------
+
+class ClaudeControlBody(BaseModel):
+    op: str
+    conversation: str = ""
+    cwd: str = ""
+    backend: str = ""                 # the picked backend; decides Claude Code or Codex
+    args: Dict[str, Any] = {}
+
+
+@app.post("/api/agent/control")
+async def agent_control(body: ClaudeControlBody) -> Any:
+    """The panels, for whichever program the picked backend (or the thread)
+    is — Claude Code's control channel or Codex's app-server, same ops.
+    See Engine.claude_control and Engine.codex_control."""
+    try:
+        return await engine().agent_control(body.op, body.conversation, body.cwd, body.backend, **body.args)
+    except BackendError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/claude/control")
+async def claude_control(body: ClaudeControlBody) -> Any:
+    """One control request to the thread's Claude Code session (or a
+    folder's warm one): mcp, models, set_model, account, permission_mode,
+    thinking, usage, context, rules, rewind, rename, background, stop_task,
+    reload_skills, settings, update_settings, interrupt, status, and the
+    mcp_* actions (toggle, reconnect, authenticate, oauth_callback,
+    clear_auth, import, apply). See Engine.claude_control."""
+    try:
+        return await engine().claude_control(body.op, body.conversation, body.cwd, **body.args)
+    except BackendError as e:
+        raise HTTPException(409, str(e))
+
+
+class McpServerBody(BaseModel):
+    name: str
+    type: str = ""
+    command: str = ""
+    args: List[str] = []
+    env: Dict[str, str] = {}
+    url: str = ""
+    headers: Dict[str, str] = {}
+    backends: List[str] = ["claude", "codex"]
+    enabled: bool = True
+
+
+class McpToggleBody(BaseModel):
+    enabled: bool
+    backend: str = ""
+
+
+@app.get("/api/mcp")
+def mcp_registry() -> Any:
+    """eki's own MCP registry (~/.eki/mcp.json), rendered into both CLIs."""
+    return {"servers": mcpregistry.load(), "path": str(mcpregistry.PATH),
+            "codex_config": str(mcpregistry.CODEX_CONFIG)}
+
+
+@app.put("/api/mcp/{name}")
+def mcp_put(name: str, body: McpServerBody) -> Any:
+    try:
+        return {"servers": mcpregistry.put(name, body.model_dump())}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/mcp/{name}/enabled")
+def mcp_enabled(name: str, body: McpToggleBody) -> Any:
+    try:
+        return {"servers": mcpregistry.set_enabled(name, body.enabled, body.backend)}
+    except KeyError:
+        raise HTTPException(404, "no such server in eki's registry")
+
+
+@app.delete("/api/mcp/{name}")
+def mcp_delete(name: str) -> Any:
+    return {"servers": mcpregistry.remove(name)}
+
+
+# ---- skills: one store, a view per backend (eki/skills.py) --------------------
+
+class SkillBody(BaseModel):
+    text: str = ""                  # the whole SKILL.md, or…
+    description: str = ""           # …a description and a body
+    body: str = ""
+    backends: Optional[List[str]] = None
+
+
+class SkillToggleBody(BaseModel):
+    enabled: bool
+    backend: str = ""
+
+
+class SkillImportBody(BaseModel):
+    names: List[str] = []
+
+
+def _skills_state() -> Dict[str, Any]:
+    return {"skills": skills_mod.list_skills(), "unmanaged": skills_mod.unmanaged(),
+            "store": str(skills_mod.STORE),
+            "views": {k: str(v) for k, v in skills_mod.VIEWS.items()}}
+
+
+@app.get("/api/skills")
+def skills_list() -> Any:
+    """eki's skill store, what each backend sees, and skills eki doesn't hold yet."""
+    return _skills_state()
+
+
+@app.get("/api/skills/{name}")
+def skill_get(name: str) -> Any:
+    try:
+        return {"skill": skills_mod.get(name), "text": skills_mod.source(name),
+                "history": skills_mod.history(20, name)}
+    except KeyError:
+        raise HTTPException(404, "no such skill")
+
+
+@app.put("/api/skills/{name}")
+def skill_put(name: str, body: SkillBody) -> Any:
+    try:
+        skills_mod.put(name, text=body.text, description=body.description,
+                       body=body.body, backends=body.backends)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _skills_state()
+
+
+@app.post("/api/skills/{name}/enabled")
+def skill_enabled(name: str, body: SkillToggleBody) -> Any:
+    try:
+        skills_mod.set_enabled(name, body.enabled, body.backend)
+    except KeyError:
+        raise HTTPException(404, "no such skill")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _skills_state()
+
+
+@app.delete("/api/skills/{name}")
+def skill_delete(name: str) -> Any:
+    try:
+        skills_mod.remove(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _skills_state()
+
+
+@app.post("/api/skills/import")
+def skills_import(body: SkillImportBody) -> Any:
+    return {**_skills_state(), "report": skills_mod.import_existing(body.names or None)}
+
+
+@app.post("/api/skills/sync")
+def skills_sync() -> Any:
+    return {**_skills_state(), "report": skills_mod.sync()}
+
+
+@app.get("/api/files")
+def file_suggestions(cwd: str = "", q: str = "") -> Any:
+    """`@file` completion: paths in the folder matching what's typed."""
+    from . import files as files_mod
+    return {"suggestions": files_mod.suggest(cwd, q)}
 
 
 @app.get("/api/conversations/{cid}/commands")
@@ -899,8 +1099,14 @@ def get_settings() -> Any:
 
 @app.put("/api/settings")
 async def put_settings(body: Dict[str, Any]) -> Any:
+    before = settings_mod.load()
     saved = settings_mod.save(body)
-    await engine().reload()             # the router model may have changed
+    eng = engine()
+    await eng.reload()                  # the router model may have changed
+    if any(before.get(k) != saved.get(k) for k in ("claude_tools", "claude_screen", "claude_system_prompt")):
+        # what a session is given is decided at its start: idle ones are
+        # closed so the next turn opens with the new tools (resumed by id)
+        await eng.close_idle_claude()
     return saved
 
 

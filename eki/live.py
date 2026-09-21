@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -38,11 +39,33 @@ IDLE_SECONDS = 30 * 60
 
 class LiveSession:
     def __init__(self, argv: List[str], cwd: Optional[str], env: Optional[Dict[str, str]],
-                 append_system_prompt: str = ""):
+                 append_system_prompt: str = "", bridge: Any = None,
+                 extra_servers: Optional[Dict[str, Dict[str, Any]]] = None):
         self.argv = argv
         self.cwd = cwd
         self.env = env
         self.append_system_prompt = append_system_prompt
+        #: servers added right after the handshake (mcp_set_servers) rather
+        #: than by config — the program's own computer-use server keeps its
+        #: reserved name that way
+        self.extra_servers = dict(extra_servers or {})
+        #: eki's own tools, served to the program in-process (see eki/mcpbridge.py):
+        #: the program sends each MCP message as a control request and waits
+        #: for the reply, so no second process and no port
+        self.bridge = bridge
+        #: what the handshake said about the account and the program
+        self.models: List[Dict[str, Any]] = []
+        self.account: Dict[str, Any] = {}
+        self.agents: List[Dict[str, Any]] = []
+        self.output_style: str = ""
+        self.output_styles: List[str] = []
+        #: from the init event: the servers, the tools, what the build can do
+        self.mcp_servers: List[Dict[str, Any]] = []
+        self.tools: List[str] = []
+        self.skills: List[str] = []
+        self.capabilities: List[str] = []
+        self.version: str = ""
+        self.cwd_reported: str = ""
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.session_id: str = ""
         self.model: str = ""
@@ -82,14 +105,22 @@ class LiveSession:
         init: Dict[str, Any] = {"subtype": "initialize"}
         if self.append_system_prompt.strip():
             init["appendSystemPrompt"] = self.append_system_prompt.strip()
+        if self.bridge is not None:
+            init["sdkMcpServers"] = [self.bridge.name]
         try:
             reply = await asyncio.wait_for(self._request(init), timeout=INIT_TIMEOUT)
         except asyncio.TimeoutError:
             await self.close()
             raise RuntimeError("Claude Code didn't answer the handshake"
                                + (f": {self.exit_error}" if self.exit_error else ""))
-        self.commands = [c for c in (reply or {}).get("commands") or []
+        reply = reply if isinstance(reply, dict) else {}
+        self.commands = [c for c in reply.get("commands") or []
                          if isinstance(c, dict) and c.get("name")]
+        self.models = [m for m in reply.get("models") or [] if isinstance(m, dict) and m.get("value")]
+        self.account = reply.get("account") if isinstance(reply.get("account"), dict) else {}
+        self.agents = [a for a in reply.get("agents") or [] if isinstance(a, dict)]
+        self.output_style = str(reply.get("output_style") or "")
+        self.output_styles = [str(s) for s in reply.get("available_output_styles") or []]
         try:
             # the init event follows with the session id and which commands
             # are terminal-only; it's quick, and worth having before the first turn
@@ -97,6 +128,11 @@ class LiveSession:
         except asyncio.TimeoutError:
             pass
         self.commands = [c for c in self.commands if c["name"] not in self._terminal_only]
+        if self.extra_servers:
+            try:
+                await self.mcp_set_servers({})
+            except (RuntimeError, asyncio.TimeoutError) as e:
+                log.warning("extra MCP servers: %s", e)
 
     async def close(self) -> None:
         if self._reader:
@@ -132,12 +168,23 @@ class LiveSession:
         finally:
             self._waiting.pop(rid, None)
 
-    async def send(self, text: str) -> None:
-        """A user turn; the events that follow come from `turn()`."""
+    async def send(self, text: str, images: Optional[List[str]] = None) -> None:
+        """A user turn — with pictures, if any were attached (paths on this
+        Mac, sent as image blocks the way a paste in the terminal is); the
+        events that follow come from `turn()`."""
         self.last_used = time.time()
-        self._write({"type": "user", "session_id": self.session_id or "",
-                     "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
+        for path in images or []:
+            block = image_source(path)
+            if block:
+                content.append(block)
+        # stamped with an id of ours: the one /rewind takes to put the files
+        # back as they were before this turn (the program doesn't echo it)
+        mid = str(uuid.uuid4())
+        self._write({"type": "user", "uuid": mid, "session_id": self.session_id or "",
+                     "message": {"role": "user", "content": content},
                      "parent_tool_use_id": None})
+        self._events.put_nowait({"kind": "checkpoint", "uuid": mid})
 
     async def answer(self, request_id: str, response: Dict[str, Any]) -> bool:
         """Reply to a question or permission prompt. `response` is what the
@@ -166,6 +213,110 @@ class LiveSession:
 
     def pending(self) -> List[Dict[str, Any]]:
         return list(self._pending.values())
+
+    # ---- the rest of what the terminal can ask the program ------------
+    #
+    # Each of these is one control request, the same ones the program's
+    # own SDK sends; the terminal's panels (/mcp, /model, /permissions,
+    # /usage, /context, /rewind …) are drawn from their replies. A request
+    # the running build doesn't know answers with an error, which comes
+    # back as RuntimeError — the caller says so rather than guessing.
+
+    async def control(self, request: Dict[str, Any], timeout: float = 30.0) -> Any:
+        """Any control request, answered or raised."""
+        return await asyncio.wait_for(self._request(request), timeout=timeout)
+
+    async def mcp_status(self) -> List[Dict[str, Any]]:
+        reply = await self.control({"subtype": "mcp_status"})
+        servers = (reply or {}).get("mcpServers") if isinstance(reply, dict) else None
+        if isinstance(servers, list):
+            self.mcp_servers = [s for s in servers if isinstance(s, dict) and s.get("name")]
+        return list(self.mcp_servers)
+
+    async def mcp_toggle(self, name: str, enabled: bool) -> Any:
+        return await self.control({"subtype": "mcp_toggle", "serverName": name, "enabled": bool(enabled)})
+
+    async def mcp_reconnect(self, name: str) -> Any:
+        return await self.control({"subtype": "mcp_reconnect", "serverName": name}, timeout=60)
+
+    async def mcp_authenticate(self, name: str, redirect_uri: str = "") -> Any:
+        """Start the server's OAuth flow. The program opens the browser (or
+        answers with the URL to open) and finishes on the callback; what it
+        answers is returned as is, since builds differ in what they say."""
+        req: Dict[str, Any] = {"subtype": "mcp_authenticate", "serverName": name}
+        if redirect_uri:
+            req["redirectUri"] = redirect_uri
+        return await self.control(req, timeout=300)
+
+    async def mcp_oauth_callback(self, name: str, callback_url: str) -> Any:
+        return await self.control({"subtype": "mcp_oauth_callback_url", "serverName": name,
+                                   "callbackUrl": callback_url}, timeout=60)
+
+    async def mcp_clear_auth(self, name: str) -> Any:
+        return await self.control({"subtype": "mcp_clear_auth", "serverName": name})
+
+    async def mcp_set_servers(self, servers: Dict[str, Dict[str, Any]]) -> Any:
+        """Add or replace process-transport servers for this session only
+        (`dynamic` scope); eki's in-process server is re-listed so it stays."""
+        merged = {**self.extra_servers, **servers}
+        if self.bridge is not None:
+            merged[self.bridge.name] = {"type": "sdk", "name": self.bridge.name}
+        return await self.control({"subtype": "mcp_set_servers", "servers": merged}, timeout=60)
+
+    async def set_permission_mode(self, mode: str) -> None:
+        await self.control({"subtype": "set_permission_mode", "mode": mode})
+        self.permission_mode = mode
+
+    async def set_thinking(self, max_tokens: Optional[int] = None, display: Optional[str] = None) -> Any:
+        req: Dict[str, Any] = {"subtype": "set_max_thinking_tokens", "max_thinking_tokens": max_tokens}
+        if display:
+            req["thinking_display"] = display
+        return await self.control(req)
+
+    async def usage(self) -> Dict[str, Any]:
+        reply = await self.control({"subtype": "get_usage", "skip_behaviors": True}, timeout=60)
+        return reply if isinstance(reply, dict) else {}
+
+    async def context_usage(self, detail: str = "summary") -> Dict[str, Any]:
+        reply = await self.control({"subtype": "get_context_usage", "detail": detail}, timeout=60)
+        return reply if isinstance(reply, dict) else {}
+
+    async def permission_rules(self) -> Dict[str, Any]:
+        reply = await self.control({"subtype": "list_permission_rules"})
+        return reply if isinstance(reply, dict) else {}
+
+    async def list_models(self) -> List[Dict[str, Any]]:
+        try:
+            reply = await self.control({"subtype": "list_models"})
+        except RuntimeError:
+            return list(self.models)
+        models = (reply or {}).get("models") if isinstance(reply, dict) else None
+        if isinstance(models, list):
+            self.models = [m for m in models if isinstance(m, dict) and m.get("value")]
+        return list(self.models)
+
+    async def rewind_files(self, user_message_id: str, dry_run: bool = False) -> Any:
+        return await self.control({"subtype": "rewind_files", "user_message_id": user_message_id,
+                                   "dry_run": bool(dry_run)}, timeout=60)
+
+    async def rename(self, title: str) -> Any:
+        return await self.control({"subtype": "rename_session", "title": title, "source": "host"})
+
+    async def background_tasks(self) -> Any:
+        return await self.control({"subtype": "background_tasks"})
+
+    async def stop_task(self, task_id: str) -> Any:
+        return await self.control({"subtype": "stop_task", "task_id": task_id})
+
+    async def reload_skills(self) -> Any:
+        return await self.control({"subtype": "reload_skills"}, timeout=60)
+
+    async def settings(self) -> Dict[str, Any]:
+        reply = await self.control({"subtype": "get_settings"})
+        return reply if isinstance(reply, dict) else {}
+
+    async def update_settings(self, settings: Dict[str, Any], source: str = "userSettings") -> Any:
+        return await self.control({"subtype": "update_settings", "source": source, "settings": settings})
 
     # ---- reading -----------------------------------------------------
 
@@ -209,7 +360,33 @@ class LiveSession:
         if t == "control_request":
             req = event.get("request") or {}
             rid = event.get("request_id", "")
-            if req.get("subtype") == "can_use_tool":
+            sub = req.get("subtype")
+            if sub == "mcp_message" and self.bridge is not None \
+                    and req.get("server_name") == self.bridge.name:
+                # one JSON-RPC message for eki's own tools; answered in a
+                # task so a slow tool (a picture) doesn't stall the reader
+                asyncio.get_running_loop().create_task(self._serve_bridge(rid, req.get("message")))
+                return
+            if sub == "elicitation":
+                # an MCP server asking you something: a form, or a URL to
+                # visit (its own sign-in, say) — a card either way
+                self._pending[rid] = {**req, "request_id": rid}
+                self._events.put_nowait({"kind": "elicitation", "request_id": rid,
+                                         "server": req.get("mcp_server_name", ""),
+                                         "message": req.get("message", ""),
+                                         "mode": req.get("mode") or "form",
+                                         "url": req.get("url") or "",
+                                         "schema": req.get("requested_schema") or {},
+                                         "title": req.get("title") or req.get("display_name") or ""})
+                return
+            if sub == "request_user_dialog":
+                self._pending[rid] = {**req, "request_id": rid}
+                self._events.put_nowait({"kind": "dialog", "request_id": rid,
+                                         "dialog": req.get("dialog_kind", ""),
+                                         "payload": req.get("payload") or {},
+                                         "tool_use_id": req.get("tool_use_id")})
+                return
+            if sub == "can_use_tool":
                 self._pending[rid] = {**req, "request_id": rid}
                 if req.get("tool_name") in QUESTION_TOOLS:
                     self._events.put_nowait({"kind": "ask", "request_id": rid,
@@ -225,10 +402,10 @@ class LiveSession:
                                              "suggestions": req.get("permission_suggestions") or [],
                                              "tool_use_id": req.get("tool_use_id")})
             else:
-                # hooks, MCP, dialogs eki doesn't host: say no, politely
+                # hooks and servers eki doesn't host: say no, politely
                 self._write({"type": "control_response",
                              "response": {"subtype": "error", "request_id": rid,
-                                          "error": f"eki doesn't handle {req.get('subtype')}"}})
+                                          "error": f"eki doesn't handle {sub}"}})
             return
         if t == "control_cancel_request":
             rid = event.get("request_id", "")
@@ -244,8 +421,21 @@ class LiveSession:
                 self.permission_mode = event.get("permissionMode") or ""
                 self._terminal_only |= set(event.get("terminal_slash_commands") or [])
                 self.commands = [c for c in self.commands if c["name"] not in self._terminal_only]
+                servers = event.get("mcp_servers")
+                if isinstance(servers, list):
+                    self.mcp_servers = [s for s in servers if isinstance(s, dict) and s.get("name")]
+                self.tools = [str(x) for x in event.get("tools") or [] if isinstance(x, str)]
+                self.skills = [str(x) for x in event.get("skills") or [] if isinstance(x, str)]
+                self.capabilities = [str(x) for x in event.get("capabilities") or [] if isinstance(x, str)]
+                self.version = str(event.get("claude_code_version") or self.version)
+                self.cwd_reported = str(event.get("cwd") or "")
                 if self._init_seen:
                     self._init_seen.set()
+            elif sub == "mcp_status" or sub == "mcp_servers_changed":
+                servers = event.get("mcp_servers") or event.get("mcpServers")
+                if isinstance(servers, list):
+                    self.mcp_servers = [s for s in servers if isinstance(s, dict) and s.get("name")]
+                    self._events.put_nowait({"kind": "mcp", "servers": list(self.mcp_servers)})
             elif sub == "compact_boundary":
                 meta = event.get("compact_metadata") or {}
                 self._events.put_nowait({"kind": "note",
@@ -287,6 +477,9 @@ class LiveSession:
                 if delta.get("type") == "text_delta" and delta.get("text"):
                     self._got_delta = True
                     self._events.put_nowait({"kind": "text", "text": delta["text"]})
+                elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                    # the model thinking, as the terminal shows it in grey
+                    self._events.put_nowait({"kind": "thinking", "text": delta["thinking"]})
             return
         if t == "assistant":
             usage = (event.get("message") or {}).get("usage") or {}
@@ -306,8 +499,9 @@ class LiveSession:
             self._got_delta = False
             return
         if t == "user":
+            blocks = (event.get("message") or {}).get("content") or []
             # tool results coming back: only errors are worth a line
-            for block in (event.get("message") or {}).get("content") or []:
+            for block in blocks:
                 if block.get("type") == "tool_result" and block.get("is_error"):
                     text = block.get("content")
                     if isinstance(text, list):
@@ -323,6 +517,21 @@ class LiveSession:
                                      "result": event.get("result"), "usage": event.get("usage") or {},
                                      "subtype": event.get("subtype", "")})
             return
+
+    async def _serve_bridge(self, rid: str, message: Any) -> None:
+        """Answer one MCP message for eki's in-process server."""
+        try:
+            reply = await self.bridge.handle(message)
+        except Exception as e:                      # noqa: BLE001
+            log.warning("eki tools: %s", e)
+            reply = {"jsonrpc": "2.0", "id": (message or {}).get("id") if isinstance(message, dict) else None,
+                     "error": {"code": -32603, "message": str(e)[:300]}}
+        try:
+            self._write({"type": "control_response",
+                         "response": {"subtype": "success", "request_id": rid,
+                                      "response": {"mcp_response": reply}}})
+        except RuntimeError:
+            pass
 
     def stirred(self) -> bool:
         """The program did something while nobody asked — a background task
@@ -355,6 +564,21 @@ class LiveSession:
                     return
         finally:
             self.busy = False
+
+
+def image_source(path: str) -> Optional[Dict[str, Any]]:
+    """A picture on disk as the API's image block, or None if unreadable."""
+    import base64
+    try:
+        with open(os.path.expanduser(path), "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    ext = path.rsplit(".", 1)[-1].lower()
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+    return {"type": "image", "source": {"type": "base64", "media_type": mime,
+                                        "data": base64.b64encode(data).decode("ascii")}}
 
 
 #: context windows by family, for the meter before the first turn reports

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import re
 import subprocess
 import time
@@ -42,6 +43,9 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import live
+from . import mcpbridge
+from . import mcpregistry
+from . import skills as skills_mod
 from . import measure
 from . import measure_images
 from . import secrets
@@ -409,19 +413,30 @@ class Engine:
 
     async def ask(self, prompt: str, *, conversation: str = "", backend_key: str = "",
                   repo: str = "", images: bool = False,
-                  image: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+                  image: Optional[Dict[str, Any]] = None,
+                  attachments: Optional[List[str]] = None) -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
-        reopened mid-answer already shows what was asked.
+        reopened mid-answer already shows what was asked. Attachments are
+        pictures on this Mac, shown with the question and given to the
+        program that answers (Claude Code and Codex take them).
         """
         cid = conversation or self.store.new_conversation()
-        turn = self.store.add_turn(cid, "user", prompt)
+        attached = [p for p in (attachments or []) if p and os.path.isfile(os.path.expanduser(p))]
+        shown = prompt + "".join(f"\n\n![attachment]({p.replace(' ', '%20')})" for p in attached)
+        turn = self.store.add_turn(cid, "user", shown,
+                                   meta={"attachments": attached} if attached else None)
         # a size or a count given outright, beside the words (see imagespec)
         image = {k: v for k, v in (image or {}).items() if v}
+        payload: Dict[str, Any] = {}
+        if image:
+            payload["image"] = image
+        if attached:
+            payload["attachments"] = attached
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
-                               payload=json.dumps({"image": image}) if image else "")
+                               payload=json.dumps(payload) if payload else "")
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
@@ -609,8 +624,12 @@ class Engine:
         if drawn:
             meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
-        stream = (self._live_turn(run, cid, backend, choice.model)
-                  if self._lives(backend) else backend.stream(history, **kw))
+        if self._lives(backend):
+            stream = self._live_turn(run, cid, backend, choice.model)
+        elif self._needs_skill_loader(backend):
+            stream = self._skilled(backend, history, kw, meta)
+        else:
+            stream = backend.stream(history, **kw)
         try:
             async for chunk in stream:
                 if isinstance(chunk, str):
@@ -645,6 +664,10 @@ class Engine:
             usage.setdefault("output_tokens", usage.pop("completion_tokens", 0))
         if usage:
             meta["usage"] = usage
+        checkpoint = getattr(backend, "last_checkpoint", "")
+        if checkpoint:
+            meta["checkpoint"] = checkpoint     # what /rewind needs to undo this turn's edits
+            backend.last_checkpoint = ""                                    # type: ignore[attr-defined]
         if cid:
             self.store.add_turn(cid, "assistant", "".join(parts), backend.key,
                                 choice.reason, meta=meta)
@@ -667,6 +690,105 @@ class Engine:
         if kind == "codex":
             return bool(self.settings.get("live_codex", True))
         return False
+
+    def _needs_skill_loader(self, backend: Backend) -> bool:
+        """Claude Code and Codex load skills themselves (from the links eki
+        keeps in their folders); a local or API model gets them from here."""
+        caps = backend.info.capabilities
+        return (backend.info.kind not in ("claude_code", "codex") and caps.text
+                and bool(self.settings.get("skills_local", True)))
+
+    async def _skilled(self, backend: Backend, history: List[Message], kw: Dict[str, Any],
+                       meta: Dict[str, Any]) -> AsyncIterator[str]:
+        """A turn for a model with no skill loader: eki is the loader.
+
+        `/name rest` (or `$name`) hands the skill over outright. Otherwise the
+        model sees the names and descriptions, and answering `[[skill:name]]`
+        asks for one: that start is held back, and the turn is asked again
+        with the skill's instructions. The body is only ever sent when used."""
+        try:
+            catalog = await asyncio.to_thread(skills_mod.catalog_prompt, "local")
+        except OSError:
+            catalog = ""
+        if not catalog or not history:
+            async for chunk in backend.stream(history, **kw):
+                yield chunk
+            return
+        last = history[-1]
+        chosen, rest = skills_mod.invoked(last.content) if last.role == "user" else (None, "")
+        if chosen is not None:
+            meta["skill"] = chosen["name"]
+            yield {"kind": "activity", "text": f"Using the {chosen['name']} skill"}  # type: ignore[misc]
+            asked = history[:-1] + [Message("system", skills_mod.loaded_prompt(chosen)),
+                                    Message("user", rest or f"Go ahead with {chosen['name']}.")]
+            async for chunk in backend.stream(asked, **kw):
+                yield chunk
+            return
+
+        offered = [Message("system", catalog)] + history
+        held = ""
+        deciding = True
+        thinking = ""                           # a reasoning model's <think> goes by untouched
+        source = backend.stream(offered, **kw)
+        async for chunk in source:
+            if not deciding or not isinstance(chunk, str):
+                yield chunk
+                continue
+            if thinking:
+                thinking += chunk
+                if "</think>" not in thinking:
+                    yield chunk
+                    continue
+                before, _, after = chunk.rpartition("</think>") if "</think>" in chunk else ("", "", "")
+                if "</think>" in chunk:
+                    yield before + "</think>"
+                    chunk = after
+                else:                           # the tag was split across chunks
+                    yield chunk
+                    chunk = thinking.partition("</think>")[2]
+                    # what came after the tag was already passed on with it
+                    held, thinking = "", ""
+                    deciding = False
+                    continue
+                thinking = ""
+                held = ""
+                if not chunk:
+                    continue
+            held += chunk
+            t = held.lstrip()
+            if t.startswith("<think>"):
+                if "</think>" not in held:
+                    thinking = held
+                    yield held
+                    held = ""
+                    continue
+                head, _, after = held.partition("</think>")
+                yield head + "</think>"
+                held = after
+                if not held:
+                    continue
+            elif "<think>".startswith(t) and t:
+                continue
+            if skills_mod.could_be_pick(held) and not skills_mod.PICK_RE.match(held):
+                continue
+            deciding = False
+            pick = skills_mod.picked(held)
+            if pick is None:
+                yield held
+                continue
+            # the model asked for a skill: stop that answer and ask again with it
+            try:
+                await source.aclose()  # type: ignore[attr-defined]
+            except Exception:                   # noqa: BLE001
+                pass
+            meta["skill"] = pick["name"]
+            yield {"kind": "activity", "text": f"Using the {pick['name']} skill"}  # type: ignore[misc]
+            asked = history[:-1] + [Message("system", skills_mod.loaded_prompt(pick)), history[-1]]
+            async for again in backend.stream(asked, **kw):
+                yield again
+            return
+        if deciding and held:
+            yield held
 
     SCRATCH = Path("~/.eki/scratch").expanduser()
 
@@ -701,16 +823,14 @@ class Engine:
             await warm.close()
         import uuid
         argv = backend.live_argv(cwd or None, resume, str(uuid.uuid4()))   # type: ignore[attr-defined]
-        session = live.LiveSession(argv, cwd or None, None,
-                                   str(self.settings.get("claude_system_prompt", "")))
+        session = self._new_live(argv, cwd or None, cid)
         try:
             await session.start()
         except RuntimeError as e:
             if resume:
                 # the old session is gone (deleted, or another machine's): start over
                 argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))  # type: ignore[attr-defined]
-                session = live.LiveSession(argv, cwd or None, None,
-                                           str(self.settings.get("claude_system_prompt", "")))
+                session = self._new_live(argv, cwd or None, cid)
                 await session.start()
             else:
                 raise BackendError(str(e))
@@ -718,6 +838,367 @@ class Engine:
             self.live[cid] = session
         session.backend_key = backend.key                                  # type: ignore[attr-defined]
         return session
+
+    def _new_live(self, argv: List[str], cwd: Optional[str], cid: str = "") -> live.LiveSession:
+        """A Claude Code session under eki: its system prompt addition, and
+        eki's own tools served in-process (Settings → Claude tools)."""
+        bridge = None
+        if self.settings.get("claude_tools", True):
+            depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
+            # the screen: on a Mac Claude Code brings its own computer-use
+            # server (mcpregistry.builtin_for_claude), so eki's screen tools
+            # go to Codex only and don't double up here
+            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1,
+                                      screen=bool(self.settings.get("claude_screen", True))
+                                      and sys.platform != "darwin")
+        claude_bin = next((getattr(b, "bin", "") for b in self.backends
+                           if b.info.kind == "claude_code"), "") or ""
+        return live.LiveSession(argv, cwd, None,
+                                str(self.settings.get("claude_system_prompt", "")),
+                                bridge=bridge,
+                                extra_servers=mcpregistry.builtin_for_claude(claude_bin))
+
+    async def claude_session(self, cid: str = "", cwd: str = "") -> live.LiveSession:
+        """The Claude Code session for a thread — or, with no thread, the
+        warm one for a folder — for the things the terminal's panels ask
+        the program: MCP servers, models, usage, permission rules…"""
+        session = self.live.get(cid) if cid else None
+        if isinstance(session, codex_live.CodexSession):
+            raise BackendError("that thread is Codex, not Claude Code")
+        if session is None or not session.alive:
+            session = self.warm.get(cwd or "")
+        if session is None or not session.alive:
+            backend = next((b for b in self.backends if b.info.kind == "claude_code"
+                            and getattr(b, "bin", None)), None)
+            if backend is None:
+                raise BackendError("Claude Code is not set up")
+            if not self.settings.get("live_claude", True):
+                raise BackendError("Claude Code isn't kept open (Settings → live)")
+            import uuid
+            argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))   # type: ignore[attr-defined]
+            session = self._new_live(argv, self._workdir(cwd), cid)
+            try:
+                await session.start()
+            except RuntimeError as e:
+                raise BackendError(str(e))
+            if cid:
+                self.live[cid] = session
+            else:
+                self.warm[cwd or ""] = session
+        return session
+
+    async def claude_control(self, op: str, cid: str = "", cwd: str = "",
+                             **kw: Any) -> Dict[str, Any]:
+        """What the terminal's panels ask the program, by name. Each op is
+        one control request on the thread's session (or the folder's warm
+        one); the reply is returned as the program gave it, under a key
+        the app knows, so a build that says more is never cut short."""
+        session = await self.claude_session(cid, cwd)
+        try:
+            if op == "mcp":
+                servers = await session.mcp_status()
+                return {"servers": servers, "registry": mcpregistry.load()}
+            if op == "mcp_toggle":
+                await session.mcp_toggle(str(kw["name"]), bool(kw.get("enabled", True)))
+                return {"servers": await session.mcp_status()}
+            if op == "mcp_reconnect":
+                try:
+                    await session.mcp_reconnect(str(kw["name"]))
+                except RuntimeError as e:
+                    if "disabled" not in str(e).lower():
+                        raise
+                    # Reconnect on a disabled server means "bring it back"
+                    await session.mcp_toggle(str(kw["name"]), True)
+                    await session.mcp_reconnect(str(kw["name"]))
+                return {"servers": await session.mcp_status()}
+            if op == "mcp_authenticate":
+                reply = await session.mcp_authenticate(str(kw["name"]), str(kw.get("redirect_uri") or ""))
+                return {"reply": reply, "servers": await session.mcp_status()}
+            if op == "mcp_oauth_callback":
+                reply = await session.mcp_oauth_callback(str(kw["name"]), str(kw["callback_url"]))
+                return {"reply": reply, "servers": await session.mcp_status()}
+            if op == "mcp_clear_auth":
+                await session.mcp_clear_auth(str(kw["name"]))
+                return {"servers": await session.mcp_status()}
+            if op == "mcp_import":
+                status = await session.mcp_status()
+                return {"registry": mcpregistry.import_from_claude(status, list(kw.get("names") or []))}
+            if op == "mcp_apply":
+                # the registry's servers, added to this session without a restart
+                await session.mcp_set_servers(mcpregistry.for_claude()["mcpServers"])
+                return {"servers": await session.mcp_status()}
+            if op == "models":
+                return {"models": await session.list_models(), "model": session.model,
+                        "account": session.account}
+            if op == "set_model":
+                await session.set_model(str(kw["model"]))
+                return {"model": session.model}
+            if op == "account":
+                return {"account": session.account, "version": session.version,
+                        "capabilities": session.capabilities, "tools": session.tools,
+                        "agents": session.agents, "output_style": session.output_style,
+                        "output_styles": session.output_styles}
+            if op == "permission_mode":
+                await session.set_permission_mode(str(kw["mode"]))
+                return {"permission_mode": session.permission_mode}
+            if op == "thinking":
+                await session.set_thinking(kw.get("max_tokens"), kw.get("display"))
+                return {"ok": True}
+            if op == "usage":
+                return {"usage": await session.usage()}
+            if op == "context":
+                return {"context": await session.context_usage(str(kw.get("detail") or "summary"))}
+            if op == "rules":
+                return {"rules": await session.permission_rules()}
+            if op == "rewind":
+                target = str(kw.get("checkpoint") or "")
+                if not target and kw.get("turn"):
+                    turn = next((t for t in self.store.turns(cid) if str(t.get("id")) == str(kw["turn"])), None)
+                    meta = (turn or {}).get("meta") or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except ValueError:
+                            meta = {}
+                    target = str(meta.get("checkpoint") or "")
+                if not target:
+                    raise BackendError("that turn has no checkpoint to rewind to")
+                return {"rewind": await session.rewind_files(target, bool(kw.get("dry_run")))}
+            if op == "rename":
+                await session.rename(str(kw["title"]))
+                return {"ok": True}
+            if op == "background":
+                return {"tasks": await session.background_tasks()}
+            if op == "stop_task":
+                await session.stop_task(str(kw["task_id"]))
+                return {"ok": True}
+            if op == "reload_skills":
+                return {"skills": await session.reload_skills()}
+            if op == "skills":
+                # the program lists skills as commands; reload_skills answers
+                # with just the skills, current as of now
+                reply = await session.reload_skills()
+                skills = (reply or {}).get("skills") if isinstance(reply, dict) else None
+                if not isinstance(skills, list):
+                    skills = [c for c in session.commands if ":" in str(c.get("name", ""))
+                              or str(c.get("name", "")) in session.skills]
+                return {"skills": [s for s in skills if isinstance(s, dict) and s.get("name")]}
+            if op == "hooks":
+                return {"hooks": await session.control({"subtype": "get_hooks_listing"})}
+            if op == "agents":
+                return {"agents": session.agents}
+            if op == "memory":
+                return {"memory": await session.control({"subtype": "get_memory_dialog"})}
+            if op == "effort":
+                # the session's flag layer (what --effort sets), not a settings file
+                await session.control({"subtype": "apply_flag_settings",
+                                       "settings": {"effortLevel": str(kw["effort"])}})
+                return {"effort": str(kw["effort"])}
+            if op == "output_style":
+                await session.update_settings({"outputStyle": str(kw["style"])}, "localSettings")
+                session.output_style = str(kw["style"])
+                return {"output_style": session.output_style}
+            if op == "settings":
+                return {"settings": await session.settings()}
+            if op == "update_settings":
+                await session.update_settings(dict(kw.get("settings") or {}),
+                                              str(kw.get("source") or "userSettings"))
+                return {"ok": True}
+            if op == "interrupt":
+                await session.interrupt()
+                return {"ok": True}
+            if op == "status":
+                return {"alive": session.alive, "busy": session.busy, "model": session.model,
+                        "session": session.session_id, "permission_mode": session.permission_mode,
+                        "version": session.version, "context_window": session.context_window,
+                        "servers": session.mcp_servers, "commands": session.commands,
+                        "background": session.background, "rate_limits": session.rate_limits}
+        except KeyError as e:
+            raise BackendError(f"{op} needs {e}")
+        except asyncio.TimeoutError:
+            raise BackendError(f"Claude Code didn't answer {op}")
+        except RuntimeError as e:
+            # the running build doesn't know the request, or refused it
+            raise BackendError(str(e)[:300])
+        raise BackendError(f"unknown op {op}")
+
+    async def agent_control(self, op: str, cid: str = "", cwd: str = "", backend_key: str = "",
+                            **kw: Any) -> Dict[str, Any]:
+        """The panels, for whichever program the thread (or the picked
+        backend) is: Claude Code's or Codex's, same op names."""
+        key = (backend_key or "").partition(":")[0]
+        kind = ""
+        if key:
+            chosen = self.get(key)
+            kind = chosen.info.kind if chosen is not None else ""
+        if not kind and cid:
+            session = self.live.get(cid)
+            if isinstance(session, codex_live.CodexSession):
+                kind = "codex"
+            elif session is not None:
+                kind = "claude_code"
+            else:
+                last = next((t for t in reversed(self.store.turns(cid))
+                             if t.get("role") == "assistant" and t.get("backend")), None)
+                if last:
+                    chosen = self.get(str(last["backend"]).partition(":")[0])
+                    kind = chosen.info.kind if chosen is not None else ""
+        if kind == "codex":
+            return await self.codex_control(op, cid, cwd, key, **kw)
+        if kind == "claude_code":
+            return await self.claude_control(op, cid, cwd, **kw)
+        raise BackendError("pick Claude Code or Codex for its panels")
+
+    async def codex_session(self, cid: str = "", cwd: str = "", key: str = "") -> codex_live.CodexSession:
+        """The thread's Codex session, or a warm one for the folder."""
+        session = self.live.get(cid) if cid else None
+        if session is not None and not isinstance(session, codex_live.CodexSession):
+            raise BackendError("that thread is Claude Code, not Codex")
+        if session is None or not session.alive:
+            session = self.warm.get("codex|" + (cwd or ""))
+        if session is None or not session.alive:
+            backend = self.get(key) if key else None
+            if backend is None or backend.info.kind != "codex":
+                backend = next((b for b in self.backends if b.info.kind == "codex"
+                                and getattr(b, "bin", None)), None)
+            if backend is None:
+                raise BackendError("Codex is not set up")
+            if not self.settings.get("live_codex", True):
+                raise BackendError("Codex isn't kept open (Settings → live)")
+            session = await self._codex_session(cid, backend, self._workdir(cwd), "", None)
+            if not cid:
+                self.live.pop("", None)
+                self.warm["codex|" + (cwd or "")] = session
+        return session
+
+    async def codex_control(self, op: str, cid: str = "", cwd: str = "", key: str = "",
+                            **kw: Any) -> Dict[str, Any]:
+        """Codex's side of the panels, over its app-server (see
+        docs/claude-code.md for the op → request table)."""
+        session = await self.codex_session(cid, cwd, key)
+        try:
+            if op == "mcp":
+                return {"servers": await session.mcp_status(), "registry": mcpregistry.load()}
+            if op == "mcp_authenticate":
+                reply = await session.control("mcpServer/oauth/login",
+                                              {"name": str(kw["name"]), "threadId": session.session_id},
+                                              timeout=300)
+                return {"reply": reply, "servers": await session.mcp_status()}
+            if op in ("mcp_reconnect", "mcp_apply"):
+                # Codex re-reads its config: the registry's managed block included
+                mcpregistry.render_codex()
+                await session.control("config/mcpServer/reload", {}, timeout=60)
+                return {"servers": await session.mcp_status()}
+            if op == "mcp_toggle":
+                raise BackendError("Codex has no per-session toggle; remove the server from eki's registry or its config.toml")
+            if op == "models":
+                return {"models": await session.list_models(), "model": session.model,
+                        "account": await self._codex_account(session)}
+            if op == "set_model":
+                await session.set_model(str(kw["model"]))
+                return {"model": session.model}
+            if op == "account":
+                return {"account": await self._codex_account(session), "version": "",
+                        "capabilities": [], "tools": [], "agents": [], "output_style": "",
+                        "output_styles": []}
+            if op == "permission_mode":
+                mode = str(kw["mode"])
+                table = {
+                    "default": ({"type": "workspaceWrite"}, "on-request"),
+                    "acceptEdits": ({"type": "workspaceWrite"}, "on-request"),
+                    "plan": ({"type": "readOnly"}, "on-request"),
+                    "bypassPermissions": ({"type": "dangerFullAccess"}, "never"),
+                }
+                if mode not in table:
+                    raise BackendError(f"no Codex equivalent of {mode}")
+                session.sandbox_policy, session.approval_policy = table[mode]
+                session.permission_mode = mode                                  # type: ignore[attr-defined]
+                return {"permission_mode": mode}
+            if op == "thinking":
+                # Codex has reasoning effort, not a thinking budget: "off" means low
+                if kw.get("max_tokens") == 0:
+                    session.effort = "low"
+                return {"ok": True}
+            if op == "effort":
+                session.effort = str(kw.get("effort") or "")
+                return {"effort": session.effort}
+            if op == "usage":
+                return {"usage": await session.usage_panel()}
+            if op == "context":
+                return {"context": await session.context_panel()}
+            if op == "rules":
+                profiles = await session.control("permissionProfile/list", {})
+                rules = [{"toolName": "profile", "ruleContent": p.get("id", ""),
+                          "behavior": "allow" if p.get("allowed") else "deny", "source": "codex"}
+                         for p in (profiles or {}).get("data") or [] if isinstance(p, dict)]
+                if session.sandbox_policy:
+                    rules.insert(0, {"toolName": "sandbox", "ruleContent": session.sandbox_policy.get("type", ""),
+                                     "behavior": "allow", "source": "this thread"})
+                return {"rules": {"state": {"rules": rules}}}
+            if op == "rewind":
+                n = int(kw.get("turns") or 1)
+                if kw.get("dry_run"):
+                    return {"rewind": {"canRewind": True, "numTurns": n, "dry_run": True}}
+                reply = await session.control("thread/rollback", {"threadId": session.session_id, "numTurns": n},
+                                              timeout=60)
+                return {"rewind": reply or {"rolledBack": n}}
+            if op == "rename":
+                await session.control("thread/name/set", {"threadId": session.session_id, "name": str(kw["title"])})
+                return {"ok": True}
+            if op in ("skills", "reload_skills"):
+                return {"skills": await session.skills()}
+            if op == "hooks":
+                reply = await session.control("hooks/list", {})
+                hooks = []
+                for group in (reply or {}).get("data") or []:
+                    for h in (group or {}).get("hooks") or []:
+                        if isinstance(h, dict):
+                            hooks.append({"event": h.get("event") or h.get("eventName") or "",
+                                          "matcher": h.get("matcher") or "", "source": h.get("source") or "codex",
+                                          "displayText": h.get("command") or h.get("displayText") or ""})
+                return {"hooks": {"hooks": hooks, "events": []}}
+            if op == "settings":
+                return {"settings": await session.control("config/read", {}) or {}}
+            if op == "plugins":
+                return {"plugins": await session.control("plugin/list", {}, timeout=60)}
+            if op == "memory":
+                return {"memory": {"files": []}}
+            if op in ("agents", "background"):
+                return {"agents": [], "tasks": {}}
+            if op == "interrupt":
+                await session.control("turn/interrupt", {"threadId": session.session_id, "turnId": session.turn_id})
+                return {"ok": True}
+            if op == "status":
+                model = session.model
+                if not model:
+                    try:
+                        cfg = await session.control("config/read", {})
+                        model = str(((cfg or {}).get("config") or {}).get("model") or "")
+                    except (RuntimeError, asyncio.TimeoutError):
+                        pass
+                return {"alive": session.alive, "busy": session.busy, "model": model,
+                        "session": session.session_id,
+                        "permission_mode": getattr(session, "permission_mode", "")
+                        or ("bypassPermissions" if session.permissions == "auto" else "default"),
+                        "version": "", "context_window": _codex_window(session),
+                        "servers": [], "commands": session.commands, "background": {},
+                        "rate_limits": session.rate_limits}
+        except KeyError as e:
+            raise BackendError(f"{op} needs {e}")
+        except asyncio.TimeoutError:
+            raise BackendError(f"Codex didn't answer {op}")
+        except RuntimeError as e:
+            raise BackendError(str(e)[:300])
+        raise BackendError(f"Codex has no {op}")
+
+    async def _codex_account(self, session: codex_live.CodexSession) -> Dict[str, Any]:
+        try:
+            reply = await session.control("account/read", {})
+        except (RuntimeError, asyncio.TimeoutError):
+            return {}
+        acct = (reply or {}).get("account") or {}
+        return {"email": acct.get("email", ""), "subscriptionType": acct.get("planType", ""),
+                "apiProvider": acct.get("type", "")}
 
     async def _codex_session(self, cid: str, backend: Backend, cwd: str, model: str,
                              resume: Optional[str]) -> codex_live.CodexSession:
@@ -820,15 +1301,18 @@ class Engine:
         rid = run["id"]
         usage: Dict[str, Any] = {}
         context: Dict[str, int] = {}
+        checkpoint = ""
         # a local model announces and stops; so does a program carrying on by
         # itself with nobody to say "go on" — both get told to
         local = bool(self.options.get(backend.key, {}).get("local_model")) or nudge
         nudges = 0
         try:
             prompt = run["prompt"]
+            attached = list((json.loads(run.get("payload") or "{}") or {}).get("attachments") or [])
             while True:
                 if send:
-                    await session.send(prompt)
+                    await session.send(prompt, images=attached or None)
+                    attached = []                       # once; a nudge carries no pictures
                 send = True                         # a nudge, if one follows, is sent
                 tail: List[str] = []                # words since the last tool call
                 async for ev in session.turn(until_quiet=until_quiet):
@@ -842,9 +1326,13 @@ class Engine:
                         yield {"kind": "activity", "text": live.summarize_activity(ev["tool"], ev["input"])}
                     elif kind == "note":
                         yield {"kind": "activity", "text": ev["text"]}
-                    elif kind in ("ask", "permission"):
+                    elif kind in ("ask", "permission", "elicitation", "dialog"):
                         self.pending[rid] = {**ev, "run": rid}
                         yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
+                    elif kind in ("thinking", "mcp"):
+                        yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
+                    elif kind == "checkpoint":
+                        checkpoint = ev["uuid"]
                     elif kind == "cancel":
                         self.pending.pop(rid, None)
                         yield {"kind": "cancel", "request_id": ev["request_id"]}
@@ -886,6 +1374,7 @@ class Engine:
             self._learn_window(backend.key, model, context["window"])
         backend.last_usage = usage                                          # type: ignore[attr-defined]
         backend.last_session = session.session_id                           # type: ignore[attr-defined]
+        backend.last_checkpoint = checkpoint                                # type: ignore[attr-defined]
 
     def _learn_window(self, key: str, model: str, window: int) -> None:
         """A harness said how big its model's context is: the registry and
@@ -922,35 +1411,55 @@ class Engine:
 
     async def commands_for(self, cid: str = "", cwd: str = "",
                            backend_key: str = "") -> List[Dict[str, Any]]:
-        """The slash commands for a thread; for a thread not started yet, a
-        session is opened ahead for its folder and kept for the first run.
-        A thread that is (or will be) Codex gets eki's short list for it."""
+        """The slash commands for the *picked* backend, and only then: Claude
+        Code's own (a session is opened ahead for the folder and kept for the
+        first run) plus eki's panels; Codex's plus its panels; a model with no
+        loader gets eki's skills. Auto picks nothing yet — commands shared by
+        every provider are a later, careful step (ROADMAP, Stage 4)."""
+        if not backend_key:
+            return []
+        chosen = self.get(backend_key.partition(":")[0])
+        if chosen is None:
+            return []
+        if chosen.info.kind == "codex":
+            session = self.live.get(cid) if cid else None
+            base = (list(session.commands) if isinstance(session, codex_live.CodexSession)
+                    else list(codex_live.COMMANDS))
+            base = [c for c in base if c.get("name") != "model"]        # eki's picker owns the model
+            return with_panels(base + _skill_commands("codex"), CODEX_PANELS)
+        if chosen.info.kind != "claude_code":
+            # a model with no loader: eki's skills, and the panel for them
+            return _skill_commands("local") + [SKILLS_PANEL]
         session = self.live.get(cid) if cid else None
-        if session is not None and isinstance(session, codex_live.CodexSession):
-            return list(session.commands)
-        if session is None and backend_key:
-            chosen = self.get(backend_key.partition(":")[0])
-            if chosen is not None and chosen.info.kind == "codex":
-                return list(codex_live.COMMANDS)
-            if chosen is not None and chosen.info.kind != "claude_code":
-                return []
+        if isinstance(session, codex_live.CodexSession):
+            session = None
         if session is None or not session.alive:
             session = self.warm.get(cwd or "")
         if session is None or not session.alive:
-            backend = next((b for b in self.backends if b.info.kind == "claude_code"
-                            and getattr(b, "bin", None)), None)
+            backend = chosen if getattr(chosen, "bin", None) else None
             if backend is None or not self.settings.get("live_claude", True):
                 return []
             import uuid
             argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))   # type: ignore[attr-defined]
-            session = live.LiveSession(argv, self._workdir(cwd), None,
-                                       str(self.settings.get("claude_system_prompt", "")))
+            session = self._new_live(argv, self._workdir(cwd), cid)
             try:
                 await session.start()
             except RuntimeError:
                 return []
             self.warm[cwd or ""] = session
-        return list(session.commands)
+        return with_panels(session.commands, CLAUDE_PANELS)
+
+    async def close_idle_claude(self) -> int:
+        """Close Claude Code sessions that aren't mid-turn, so they reopen
+        with the current settings; a thread's session resumes by its id."""
+        closed = 0
+        for table in (self.live, self.warm):
+            for key, session in list(table.items()):
+                if isinstance(session, live.LiveSession) and not session.busy:
+                    await session.close()
+                    table.pop(key, None)
+                    closed += 1
+        return closed
 
     async def reap_live(self, now: Optional[float] = None) -> int:
         """Close sessions idle for a while; they resume by id when needed."""
@@ -1548,3 +2057,73 @@ class Engine:
 
 def open_engine(path: str = "") -> Engine:
     return Engine(config_mod.load(path or str(config_mod.default_path())))
+
+
+#: the terminal's panels eki draws itself (ClaudeCode.swift); listed with
+#: the program's commands even when the program calls them terminal-only.
+#: /model is not among them: eki's own picker beside the composer owns the
+#: model, for every backend
+CLAUDE_PANELS = [
+    ("mcp", "MCP servers: status, authenticate, add"),
+    ("permissions", "Permission rules of this session"),
+    ("usage", "Plan limits and this session's cost"),
+    ("context", "What fills the context window"),
+    ("rewind", "Put files back as before an answer"),
+    ("agents", "Custom agents available here"),
+    ("hooks", "Hooks configured here"),
+    ("status", "Version, session, account, what the build can do"),
+    ("tasks", "Background tasks, and stop one"),
+    ("config", "Claude Code's settings as this session sees them"),
+    ("memory", "Memory files loaded for this folder"),
+    ("skills", "Skills available here, and use one"),
+]
+CODEX_PANELS = [
+    ("mcp", "MCP servers: status, sign in"),
+    ("permissions", "Sandbox and approval of this thread"),
+    ("usage", "Plan limits and usage"),
+    ("context", "What the last request carried"),
+    ("rewind", "Roll the thread back a turn"),
+    ("hooks", "Hooks configured here"),
+    ("status", "Model, thread, account"),
+    ("config", "Codex's config as it reads it"),
+    ("skills", "Skills available here, and use one"),
+    ("plugins", "Installed plugins and marketplaces"),
+]
+PANEL_COMMANDS = CLAUDE_PANELS
+
+
+def with_panels(commands: List[Dict[str, Any]],
+                panels: Optional[List[Tuple[str, str]]] = None) -> List[Dict[str, Any]]:
+    have = {c.get("name") for c in commands}
+    out = [c for c in commands if c.get("name") != "model"]     # eki's picker owns the model
+    for name, desc in (panels if panels is not None else PANEL_COMMANDS):
+        if name not in have:
+            out.append({"name": name, "description": desc, "argumentHint": "", "builtin": True})
+    return out
+
+
+def _codex_window(session: Any) -> int:
+    try:
+        return int((session.usage or {}).get("modelContextWindow") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def _codex_window(session: Any) -> int:
+    try:
+        return int((session.usage or {}).get("modelContextWindow") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+SKILLS_PANEL = {"name": "skills", "description": "eki's skills, and use one",
+                "argumentHint": "", "builtin": True}
+
+
+def _skill_commands(backend: str) -> List[Dict[str, Any]]:
+    """eki's skills enabled for a backend, as slash commands."""
+    try:
+        return [{"name": s["folder"], "description": s["description"], "argumentHint": "",
+                 "skill": True} for s in skills_mod.enabled_for(backend)]
+    except OSError:
+        return []

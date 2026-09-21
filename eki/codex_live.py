@@ -66,6 +66,10 @@ class CodexSession:
         self.session_id: str = ""                  # Codex's thread id
         self.turn_id: str = ""
         self.commands: List[Dict[str, Any]] = list(COMMANDS)
+        #: per-turn choices the panels can set (turn/start takes them)
+        self.effort: str = ""
+        self.sandbox_policy: Optional[Dict[str, Any]] = None
+        self.approval_policy: str = ""
         self.rate_limits: Dict[str, Any] = {}
         self.usage: Dict[str, Any] = {}
         self.diff: str = ""
@@ -176,8 +180,9 @@ class CodexSession:
     async def set_model(self, model: str) -> None:
         self.model = model
 
-    async def send(self, text: str) -> None:
-        """A user turn — or one of eki's few slash commands for Codex."""
+    async def send(self, text: str, images: Optional[List[str]] = None) -> None:
+        """A user turn — with pictures, if any — or one of eki's few slash
+        commands for Codex."""
         self.last_used = time.time()
         stripped = text.strip()
         if stripped.startswith("/"):
@@ -185,12 +190,23 @@ class CodexSession:
             handled = await self._slash(name.lower(), arg.strip())
             if handled:
                 return
+            # "/name" for one of eki's skills: Codex's own way to name one is "$name"
+            from . import skills as skills_mod
+            if any(name in (s["folder"], s["name"]) for s in skills_mod.enabled_for("codex")):
+                text = "$" + stripped[1:]
         params: Dict[str, Any] = {"threadId": self.session_id,
-                                  "input": [{"type": "text", "text": text}]}
+                                  "input": [{"type": "text", "text": text}]
+                                  + [{"type": "localImage", "path": p} for p in images or []]}
         if self.model:
             params["model"] = self.model
         if self.cwd:
             params["cwd"] = self.cwd
+        if self.effort:
+            params["effort"] = self.effort
+        if self.sandbox_policy:
+            params["sandboxPolicy"] = self.sandbox_policy
+        if self.approval_policy:
+            params["approvalPolicy"] = self.approval_policy
         result = await self._request("turn/start", params)
         self.turn_id = ((result or {}).get("turn") or {}).get("id", "")
 
@@ -237,6 +253,111 @@ class CodexSession:
             return False
         self._events.put_nowait({"kind": "result", "is_error": False, "result": "", "usage": {}})
         return True
+
+    # ---- what the panels ask (see Engine.codex_control) -----------------
+
+    async def control(self, method: str, params: Optional[Dict[str, Any]] = None,
+                      timeout: float = 30.0) -> Any:
+        """Any app-server request, answered or raised."""
+        return await asyncio.wait_for(self._request(method, params or {}), timeout=timeout)
+
+    async def mcp_status(self) -> List[Dict[str, Any]]:
+        """Codex's servers in the shape Claude Code reports its own, so one
+        panel draws both: name, status, tools, scope."""
+        reply = await self.control("mcpServerStatus/list", {}, timeout=60)
+        out = []
+        for s in (reply or {}).get("data") or []:
+            if not isinstance(s, dict) or not s.get("name"):
+                continue
+            tools = s.get("tools") or {}
+            tool_list = ([{"name": k, "description": (v or {}).get("description", "") if isinstance(v, dict) else ""}
+                          for k, v in tools.items()] if isinstance(tools, dict)
+                         else [{"name": str(t.get("name", t)) if isinstance(t, dict) else str(t)} for t in tools])
+            auth = str(s.get("authStatus") or "")
+            runtime = str(s.get("runtimeStatus") or "")
+            if s.get("toolsError"):
+                status, error = "failed", str(s["toolsError"])[:200]
+            elif auth in ("unauthenticated", "notLoggedIn", "needsAuth", "oauthRequired"):
+                status, error = "needs-auth", ""
+            elif runtime in ("error", "failed"):
+                status, error = "failed", ""
+            elif runtime in ("disabled",):
+                status, error = "disabled", ""
+            else:
+                status, error = ("connected" if tool_list or s.get("serverInfo") else "pending"), ""
+            out.append({"name": s["name"], "status": status, "error": error, "tools": tool_list,
+                        "scope": "plugin" if s.get("pluginId") else "codex",
+                        "config": {"type": "codex"}, "auth": auth, "runtime": runtime})
+        return out
+
+    async def list_models(self) -> List[Dict[str, Any]]:
+        reply = await self.control("model/list", {})
+        out = []
+        for m in (reply or {}).get("data") or []:
+            if not isinstance(m, dict) or m.get("hidden"):
+                continue
+            out.append({"value": m.get("id") or m.get("model"), "displayName": m.get("displayName") or m.get("model"),
+                        "description": m.get("description") or "",
+                        "supportedEffortLevels": [e.get("reasoningEffort") for e in m.get("supportedReasoningEfforts") or []
+                                                  if isinstance(e, dict) and e.get("reasoningEffort")]})
+        return out
+
+    async def usage_panel(self) -> Dict[str, Any]:
+        """Codex's limits and usage, in the shape Claude Code's get_usage
+        answers, so the same panel draws them."""
+        limits = await self.control("account/rateLimits/read", {}, timeout=60)
+        rl = (limits or {}).get("rateLimits") or {}
+        windows = []
+        for key, label in (("primary", "primary window"), ("secondary", "secondary window")):
+            w = rl.get(key)
+            if isinstance(w, dict):
+                mins = int(w.get("windowDurationMins") or 0)
+                days = mins // 1440
+                name = f"{days}-day window" if days else (f"{mins // 60}-hour window" if mins >= 60 else label)
+                resets = w.get("resetsAt")
+                iso = (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(resets))) if isinstance(resets, (int, float)) else None)
+                windows.append({"display_name": name, "utilization": (w.get("usedPercent") or 0) / 100.0,
+                                "resets_at": iso})
+        out: Dict[str, Any] = {"subscription_type": rl.get("planType") or (limits or {}).get("planType"),
+                               "rate_limits": {"model_scoped": windows}, "session": {}}
+        credits = rl.get("credits") or {}
+        if credits.get("hasCredits"):
+            out["rate_limits"]["extra_usage"] = {"is_enabled": True, "used_credits": credits.get("balance")}
+        total = (self.usage.get("total") or {})
+        if total:
+            out["session"] = {"model_usage": {self.model or "codex": {
+                "inputTokens": total.get("inputTokens", 0), "outputTokens": total.get("outputTokens", 0),
+                "cacheReadInputTokens": total.get("cachedInputTokens", 0)}}}
+        try:
+            daily = await self.control("account/usage/read", {}, timeout=60)
+            out["daily"] = (daily or {}).get("dailyUsageBuckets") or []
+            out["summary"] = (daily or {}).get("summary") or {}
+        except (RuntimeError, asyncio.TimeoutError):
+            pass
+        return out
+
+    async def skills(self) -> List[Dict[str, Any]]:
+        reply = await self.control("skills/list", {}, timeout=60)
+        out = []
+        for group in (reply or {}).get("data") or []:
+            for s in (group or {}).get("skills") or []:
+                if isinstance(s, dict) and s.get("name"):
+                    out.append({"name": s["name"], "description": s.get("description") or "",
+                                "argumentHint": "", "path": s.get("path") or ""})
+        return out
+
+    async def context_panel(self) -> Dict[str, Any]:
+        used, window = _context(self.usage)
+        last = (self.usage.get("last") or {})
+        cats = []
+        for key, name, color in (("inputTokens", "Input (last request)", "blue"),
+                                 ("cachedInputTokens", "of which cached", "cyan"),
+                                 ("outputTokens", "Output", "green"),
+                                 ("reasoningOutputTokens", "Reasoning", "magenta")):
+            if last.get(key):
+                cats.append({"name": name, "tokens": int(last[key]), "kind": "used", "color": color})
+        return {"model": self.model or "codex default", "totalTokens": used, "maxTokens": window,
+                "percentage": (100.0 * used / window) if window else 0, "categories": cats}
 
     async def answer(self, request_id: str, response: Dict[str, Any]) -> bool:
         """The user's answer, in the shape eki's cards produce (the same

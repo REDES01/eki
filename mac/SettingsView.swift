@@ -213,6 +213,26 @@ struct RoutingSettings: View {
                         .lineLimit(1...4)
                         .onSubmit(save)
                 }
+                Toggle("Give Claude Code eki's tools", isOn: Binding(
+                    get: { settings.claude_tools },
+                    set: { settings.claude_tools = $0; save() }))
+                    .toggleStyle(AccentSwitch())
+                Text("Served in-process, no extra server: the other backends on this Mac "
+                     + "(eki_ask, eki_image, eki_capabilities). Codex gets the same through `eki mcp`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Computer use — let it see and drive the screen", isOn: Binding(
+                    get: { settings.claude_screen },
+                    set: { settings.claude_screen = $0; save() }))
+                    .toggleStyle(AccentSwitch())
+                    .disabled(!settings.claude_tools)
+                Text("Claude Code gets its own built-in computer-use server (the terminal's 24 tools: "
+                     + "screenshot, click, type, key, scroll, open app…), started by eki for each "
+                     + "session; Codex gets eki's screen tools through `eki mcp`. macOS asks for "
+                     + "Accessibility and Screen Recording the first time it acts. Takes effect for "
+                     + "new sessions; a thread already open keeps what it had.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Measuring") {
@@ -296,7 +316,7 @@ struct EnginesList: View {
             LabeledContent {
                 HStack(spacing: 8) {
                     Text(e.installed ? "ready" : "not fetched")
-                        .font(.system(size: 11)).foregroundStyle(e.installed ? Palette.ok : Palette.inkFaint)
+                        .font(.zoomed(size: 11)).foregroundStyle(e.installed ? Palette.ok : Palette.inkFaint)
                     if e.installed {
                         Button("Remove") {
                             Task {

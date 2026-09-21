@@ -54,11 +54,13 @@ def test_a_turn_streams_text_and_tool_lines_then_a_result():
         try:
             got = await _collect(s, "hello")
             kinds = [e["kind"] for e in got]
-            assert kinds == ["activity", "activity", "text", "text", "result"]
+            assert kinds == ["activity", "activity", "text", "text", "context", "result"]
             assert live.summarize_activity(got[0]["tool"], got[0]["input"]) == "Running ls"
             assert live.summarize_activity(got[1]["tool"], got[1]["input"]) == "Editing a.py"
             assert "".join(e["text"] for e in got if e["kind"] == "text") == "Echo: hello (gpt-5.5)"
-            assert got[-1]["usage"] == {"input_tokens": 90, "output_tokens": 10}
+            assert got[-2] == {"kind": "context", "used": 100, "window": 131072}
+            assert got[-1]["usage"] == {"input_tokens": 90, "output_tokens": 10,
+                                        "context_used": 100, "context_window": 131072}
         finally:
             await s.close()
     run(go())

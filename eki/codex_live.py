@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 log = logging.getLogger("eki.codex_live")
 
@@ -347,9 +347,18 @@ class CodexSession:
                                          "input": {"query": item.get("query", "")}})
             elif kind == "mcpToolCall":
                 self._events.put_nowait({"kind": "activity", "tool": item.get("tool") or "tool", "input": {}})
+            elif kind == "contextCompaction":
+                # Codex is at the wall it was told about: the thread is
+                # summarised in place. Said out loud, because from outside
+                # it looks like the model stopping for no reason.
+                used, window = _context(self.usage)
+                self._events.put_nowait({"kind": "note", "text": "Compacting context"
+                                         + (f" at {used // 1000}k of {window // 1000}k" if used and window else "")})
         elif method == "item/completed":
             item = params.get("item") or {}
-            if item.get("type") == "agentMessage":
+            if item.get("type") == "contextCompaction":
+                self._events.put_nowait({"kind": "note", "text": "Context compacted"})
+            elif item.get("type") == "agentMessage":
                 self._text_open = False
                 if not self._had_text and item.get("text"):
                     # no deltas came (a resumed or replayed turn): the whole thing
@@ -371,6 +380,9 @@ class CodexSession:
                                      "usage": _usage(self.usage), "subtype": turn.get("status", "")})
         elif method == "thread/tokenUsage/updated":
             self.usage = params.get("tokenUsage") or {}
+            used, window = _context(self.usage)
+            if used:
+                self._events.put_nowait({"kind": "context", "used": used, "window": window})
         elif method == "turn/diff/updated":
             self.diff = params.get("diff") or ""
         elif method == "thread/compacted":
@@ -469,5 +481,17 @@ def _plain_command(command: Any) -> str:
 
 def _usage(usage: Dict[str, Any]) -> Dict[str, Any]:
     last = usage.get("last") or usage.get("total") or {}
-    return {"input_tokens": int(last.get("inputTokens", 0)),
-            "output_tokens": int(last.get("outputTokens", 0))}
+    out = {"input_tokens": int(last.get("inputTokens", 0)),
+           "output_tokens": int(last.get("outputTokens", 0))}
+    used, window = _context(usage)
+    if used:
+        out["context_used"], out["context_window"] = used, window
+    return out
+
+
+def _context(usage: Dict[str, Any]) -> Tuple[int, int]:
+    """How full the thread is: what the last request carried, against the
+    window Codex was told about."""
+    last = usage.get("last") or {}
+    used = int(last.get("inputTokens", 0)) + int(last.get("outputTokens", 0))
+    return used, int(usage.get("modelContextWindow") or 0)

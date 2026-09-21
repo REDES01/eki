@@ -766,8 +766,8 @@ struct Composer: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let cost = model.cost, cost.turns > 0 {
-                CostStrip(cost: cost)
+            if (model.cost?.turns ?? 0) > 0 || model.contextUse != nil {
+                CostStrip(cost: model.cost, context: model.contextUse)
             }
             VStack(spacing: 0) {
                 if !suggestions.isEmpty {
@@ -966,26 +966,60 @@ struct RepoField: View {
 /// nothing per token, and inventing a price would be the least honest thing
 /// on the screen. Turns and reported tokens are what's true.
 struct CostStrip: View {
-    let cost: CostReport
+    let cost: CostReport?
+    var context: ContextUse? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            ForEach(cost.by_backend.sorted(by: { $0.value.turns > $1.value.turns }),
-                    id: \.key) { key, entry in
-                HStack(spacing: 5) {
-                    Dot(color: Palette.backend(key), size: 5)
-                    Text("\(key) ×\(entry.turns)")
-                    if entry.output_tokens > 0 {
-                        Text("\(entry.output_tokens) tok")
-                            .foregroundStyle(Palette.inkFaint)
+            if let cost {
+                ForEach(cost.by_backend.sorted(by: { $0.value.turns > $1.value.turns }),
+                        id: \.key) { key, entry in
+                    HStack(spacing: 5) {
+                        Dot(color: Palette.backend(key), size: 5)
+                        Text("\(key) ×\(entry.turns)")
+                        if entry.output_tokens > 0 {
+                            Text("\(entry.output_tokens) tok")
+                                .foregroundStyle(Palette.inkFaint)
+                        }
                     }
                 }
             }
             Spacer()
+            if let context {
+                ContextMeter(use: context)
+            }
         }
         .font(.system(size: 11).monospacedDigit())
         .foregroundStyle(Palette.inkMuted)
         .padding(.horizontal, 4)
+    }
+}
+
+/// How full the harness's window is. Past 85% the next thing that happens
+/// is a compaction — worth seeing coming rather than wondering why the
+/// program went quiet.
+struct ContextMeter: View {
+    let use: ContextUse
+
+    private var tone: Color {
+        use.fraction >= 0.85 ? Palette.warn : use.fraction >= 0.6 ? Palette.inkMuted : Palette.inkFaint
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("context \(use.text)")
+            if use.window > 0 {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.hairline)
+                    Capsule().fill(tone).frame(width: max(2, 56 * use.fraction))
+                }
+                .frame(width: 56, height: 4)
+            }
+        }
+        .foregroundStyle(use.fraction >= 0.85 ? Palette.warn : Palette.inkMuted)
+        .help(use.window > 0
+              ? "\(use.used) tokens of the \(use.window) the program was given; it compacts near the top"
+              : "\(use.used) tokens in the program's context")
     }
 }
 

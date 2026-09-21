@@ -46,6 +46,9 @@ class LiveSession:
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.session_id: str = ""
         self.model: str = ""
+        #: what Claude Code reports for the model once a turn has finished;
+        #: 200k is every current Claude model's window until then
+        self.context_window: int = 200_000
         self.permission_mode: str = ""
         self.commands: List[Dict[str, Any]] = []
         self.rate_limits: Dict[str, Any] = {}
@@ -262,6 +265,13 @@ class LiveSession:
                     self._events.put_nowait({"kind": "text", "text": delta["text"]})
             return
         if t == "assistant":
+            usage = (event.get("message") or {}).get("usage") or {}
+            used = sum(int(usage.get(k, 0) or 0) for k in
+                       ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
+                        "output_tokens"))
+            if used:
+                self._events.put_nowait({"kind": "context", "used": used,
+                                         "window": self.context_window})
             for block in (event.get("message") or {}).get("content") or []:
                 if block.get("type") == "text" and block.get("text") and not self._got_delta:
                     self._events.put_nowait({"kind": "text", "text": block["text"]})
@@ -282,6 +292,9 @@ class LiveSession:
                                              "input": {"text": str(text)[:300]}})
             return
         if t == "result":
+            for info in (event.get("modelUsage") or {}).values():
+                if isinstance(info, dict) and info.get("contextWindow"):
+                    self.context_window = int(info["contextWindow"])
             self._events.put_nowait({"kind": "result", "is_error": bool(event.get("is_error")),
                                      "result": event.get("result"), "usage": event.get("usage") or {},
                                      "subtype": event.get("subtype", "")})

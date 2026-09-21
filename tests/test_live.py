@@ -48,10 +48,12 @@ def test_a_turn_streams_text_and_tool_lines_then_a_result():
         try:
             got = await _collect(s, "hello")
             kinds = [e["kind"] for e in got]
-            assert kinds == ["activity", "text", "text", "result"]
+            assert kinds == ["activity", "text", "text", "context", "result"]
             assert "".join(e["text"] for e in got if e["kind"] == "text") == "Echo: hello (claude-sonnet-5)"
             assert live.summarize_activity(got[0]["tool"], got[0]["input"]) == "Reading README.md"
             assert got[-1]["usage"]["output_tokens"] > 0 and not s.busy
+            # every assistant message says how full the thread is
+            assert got[-2]["used"] > 12000 and got[-2]["window"] == 200000
         finally:
             await s.close()
     run(go())

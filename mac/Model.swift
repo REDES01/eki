@@ -48,6 +48,11 @@ final class AppModel: ObservableObject {
     private var commandsKey = "\u{0}"
     @Published var chatError: String = ""
     @Published var cost: CostReport?
+    /// the context meter while a harness answers; the stored turn has it after
+    @Published var liveContext: ContextUse?
+    var contextUse: ContextUse? {
+        liveContext ?? turns.last(where: { $0.contextUse != nil })?.contextUse
+    }
 
     // choices the user makes
     @AppStorage("preferredBackend") var preferredBackend: String = ""   // "" = let it route
@@ -455,6 +460,8 @@ final class AppModel: ObservableObject {
                         self.chatError = event.message ?? "something went wrong"
                     case "activity":
                         if let line = event.text { self.activity.append(line) }
+                    case "context":
+                        if let used = event.used { self.liveContext = ContextUse(used: used, window: event.window ?? 0) }
                     case "ask", "permission":
                         self.prompt = PendingPrompt(run: run, event: event)
                     case "cancel", "answered":
@@ -476,6 +483,7 @@ final class AppModel: ObservableObject {
             self.streaming = ""
             self.activity = []
             self.prompt = nil
+            self.liveContext = nil
             self.liveRun = ""
             await self.refreshCost()
             await self.refreshLive()
@@ -491,6 +499,7 @@ final class AppModel: ObservableObject {
         routedTo = ""
         activity = []
         prompt = nil
+        liveContext = nil
     }
 
     /// The named models behind a provider, enabled, for the picker.

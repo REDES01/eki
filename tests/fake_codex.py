@@ -102,7 +102,8 @@ while True:
         notify("item/agentMessage/delta", {"itemId": "m1", "delta": reply[half:]})
         notify("item/completed", {"item": {"type": "agentMessage", "id": "m1", "text": reply}})
         usage = {"total": {"totalTokens": 100 * turns, "inputTokens": 90 * turns, "outputTokens": 10 * turns},
-                 "last": {"totalTokens": 100, "inputTokens": 90, "outputTokens": 10}}
+                 "last": {"totalTokens": 100, "inputTokens": 90, "outputTokens": 10},
+                 "modelContextWindow": 131072}
         notify("thread/tokenUsage/updated", {"threadId": THREAD, "tokenUsage": usage})
         notify("turn/completed", {"threadId": THREAD, "turn": {**turn, "status": "completed", "error": None}})
     else:

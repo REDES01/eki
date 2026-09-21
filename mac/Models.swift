@@ -185,6 +185,14 @@ struct LocalModelCard: View {
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.inkMuted)
+                    if let window = row.context, let summary = window.summary {
+                        Text(summary)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.inkFaint)
+                            .help("Worked out from the model's config and the memory beside "
+                                  + "its weights each time eki loads its models; Codex and "
+                                  + "Claude Code are told this number.")
+                    }
                 }
                 Spacer()
                 if row.busy == true {

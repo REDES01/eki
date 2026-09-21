@@ -24,6 +24,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
 
 from . import config as config_mod
+from . import context as context_mod
 from . import policy as policy_mod
 from . import priors
 from . import public_scores
@@ -90,7 +91,8 @@ class Engine:
         self.failed: Dict[str, str] = {}
         self.options: Dict[str, Dict[str, Any]] = {}
         local: List[LocalModel] = []
-        for p in self.providers.all():
+        providers = self.providers.all()
+        for p in providers:
             if p.runtime.get("port"):
                 r = p.runtime
                 local.append(LocalModel(
@@ -98,7 +100,14 @@ class Engine:
                     start=r.get("start", ""), stop=r.get("stop", ""),
                     gb=float(r.get("gb", 0) or 0), note=r.get("note", ""),
                     backend=p.key, kind=r.get("kind", "llm"),
-                    idle_minutes=float(r.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0)))
+                    idle_minutes=float(r.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0),
+                    context=r.get("context") or {}))
+        previous = getattr(self, "models", None)
+        self.models = ModelManager(local, self.cfg.memory_ceiling_gb)
+        if previous is not None:                    # keep who-started-what across reloads
+            self.models.adopt(previous)
+        self._size_windows(providers)
+        for p in providers:
             if not p.enabled:
                 continue
             options = dict(p.options)
@@ -113,10 +122,6 @@ class Engine:
                 self.backends.append(adapters.build(p.info(), options))
             except Exception as e:                  # noqa: BLE001
                 self.failed[p.key] = str(e)
-        previous = getattr(self, "models", None)
-        self.models = ModelManager(local, self.cfg.memory_ceiling_gb)
-        if previous is not None:                    # keep who-started-what across reloads
-            self.models.adopt(previous)
         self.quota = QuotaBoard(self._quota_providers(),
                                 ceiling=self.policy.quota_ceiling or self.cfg.quota_ceiling)
         self.settings = settings_mod.load()
@@ -131,6 +136,39 @@ class Engine:
                              if self.settings["router_model"] else set(),
                              models_for=self.registry.for_provider)
         self._health = {}
+
+    def _size_windows(self, providers: List[Provider]) -> None:
+        """Give each local model the context it can actually use.
+
+        The model's config says what it supports, the memory beside its
+        weights says what fits, and a speed cap says where a bigger window
+        stops being worth the wait (see eki/context.py). Worked out here,
+        every time the providers load, so the number a harness is handed
+        is never a catalog's guess. A model whose weights aren't cached
+        yet keeps whatever it has.
+        """
+        memory = self.models.memory()
+        for p in providers:
+            if p.kind != "mlx" or not p.runtime.get("port") or not p.options.get("model"):
+                continue
+            if p.runtime.get("kind", "llm") != "llm":
+                continue
+            config = context_mod.read_config(str(p.options["model"]))
+            if not config:
+                continue
+            model = self.models.models.get(p.key)
+            weights = float(p.runtime.get("gb", 0) or 0)
+            room = memory.free_gb if (model and model.running) else memory.free_gb - weights
+            window = context_mod.size(config, room)
+            if window is None:
+                continue
+            before = (int(p.capabilities.get("context_tokens") or 0), p.runtime.get("context"))
+            p.capabilities["context_tokens"] = window.tokens
+            p.runtime["context"] = window.as_dict()
+            if model is not None:
+                model.context = p.runtime["context"]
+            if before != (window.tokens, p.runtime["context"]):
+                self.providers.upsert(p)
 
     def _companions(self) -> None:
         """Codex driving each local model: derived, never stored.
@@ -160,6 +198,12 @@ class Engine:
             if self.get(key) or self.providers.get(key):
                 continue
             context = int(p.capabilities.get("context_tokens") or 32000)
+            if not context_mod.harness_ready(context):
+                self.failed[key] = (f"{p.label}'s {context // 1024}k context is too small for "
+                                    f"Codex, which needs {context_mod.HARNESS_MIN // 1024}k")
+                for rec in self.registry.for_provider(key, enabled_only=False):
+                    self.registry.remove(key, rec.model)
+                continue
             info = adapters.BackendInfo(
                 key=key, kind="codex", label=f"Codex on {p.label}",
                 capabilities=adapters.Capabilities(context_tokens=context, text=True,
@@ -627,6 +671,7 @@ class Engine:
                 pass
         rid = run["id"]
         usage: Dict[str, Any] = {}
+        context: Dict[str, int] = {}
         local = bool(self.options.get(backend.key, {}).get("local_model"))
         nudges = 0
         try:
@@ -653,6 +698,11 @@ class Engine:
                         yield {"kind": "cancel", "request_id": ev["request_id"]}
                     elif kind == "rate_limit":
                         self._note_rate_limits(ev["info"])
+                    elif kind == "context":
+                        # how full the thread is — shown as a meter, and kept
+                        # with the answer so it's known when the thread is idle
+                        context = {"used": int(ev["used"]), "window": int(ev.get("window") or 0)}
+                        yield {"kind": "context", **context}
                     elif kind == "result":
                         usage = ev.get("usage") or {}
                         if ev.get("is_error"):
@@ -678,6 +728,8 @@ class Engine:
             raise BackendError(str(e))
         finally:
             self.pending.pop(rid, None)
+        if context.get("used"):
+            usage = {**usage, "context_used": context["used"], "context_window": context["window"]}
         backend.last_usage = usage                                          # type: ignore[attr-defined]
         backend.last_session = session.session_id                           # type: ignore[attr-defined]
 

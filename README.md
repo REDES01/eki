@@ -186,6 +186,17 @@ appears as a second provider, **Codex on <model>** — free, offline, edits
 files — in the running for repo work like any other, measured like any
 other, and gone when the model is removed. Nothing to register by hand.
 
+How much context that model gets is worked out, not typed in: its own
+config says what it supports, the memory beside its weights says what fits
+(hybrid models like Qwen3.5/3.8 keep a growing cache in only some of their
+layers, which is counted as such), and a 128k cap says where a bigger
+window stops being worth the wait (`eki/context.py`). The Models pane shows
+the result and the reason. Codex's own prompt is about 15k tokens, so a
+model that can't be given 48k gets no companion — inside 32k Codex would
+compact after a few commands, which from outside looks like a model that
+stops for no reason. In a thread, a meter above the composer shows how full
+the window is, and a compaction is said out loud when it happens.
+
 Claude Code is not driven this way: it speaks only Anthropic's API, and
 pointing it at another model would mean running Anthropic's program outside
 what it supports.

@@ -54,6 +54,8 @@ class LocalModel:
     #: 0 pins it: the idle timer leaves it alone, and it is the last thing
     #: unloaded to make room
     idle_minutes: float = DEFAULT_IDLE_MINUTES
+    #: the window eki worked out for it (see eki/context.py), for the pane
+    context: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def pinned(self) -> bool:
@@ -288,6 +290,7 @@ class ModelManager:
             "can_start": bool(m.start) and not m.running,
             "blocked_by_memory": not m.running and m.gb > 0 and not self.fits(m)[0],
             "busy": self.busy(m.key),
+            "context": m.context or None,
         } for m in self.models.values()]
 
     # ---- control ---------------------------------------------------------

@@ -38,12 +38,16 @@ def text(s):
         out({"type": "stream_event", "event": {"type": "content_block_delta",
                                                "delta": {"type": "text_delta", "text": piece}}})
     out({"type": "assistant", "message": {"role": "assistant",
-                                          "content": [{"type": "text", "text": s}]}})
+                                          "content": [{"type": "text", "text": s}],
+                                          "usage": {"input_tokens": 4, "cache_read_input_tokens": 12000,
+                                                    "output_tokens": len(s)}}})
 
 
 def result(s, err=False):
     out({"type": "result", "subtype": "success", "is_error": err, "result": s,
-         "usage": {"input_tokens": 10, "output_tokens": len(s)}})
+         "usage": {"input_tokens": 10, "output_tokens": len(s)},
+         "modelUsage": {"claude-sonnet-5": {"inputTokens": 10, "outputTokens": len(s),
+                                            "contextWindow": 200000}}})
 
 
 if "--resume" in ARGV and SESSION == "gone":

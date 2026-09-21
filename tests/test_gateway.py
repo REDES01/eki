@@ -147,7 +147,7 @@ def test_every_local_model_gets_a_codex_companion(tmp_path, monkeypatch):
     settings.save({"router_model": "tiny"})
     cfg = Config(db_path=str(tmp_path / "eki.db"))
     cfg.backends = [
-        BackendInfo(key="qwen", kind="mlx", label="Qwen 27B", capabilities=Capabilities(context_tokens=32000)),
+        BackendInfo(key="qwen", kind="mlx", label="Qwen 27B", capabilities=Capabilities(context_tokens=131072)),
         BackendInfo(key="tiny", kind="mlx", label="Qwen 2B", capabilities=Capabilities(context_tokens=32000)),
         BackendInfo(key="codex", kind="codex", label="Codex", cost=Cost(tier=50),
                     capabilities=Capabilities(repo=True, tools=True)),
@@ -172,3 +172,29 @@ def test_every_local_model_gets_a_codex_companion(tmp_path, monkeypatch):
     assert rec.quality("repo", "easy") >= 0.5 > 0.0
     assert rec.quality("repo", "hard") < 0.88
     asyncio.run(eng.quota.stop())
+
+
+def test_a_small_window_gets_no_companion(tmp_path, monkeypatch):
+    """Codex's own prompt is ~15k: inside 32k it would compact after a few
+    commands, which looks like a model that stops for no reason."""
+    from eki import secrets, settings
+    from eki.adapters.base import BackendInfo, Capabilities, Cost
+    from eki.config import Config
+    from eki.engine import Engine
+    from eki.models import LocalModel
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    settings.save({"router_model": ""})
+    cfg = Config(db_path=str(tmp_path / "eki.db"))
+    cfg.backends = [
+        BackendInfo(key="qwen", kind="mlx", label="Qwen 27B", capabilities=Capabilities(context_tokens=32000)),
+        BackendInfo(key="codex", kind="codex", label="Codex", cost=Cost(tier=50),
+                    capabilities=Capabilities(repo=True, tools=True)),
+    ]
+    cfg.options = {"qwen": {"base_url": "http://127.0.0.1:1", "model": "mlx-community/Qwen3.8-27B-4bit"},
+                   "codex": {"binary": "/bin/echo"}}
+    cfg.local_models = [LocalModel(key="qwen", label="Qwen", port=1, start="true", backend="qwen", gb=16)]
+    eng = Engine(cfg, port=8799)
+    assert eng.get("codex-qwen") is None
+    assert "too small for Codex" in eng.failed["codex-qwen"]
+    assert eng.registry.get("codex-qwen", "") is None

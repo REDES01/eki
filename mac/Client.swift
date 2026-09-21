@@ -69,11 +69,29 @@ struct Turn: Codable, Identifiable, Hashable {
     }
     /// The engine restarted under this run; the program can carry on.
     var wasInterrupted: Bool { metaObject?["interrupted"] as? Bool ?? false }
+    /// How full the harness's context was when this answer finished.
+    var contextUse: ContextUse? {
+        guard let usage = metaObject?["usage"] as? [String: Any],
+              let used = usage["context_used"] as? Int, used > 0 else { return nil }
+        return ContextUse(used: used, window: usage["context_window"] as? Int ?? 0)
+    }
 
     private var metaObject: [String: Any]? {
         guard let meta, let data = meta.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
+}
+
+/// Tokens in the harness's window against its size, from the last request.
+struct ContextUse: Hashable {
+    let used: Int
+    let window: Int
+
+    var fraction: Double { window > 0 ? min(1, Double(used) / Double(window)) : 0 }
+    var text: String {
+        window > 0 ? "\(ContextUse.k(used)) / \(ContextUse.k(window))" : ContextUse.k(used)
+    }
+    static func k(_ n: Int) -> String { n >= 1000 ? "\(n / 1000)k" : "\(n)" }
 }
 
 struct ConversationView: Codable {
@@ -125,8 +143,18 @@ struct LocalModelRow: Codable, Identifiable, Hashable {
     var pinned: Bool? = false
     /// when the idle timer will stop it, if it is going to (unix seconds)
     var unloads_at: Double? = nil
+    /// the window eki worked out from the model's config and the memory
+    var context: ContextWindow? = nil
 
     var id: String { key }
+}
+
+struct ContextWindow: Codable, Hashable {
+    let tokens: Int
+    let native: Int
+    let kv_gb: Double
+    let limited_by: String
+    var summary: String? = nil
 }
 
 struct MemoryReport: Codable, Hashable {
@@ -254,6 +282,9 @@ struct RunEvent: Codable {
     var title: String?
     var description: String?
     var suggestions: [JSONValue]?
+    // context: how full the window is (see eki/context.py)
+    var used: Int?
+    var window: Int?
 }
 
 struct AskQuestion: Codable, Hashable {

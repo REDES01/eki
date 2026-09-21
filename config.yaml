@@ -47,12 +47,11 @@ backends:
     quota_source: codex
     capabilities:
       context_tokens: 200000
-      # Some standalone Codex installs ship without the helper its shell and
-      # edit tools need, and then fail closed on anything but questions. If
-      # `codex exec -s workspace-write "create probe.txt"` works for you, set
-      # both of these to true.
-      tools: false
-      repo: false
+      # Needs the `codex-code-mode-host` helper beside the codex binary; the
+      # standalone install doesn't always ship it. eki's provider test says
+      # so and offers to fetch the matching one from Codex's own releases.
+      tools: true
+      repo: true
     options:
       binary: codex
       sandbox: read-only        # workspace-write is used automatically with a folder

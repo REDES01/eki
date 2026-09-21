@@ -53,3 +53,26 @@ def test_latest_conversation_tracks_activity(tmp_path):
     s.add_turn(first, "user", "older thread, but just touched")
     assert s.latest_conversation() == first
     s.close()
+
+
+def test_pin_rename_archive_delete(tmp_path):
+    from eki.store import Store
+    s = Store(tmp_path / "hub.db")
+    a, b = s.new_conversation(), s.new_conversation()
+    s.add_turn(a, "user", "older question")
+    s.add_turn(b, "user", "newer question")
+    assert [c["id"] for c in s.conversations()] == [b, a]
+
+    assert s.set_conversation(a, pinned=True, title="  Keep this one  ")
+    rows = s.conversations()
+    assert rows[0]["id"] == a and rows[0]["pinned"] == 1 and rows[0]["title"] == "Keep this one"
+
+    assert s.set_conversation(b, archived=True)
+    assert [c["id"] for c in s.conversations()] == [a]
+    assert [c["id"] for c in s.conversations(archived=True)] == [b]
+    # archived threads are still searchable — they left the list, not the history
+    assert [c["id"] for c in s.search("newer")] == [b]
+
+    assert s.delete_conversation(b)
+    assert s.search("newer") == [] and s.turns(b) == []
+    assert not s.set_conversation("nope", pinned=True)

@@ -45,6 +45,11 @@ struct ConversationRow: Codable, Identifiable, Hashable {
     let n: Int
     var hit: String? = nil          // the matching line, when this came from a search
     var live: Bool? = false         // a run in it is working right now
+    var pinned: Int? = 0
+    var archived: Int? = 0
+
+    var isPinned: Bool { (pinned ?? 0) != 0 }
+    var isArchived: Bool { (archived ?? 0) != 0 }
 }
 
 struct Turn: Codable, Identifiable, Hashable {
@@ -341,11 +346,34 @@ actor EngineClient {
         try await decode([Backend].self, "GET", "api/backends")
     }
 
-    func conversations(matching query: String = "") async throws -> [ConversationRow] {
+    func conversations(matching query: String = "",
+                       archived: Bool = false) async throws -> [ConversationRow] {
         let escaped = query.addingPercentEncoding(
             withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let path = escaped.isEmpty ? "api/conversations" : "api/conversations?q=\(escaped)"
+        var path = "api/conversations?archived=\(archived)"
+        if !escaped.isEmpty { path += "&q=\(escaped)" }
         return try await decode([ConversationRow].self, "GET", path)
+    }
+
+    func set(conversation id: String, title: String? = nil, pinned: Bool? = nil,
+             archived: Bool? = nil) async throws {
+        struct W: Codable { let ok: Bool }
+        var body: [String: Any] = [:]
+        if let title { body["title"] = title }
+        if let pinned { body["pinned"] = pinned }
+        if let archived { body["archived"] = archived }
+        _ = try await decode(W.self, "PATCH", "api/conversations/\(id)", body: body)
+    }
+
+    func delete(conversation id: String) async throws {
+        struct W: Codable { let deleted: String }
+        _ = try await decode(W.self, "DELETE", "api/conversations/\(id)")
+    }
+
+    func installCodexHost(_ key: String) async throws -> String {
+        struct W: Codable { let message: String }
+        return try await decode(W.self, "POST", "api/providers/\(key)/codex-host",
+                                timeout: 300).message
     }
 
     func conversation(_ id: String) async throws -> ConversationView {

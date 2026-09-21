@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import catalog
+from . import codex_host
 from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
@@ -221,10 +222,34 @@ async def run_stream(rid: str) -> StreamingResponse:
 
 # ---- reading --------------------------------------------------------------
 
-@app.get("/api/conversations")
-def conversations(limit: int = 30, q: str = "") -> Any:
+class ConversationPatch(BaseModel):
+    title: Optional[str] = None
+    pinned: Optional[bool] = None
+    archived: Optional[bool] = None
+
+
+@app.patch("/api/conversations/{cid}")
+def patch_conversation(cid: str, body: ConversationPatch) -> Any:
+    if not engine().store.set_conversation(cid, title=body.title, pinned=body.pinned,
+                                           archived=body.archived):
+        raise HTTPException(404, "no such conversation")
+    return {"ok": True}
+
+
+@app.delete("/api/conversations/{cid}")
+def delete_conversation(cid: str) -> Any:
     eng = engine()
-    rows = eng.store.search(q, limit) if q.strip() else eng.store.conversations(limit)
+    if eng.runs.active(cid):
+        raise HTTPException(409, "a run is still working in it — stop that first")
+    if not eng.store.delete_conversation(cid):
+        raise HTTPException(404, "no such conversation")
+    return {"deleted": cid}
+
+
+@app.get("/api/conversations")
+def conversations(limit: int = 30, q: str = "", archived: bool = False) -> Any:
+    eng = engine()
+    rows = eng.store.search(q, limit) if q.strip() else eng.store.conversations(limit, archived)
     live = {r["conversation_id"] for r in eng.runs.live()}
     out = []
     for r in rows:
@@ -415,6 +440,20 @@ async def provider_delete(key: str) -> Any:
     secrets.delete(key)
     await eng.reload()
     return {"deleted": key}
+
+
+@app.post("/api/providers/{key}/codex-host")
+async def provider_codex_host(key: str) -> Any:
+    """Fetch the helper Codex needs to edit files, from Codex's own release."""
+    backend = engine().get(key)
+    if backend is None or backend.info.kind != "codex":
+        raise HTTPException(404, "not a Codex provider")
+    try:
+        message = await codex_host.install(getattr(backend, "bin", "") or "codex")
+    except Exception as e:                          # noqa: BLE001
+        raise HTTPException(502, str(e))
+    engine()._health.pop(key, None)                 # re-check on the next look
+    return {"message": message}
 
 
 @app.get("/api/providers/{key}/models")

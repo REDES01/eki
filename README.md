@@ -53,6 +53,8 @@ of chips. Give a request a **folder** and only backends that can edit files are
 considered — that's how a request becomes a code change rather than advice
 about one.
 
+Right-click a chat to pin, rename, archive or delete it, or copy its id.
+
 **Activity** shows everything running and everything that has run, with the
 output and, for a run with a folder, the diff it left behind. **Usage** shows
 what's left of your limits. **Models & routing** is where providers are added,
@@ -76,6 +78,13 @@ or OpenAI API, xAI, OpenRouter, an OpenAI-compatible URL (vLLM, llama.cpp,
 Ollama, LM Studio), ComfyUI for images. *Models & routing → Add provider*
 finds what's already on the Mac, tests before saving, and puts any key in the
 Keychain.
+
+A note on Codex: it edits files through a separate helper,
+`codex-code-mode-host`, that the standalone install doesn't always ship —
+without it Codex answers questions and declines every edit. eki says so on
+the provider card and offers *Fix editing*, which fetches the helper matching
+your Codex version from Codex's own GitHub release, checks Apple's signature
+says it's OpenAI's, and puts it beside the `codex` binary.
 
 **A local model**: *Add local model* searches Hugging Face's `mlx-community`,
 says how much memory it will want against what's free right now, then

@@ -55,7 +55,12 @@ class CodexBackend(Backend):
         out, _ = await proc.communicate()
         if proc.returncode != 0:
             return Health(False, "codex --version failed")
-        return Health(True, out.decode().strip())
+        detail = out.decode().strip()
+        from .. import codex_host
+        if not codex_host.present(self.bin):
+            # answers questions, refuses every edit — worth saying up front
+            detail += " · can't edit files: codex-code-mode-host is missing"
+        return Health(True, detail)
 
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
         if not self.bin:

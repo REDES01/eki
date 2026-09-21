@@ -69,6 +69,7 @@ struct ContentView: View {
 struct Sidebar: View {
     @EnvironmentObject var model: AppModel
     @Binding var pane: Pane
+    @State private var renaming: ConversationRow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,17 +109,41 @@ struct Sidebar: View {
                     RailRow(icon: "slider.horizontal.3", title: "Models & routing",
                             selected: pane == .models) { choose(.models) }
 
-                    SectionLabel(text: model.search.isEmpty ? "Chats" : "Results")
-                        .padding(.horizontal, 11)
-                        .padding(.top, 16)
-                        .padding(.bottom, 6)
+                    let pinned = model.conversations.filter(\.isPinned)
+                    let rest = model.conversations.filter { !$0.isPinned }
+                    if !pinned.isEmpty && model.search.isEmpty {
+                        SectionLabel(text: "Pinned")
+                            .padding(.horizontal, 11).padding(.top, 16).padding(.bottom, 6)
+                        ForEach(pinned) { row in
+                            ChatRow(row: row, selected: pane == .chat(row.id),
+                                    rename: { renaming = row }) { choose(.chat(row.id)) }
+                        }
+                    }
+                    HStack {
+                        SectionLabel(text: !model.search.isEmpty ? "Results"
+                                     : model.showArchived ? "Archived" : "Chats")
+                        Spacer()
+                        if model.search.isEmpty {
+                            Button(model.showArchived ? "Back" : "Archived") {
+                                model.showArchived.toggle()
+                                Task { await model.refreshConversations() }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Palette.inkFaint)
+                        }
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.top, 16)
+                    .padding(.bottom, 6)
 
-                    ForEach(model.conversations) { row in
-                        ChatRow(row: row, selected: pane == .chat(row.id))
-                            { choose(.chat(row.id)) }
+                    ForEach(model.search.isEmpty ? rest : model.conversations) { row in
+                        ChatRow(row: row, selected: pane == .chat(row.id),
+                                rename: { renaming = row }) { choose(.chat(row.id)) }
                     }
                     if model.conversations.isEmpty {
-                        Text(model.search.isEmpty ? "Nothing yet" : "No matches")
+                        Text(!model.search.isEmpty ? "No matches"
+                             : model.showArchived ? "Nothing archived" : "Nothing yet")
                             .font(.system(size: 12))
                             .foregroundStyle(Palette.inkFaint)
                             .padding(.horizontal, 11)
@@ -133,6 +158,7 @@ struct Sidebar: View {
         .onChange(of: model.search) {
             Task { await model.refreshConversations() }
         }
+        .sheet(item: $renaming) { row in RenameSheet(row: row) }
     }
 
     private func choose(_ value: Pane) {
@@ -221,8 +247,11 @@ struct ChatRow: View {
     @EnvironmentObject var model: AppModel
     let row: ConversationRow
     let selected: Bool
+    var rename: () -> Void = {}
     let action: () -> Void
     @State private var hovering = false
+    @State private var confirmDelete = false
+    @State private var problem = ""
 
     var body: some View {
         Button(action: action) {
@@ -242,6 +271,10 @@ struct ChatRow: View {
                 if row.live == true {
                     // something in this thread is still being answered
                     Dot(color: Palette.ok, size: 6, pulsing: true)
+                } else if row.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Palette.inkFaint)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -255,6 +288,32 @@ struct ChatRow: View {
         .buttonStyle(.plain)
         .foregroundStyle(Palette.ink)
         .onHover { hovering = $0 }
+        .contextMenu {
+            Button(row.isPinned ? "Unpin" : "Pin") {
+                Task { await model.pin(row.id, !row.isPinned) }
+            }
+            Button("Rename…", action: rename)
+            Button("Copy conversation ID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(row.id, forType: .string)
+            }
+            Divider()
+            Button(row.isArchived ? "Unarchive" : "Archive") {
+                Task { await model.archive(row.id, !row.isArchived) }
+            }
+            Button("Delete…", role: .destructive) { confirmDelete = true }
+        }
+        .confirmationDialog("Delete “\(title)”?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) {
+                Task { if let why = await model.delete(row.id) { problem = why } }
+            }
+        } message: {
+            Text("Its \(row.n) turns go with it. Archive keeps them out of the way instead.")
+        }
+        .alert("Couldn't delete", isPresented: Binding(get: { !problem.isEmpty },
+                                                       set: { if !$0 { problem = "" } })) {
+            Button("OK") { problem = "" }
+        } message: { Text(problem) }
     }
 
     private var title: String {
@@ -780,5 +839,39 @@ struct Banner<Trailing: View>: View {
             .strokeBorder(tone.opacity(0.25), lineWidth: 1))
         .padding(.horizontal, Metric.gutter)
         .padding(.top, 12)
+    }
+}
+
+
+/// A title for a thread, instead of its first line.
+struct RenameSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let row: ConversationRow
+    @State private var title = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename").font(.hubTitle)
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
+                Button("Save", action: save)
+                    .buttonStyle(AccentButton())
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 380)
+        .onAppear { title = row.title ?? "" }
+    }
+
+    private func save() {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        Task { await model.rename(row.id, to: t); dismiss() }
     }
 }

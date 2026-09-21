@@ -27,6 +27,7 @@ final class AppModel: ObservableObject {
     @Published var search: String = ""
     @Published var usage: UsageReport?
     @Published var providers: [ProviderDTO] = []
+    @Published var showArchived = false          // the chat list shows archived threads
     /// set to move the window to a pane (e.g. Activity after starting a deploy)
     @Published var paneRequest: Pane?
     @Published var focusRun: String = ""
@@ -213,7 +214,7 @@ final class AppModel: ObservableObject {
 
     func refreshAll() async {
         async let b = try? await client.backends()
-        async let c = try? await client.conversations(matching: search)
+        async let c = try? await client.conversations(matching: search, archived: showArchived)
         async let r = try? await client.runs()
         async let m = try? await client.models()
         async let p = try? await client.policy()
@@ -241,13 +242,51 @@ final class AppModel: ObservableObject {
             return
         }
         if let fresh = try? await client.runs() { runs = fresh }
-        if let fresh = try? await client.conversations(matching: search) {
+        if let fresh = try? await client.conversations(matching: search,
+                                                       archived: showArchived) {
             conversations = fresh
         }
     }
 
     func refreshConversations() async {
-        conversations = (try? await client.conversations(matching: search)) ?? []
+        conversations = (try? await client.conversations(matching: search,
+                                                          archived: showArchived)) ?? []
+    }
+
+    // ---- the chat list's menu -------------------------------------------
+
+    func pin(_ id: String, _ on: Bool) async {
+        try? await client.set(conversation: id, pinned: on)
+        await refreshConversations()
+    }
+
+    func rename(_ id: String, to title: String) async {
+        try? await client.set(conversation: id, title: title)
+        await refreshConversations()
+    }
+
+    func archive(_ id: String, _ on: Bool) async {
+        try? await client.set(conversation: id, archived: on)
+        if on && conversationID == id { newConversation() }
+        await refreshConversations()
+    }
+
+    /// Returns what went wrong, or nil.
+    func delete(_ id: String) async -> String? {
+        do {
+            try await client.delete(conversation: id)
+        } catch ClientError.http(_, let body) {
+            if let data = body.data(using: .utf8),
+               let w = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let detail = w["detail"] as? String { return detail }
+            return body
+        } catch {
+            return error.localizedDescription
+        }
+        if conversationID == id { newConversation() }
+        await refreshConversations()
+        runs = (try? await client.runs()) ?? runs
+        return nil
     }
 
     func refreshModels() async {

@@ -180,6 +180,13 @@ struct ProviderCard: View {
     let provider: ProviderDTO
     @State private var confirmRemove = false
     @State private var editingKey = false
+    @State private var fixing = false
+    @State private var fixNote = ""
+
+    /// Codex without its code-mode helper: it answers, but can't touch a file.
+    private var codexNeedsHost: Bool {
+        provider.kind == "codex" && provider.detail.contains("codex-code-mode-host")
+    }
 
     private var inAuto: Bool { !model.policy.disabled.contains(provider.key) }
     private var isFirst: Bool { model.policy.order.first == provider.key }
@@ -197,6 +204,7 @@ struct ProviderCard: View {
                         if !provider.ok && provider.runtime.port == nil {
                             Tag(text: "not reachable", color: Palette.danger)
                         }
+                        if codexNeedsHost { Tag(text: "can't edit files", color: Palette.inkMuted) }
                     }
                     Text(detail)
                         .font(.system(size: 11.5))
@@ -205,6 +213,17 @@ struct ProviderCard: View {
                         .help(provider.detail)
                 }
                 Spacer()
+                if codexNeedsHost {
+                    if fixing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Fix editing") { Task { await fixCodex() } }
+                            .buttonStyle(AccentButton())
+                            .help("Downloads the codex-code-mode-host helper matching your "
+                                  + "Codex version from Codex's own GitHub release, checks it "
+                                  + "is signed by OpenAI, and puts it beside the codex binary.")
+                    }
+                }
                 if inAuto && !isFirst {
                     Button("Prefer") { Task { await model.prefer(provider.key) } }
                         .buttonStyle(GhostButton())
@@ -244,6 +263,27 @@ struct ProviderCard: View {
                  : "Nothing on disk is touched.")
         }
         .sheet(isPresented: $editingKey) { ReplaceKeySheet(provider: provider) }
+        .alert("Codex", isPresented: Binding(get: { !fixNote.isEmpty },
+                                             set: { if !$0 { fixNote = "" } })) {
+            Button("OK") { fixNote = "" }
+        } message: { Text(fixNote) }
+    }
+
+    private func fixCodex() async {
+        fixing = true
+        defer { fixing = false }
+        do {
+            let message = try await model.client.installCodexHost(provider.key)
+            // it can edit now: say so to the router as well
+            _ = try await model.client.patchProvider(provider.key,
+                                                     ["capabilities": ["tools": true, "repo": true]])
+            fixNote = message + ". Codex can now take repo work."
+        } catch ClientError.http(_, let body) {
+            fixNote = body
+        } catch {
+            fixNote = error.localizedDescription
+        }
+        await model.refreshProviders()
     }
 
     private var detail: String {

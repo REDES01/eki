@@ -56,9 +56,44 @@ class Store:
         self._conn = sqlite3.connect(str(p), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(conversations)")}
+        # pinned stays at the top; archived leaves the list but keeps its history
+        if "pinned" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if "archived" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         self._conn.commit()
 
     # --- conversations ------------------------------------------------------
+
+    def set_conversation(self, conversation_id: str, *, title: Optional[str] = None,
+                         pinned: Optional[bool] = None,
+                         archived: Optional[bool] = None) -> bool:
+        fields, values = [], []
+        if title is not None:
+            fields.append("title = ?"); values.append(title.strip()[:120])
+        if pinned is not None:
+            fields.append("pinned = ?"); values.append(int(pinned))
+        if archived is not None:
+            fields.append("archived = ?"); values.append(int(archived))
+        if not fields:
+            return False
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE conversations SET {', '.join(fields)} WHERE id = ?",
+                (*values, conversation_id))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Gone for good: the thread, its turns and its resumable sessions."""
+        with self._lock:
+            self._conn.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
+            self._conn.execute("DELETE FROM backend_sessions WHERE conversation_id = ?",
+                               (conversation_id,))
+            cur = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def new_conversation(self, title: str = "") -> str:
         cid = uuid.uuid4().hex[:12]
@@ -77,12 +112,14 @@ class Store:
             ).fetchone()
         return row["id"] if row else None
 
-    def conversations(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def conversations(self, limit: int = 20, archived: bool = False) -> List[Dict[str, Any]]:
+        """Pinned first, then newest; archived ones only when asked for."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.id, c.title, c.updated_at,"
+                "SELECT c.id, c.title, c.updated_at, c.pinned, c.archived,"
                 "       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) n"
-                " FROM conversations c ORDER BY c.updated_at DESC LIMIT ?", (limit,)
+                " FROM conversations c WHERE c.archived = ?"
+                " ORDER BY c.pinned DESC, c.updated_at DESC, c.rowid DESC LIMIT ?", (int(archived), limit)
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -120,7 +157,7 @@ class Store:
         like = f"%{text}%"
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.id, c.title, c.updated_at,"
+                "SELECT c.id, c.title, c.updated_at, c.pinned, c.archived,"
                 "       (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) n,"
                 # the first matching line, so the result says why it matched
                 "       (SELECT substr(t.content, 1, 160) FROM turns t"

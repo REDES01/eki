@@ -45,6 +45,10 @@ struct ModelsPane: View {
                        note: "started on demand when a request needs them, unloaded "
                            + "after a while unused if eki started them, and never "
                            + "loaded past what fits in memory") {
+                    // a model (or an engine) being set up: its progress, then its card below
+                    ForEach(model.deploys, id: \.self) { id in
+                        DeployCard(id: id)
+                    }
                     ForEach(model.localModels) { row in
                         LocalModelCard(row: row)
                     }

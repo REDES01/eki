@@ -51,6 +51,11 @@ async def _hub(repo: str, free_gb: float, ceiling_gb: float) -> Dict[str, Any]:
         d = await deploy.details(repo)
     except Exception as e:                          # noqa: BLE001
         return {"kind": "unknown", "text": repo, "message": f"Hugging Face couldn't find {repo}: {e}"}
+    if d.get("picture"):
+        return {"kind": "unsupported", "text": repo,
+                "message": f"{repo} is an image model. eki serves those through ComfyUI: put its files in "
+                           "ComfyUI's models folder, then Add provider → ComfyUI and build or import a "
+                           "workflow for it. (A GGUF UNet also needs the ComfyUI-GGUF custom node.)"}
     if not d.get("weights_gb"):
         return {"kind": "unsupported", "text": repo,
                 "message": f"{repo} has no weights eki can serve (safetensors for MLX, or GGUF)."}

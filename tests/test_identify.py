@@ -107,3 +107,13 @@ def test_a_server_address_becomes_a_provider(monkeypatch):
     lm = asyncio.run(identify.identify("http://127.0.0.1:1234", 20.0, 37.4))
     assert lm["template"] == "custom" and lm["url"] == "http://127.0.0.1:1234/v1" and lm["models"] == ["qwen3-14b"]
     assert asyncio.run(identify.identify("http://127.0.0.1:9", 20.0, 37.4))["kind"] == "unknown"
+
+
+def test_an_image_model_in_gguf_is_named_for_what_it_is(monkeypatch):
+    async def fake_details(repo, quant=""):
+        return {"repo": repo, "format": "gguf", "weights_gb": 4.3, "download_gb": 4.3, "context": 0,
+                "config": {}, "sampling": {}, "license": "other", "gated": False, "vision": False,
+                "base_id": "Qwen/Qwen-Image-2.1", "task": "text-to-image", "picture": True}
+    monkeypatch.setattr(identify.deploy, "details", fake_details)
+    got = asyncio.run(identify.identify("abenzerps/Qwen-Image-2.1-GGUF", 22.0, 37.4))
+    assert got["kind"] == "unsupported" and "ComfyUI" in got["message"]

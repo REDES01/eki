@@ -35,11 +35,12 @@ struct DeployCard: View {
                             .buttonStyle(GhostButton())
                     }
                 }
-                if let last = lastLine {
-                    Text(last)
+                if !recent.isEmpty {
+                    Text(recent.joined(separator: "\n"))
                         .font(.system(size: 11.5).monospacedDigit())
                         .foregroundStyle(state == "failed" ? Palette.danger : Palette.inkMuted)
-                        .lineLimit(2)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 if let error = run?.error, !error.isEmpty, state == "failed" {
@@ -64,10 +65,11 @@ struct DeployCard: View {
         }
     }
 
-    /// The most recent thing it said — progress reads best one line at a time.
-    private var lastLine: String? {
-        output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .last { !$0.isEmpty && !$0.hasPrefix(">") }
+    /// The last few things it said: what it is, and how the download is going.
+    private var recent: [String] {
+        let lines = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix(">") }
+        return Array(lines.suffix(live ? 3 : 2))
     }
 
     private func load() async {

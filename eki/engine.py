@@ -1291,6 +1291,9 @@ class Engine:
             d = await deploy_mod.details(repo, quant=job.get("quant") or "")
             if d["gated"]:
                 raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
+            if d.get("picture"):
+                raise BackendError(f"{repo} is an image model, not a language model — eki serves those "
+                                   "through ComfyUI (Add provider → ComfyUI, with a workflow for it)")
             if not d["weights_gb"]:
                 raise BackendError(f"{repo} has no weights eki can serve (safetensors or GGUF)")
         fmt = d["format"]

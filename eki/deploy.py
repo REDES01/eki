@@ -134,8 +134,15 @@ async def details(repo: str, quant: str = "") -> Dict[str, Any]:
             gen = gen or await _json(c, f"{HF}/{base_id}/resolve/main/generation_config.json")
     total = sum(f.get("size", 0) for f in siblings)
     text = _text_config(config)
+    task = str(info.get("pipeline_tag") or "")
+    tags = [str(t) for t in (info.get("tags") or [])]
+    # a diffusion model's weights in GGUF are for ComfyUI, not a language
+    # model server: the file is real, the words come out as noise
+    picture = task in ("text-to-image", "image-to-image", "text-to-video", "image-to-video") or \
+        any(t in ("comfyui-gguf", "image-generation", "diffusion-single-file") for t in tags)
     out: Dict[str, Any] = {
         "repo": repo, "format": "gguf" if is_gguf else "mlx", "base_id": base_id,
+        "task": task, "picture": picture,
         "context": int(text.get("max_position_embeddings") or 0),
         "vision": bool(config.get("vision_config")),
         "license": (info.get("cardData") or {}).get("license", ""),

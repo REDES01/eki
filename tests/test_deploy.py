@@ -39,3 +39,10 @@ def test_scripts_turn_thinking_off_and_bind_loopback(tmp_path, monkeypatch):
     assert "--temp 0.7" in start
     assert "enable_thinking" in start and "false" in start
     assert "8099" in open(paths["stop"]).read()
+
+
+def test_kv_gb_counts_only_full_attention_layers_in_hybrids():
+    config = {"num_hidden_layers": 64, "num_key_value_heads": 4, "num_attention_heads": 24,
+              "head_dim": 256, "layer_types": ["linear_attention"] * 48 + ["full_attention"] * 16}
+    # 16 layers × 4 heads × 256 × K+V × fp16 = 64 KB per token → 8 GB at 128k
+    assert deploy.kv_gb(config, 131072) == 8.0

@@ -81,9 +81,16 @@ def _text_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def kv_gb(config: Dict[str, Any], tokens: int) -> float:
-    """fp16 KV cache for `tokens` of context — an upper bound for hybrid models."""
+    """fp16 KV cache for `tokens` of context.
+
+    Hybrid models (Qwen3.5/3.8, Gemma 3n…) list `layer_types`; only the
+    full-attention layers keep a cache that grows with the context, the
+    linear/sliding ones hold a fixed state, so those are counted alone."""
     c = _text_config(config)
     layers = c.get("num_hidden_layers") or 0
+    types = c.get("layer_types")
+    if isinstance(types, list) and types:
+        layers = sum(1 for t in types if t == "full_attention")
     heads = c.get("num_attention_heads") or 0
     kv_heads = c.get("num_key_value_heads") or heads
     head_dim = c.get("head_dim") or ((c.get("hidden_size") or 0) // heads if heads else 0)

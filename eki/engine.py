@@ -33,7 +33,7 @@ from . import measure
 from . import secrets
 from . import settings as settings_mod
 from . import titles
-from .models import LocalModel, ModelManager
+from .models import DEFAULT_IDLE_MINUTES, LocalModel, ModelManager
 from .capability import SOLID_ITEMS, Registry
 from .providers import Provider, ProviderStore, seed_from_config
 from .quota import QuotaBoard, QuotaProvider
@@ -89,7 +89,7 @@ class Engine:
                     start=r.get("start", ""), stop=r.get("stop", ""),
                     gb=float(r.get("gb", 0) or 0), note=r.get("note", ""),
                     backend=p.key, kind=r.get("kind", "llm"),
-                    idle_minutes=float(r.get("idle_minutes", 30) or 0)))
+                    idle_minutes=float(r.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0)))
             if not p.enabled:
                 continue
             options = dict(p.options)
@@ -190,7 +190,7 @@ class Engine:
         # stopped, but eki can bring it up: still a candidate, started on
         # demand — otherwise a free local model loses every request to a paid
         # one just because it was idle-unloaded
-        return None if self.models.can_start(model.key) else False
+        return None if self.models.can_start(model.key, eager=True) else False
 
     def set_policy(self, policy) -> None:
         self.policy = policy
@@ -313,7 +313,9 @@ class Engine:
         yield {"backend": choice.backend.key, "reason": reason}
         if model is not None:
             if not model.running:
-                message = await self.models.start(model.key)
+                # the user is waiting on this one: it may unload a server that
+                # was answering a minute ago, which background work may not
+                message = await self.models.start(model.key, eager=True)
                 if not model.running:
                     raise BackendError(message)
                 if "make room" in message:
@@ -820,7 +822,7 @@ class Engine:
             key=key, kind="mlx", label=label, tier=0, note="local, free",
             capabilities={"context_tokens": room["context"], "text": True},
             options=options,
-            runtime={"port": port, "gb": room["need_gb"], "idle_minutes": 30,
+            runtime={"port": port, "gb": room["need_gb"], "idle_minutes": DEFAULT_IDLE_MINUTES,
                      "thinking": "off" if thinking is False else "n/a",
                      "label": label, "kind": "llm", "repo": repo, **scripts})
         self.providers.upsert(provider)

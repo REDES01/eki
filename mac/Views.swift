@@ -725,6 +725,19 @@ struct Composer: View {
                         complete(c)
                     }
                     Divider().overlay(Palette.hairline)
+                } else if draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace), model.commands.isEmpty {
+                    HStack(spacing: 8) {
+                        if model.commandsLoading {
+                            ProgressView().controlSize(.small)
+                            Text("Asking Claude Code for its commands…")
+                        } else {
+                            Text("No commands yet — is Claude Code set up?")
+                        }
+                    }
+                    .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Divider().overlay(Palette.hairline)
                 }
                 // A vertical TextField rather than a TextEditor: an editor
                 // takes every point of height offered and the composer ends up

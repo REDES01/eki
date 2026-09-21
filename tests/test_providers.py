@@ -262,3 +262,78 @@ def test_pressure_shortens_the_idle_window(monkeypatch):
     mm.hold("a"); mm.started = {"a"}; stopped.clear()
     asyncio.run(mm.reap_idle(now=99 * 60, pressure="critical"))
     assert stopped == []                           # never from under a run
+
+
+# ---- unloading to make room: who goes, and for whom -------------------------
+
+def _crowded(monkeypatch, tmp_path):
+    """Three eki-started servers up — one long idle, one used a moment ago,
+    one pinned — and the memory a fourth would need only if they go."""
+    import time
+    from eki import memory
+    from eki.models import LocalModel, ModelManager
+    monkeypatch.setattr(ModelManager, "STARTED_FILE", tmp_path / "started.json")
+    stale = LocalModel(key="stale", label="stale", port=1, start="x", stop="y", gb=6)
+    fresh = LocalModel(key="fresh", label="fresh", port=2, start="x", stop="y", gb=14)
+    pinned = LocalModel(key="pinned", label="pinned", port=3, start="x", stop="y",
+                        gb=8, idle_minutes=0)
+    want = LocalModel(key="want", label="want", port=4, start="x", stop="y", gb=18)
+    mm = ModelManager([stale, fresh, pinned, want], ceiling_gb=37.4)
+    running = {"stale", "fresh", "pinned"}
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: self.key in running))
+    mm.started = set(running)
+    now = time.time()
+    mm.last_used = {"stale": now - 3600, "fresh": now - 20, "pinned": now - 3600}
+    stopped = []
+
+    async def fake_stop(key):
+        stopped.append(key); running.discard(key)
+    monkeypatch.setattr(mm, "stop", fake_stop)
+    sizes = {m.key: m.gb for m in (stale, fresh, pinned)}
+    monkeypatch.setattr(memory, "snapshot", lambda: memory.Snapshot(
+        total_gb=48, available_gb=38 - sum(sizes[k] for k in running), used_gb=0, level=50))
+    return mm, stopped
+
+
+def test_background_work_only_takes_long_idle_unpinned_servers(monkeypatch, tmp_path):
+    mm, stopped = _crowded(monkeypatch, tmp_path)
+    assert [m.key for m in mm.evictable()] == ["stale"]
+    assert mm.can_start("want") is False           # stale's 6 GB isn't enough
+    asyncio.run(mm.make_room(18))
+    assert stopped == ["stale"]                    # and it took nothing else
+
+
+def test_a_waiting_user_outranks_a_resting_model_and_pins_go_last(monkeypatch, tmp_path):
+    mm, stopped = _crowded(monkeypatch, tmp_path)
+    assert [m.key for m in mm.evictable(eager=True)] == ["stale", "fresh", "pinned"]
+    assert mm.can_start("want", eager=True) is True
+    asyncio.run(mm.make_room(18, eager=True))
+    assert stopped == ["stale", "fresh"]           # enough: the pin survives
+
+
+def test_a_server_mid_answer_is_never_unloaded(monkeypatch, tmp_path):
+    mm, stopped = _crowded(monkeypatch, tmp_path)
+    mm.hold("fresh")
+    assert "fresh" not in [m.key for m in mm.evictable(eager=True)]
+    asyncio.run(mm.make_room(40, eager=True))
+    assert "fresh" not in stopped
+
+
+def test_pin_is_left_by_the_idle_timer_and_says_when_others_unload(monkeypatch, tmp_path):
+    mm, stopped = _crowded(monkeypatch, tmp_path)
+    import time
+    assert mm.unloads_at("pinned") is None
+    assert abs(mm.unloads_at("fresh") - (mm.last_used["fresh"] + 15 * 60)) < 1
+    asyncio.run(mm.reap_idle(now=time.time() + 6 * 3600, pressure="normal"))
+    assert sorted(stopped) == ["fresh", "stale"]
+    rows = {r["key"]: r for r in mm.describe()}
+    assert rows["pinned"]["pinned"] is True and rows["pinned"]["unloads_at"] is None
+
+
+def test_holds_survive_an_engine_reload(monkeypatch, tmp_path):
+    from eki.models import ModelManager
+    mm, _ = _crowded(monkeypatch, tmp_path)
+    mm.hold("fresh")
+    again = ModelManager(list(mm.models.values()), ceiling_gb=37.4)
+    again.adopt(mm)
+    assert again.busy("fresh")

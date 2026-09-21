@@ -742,7 +742,8 @@ def models() -> Any:
 @app.post("/api/models/{key}/start")
 async def start_model(key: str, force: bool = False) -> Any:
     try:
-        return {"message": await engine().models.start(key, force=force)}
+        # someone pressed Start: that outranks a server resting in memory
+        return {"message": await engine().models.start(key, force=force, eager=True)}
     except KeyError:
         raise HTTPException(404, "no such model")
 
@@ -753,6 +754,33 @@ async def stop_model(key: str) -> Any:
         return {"message": await engine().models.stop(key)}
     except KeyError:
         raise HTTPException(404, "no such model")
+
+
+class IdleBody(BaseModel):
+    minutes: float                  # 0 keeps it loaded
+
+
+@app.put("/api/models/{key}/idle")
+def set_model_idle(key: str, body: IdleBody) -> Any:
+    """How long this server stays loaded unused. Changed in place — no engine
+    reload, so nothing in flight notices — and saved with its provider."""
+    eng = engine()
+    model = eng.models.get(key)
+    if model is None:
+        raise HTTPException(404, "no such model")
+    if body.minutes < 0 or body.minutes > 24 * 60:
+        raise HTTPException(422, "between 0 (keep loaded) and 1440 minutes")
+    model.idle_minutes = float(body.minutes)
+    p = eng.providers.get(model.backend or key)
+    if p is not None:
+        p.runtime["idle_minutes"] = model.idle_minutes
+        eng.providers.upsert(p)
+    # the window starts now, not from whenever it last answered: shortening
+    # it shouldn't unload a model out from under the person changing it
+    eng.models.touch(key)
+    if model.pinned:
+        return {"message": f"{model.label} stays loaded until you stop it"}
+    return {"message": f"{model.label} unloads after {body.minutes:g} min unused"}
 
 
 @app.get("/api/policy")

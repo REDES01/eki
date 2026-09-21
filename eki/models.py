@@ -29,6 +29,15 @@ from . import memory
 #: real ceiling rather than the number on the box.
 CEILING_FRACTION = 0.78
 
+#: how long an unused server stays loaded unless its provider says otherwise.
+#: Loading is seconds; what an unload really costs is the prompt cache, so the
+#: window is long enough that a conversation with pauses in it never pays that
+DEFAULT_IDLE_MINUTES = 15.0
+
+#: used more recently than this counts as "in the middle of something": only
+#: a request the user is waiting on may unload it
+RECENT_SECONDS = 180.0
+
 
 @dataclass
 class LocalModel:
@@ -42,8 +51,13 @@ class LocalModel:
     backend: str = ""               # the backend key this serves, if any
     kind: str = "llm"
     #: stop it after this long unused, if eki was the one that started it;
-    #: 0 keeps it loaded
-    idle_minutes: float = 30.0
+    #: 0 pins it: the idle timer leaves it alone, and it is the last thing
+    #: unloaded to make room
+    idle_minutes: float = DEFAULT_IDLE_MINUTES
+
+    @property
+    def pinned(self) -> bool:
+        return not self.idle_minutes
 
     @property
     def running(self) -> bool:
@@ -123,6 +137,10 @@ class ModelManager:
     def adopt(self, previous: "ModelManager") -> None:
         self.started = {k for k in previous.started if k in self.models}
         self.last_used = {k: v for k, v in previous.last_used.items() if k in self.models}
+        # runs in flight keep their hold: a settings change mid-answer must
+        # not leave the server they're using looking free to unload
+        self._busy = {k: v for k, v in previous._busy.items() if k in self.models}
+        self._starting = {k: v for k, v in previous._starting.items() if k in self.models}
 
     def for_backend(self, backend_key: str) -> Optional[LocalModel]:
         return next((m for m in self.models.values()
@@ -144,14 +162,15 @@ class ModelManager:
                            f"(keeping {memory.RESERVE_GB:g} back)")
         return True, ""
 
-    def can_start(self, key: str) -> bool:
-        """Startable now, or after unloading eki's own idle servers."""
+    def can_start(self, key: str, eager: bool = False) -> bool:
+        """Startable now, or after unloading eki's own servers — the idle
+        ones, or with `eager` any that no run is using."""
         m = self.models.get(key)
         if m is None or not m.start:
             return False
         if self.fits(m)[0]:
             return True
-        reclaimable = sum(x.gb for x in self.idle_started() if x.key != key)
+        reclaimable = sum(x.gb for x in self.evictable(eager) if x.key != key)
         if not reclaimable or not m.gb:
             return False
         snap = memory.snapshot()
@@ -169,19 +188,32 @@ class ModelManager:
         self._busy[key] = max(0, self._busy.get(key, 0) - 1)
         self.touch(key)
 
-    def idle_started(self, min_idle: float = 180.0) -> List[LocalModel]:
-        """eki's own servers nobody has touched lately, biggest first."""
-        now = time.time()
-        out = [m for k, m in self.models.items()
-               if k in self.started and m.running and m.stop and not self.busy(k)
-               and now - self.last_used.get(k, 0) >= min_idle]
-        return sorted(out, key=lambda m: -m.gb)
+    def evictable(self, eager: bool = False) -> List[LocalModel]:
+        """eki's own servers that may be unloaded to make room, in the order
+        they would go. Never one a run is using, never one eki didn't start.
 
-    async def make_room(self, gb: float) -> List[str]:
-        """Unload idle eki-started servers until `gb` more would fit.
-        Never touches anything eki didn't start."""
+        Background work (measuring, waking the labeller) only takes servers
+        that have sat unused a few minutes and aren't pinned. A request the
+        user is waiting on (`eager`) may take the rest as well — a reload is
+        seconds, and an image that can't be made because a chat model is
+        resting in memory is worse — recently used ones next, pinned last.
+        """
+        now = time.time()
+        ranked = []
+        for k, m in self.models.items():
+            if k not in self.started or not m.running or not m.stop or self.busy(k):
+                continue
+            recent = now - self.last_used.get(k, 0) < RECENT_SECONDS
+            if (recent or m.pinned) and not eager:
+                continue
+            ranked.append(((m.pinned, recent, -m.gb), m))
+        return [m for _, m in sorted(ranked, key=lambda pair: pair[0])]
+
+    async def make_room(self, gb: float, eager: bool = False) -> List[str]:
+        """Unload eki-started servers, in `evictable` order, until `gb` more
+        would fit. Never touches anything eki didn't start."""
         stopped: List[str] = []
-        for m in self.idle_started():
+        for m in self.evictable(eager):
             snap = memory.snapshot()
             if gb <= snap.headroom_gb and self.committed_gb() + gb <= self.ceiling_gb:
                 break
@@ -237,6 +269,13 @@ class ModelManager:
                       holders=[{"name": h.name, "gb": h.gb, "pid": h.pid}
                                for h in memory.grouped_holders()])
 
+    def unloads_at(self, key: str) -> Optional[float]:
+        """When the idle timer will stop this server, if it is going to."""
+        m = self.models.get(key)
+        if m is None or m.pinned or key not in self.started or not m.running or not m.stop:
+            return None
+        return self.last_used.get(key, time.time()) + m.idle_minutes * 60
+
     def describe(self) -> List[Dict[str, Any]]:
         return [{
             "key": m.key, "label": m.label, "kind": m.kind, "port": m.port,
@@ -244,6 +283,8 @@ class ModelManager:
             "running": m.running, "idle_minutes": m.idle_minutes,
             "started_by_hub": m.key in self.started,
             "last_used": self.last_used.get(m.key),
+            "pinned": m.pinned,
+            "unloads_at": None if self.busy(m.key) else self.unloads_at(m.key),
             "can_start": bool(m.start) and not m.running,
             "blocked_by_memory": not m.running and m.gb > 0 and not self.fits(m)[0],
             "busy": self.busy(m.key),
@@ -251,15 +292,17 @@ class ModelManager:
 
     # ---- control ---------------------------------------------------------
 
-    async def start(self, key: str, force: bool = False) -> str:
+    async def start(self, key: str, force: bool = False, eager: bool = False) -> str:
+        """Bring a server up. `eager`: someone is waiting on this, so servers
+        used moments ago (and, last, pinned ones) may be unloaded for it."""
         model = self.models.get(key)
         if model is None:
             raise KeyError(key)
         # two runs arriving at a stopped model start it once
         async with self._starting.setdefault(key, asyncio.Lock()):
-            return await self._start(model, force)
+            return await self._start(model, force, eager)
 
-    async def _start(self, model: LocalModel, force: bool) -> str:
+    async def _start(self, model: LocalModel, force: bool, eager: bool = False) -> str:
         key = model.key
         if model.running:
             return f"{key} is already up on :{model.port}"
@@ -267,8 +310,8 @@ class ModelManager:
             return f"{key} has no start command configured"
         ok, why = self.fits(model)
         if not ok and not force:
-            # make room from eki's own idle servers, never from anything else
-            freed = await self.make_room(model.gb)
+            # make room from eki's own servers, never from anything else
+            freed = await self.make_room(model.gb, eager)
             ok, why = self.fits(model)
             if not ok:
                 return f"not starting {key}: {why} — stop something first"
@@ -337,5 +380,6 @@ def from_config(entries: List[Dict[str, Any]]) -> List[LocalModel]:
             note=entry.get("note", ""),
             backend=entry.get("backend", ""),
             kind=entry.get("kind", "llm"),
+            idle_minutes=float(entry.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0),
         ))
     return out

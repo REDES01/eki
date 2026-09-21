@@ -118,6 +118,11 @@ struct LocalModelRow: Codable, Identifiable, Hashable {
     let blocked_by_memory: Bool
     var busy: Bool? = false
     var started_by_hub: Bool? = false
+    /// minutes unused before eki unloads it; 0 keeps it loaded
+    var idle_minutes: Double? = nil
+    var pinned: Bool? = false
+    /// when the idle timer will stop it, if it is going to (unix seconds)
+    var unloads_at: Double? = nil
 
     var id: String { key }
 }
@@ -538,6 +543,13 @@ actor EngineClient {
         let path = "api/models/\(key)/\(running ? "start" : "stop")"
             + (force ? "?force=true" : "")
         return try await decode(Wrapper.self, "POST", path).message
+    }
+
+    @discardableResult
+    func setIdle(_ key: String, minutes: Double) async throws -> String {
+        struct Wrapper: Codable { let message: String }
+        return try await decode(Wrapper.self, "PUT", "api/models/\(key)/idle",
+                                body: ["minutes": minutes]).message
     }
 
     func policy() async throws -> PolicyDTO {

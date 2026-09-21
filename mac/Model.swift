@@ -485,13 +485,19 @@ final class AppModel: ObservableObject {
 
     /// The commands the composer can offer: the thread's, or the folder's
     /// for a thread that hasn't started. Fetched once per thread/folder.
+    @Published var commandsLoading = false
+
     func loadCommands(cwd: String) {
         let key = conversationID + "|" + cwd
-        guard key != commandsKey else { return }
-        commandsKey = key
+        guard key != commandsKey, !commandsLoading else { return }
+        commandsLoading = true
         Task {
+            defer { commandsLoading = false }
             let got = (try? await client.commands(conversation: conversationID, cwd: cwd)) ?? []
-            if commandsKey == key { commands = got }
+            // an empty answer (engine still starting the session, or down)
+            // is not remembered, so the next "/" asks again
+            if !got.isEmpty { commandsKey = key }
+            commands = got
         }
     }
 
@@ -522,6 +528,16 @@ final class AppModel: ObservableObject {
         }
         await refreshModels()
         backends = (try? await client.backends()) ?? backends
+    }
+
+    /// How long a local server stays loaded unused; 0 keeps it loaded.
+    func setIdle(_ key: String, minutes: Double) async {
+        do {
+            modelMessage = try await client.setIdle(key, minutes: minutes)
+        } catch {
+            modelMessage = error.localizedDescription
+        }
+        await refreshModels()
     }
 
     // ---- policy ---------------------------------------------------------

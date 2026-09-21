@@ -181,6 +181,7 @@ struct LocalModelCard: View {
                         Text(":\(row.port)")
                         Text(String(format: "%.1f GB", row.gb))
                         if !row.note.isEmpty { Text(row.note) }
+                        if let fate { Text(fate) }
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.inkMuted)
@@ -189,6 +190,7 @@ struct LocalModelCard: View {
                 if row.busy == true {
                     Tag(text: "answering", color: Palette.ok)
                 }
+                idleMenu
                 if model.busyModel == row.key {
                     ProgressView().controlSize(.small)
                 } else if row.running {
@@ -208,6 +210,55 @@ struct LocalModelCard: View {
                 }
             }
         }
+    }
+}
+
+extension LocalModelCard {
+    static let idleChoices: [(String, Double)] = [
+        ("5 minutes", 5), ("15 minutes", 15), ("30 minutes", 30),
+        ("1 hour", 60), ("4 hours", 240),
+    ]
+
+    /// What the idle timer has in store, in words.
+    var fate: String? {
+        guard row.running else { return nil }
+        if row.pinned == true { return "stays loaded" }
+        guard let at = row.unloads_at else { return nil }
+        let minutes = Int(((at - Date().timeIntervalSince1970) / 60).rounded(.up))
+        if minutes <= 1 { return "unloads within a minute" }
+        return minutes < 90 ? "unloads in \(minutes) min"
+                            : "unloads in \(Int((Double(minutes) / 60).rounded())) h"
+    }
+
+    var idleMenu: some View {
+        let current = row.idle_minutes ?? 15
+        return Menu {
+            Section("Unload after unused for") {
+                ForEach(Self.idleChoices, id: \.1) { name, minutes in
+                    Toggle(name, isOn: Binding(
+                        get: { current == minutes },
+                        set: { _ in Task { await model.setIdle(row.key, minutes: minutes) } }))
+                }
+            }
+            Divider()
+            Toggle("Keep loaded", isOn: Binding(
+                get: { current == 0 },
+                set: { _ in Task { await model.setIdle(row.key, minutes: 0) } }))
+        } label: {
+            Image(systemName: row.pinned == true ? "pin.fill" : "timer")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(row.pinned == true ? Palette.accent : Palette.inkMuted)
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Palette.inkMuted)
+        .fixedSize()
+        .help(row.pinned == true
+              ? "Kept loaded: the idle timer leaves it alone, and it's the last "
+                + "thing unloaded when something else needs the memory"
+              : "Unloaded after \(Int(current)) min unused, if eki started it; "
+                + "it loads again on demand in a few seconds")
     }
 }
 

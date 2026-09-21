@@ -53,6 +53,7 @@ def test_params_from_name():
     assert profile.params_from_name("mlx-community/Llama-3.3-70B-Instruct-8bit") == 70.0
     assert profile.params_from_name("mlx-community/gemma-3-12b-it-4bit") == 12.0
     assert profile.params_from_name("x/no-size-here") == 0.0
+    assert profile.params_from_name("mlx-community/Qwen3.6-35B-A3B-4bit") == 35.0
 
 
 def test_read_returns_none_when_not_downloaded(monkeypatch):

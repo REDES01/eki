@@ -130,6 +130,33 @@ struct Suggestion: Codable, Identifiable, Hashable {
     }
 }
 
+/// A parameter-count band to narrow the lists by; what a person means by
+/// "a small one" or "the biggest that fits".
+enum SizeBand: String, CaseIterable, Identifiable {
+    case all = "Any size", small = "Up to 4B", medium = "4–15B", large = "15–40B", huge = "40B+"
+    var id: String { rawValue }
+
+    func admits(_ params: Double) -> Bool {
+        switch self {
+        case .all: return true
+        case .small: return params > 0 && params <= 4
+        case .medium: return params > 4 && params <= 15
+        case .large: return params > 15 && params <= 40
+        case .huge: return params > 40
+        }
+    }
+
+    /// Billions of parameters from a repo name ("Qwen3.8-27B-4bit" → 27,
+    /// "Qwen3.6-35B-A3B-4bit" → 35); 0 when the name doesn't say.
+    static func params(in repo: String) -> Double {
+        let name = repo.split(separator: "/").last.map(String.init) ?? repo
+        guard let re = try? NSRegularExpression(pattern: "(\\d+(?:\\.\\d+)?)[bB](?![a-zA-Z])") else { return 0 }
+        let found = re.matches(in: name, range: NSRange(name.startIndex..., in: name))
+            .compactMap { Range($0.range(at: 1), in: name) }.compactMap { Double(name[$0]) }
+        return found.max() ?? 0                     // "35B-A3B": the total is what memory sees
+    }
+}
+
 struct Suggestions: Codable {
     let suggestions: [Suggestion]
     /// new releases the boards haven't scored, by how much they're being used
@@ -643,6 +670,11 @@ struct AddModelSheet: View {
     @State private var error = ""
     @State private var suggested: Suggestions?
     @State private var suggesting = true
+    @State private var band: SizeBand = .all
+
+    private func admitted(_ s: Suggestion) -> Bool {
+        band.admits(s.params_b ?? SizeBand.params(in: s.repo))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -658,18 +690,25 @@ struct AddModelSheet: View {
             TextField("Search, e.g. Qwen3.5 4B", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { Task { await search() } }
+            HStack(spacing: 6) {
+                ForEach(SizeBand.allCases) { b in
+                    Button(b.rawValue) { band = b }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: band == b ? .semibold : .regular))
+                        .foregroundStyle(band == b ? Palette.ink : Palette.inkMuted)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(band == b ? Palette.fill : Color.clear, in: Capsule())
+                }
+                Spacer()
+            }
             HStack(alignment: .top, spacing: 12) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         if query.isEmpty {
                             recommended
-                            Text("Popular")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(Palette.inkFaint)
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 9).padding(.top, 10).padding(.bottom, 2)
+                            heading(results.isEmpty ? "" : "Popular", top: 10)
                         }
-                        ForEach(results) { m in
+                        ForEach(results.filter { band.admits(SizeBand.params(in: $0.repo)) || band == .all }) { m in
                             Button {
                                 selected = m
                                 Task { await loadFit() }
@@ -708,34 +747,43 @@ struct AddModelSheet: View {
 
     /// The models worth having on this Mac: the boards' quality, the
     /// catalogue's builds, this machine's memory — joined by the engine.
-    @ViewBuilder private var recommended: some View {
+    private func heading(_ text: String, top: CGFloat = 4, help: String = "") -> some View {
         HStack(spacing: 6) {
-            Text("Recommended for this Mac")
+            Text(text)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(Palette.inkFaint)
                 .textCase(.uppercase)
-            if suggesting { ProgressView().controlSize(.mini) }
+            if text.hasPrefix("Suggested") && suggesting { ProgressView().controlSize(.mini) }
             Spacer()
         }
-        .padding(.horizontal, 9).padding(.top, 4).padding(.bottom, 2)
-        .help("Ranked by public benchmark results for the base model, among builds that fit "
-              + "in this Mac's memory. Once a model is measured here, that number takes over.")
+        .padding(.horizontal, 9).padding(.top, top).padding(.bottom, 2)
+        .help(help)
+        .opacity(text.isEmpty ? 0 : 1)
+    }
+
+    /// Suggested (the boards' quality × this Mac's memory), then what's
+    /// new and trending that the boards haven't scored — both narrowed by
+    /// the size band.
+    @ViewBuilder private var recommended: some View {
+        heading("Suggested for this Mac",
+                help: "Ranked by public benchmark results for the base model, among builds that fit "
+                    + "in this Mac's memory. Once a model is measured here, that number takes over.")
         if let suggested {
-            ForEach(suggested.suggestions) { s in suggestionRow(s) }
-            if suggested.suggestions.isEmpty && !suggesting {
-                Text("Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
+            let picks = suggested.suggestions.filter(admitted)
+            ForEach(picks) { s in suggestionRow(s) }
+            if picks.isEmpty && !suggesting {
+                Text(band == .all
+                     ? "Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB."
+                     : "Nothing on the boards in this size fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
                     .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
                     .padding(.horizontal, 9)
             }
-            if let fresh = suggested.trending, !fresh.isEmpty {
-                Text("New and trending — not on the boards yet")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Palette.inkFaint)
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 9).padding(.top, 10).padding(.bottom, 2)
-                    .help("Released within the year and being downloaded a lot, but no public benchmark "
-                          + "has scored them yet. Ordered by how much they're used, then by size. "
-                          + "eki measures one itself once it's installed.")
+            let fresh = (suggested.trending ?? []).filter(admitted)
+            if !fresh.isEmpty {
+                heading("Trending — not on the boards yet", top: 10,
+                        help: "Released within the year and being downloaded a lot, but no public benchmark "
+                            + "has scored them yet. Ordered by how much they're used, then by size. "
+                            + "eki measures one itself once it's installed.")
                 ForEach(fresh) { s in suggestionRow(s) }
             }
         }

@@ -41,7 +41,7 @@ SHOWN = 8
 SHORTLIST = 16
 #: models the boards haven't scored, shown by trending — a release the
 #: boards will take months to reach is here the week it lands
-TRENDING = 4
+TRENDING = 8
 
 #: the plain mlx_lm quantisations, which every mlx_lm can load; the rest
 #: are experiments (OptiQ, mxfp4, nvfp4), multi-token-prediction builds

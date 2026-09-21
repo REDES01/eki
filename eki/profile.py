@@ -82,7 +82,7 @@ _PARAMS = re.compile(r"(\d+(?:\.\d+)?)[bB](?![a-zA-Z])")
 
 def params_from_name(repo: str) -> float:
     m = _PARAMS.findall(repo.split("/")[-1])
-    return float(m[-1]) if m else 0.0
+    return max(float(x) for x in m) if m else 0.0     # "35B-A3B": the total is what memory sees
 
 
 def _text(config: Dict[str, Any]) -> Dict[str, Any]:

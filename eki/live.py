@@ -406,7 +406,8 @@ def summarize_activity(tool: str, inp: Dict[str, Any]) -> str:
 
 _INTENT = re.compile(r"\b(let me|i'll|i will|i am going to|i'm going to|first,? i|now i|next,? i|"
                      r"going to|will now|let's|installing|starting|running|adding|creating|"
-                     r"writing|fixing|updating|checking|setting up|wiring|porting)\b", re.I)
+                     r"writing|fixing|updating|checking|setting up|wiring|porting|restarting|"
+                     r"re-?running|retrying|testing|rebuilding|downloading|patching)\b", re.I)
 _DONE = re.compile(r"\b(done|finished|complete|completed|all set|ready to|you can now|"
                    r"is running on|is up and running|nothing (else|more) to do)\b", re.I)
 

@@ -350,3 +350,8 @@ def test_background_task_events_read_as_lines():
         finally:
             await s.close()
     run(go())
+
+
+def test_a_program_that_announces_the_next_step_sounds_unfinished():
+    assert live.sounds_unfinished("Patched. Restarting ComfyUI to pick up the loader change, then re-running the test.")
+    assert not live.sounds_unfinished("The test passed; the model is up and running on port 8188.")

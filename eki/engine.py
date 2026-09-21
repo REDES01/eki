@@ -753,7 +753,7 @@ class Engine:
         try:
             # a lull of a few seconds ends it: progress lines on their own
             # never come with a result
-            async for chunk in self._live_turn(run, cid, backend, "", send=False, until_quiet=8.0):
+            async for chunk in self._live_turn(run, cid, backend, "", send=False, until_quiet=8.0, nudge=True):
                 if isinstance(chunk, str):
                     parts.append(chunk)
                 elif isinstance(chunk, dict) and chunk.get("kind") == "activity":
@@ -775,8 +775,8 @@ class Engine:
         self.store.add_turn(cid, "assistant", text, backend.key, reason, meta=meta)
 
     async def _live_turn(self, run: Dict[str, Any], cid: str, backend: Backend,
-                         model: str, send: bool = True, until_quiet: float = 0.0
-                         ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+                         model: str, send: bool = True, until_quiet: float = 0.0,
+                         nudge: bool = False) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         """One turn through the open session: text as it streams, tool
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
@@ -792,7 +792,9 @@ class Engine:
         rid = run["id"]
         usage: Dict[str, Any] = {}
         context: Dict[str, int] = {}
-        local = bool(self.options.get(backend.key, {}).get("local_model"))
+        # a local model announces and stops; so does a program carrying on by
+        # itself with nobody to say "go on" — both get told to
+        local = bool(self.options.get(backend.key, {}).get("local_model")) or nudge
         nudges = 0
         try:
             prompt = run["prompt"]
@@ -837,6 +839,7 @@ class Engine:
                 if local and nudges < 2 and live.sounds_unfinished("".join(tail)):
                     nudges += 1
                     prompt = "Go ahead — do it now, with the tools. Don't stop to announce."
+                    until_quiet = 0.0                   # a real turn follows the nudge
                     yield {"kind": "activity", "text": "Nudged to carry on"}
                     yield "\n\n"
                     continue

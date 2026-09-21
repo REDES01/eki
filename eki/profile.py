@@ -46,6 +46,8 @@ class Profile:
     thinking_switch: bool = False   # chat template takes enable_thinking
     tools: Optional[bool] = None    # chat template renders tools / tool calls; None = no template read
     vision_weights: bool = False    # the build has a vision tower (the server may not serve it)
+    format: str = "mlx"             # mlx | gguf
+    quant: str = ""                 # a GGUF's quantisation name (Q4_K_M…)
     config: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -56,8 +58,11 @@ class Profile:
         parts = []
         if self.params_b:
             parts.append(f"{self.params_b:g}B")
-        parts.append(f"{self.quant_bits}-bit" + (f" (group {self.quant_group})" if self.quant_group else "")
-                     if self.quant_bits else "16-bit")
+        if self.quant:
+            parts.append(f"GGUF {self.quant}")
+        else:
+            parts.append(f"{self.quant_bits}-bit" + (f" (group {self.quant_group})" if self.quant_group else "")
+                         if self.quant_bits else "16-bit")
         parts.append(f"{self.weights_gb:.1f} GB of weights")
         if self.hybrid:
             parts.append(f"hybrid · {self.attention_layers} of {self.layers} layers keep a cache")
@@ -102,11 +107,42 @@ def read(repo: str) -> Optional[Profile]:
     return from_files(repo, config, snap)
 
 
+def read_gguf(key: str, runtime: Dict[str, Any]) -> Optional[Profile]:
+    """A GGUF model set up by eki: the profile recorded at setup, with the
+    base model's config (kept beside the start script) for the cache."""
+    stored = runtime.get("profile") or {}
+    if not stored:
+        return None
+    try:
+        config = json.loads((Path("~/.eki/models").expanduser() / key / "config.json").read_text())
+    except (OSError, ValueError):
+        config = {}
+    fields = {k: v for k, v in stored.items() if k in Profile.__dataclass_fields__}
+    return Profile(**{**fields, "config": config})
+
+
 def from_hub(repo: str, details: Dict[str, Any]) -> Profile:
-    """Before the download: what the Hub's file list and config say."""
+    """Before the download: what the Hub's file list and config say. For a
+    GGUF, the quantisation comes from the chosen file and the template
+    facts from the Hub's parsed header."""
     p = from_files(repo, details.get("config") or {}, None)
     p.weights_gb = float(details.get("weights_gb") or 0)
     p.sampling = dict(details.get("sampling") or {})
+    if details.get("format") == "gguf":
+        from . import gguf
+        meta = details.get("gguf") or {}
+        p.format = "gguf"
+        p.quant = str(details.get("quant") or "")
+        p.quant_bits = int(round(gguf.bits_of(p.quant))) if p.quant else 0
+        p.quant_group = 0
+        p.tools = bool(meta.get("tools")) if meta else None
+        p.thinking_switch = bool(meta.get("thinking_switch"))
+        if not p.params_b and meta.get("params"):
+            p.params_b = round(float(meta["params"]) / 1e9, 1)
+        if details.get("base_id"):
+            p.base = public_scores.base_name(str(details["base_id"]))
+        if not p.native_context and details.get("context"):
+            p.native_context = int(details["context"])
     return p
 
 

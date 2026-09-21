@@ -32,6 +32,7 @@ from . import codex_host
 from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
+from . import engines as engines_mod
 from . import profile as profile_mod
 from . import suggest as suggest_mod
 from . import migrate
@@ -580,12 +581,14 @@ async def provider_models(key: str) -> Any:
 class DeployBody(BaseModel):
     repo: str
     label: str = ""
+    quant: str = ""                                 # a GGUF quantisation, e.g. Q4_K_M
 
 
 @app.get("/api/catalog")
-async def catalog_search(q: str = "", limit: int = 30, min_b: float = 0.0, max_b: float = 0.0) -> Any:
+async def catalog_search(q: str = "", limit: int = 30, min_b: float = 0.0, max_b: float = 0.0,
+                         format: str = "mlx") -> Any:
     try:
-        return {"models": await deploy_mod.search(q, limit, min_b=min_b, max_b=max_b)}
+        return {"models": await deploy_mod.search(q, limit, min_b=min_b, max_b=max_b, fmt=format)}
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
 
@@ -603,10 +606,35 @@ async def catalog_suggest(fresh: bool = False) -> Any:
         raise HTTPException(502, f"Hugging Face: {e}")
 
 
+@app.get("/api/engines")
+def engines_list() -> Any:
+    """The programs that serve models, and whether eki has fetched them."""
+    return {"engines": engines_mod.statuses()}
+
+
+@app.post("/api/engines/{name}/install")
+async def engine_install(name: str) -> Any:
+    if name not in engines_mod.ENGINES:
+        raise HTTPException(404, "no such engine")
+    return await engine().install_engine(name)
+
+
+@app.delete("/api/engines/{name}")
+def engine_remove(name: str) -> Any:
+    if name not in engines_mod.ENGINES:
+        raise HTTPException(404, "no such engine")
+    eng = engine()
+    using = [p.key for p in eng.providers.all() if p.runtime.get("engine") == name]
+    if using:
+        raise HTTPException(409, f"still used by {', '.join(using)}")
+    engines_mod.get(name).remove()
+    return {"message": f"{engines_mod.get(name).info.title} removed"}
+
+
 @app.get("/api/catalog/fit")
-async def catalog_fit(repo: str) -> Any:
+async def catalog_fit(repo: str, quant: str = "") -> Any:
     try:
-        d = await deploy_mod.details(repo)
+        d = await deploy_mod.details(repo, quant=quant)
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
     mem = engine().models.memory()
@@ -620,7 +648,7 @@ async def catalog_fit(repo: str) -> Any:
 async def deploy_model(body: DeployBody) -> Any:
     if "/" not in body.repo:
         raise HTTPException(400, "a Hugging Face repo looks like org/name")
-    return await engine().deploy(body.repo, body.label)
+    return await engine().deploy(body.repo, body.label, body.quant)
 
 
 # ---- models behind providers ---------------------------------------------

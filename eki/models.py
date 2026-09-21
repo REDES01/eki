@@ -58,6 +58,8 @@ class LocalModel:
     context: Dict[str, Any] = field(default_factory=dict)
     #: what the build is, read from its files (see eki/profile.py)
     profile: Dict[str, Any] = field(default_factory=dict)
+    #: the engine serving it (see eki/engines), "" for a server eki didn't set up
+    engine: str = ""
 
     @property
     def pinned(self) -> bool:
@@ -294,6 +296,7 @@ class ModelManager:
             "busy": self.busy(m.key),
             "context": m.context or None,
             "profile": m.profile or None,
+            "engine": m.engine or None,
         } for m in self.models.values()]
 
     # ---- control ---------------------------------------------------------

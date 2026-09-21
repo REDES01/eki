@@ -33,6 +33,8 @@ from . import schedules as schedules_mod
 from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
+from . import engines as engines_mod
+from . import gguf as gguf_mod
 from . import bench
 from . import classify
 from . import codex_live
@@ -102,7 +104,8 @@ class Engine:
                     gb=float(r.get("gb", 0) or 0), note=r.get("note", ""),
                     backend=p.key, kind=r.get("kind", "llm"),
                     idle_minutes=float(r.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0),
-                    context=r.get("context") or {}, profile=r.get("profile") or {}))
+                    context=r.get("context") or {}, profile=r.get("profile") or {},
+                    engine=str(r.get("engine") or ("mlx" if p.kind == "mlx" and r.get("start") else ""))))
         previous = getattr(self, "models", None)
         self.models = ModelManager(local, self.cfg.memory_ceiling_gb)
         if previous is not None:                    # keep who-started-what across reloads
@@ -152,11 +155,14 @@ class Engine:
         """
         memory = self.models.memory()
         for p in providers:
-            if p.kind != "mlx" or not p.runtime.get("port") or not p.options.get("model"):
+            if p.kind not in ("mlx", "llamacpp") or not p.runtime.get("port") or not p.options.get("model"):
                 continue
             if p.runtime.get("kind", "llm") != "llm":
                 continue
-            prof = profile_mod.read(str(p.options["model"]))
+            if p.kind == "llamacpp":
+                prof = profile_mod.read_gguf(p.key, p.runtime)
+            else:
+                prof = profile_mod.read(str(p.options["model"]))
             if prof is None:
                 continue
             before = (int(p.capabilities.get("context_tokens") or 0),
@@ -186,6 +192,15 @@ class Engine:
             if before != after:
                 self.providers.upsert(p)
 
+    def _board_name(self, key: str) -> str:
+        """What to look a local model up as on the public boards: the base
+        model it was built from when the setup recorded one, else its repo,
+        else whatever the provider calls it (a GGUF's path says nothing)."""
+        p = self.providers.get(key)
+        if p is None:
+            return ""
+        return str(p.runtime.get("base_id") or p.runtime.get("repo") or p.options.get("model") or "")
+
     def _companions(self) -> None:
         """Codex driving each local model: derived, never stored.
 
@@ -202,7 +217,7 @@ class Engine:
             return
         reserved = self.settings.get("router_model") or ""
         for p in self.providers.all():
-            if (not p.enabled or p.kind not in ("mlx", "openai_compat") or not p.runtime.get("port")
+            if (not p.enabled or p.kind not in ("mlx", "llamacpp", "openai_compat") or not p.runtime.get("port")
                     or p.runtime.get("kind", "llm") != "llm" or not p.options.get("model")
                     or p.key == reserved):
                 continue
@@ -247,7 +262,7 @@ class Engine:
                     self.registry.remove(key, rec.model)
             self.registry.seen(key, "", label=info.label, context_tokens=context, klass=klass,
                                source="derived",
-                               public=public_scores.lookup(p.kind, str(p.options["model"])))
+                               public=public_scores.lookup(p.kind, self._board_name(p.key)))
 
     def _local_for(self, key: str) -> Optional[LocalModel]:
         """The local server behind a backend: its own, or the one a Codex
@@ -276,6 +291,8 @@ class Engine:
             if b.info.kind == "claude_code":
                 reading = claude_bridge.reading() or {}
                 default = str(reading.get("model") or "")
+            elif b.info.kind in ("mlx", "llamacpp"):
+                default = self._board_name(b.key)
             try:
                 found[b.key] = await discover_models.discover(b, self.registry, default)
             except Exception:                       # noqa: BLE001
@@ -452,7 +469,8 @@ class Engine:
         it happens whether or not anyone is watching.
         """
         if run.get("kind") == "deploy":
-            async for piece in self._deploy(run):
+            job = json.loads(run.get("payload") or "{}")
+            async for piece in (self._install_engine(run) if job.get("engine") else self._deploy(run)):
                 yield piece
             return
         if run.get("kind") == "measure":
@@ -1176,25 +1194,53 @@ class Engine:
             n += 1
         return f"{key}-{n}"
 
-    async def deploy(self, repo: str, label: str = "") -> Dict[str, str]:
+    async def deploy(self, repo: str, label: str = "", quant: str = "") -> Dict[str, str]:
         rid = self.runs.create(f"Set up {repo}", requested="eki", kind="deploy",
-                               payload=json.dumps({"repo": repo, "label": label}))
+                               payload=json.dumps({"repo": repo, "label": label, "quant": quant}))
         await self.runner.submit(rid)
         return {"run": rid}
 
+    async def install_engine(self, name: str) -> Dict[str, str]:
+        engine = engines_mod.get(name)
+        rid = self.runs.create(f"Get {engine.info.title}", requested="eki", kind="deploy",
+                               payload=json.dumps({"engine": name}))
+        await self.runner.submit(rid)
+        return {"run": rid}
+
+    async def _install_engine(self, run: Dict[str, Any]) -> AsyncIterator[Union[str, Dict[str, str]]]:
+        name = json.loads(run["payload"] or "{}")["engine"]
+        engine = engines_mod.get(name)
+        yield {"backend": "eki", "reason": f"getting {engine.info.title}"}
+        if engine.installed():
+            ok, detail = await engine.health()
+            yield f"{engine.info.title} is already here ({detail}).\n"
+            return
+        yield (f"Getting {engine.info.title} {engine.info.version} ({engine.info.size_mb} MB) "
+               f"from {engine.info.source} into eki's own folder…\n")
+        async for line in engine.install():
+            yield line
+
     async def _deploy(self, run: Dict[str, Any]) -> AsyncIterator[Union[str, Dict[str, str]]]:
+        """Set a model up from the Hub: identify its format, get the engine
+        that serves it (installing it into eki's own space if this is the
+        first model of that kind), size it, download it, write its start
+        script, register it, and prove it answers."""
         job = json.loads(run["payload"] or "{}")
         repo = job["repo"]
         yield {"backend": "eki", "reason": f"setting up {repo}"}
         for p in self.providers.all():
-            if p.runtime.get("repo") == repo:
+            if p.runtime.get("repo") == repo and (not job.get("quant") or p.runtime.get("quant") == job.get("quant")):
                 raise BackendError(f"{repo} is already set up as “{p.label}” ({p.key})")
         yield f"Looking up {repo}…\n"
-        d = await deploy_mod.details(repo)
+        d = await deploy_mod.details(repo, quant=job.get("quant") or "")
         if d["gated"]:
             raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
         if not d["weights_gb"]:
-            raise BackendError(f"{repo} has no safetensors weights")
+            raise BackendError(f"{repo} has no weights eki can serve (safetensors or GGUF)")
+        fmt = d["format"]
+        engine = engines_mod.for_format(fmt)
+        if engine is None:
+            raise BackendError(f"nothing here serves {fmt} models")
         mem = self.models.memory()
         room = deploy_mod.fit(d, mem.free_gb, mem.ceiling_gb)
         prof = profile_mod.from_hub(repo, d)
@@ -1208,28 +1254,51 @@ class Engine:
         if d["license"]:
             yield f"License: {d['license']}.\n"
 
-        yield f"Downloading {d['download_gb']} GB…\n"
-        async for line in deploy_mod.download(repo, int(d["download_gb"] * 1024**3)):
-            yield line
+        if not engine.installed():
+            yield (f"{engine.info.title} isn't here yet — it runs {fmt.upper()} models. "
+                   f"Getting {engine.info.title} {engine.info.version} ({engine.info.size_mb} MB) "
+                   f"into eki's own folder…\n")
+            async for line in engine.install():
+                yield line
+
+        if fmt == "gguf":
+            yield f"Downloading {d['quant']} ({d['download_gb']} GB)…\n"
+            async for line in deploy_mod.download_gguf(repo, d["chosen"]):
+                yield line
+            served = str(gguf_mod.local_path(repo, gguf_mod.first_shard(d["chosen"])))
+        else:
+            yield f"Downloading {d['download_gb']} GB…\n"
+            async for line in deploy_mod.download(repo, int(d["download_gb"] * 1024**3)):
+                yield line
+            served = repo
         yield "Downloaded.\n"
 
-        key = self.free_key(deploy_mod.slug(repo))
+        key = self.free_key(deploy_mod.slug(repo) + (f"-{d['quant'].lower()}" if fmt == "gguf" else ""))
         taken = [m.port for m in self.models.models.values()]
         port = deploy_mod.free_port(taken)
         samp = d["sampling"]
-        thinking = False if deploy_mod.has_thinking_switch(repo) else None
-        scripts = deploy_mod.write_scripts(key, repo, port, samp, thinking=thinking)
-        label = job.get("label") or repo.split("/")[-1]
-        options: Dict[str, Any] = {"base_url": f"http://127.0.0.1:{port}", "model": repo}
+        switch = prof.thinking_switch if fmt == "gguf" else deploy_mod.has_thinking_switch(repo)
+        thinking = False if switch else None
+        scripts = deploy_mod.write_scripts(key, served, port, samp, thinking=thinking,
+                                           engine_name=engine.info.name,
+                                           context=room["context"] if fmt == "gguf" else 0)
+        label = job.get("label") or (repo.split("/")[-1] + (f" {d['quant']}" if fmt == "gguf" else ""))
+        options: Dict[str, Any] = {"base_url": f"http://127.0.0.1:{port}", "model": served}
         if "temperature" in samp:
             options["temperature"] = samp["temperature"]
+        runtime: Dict[str, Any] = {"port": port, "gb": room["need_gb"], "idle_minutes": DEFAULT_IDLE_MINUTES,
+                                   "thinking": "off" if thinking is False else "n/a",
+                                   "label": label, "kind": "llm", "repo": repo, "format": fmt,
+                                   "base_id": d.get("base_id") or "", **scripts}
+        if fmt == "gguf":
+            runtime["quant"] = d["quant"]
+            runtime["profile"] = prof.as_dict()
+            # the cache's shape, for sizing the window on later loads
+            (deploy_mod.HOME / "models" / key / "config.json").write_text(json.dumps(d["config"] or {}))
         provider = Provider(
-            key=key, kind="mlx", label=label, tier=0, note="local, free",
+            key=key, kind="llamacpp" if fmt == "gguf" else "mlx", label=label, tier=0, note="local, free",
             capabilities={"context_tokens": room["context"], "text": True},
-            options=options,
-            runtime={"port": port, "gb": room["need_gb"], "idle_minutes": DEFAULT_IDLE_MINUTES,
-                     "thinking": "off" if thinking is False else "n/a",
-                     "label": label, "kind": "llm", "repo": repo, **scripts})
+            options=options, runtime=runtime)
         self.providers.upsert(provider)
         await self.reload()
         yield f"Added as “{label}” ({key}) on port {port}"

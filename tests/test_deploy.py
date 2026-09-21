@@ -47,7 +47,8 @@ def test_sampling_only_what_was_published():
 
 
 def test_scripts_turn_thinking_off_and_bind_loopback(tmp_path, monkeypatch):
-    monkeypatch.setattr(deploy, "HOME", tmp_path)
+    from eki.engines import base as engines_base
+    monkeypatch.setattr(engines_base, "MODELS", tmp_path)
     monkeypatch.setattr(settings_mod, "PATH", tmp_path / "settings.json")
     paths = deploy.write_scripts("m", "org/m-4bit", 8099, {"temperature": 0.7}, thinking=False)
     start = open(paths["start"]).read()

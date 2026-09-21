@@ -75,7 +75,31 @@ struct CatalogModel: Codable, Identifiable, Hashable {
     let likes: Int
     let task: String
     var params_b: Double? = 0
+    var format: String? = "mlx"
     var id: String { repo }
+}
+
+/// One quantisation of a GGUF repo.
+struct GGUFFile: Codable, Identifiable, Hashable {
+    let quant: String
+    let gb: Double
+    let bits: Double
+    var shards: Int? = nil
+    var id: String { quant }
+}
+
+/// A program that serves models, fetched by eki when a model needs it.
+struct EngineStatus: Codable, Identifiable, Hashable {
+    let name: String
+    let title: String
+    let formats: [String]
+    let version: String
+    let size_mb: Int
+    let source: String
+    let installed: Bool
+    let path: String
+    var note: String? = ""
+    var id: String { name }
 }
 
 /// A model worth downloading on this Mac (see eki/suggest.py).
@@ -252,6 +276,9 @@ struct ModelFit: Codable, Hashable {
     let fits: Bool                  // on this Mac at all
     var fits_now: Bool? = nil       // beside what's loaded this minute
     let verdict: String
+    var format: String? = "mlx"
+    var quant: String? = ""
+    var files: [GGUFFile]? = nil
     /// how the window was sized (see eki/context.py); nil when the repo has no config
     var window: ContextWindow? = nil
     /// what the build is, from the Hub's config and file list
@@ -328,25 +355,42 @@ extension EngineClient {
         try await decode(ProbeResult.self, "GET", "api/providers/\(key)/models")
     }
 
-    func catalog(_ query: String, minB: Double = 0, maxB: Double = 0) async throws -> [CatalogModel] {
+    func catalog(_ query: String, minB: Double = 0, maxB: Double = 0,
+                 format: String = "mlx") async throws -> [CatalogModel] {
         struct W: Codable { let models: [CatalogModel] }
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return try await decode(W.self, "GET", "api/catalog?q=\(q)&min_b=\(minB)&max_b=\(maxB)").models
+        return try await decode(W.self, "GET",
+                                "api/catalog?q=\(q)&min_b=\(minB)&max_b=\(maxB)&format=\(format)").models
+    }
+
+    func engines() async throws -> [EngineStatus] {
+        struct W: Codable { let engines: [EngineStatus] }
+        return try await decode(W.self, "GET", "api/engines").engines
+    }
+
+    func installEngine(_ name: String) async throws -> String {
+        struct W: Codable { let run: String }
+        return try await decode(W.self, "POST", "api/engines/\(name)/install").run
+    }
+
+    func removeEngine(_ name: String) async throws -> String {
+        struct W: Codable { let message: String }
+        return try await decode(W.self, "DELETE", "api/engines/\(name)").message
     }
 
     func suggestions(fresh: Bool = false) async throws -> Suggestions {
         try await decode(Suggestions.self, "GET", "api/catalog/suggest?fresh=\(fresh)")
     }
 
-    func fit(_ repo: String) async throws -> ModelFit {
+    func fit(_ repo: String, quant: String = "") async throws -> ModelFit {
         let q = repo.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repo
-        return try await decode(ModelFit.self, "GET", "api/catalog/fit?repo=\(q)")
+        return try await decode(ModelFit.self, "GET", "api/catalog/fit?repo=\(q)&quant=\(quant)")
     }
 
-    func deploy(_ repo: String, label: String) async throws -> String {
+    func deploy(_ repo: String, label: String, quant: String = "") async throws -> String {
         struct W: Codable { let run: String }
         return try await decode(W.self, "POST", "api/deploy",
-                                body: ["repo": repo, "label": label]).run
+                                body: ["repo": repo, "label": label, "quant": quant]).run
     }
 }
 
@@ -743,6 +787,8 @@ struct AddModelSheet: View {
     @State private var suggested: Suggestions?
     @State private var suggesting = true
     @State private var range = SizeRange.all
+    @State private var format = "mlx"
+    @State private var quant = ""
 
     private func admitted(_ s: Suggestion) -> Bool {
         range.admits(s.params_b ?? SizeRange.params(in: s.repo))
@@ -759,25 +805,40 @@ struct AddModelSheet: View {
                  + "writes a start script, measures it and adds it as a provider.")
                 .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Search, e.g. Qwen3.5 4B", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { Task { await search() } }
+            HStack(spacing: 8) {
+                TextField("Search, e.g. Qwen3.5 4B", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await search() } }
+                Picker("", selection: $format) {
+                    Text("MLX").tag("mlx")
+                    Text("GGUF").tag("gguf")
+                }
+                .pickerStyle(.segmented).frame(width: 130)
+                .onChange(of: format) { Task { await search() } }
+                .help("MLX builds run through Apple's MLX and are fastest here. GGUF builds run "
+                      + "through llama.cpp, which eki fetches on first use; there are more of them.")
+            }
             SizeSlider(range: $range)
                 .onChange(of: range) { Task { await search() } }
             HStack(alignment: .top, spacing: 12) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        if query.isEmpty {
+                        if query.isEmpty && format == "mlx" {
                             recommended
                             heading(results.isEmpty ? "" : "Popular", top: 10)
+                        } else if query.isEmpty {
+                            heading("Popular GGUF builds", top: 4,
+                                    help: "From the publishers who quantise the originals as they are; "
+                                        + "edited weights are left out. Served through llama.cpp.")
                         }
                         ForEach(results) { m in
                             Button {
-                                selected = m
+                                selected = m; quant = ""; fit = nil
                                 Task { await loadFit() }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(m.repo.replacingOccurrences(of: "mlx-community/", with: ""))
+                                    Text(m.format == "gguf" ? m.repo
+                                         : m.repo.replacingOccurrences(of: "mlx-community/", with: ""))
                                         .font(.system(size: 12.5))
                                         .foregroundStyle(Palette.ink)
                                     Text("\(m.downloads.formatted()) downloads")
@@ -906,6 +967,22 @@ struct AddModelSheet: View {
                         .foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if fit.format == "gguf", let files = fit.files, !files.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("Quantization").font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                            .frame(width: 84, alignment: .leading)
+                        Picker("", selection: Binding(
+                            get: { fit.quant ?? "" },
+                            set: { quant = $0; Task { await loadFit() } })) {
+                            ForEach(files) { f in
+                                Text("\(f.quant) · \(String(format: "%.1f", f.gb)) GB").tag(f.quant)
+                            }
+                        }
+                        .labelsHidden().frame(maxWidth: 220)
+                        .help("Fewer bits: smaller and faster, a little less accurate. Q4_K_M is "
+                              + "the usual choice; Q8_0 is close to the original.")
+                    }
+                }
                 row("Download", String(format: "%.1f GB", fit.download_gb))
                 row("Needs", String(format: "%.1f GB with a %dk context", fit.need_gb, fit.context / 1024))
                 if let window = fit.window {
@@ -938,7 +1015,8 @@ struct AddModelSheet: View {
                     Button("Download and set up") {
                         Task {
                             do {
-                                let run = try await model.client.deploy(selected.repo, label: "")
+                                let run = try await model.client.deploy(selected.repo, label: "",
+                                                                        quant: fit.quant ?? "")
                                 model.show(deploy: run)
                                 dismiss()
                             } catch { self.error = error.localizedDescription }
@@ -966,15 +1044,16 @@ struct AddModelSheet: View {
 
     private func search() async {
         error = ""
-        do { results = try await model.client.catalog(query, minB: range.minB, maxB: range.maxB) }
+        do { results = try await model.client.catalog(query, minB: range.minB, maxB: range.maxB,
+                                                      format: format) }
         catch { self.error = error.localizedDescription }
     }
 
     private func loadFit() async {
         guard let selected else { return }
-        loading = true; fit = nil
+        loading = fit == nil
         defer { loading = false }
-        do { fit = try await model.client.fit(selected.repo) }
+        do { fit = try await model.client.fit(selected.repo, quant: quant) }
         catch { self.error = error.localizedDescription }
     }
 }

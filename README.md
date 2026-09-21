@@ -198,6 +198,26 @@ leaves the Mac room and a useful window, and shows the board scores so the
 choice is visible. Boards are priors: once a build is measured here, that
 number is what routing uses.
 
+**Engines are fetched, not installed.** A model is a file; something has
+to run it — mlx_lm for MLX builds, llama.cpp for GGUF. eki treats those as
+extensions (`eki/engines/`): each is a manifest (what it serves, a pinned
+version, where it comes from, how big it is) and an installer that puts
+exactly that version under `~/.eki/engines`, owned by eki — no sudo,
+nothing on your PATH, nothing in your Homebrew or Python. The first model
+that needs an engine fetches it as part of its own setup, with progress in
+the thread; a checksum is verified before anything runs, and a failed check
+leaves nothing behind. Settings → Engines shows what's here. An MLX Python
+you already have (Settings → Local models) is used in preference to
+fetching one.
+
+**GGUF too.** Add Model has an MLX / GGUF switch. A GGUF repo shows its
+quantisations (Q4_K_M is the default; fewer bits is smaller and faster,
+Q8_0 is closest to the original); eki sizes the chosen one from the base
+model's config, downloads just those files, checks each against the Hub's
+sha256, and serves it with `llama-server --jinja` so tool calls work and
+Codex can drive it. On Apple Silicon an MLX build of the same model is
+usually faster; GGUF is for the models that only exist that way.
+
 What that model *is* is read from its own files, not typed in
 (`eki/profile.py`): the build's bits and group size, its weights on disk,
 its layers and how many keep a growing cache, whether its chat template

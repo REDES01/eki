@@ -77,3 +77,9 @@ class MLXBackend(Backend):
                             yield text
         except httpx.HTTPError as e:
             raise BackendError(f"mlx request failed: {e}") from e
+
+
+@register("llamacpp")
+class LlamaCppBackend(MLXBackend):
+    """llama.cpp's server speaks the same OpenAI-shaped endpoint: a GGUF
+    model set up by eki (see eki/engines/llamacpp.py) is served through it."""

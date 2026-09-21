@@ -179,6 +179,10 @@ struct LocalModelCard: View {
                     Text(row.label).font(.system(size: 13.5, weight: .medium))
                     HStack(spacing: 8) {
                         Text(":\(row.port)")
+                        if let engine = row.engine {
+                            Text(engine == "llamacpp" ? "llama.cpp" : engine == "mlx" ? "mlx_lm" : engine)
+                                .help("The engine eki serves it with")
+                        }
                         Text(String(format: "%.1f GB", row.gb))
                         if !row.note.isEmpty { Text(row.note) }
                         if let fate { Text(fate) }

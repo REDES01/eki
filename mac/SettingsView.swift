@@ -235,6 +235,15 @@ struct RoutingSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Engines") {
+                EnginesList()
+                Text("The programs that serve models. eki fetches each one — a pinned, "
+                     + "checksum-verified release into its own folder — the first time a model "
+                     + "needs it. Nothing to install by hand; remove one here when no model uses it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Local models") {
                 LabeledContent("MLX Python") {
                     TextField("", text: Binding(
@@ -248,9 +257,10 @@ struct RoutingSettings: View {
                         set: { settings.hf_home = $0 }))
                         .onSubmit(save)
                 }
-                Text("The Python environment eki runs mlx_lm with, and where downloaded "
-                     + "weights live. Each model's context window is worked out from its own "
-                     + "config and the memory beside its weights — see the Models pane.")
+                Text("An MLX Python of your own, if you'd rather eki used it than its own "
+                     + "(leave it if not sure), and where downloaded weights live. Each model's "
+                     + "context window is worked out from its own config and the memory beside "
+                     + "its weights — see the Models pane.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -270,5 +280,59 @@ struct RoutingSettings: View {
             await model.refreshProviders()
             saving = false
         }
+    }
+}
+
+
+/// Engines and whether eki has them; Get starts the fetch as a run you
+/// can watch under Models, Remove is allowed once no model uses it.
+struct EnginesList: View {
+    @EnvironmentObject var model: AppModel
+    @State private var engines: [EngineStatus] = []
+    @State private var message = ""
+
+    var body: some View {
+        ForEach(engines) { e in
+            LabeledContent {
+                HStack(spacing: 8) {
+                    Text(e.installed ? "ready" : "not fetched")
+                        .font(.system(size: 11)).foregroundStyle(e.installed ? Palette.ok : Palette.inkFaint)
+                    if e.installed {
+                        Button("Remove") {
+                            Task {
+                                do { message = try await model.client.removeEngine(e.name) }
+                                catch { message = error.localizedDescription }
+                                await load()
+                            }
+                        }.buttonStyle(GhostButton())
+                    } else {
+                        Button("Get (\(e.size_mb) MB)") {
+                            Task {
+                                do {
+                                    let run = try await model.client.installEngine(e.name)
+                                    model.show(deploy: run)
+                                } catch { message = error.localizedDescription }
+                            }
+                        }.buttonStyle(GhostButton())
+                    }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(e.title) \(e.version)")
+                    Text((e.note ?? "").isEmpty ? e.source : (e.note ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .help(e.installed ? "At \(e.path)" : "From \(e.source)")
+        }
+        if !message.isEmpty {
+            Text(message).font(.caption).foregroundStyle(.secondary)
+        }
+        Color.clear.frame(height: 0).task { await load() }
+    }
+
+    private func load() async {
+        engines = (try? await model.client.engines()) ?? engines
     }
 }

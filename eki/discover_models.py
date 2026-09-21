@@ -87,7 +87,7 @@ async def discover(backend: Backend, registry: Registry,
                   for a in claude_aliases(getattr(backend, "bin", "") or "claude")]
     elif kind == "codex":
         found += codex_models()
-    elif kind == "mlx":
+    elif kind in ("mlx", "llamacpp"):
         pass                                        # one server, one model: the default
     elif hasattr(backend, "list_models"):
         try:

@@ -147,6 +147,8 @@ struct LocalModelRow: Codable, Identifiable, Hashable {
     var context: ContextWindow? = nil
     /// what the build is, read from its files (see eki/profile.py)
     var profile: ModelProfile? = nil
+    /// which engine serves it (mlx, llamacpp); nil for servers eki didn't set up
+    var engine: String? = nil
 
     var id: String { key }
 }

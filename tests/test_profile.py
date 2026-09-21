@@ -90,3 +90,16 @@ def test_a_model_without_tool_calling_gets_no_companion(tmp_path, monkeypatch):
     assert p.capabilities["context_tokens"] == 131072                           # 30 GB free: the speed cap
     assert eng.get("codex-g") is None and "no tool calling" in eng.failed["codex-g"]
     assert eng.models.describe()[0]["profile"]["summary"].startswith("12B · 4-bit")
+
+
+def test_a_gguf_profile_from_the_hub():
+    details = {"format": "gguf", "quant": "Q4_K_M", "weights_gb": 8.38, "base_id": "Qwen/Qwen3-14B",
+               "context": 40960, "sampling": {"temperature": 0.6},
+               "gguf": {"architecture": "qwen3", "params": 14_768_307_200, "tools": True, "thinking_switch": True},
+               "config": {"model_type": "qwen3", "num_hidden_layers": 40, "num_key_value_heads": 8,
+                          "num_attention_heads": 40, "head_dim": 128, "max_position_embeddings": 40960}}
+    p = profile.from_hub("unsloth/Qwen3-14B-GGUF", details)
+    assert p.format == "gguf" and p.quant == "Q4_K_M" and p.quant_bits == 5
+    assert p.base == "qwen3-14b" and p.params_b == 14.0 and p.tools and p.thinking_switch
+    assert p.describe().startswith("14B · GGUF Q4_K_M · 8.4 GB of weights")
+    assert p.kv_per_token_kb == 160.0

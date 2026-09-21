@@ -33,6 +33,7 @@ from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
 from . import profile as profile_mod
+from . import suggest as suggest_mod
 from . import migrate
 from . import secrets
 from . import bench
@@ -585,6 +586,19 @@ class DeployBody(BaseModel):
 async def catalog_search(q: str = "", limit: int = 30) -> Any:
     try:
         return {"models": await deploy_mod.search(q, limit)}
+    except Exception as e:                          # noqa: BLE001
+        raise HTTPException(502, f"Hugging Face: {e}")
+
+
+@app.get("/api/catalog/suggest")
+async def catalog_suggest(fresh: bool = False) -> Any:
+    """Which models are worth downloading on this Mac (see eki/suggest.py)."""
+    eng = engine()
+    mem = eng.models.memory()
+    installed = [str(p.options.get("model")) for p in eng.providers.all()
+                 if p.kind == "mlx" and p.options.get("model")]
+    try:
+        return await suggest_mod.get(mem.ceiling_gb, mem.free_gb, installed, fresh=fresh)
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
 

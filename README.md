@@ -186,6 +186,18 @@ appears as a second provider, **Codex on <model>** — free, offline, edits
 files — in the running for repo work like any other, measured like any
 other, and gone when the model is removed. Nothing to register by hand.
 
+Which model to download is answered the same way, in the Add Model sheet
+under **Recommended for this Mac** (`eki/suggest.py`). Nothing else does
+this: Hugging Face and the model apps say whether a build *fits*, no one
+says whether it's *good*. eki joins the public boards (how each base model
+scores against the best there is, medium and hard tasks only), the
+mlx-community catalogue (which builds of it exist, linked to their base),
+and this Mac's memory (which builds fit, with how much context) — and
+sorts. For each base it picks the highest-precision build that still
+leaves the Mac room and a useful window, and shows the board scores so the
+choice is visible. Boards are priors: once a build is measured here, that
+number is what routing uses.
+
 What that model *is* is read from its own files, not typed in
 (`eki/profile.py`): the build's bits and group size, its weights on disk,
 its layers and how many keep a growing cache, whether its chat template

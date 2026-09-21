@@ -77,6 +77,47 @@ struct CatalogModel: Codable, Identifiable, Hashable {
     var id: String { repo }
 }
 
+/// A model worth downloading on this Mac (see eki/suggest.py).
+struct Suggestion: Codable, Identifiable, Hashable {
+    struct Other: Codable, Hashable {
+        let repo: String
+        let bits: Int
+        let need_gb: Double
+        let context: Int
+        let fits: Bool
+    }
+    let base: String
+    let name: String
+    let repo: String
+    let bits: Int
+    let weights_gb: Double
+    let need_gb: Double
+    let context: Int
+    let native: Int
+    let fits_now: Bool
+    let downloads: Int
+    let scores: [String: Double]
+    let installed: Bool
+    var label: String? = ""
+    var others: [Other]? = []
+
+    var id: String { repo }
+    var build: String { repo.replacingOccurrences(of: "mlx-community/", with: "") }
+    /// "Code 68 · Chat 78 · Math 86" — percent of the best model on the boards
+    var scoreLine: String {
+        [("code", "Code"), ("chat", "Chat"), ("math", "Math")]
+            .compactMap { key, word in scores[key].map { "\(word) \(Int(($0 * 100).rounded()))" } }
+            .joined(separator: " · ")
+    }
+}
+
+struct Suggestions: Codable {
+    let suggestions: [Suggestion]
+    let ceiling_gb: Double
+    let free_gb: Double
+    var attribution: String? = ""
+}
+
 struct ModelFit: Codable, Hashable {
     let repo: String
     let weights_gb: Double
@@ -171,6 +212,10 @@ extension EngineClient {
         struct W: Codable { let models: [CatalogModel] }
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return try await decode(W.self, "GET", "api/catalog?q=\(q)").models
+    }
+
+    func suggestions(fresh: Bool = false) async throws -> Suggestions {
+        try await decode(Suggestions.self, "GET", "api/catalog/suggest?fresh=\(fresh)")
     }
 
     func fit(_ repo: String) async throws -> ModelFit {
@@ -575,6 +620,8 @@ struct AddModelSheet: View {
     @State private var fit: ModelFit?
     @State private var loading = false
     @State private var error = ""
+    @State private var suggested: Suggestions?
+    @State private var suggesting = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -593,6 +640,14 @@ struct AddModelSheet: View {
             HStack(alignment: .top, spacing: 12) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
+                        if query.isEmpty {
+                            recommended
+                            Text("Popular")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(Palette.inkFaint)
+                                .textCase(.uppercase)
+                                .padding(.horizontal, 9).padding(.top, 10).padding(.bottom, 2)
+                        }
                         ForEach(results) { m in
                             Button {
                                 selected = m
@@ -619,14 +674,73 @@ struct AddModelSheet: View {
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
                 .overlay(RoundedRectangle(cornerRadius: Metric.radius)
                     .strokeBorder(Palette.hairline, lineWidth: 1))
-                .frame(width: 270)
+                .frame(width: 300)
                 fitPanel.frame(maxWidth: .infinity, alignment: .topLeading)
             }
             if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger) }
         }
         .padding(22)
-        .frame(width: 640, height: 520)
+        .frame(width: 680, height: 560)
         .task { await search() }
+        .task { await loadSuggestions() }
+    }
+
+    /// The models worth having on this Mac: the boards' quality, the
+    /// catalogue's builds, this machine's memory — joined by the engine.
+    @ViewBuilder private var recommended: some View {
+        HStack(spacing: 6) {
+            Text("Recommended for this Mac")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Palette.inkFaint)
+                .textCase(.uppercase)
+            if suggesting { ProgressView().controlSize(.mini) }
+            Spacer()
+        }
+        .padding(.horizontal, 9).padding(.top, 4).padding(.bottom, 2)
+        .help("Ranked by public benchmark results for the base model, among builds that fit "
+              + "in this Mac's memory. Once a model is measured here, that number takes over.")
+        if let suggested {
+            ForEach(suggested.suggestions) { s in
+                Button {
+                    selected = CatalogModel(repo: s.repo, downloads: s.downloads, likes: 0, task: "text-generation")
+                    Task { await loadFit() }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(s.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink)
+                            if let label = s.label, !label.isEmpty {
+                                Tag(text: label, color: Palette.accent)
+                            }
+                            if s.installed { Tag(text: "installed", color: Palette.ok) }
+                        }
+                        Text("\(s.bits)-bit · \(String(format: "%.1f", s.need_gb)) GB · up to \(s.context / 1024)k context"
+                             + (s.fits_now ? "" : " · room needed"))
+                            .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                        if !s.scoreLine.isEmpty {
+                            Text(s.scoreLine).font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 9).padding(.vertical, 6)
+                    .background(selected?.repo == s.repo ? Palette.fill : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if suggested.suggestions.isEmpty && !suggesting {
+                Text("Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
+                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .padding(.horizontal, 9)
+            }
+        }
+    }
+
+    private func loadSuggestions() async {
+        suggesting = true
+        defer { suggesting = false }
+        do { suggested = try await model.client.suggestions() }
+        catch { self.error = error.localizedDescription }
     }
 
     @ViewBuilder private var fitPanel: some View {

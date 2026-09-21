@@ -157,6 +157,15 @@ def size_slots(graph: Graph) -> List[Tuple[str, str]]:
     return out
 
 
+def batch_slots(graph: Graph) -> List[Tuple[str, str]]:
+    """Every literal batch_size: where "four of them" goes. Read off the graph
+    each time rather than bound once, so workflows added before eki drew in
+    batches need nothing done to them. A graph without one (it starts from a
+    loaded picture, say) can still be queued that many times."""
+    return [(nid, "batch_size") for nid, n in graph.items()
+            if isinstance((n.get("inputs") or {}).get("batch_size"), int)]
+
+
 # ---- checking against a ComfyUI ---------------------------------------------
 
 def problems(graph: Graph, object_info: Dict[str, Any]) -> List[str]:
@@ -195,8 +204,11 @@ def files_available(object_info: Dict[str, Any]) -> Dict[str, List[str]]:
 
 def fill(graph: Graph, b: Bindings, *, prompt: str, negative: str = "", width: int = 0,
          height: int = 0, seed: Optional[int] = None, steps: int = 0, image: str = "",
-         prefix: str = "eki") -> Graph:
+         prefix: str = "eki", batch: int = 0) -> Graph:
     g = json.loads(json.dumps(graph))
+    if batch:
+        for nid, k in batch_slots(g):
+            g[nid]["inputs"][k] = batch
     if b.prompt:
         g[b.prompt.node]["inputs"][b.prompt.input] = prompt
     if b.negative and negative:

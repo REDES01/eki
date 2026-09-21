@@ -40,6 +40,7 @@ from . import bench
 from . import classify
 from . import codex_live
 from . import discover_models
+from . import imagespec
 from . import live
 from . import measure
 from . import measure_images
@@ -407,7 +408,8 @@ class Engine:
     # ---- asking ------------------------------------------------------
 
     async def ask(self, prompt: str, *, conversation: str = "", backend_key: str = "",
-                  repo: str = "", images: bool = False) -> Dict[str, str]:
+                  repo: str = "", images: bool = False,
+                  image: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
@@ -415,8 +417,11 @@ class Engine:
         """
         cid = conversation or self.store.new_conversation()
         turn = self.store.add_turn(cid, "user", prompt)
+        # a size or a count given outright, beside the words (see imagespec)
+        image = {k: v for k, v in (image or {}).items() if v}
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
-                               requested=backend_key, images=images, user_turn=turn)
+                               requested=backend_key, images=images or bool(image), user_turn=turn,
+                               payload=json.dumps({"image": image}) if image else "")
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
@@ -558,17 +563,40 @@ class Engine:
             kw["cwd"] = run["cwd"]
         # "make it bluer", said to a picture: the image model is handed the
         # picture to change. "try again" repeats whatever made it, anew.
-        drawn: Dict[str, str] = {}
+        drawn: Dict[str, Any] = {}
         if backend.info.capabilities.images_out and not backend.info.capabilities.text:
-            drawn = {"prompt": run["prompt"], "source": ""}
+            # "four of them, at 1536x1024" is about the paper, not the picture:
+            # taken out of what the model reads, and handed over as numbers
+            said = imagespec.read(run["prompt"])
+            paper = said.as_dict()
+            words = said.prompt
+            drawn = {"prompt": words or run["prompt"], "source": ""}
             follow = classify.image_followup(run["prompt"]) if shown else ""
             if follow == "edit":
                 drawn["source"] = shown["path"]
             elif follow == "redo" and shown.get("prompt"):
                 drawn = {"prompt": shown["prompt"], "source": shown.get("source", "")}
+                # the same again means the same paper, unless this names another:
+                # a new size or shape replaces the old one, whichever it was
+                before = dict(shown.get("paper") or {})
+                if "width" in paper or "aspect" in paper:
+                    for k in ("width", "height", "aspect"):
+                        before.pop(k, None)
+                paper = {**before, **paper}
             if drawn["source"] and not os.path.isfile(drawn["source"]):
                 drawn["source"] = ""
+            # what the app sent outright (a size picker, the API) wins over words
+            try:
+                paper.update({k: v for k, v in (json.loads(run.get("payload") or "{}").get("image") or {}).items()
+                              if k in ("width", "height", "aspect", "batch") and v})
+            except (TypeError, ValueError, AttributeError):
+                pass
+            if paper.get("width") and paper.get("height"):
+                paper.pop("aspect", None)
             kw["prompt"] = drawn["prompt"]
+            kw.update(paper)
+            if paper:
+                drawn["paper"] = paper
             if drawn["source"]:
                 kw["edit"] = drawn["source"]
         resumed = self.store.session(cid, backend.key) if cid else None
@@ -998,7 +1026,7 @@ class Engine:
 
     _PICTURE = re.compile(r"!\[[^\]]*\]\(([^)\s]+\.(?:png|jpe?g|webp))\)", re.I)
 
-    def _picture_before(self, run: Dict[str, Any]) -> Dict[str, str]:
+    def _picture_before(self, run: Dict[str, Any]) -> Dict[str, Any]:
         """The picture this request was said to, if the last answer was one.
 
         Only the answer immediately before counts: once the thread has moved
@@ -1027,7 +1055,8 @@ class Engine:
         asked = next((t["content"] for t in reversed(before)
                       if t["role"] == "user" and t["id"] < last["id"]), "")
         return {"path": unquote(found[-1]), "prompt": made.get("prompt") or asked,
-                "source": made.get("source") or ""}
+                "source": made.get("source") or "",
+                "paper": made.get("paper") if isinstance(made.get("paper"), dict) else {}}
 
     async def _label(self, run: Dict[str, Any], after_image: bool = False) -> classify.Label:
         """What kind of request this is. Never allowed to fail a run."""

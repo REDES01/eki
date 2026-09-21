@@ -233,6 +233,22 @@ posts it. Results come back through ComfyUI's own API into `~/.eki/images`,
 so its output folder is nobody's business. A workflow with a LoadImage
 node can edit pictures as well as draw them.
 
+How big and how many are said in the request, in words (`eki/imagespec.py`):
+*draw 4 images of a red fox at 1536x1024*, *…, 16:9*, *…in portrait
+orientation*, *a robot, x4*, *画4张…*. Those words are taken out before the
+model reads the rest — handed "four images of a fox" it draws four foxes —
+and go into the graph as numbers: a size is brought onto the 32-pixel grid
+and under the provider's pixel limit keeping its shape, a shape alone is cut
+from as many pixels as the model usually draws, and a count fills the graph's
+`batch_size` (a workflow without one is queued that many times, seeds apart).
+After a picture, *4 more*, *try again at 1280x720* or *same but 16:9* repeat
+what made it on the new paper. Only plain statements count: *4k* is a
+quality tag, *a portrait of a sailor* is a subject. `POST /api/ask` takes
+`width`, `height` and `batch` outright, which win over the words, and a
+provider's defaults and limits (`width`, `height`, `batch`, `max_batch` — 8 —
+and `max_pixels` — 2048² —) are set with `PATCH /api/providers/<key>`
+`{"options": {…}}`.
+
 Image models are measured too (`eki/measure_images.py`): twelve fixed
 prompts whose success is a list of plain facts — is there a cat, is it
 left of the dog, are there exactly three apples, does the sign say OPEN —

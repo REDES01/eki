@@ -191,6 +191,11 @@ class AskBody(BaseModel):
     backend: str = ""
     repo: str = ""
     images: bool = False
+    # a picture's size and how many, given outright; the words of the prompt
+    # ("4 images… at 1536x1024") say the same thing without these
+    width: int = 0
+    height: int = 0
+    batch: int = 0
 
 
 class PolicyBody(BaseModel):
@@ -208,7 +213,8 @@ async def ask(body: AskBody) -> Any:
         raise HTTPException(400, "empty prompt")
     return await engine().ask(body.prompt, conversation=body.conversation,
                               backend_key=body.backend, repo=body.repo,
-                              images=body.images)
+                              images=body.images,
+                              image={"width": body.width, "height": body.height, "batch": body.batch})
 
 
 @app.get("/api/runs")
@@ -430,6 +436,12 @@ class ProviderPatch(BaseModel):
     api_key: Optional[str] = None
     capabilities: Optional[Dict[str, Any]] = None
     runtime: Optional[Dict[str, Any]] = None
+    options: Optional[Dict[str, Any]] = None        # only the keys in TUNABLE
+
+
+#: What may be changed about a provider after it's added, by kind: for an image
+#: model, the size and count it draws when a request names neither, and its limits.
+TUNABLE = {"comfyui": ("width", "height", "batch", "max_batch", "max_pixels", "steps", "timeout_seconds")}
 
 
 def _provider_view(p: providers_mod.Provider, status: Dict[str, Any]) -> Dict[str, Any]:
@@ -611,6 +623,14 @@ async def provider_patch(key: str, body: ProviderPatch) -> Any:
         p.capabilities.update(body.capabilities)
     if body.runtime is not None:
         p.runtime.update(body.runtime)
+    if body.options is not None:
+        refused = sorted(set(body.options) - set(TUNABLE.get(p.kind, ())))
+        if refused:
+            raise HTTPException(400, f"can't change {', '.join(refused)} on a {p.kind} provider")
+        for k, v in body.options.items():
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+                raise HTTPException(400, f"{k} must be a number")
+            p.options[k] = v
     if body.api_key:
         secrets.put(key, body.api_key)
         p.options["secret"] = True

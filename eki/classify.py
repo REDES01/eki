@@ -23,6 +23,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from . import imagespec
+
 TASKS = ("chat", "writing", "translate", "code", "repo", "math", "research", "image")
 DIFFICULTIES = ("easy", "medium", "hard")
 #: past this, the rules' answer is used instead — a label is not worth a wait
@@ -102,6 +104,9 @@ _REDO_IMAGE = re.compile(
     r"(give me |make |show me |do |try )?(another|a different|a new)"
     r"( one| version| take| variation| try)?|再来一(张|張|次|个)|再画一(张|張)|重新(生成|画)|"
     r"もう一(枚|度|回)|やり直して?)(,? please)?\W*$", re.I)
+#: all that is left of "same but 16:9" or "now in portrait" once the paper is set aside
+_SAME_AGAIN = re.compile(r"^\W*((the )?same( (one|thing|image|picture|prompt))?|again|now|but|and|also|"
+                         r"this time|please|同样|同樣|一样|一樣|同じ|\s)*\W*$", re.I)
 _BACKREF = re.compile(r"\b(same|it|this one|that one|the (last|previous) (one|image|picture))\b"
                       r"|这张|這張|那张|那張|刚才|剛才|さっき|この|その", re.I)
 _QUESTION = re.compile(r"^\s*(what|why|how|which|who|where|when|is|are|was|does|did|do)\b", re.I)
@@ -117,6 +122,13 @@ def image_followup(prompt: str) -> str:
     text = prompt.strip()
     if not text or len(text) > 400:
         return ""
+    # "4 more", "try again at 1280x720", "same but 16:9": the size and the
+    # count are about the paper; what is left says which of the two this is
+    said = imagespec.read(text)
+    if said.as_dict():
+        if _SAME_AGAIN.match(said.prompt):
+            return "redo"
+        text = said.prompt
     if _REDO_IMAGE.match(text):
         return "redo"
     if _CODE.search(text) or _ABOUT_IMAGE.search(text) or _QUESTION.match(text):

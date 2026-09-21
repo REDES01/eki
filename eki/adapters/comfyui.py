@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import random
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -24,7 +25,7 @@ from .base import Backend, BackendError, Health, Message, register
 
 
 def flux2_graph(prompt: str, width: int, height: int, steps: int,
-                seed: int, prefix: str) -> Dict[str, Any]:
+                seed: int, prefix: str, batch: int = 1) -> Dict[str, Any]:
     """The FLUX.2-klein text-to-image graph, as ComfyUI wants it posted."""
     return {
         "1": {"class_type": "UNETLoader",
@@ -46,7 +47,7 @@ def flux2_graph(prompt: str, width: int, height: int, steps: int,
         "8": {"class_type": "Flux2Scheduler",
               "inputs": {"steps": steps, "width": width, "height": height}},
         "9": {"class_type": "EmptyFlux2LatentImage",
-              "inputs": {"width": width, "height": height, "batch_size": 1}},
+              "inputs": {"width": width, "height": height, "batch_size": batch}},
         "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
         "11": {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["10", 0], "guider": ["6", 0], "sampler": ["7", 0],
@@ -58,7 +59,7 @@ def flux2_graph(prompt: str, width: int, height: int, steps: int,
 
 
 def flux2_edit_graph(prompt: str, image: str, steps: int, seed: int,
-                     prefix: str) -> Dict[str, Any]:
+                     prefix: str, batch: int = 1) -> Dict[str, Any]:
     """FLUX.2-klein told to change a picture it is shown, rather than draw one.
 
     The picture rides along as a reference latent on the conditioning; the
@@ -66,7 +67,7 @@ def flux2_edit_graph(prompt: str, image: str, steps: int, seed: int,
     ("remove the hat") instead of img2img's blend. The source is brought to
     about a megapixel on a 64px grid — the grid is not optional — and the
     output takes its size from that, so an edit keeps the original's shape."""
-    graph = flux2_graph(prompt, 1024, 1024, steps, seed, prefix)
+    graph = flux2_graph(prompt, 1024, 1024, steps, seed, prefix, batch)
     graph.update({
         "20": {"class_type": "LoadImage", "inputs": {"image": image}},
         "21": {"class_type": "ImageScaleToTotalPixels",
@@ -85,6 +86,30 @@ def flux2_edit_graph(prompt: str, image: str, steps: int, seed: int,
     return graph
 
 
+#: Latents are an eighth of the picture and the newer models patch them 2×2
+#: again on top of their own strides; 32 is the grid every family here accepts.
+GRID = 32
+
+
+def fit_size(width: int, height: int, max_pixels: int) -> Tuple[int, int]:
+    """The nearest size a model will take: on the grid, no side absurd, and —
+    keeping its shape — no more pixels than this Mac is allowed to be asked for."""
+    width, height = max(1, int(width)), max(1, int(height))
+    if max_pixels and width * height > max_pixels:
+        scale = math.sqrt(max_pixels / (width * height))
+        width, height = width * scale, height * scale
+
+    def snap(v: float) -> int:
+        return min(4096, max(256, int(v / GRID + 0.5) * GRID))
+    width, height = snap(width), snap(height)
+    while max_pixels and width * height > max_pixels and max(width, height) > 256:
+        if width >= height:
+            width -= GRID
+        else:
+            height -= GRID
+    return width, height
+
+
 @register("comfyui")
 class ComfyBackend(Backend):
     def __init__(self, info, options: Dict[str, Any]):
@@ -96,6 +121,11 @@ class ComfyBackend(Backend):
         self.height = int(self.options.get("height", 1024))
         self.steps = int(self.options.get("steps", 0))
         self.timeout = float(self.options.get("timeout_seconds", 300))
+        # how many to draw when the request doesn't say, the most it may ask
+        # for, and the most pixels in one picture (2048² unless told otherwise)
+        self.batch = max(1, int(self.options.get("batch", 1) or 1))
+        self.max_batch = max(1, int(self.options.get("max_batch", 8) or 8))
+        self.max_pixels = int(self.options.get("max_pixels", 2048 * 2048) or 0)
         self._client: Optional[httpx.AsyncClient] = None
         # a workflow of the user's (see eki/workflow.py); without one, the
         # built-in FLUX.2-klein graph
@@ -154,10 +184,24 @@ class ComfyBackend(Backend):
         got = r.json()
         return os.path.join(got.get("subfolder") or "", got.get("name") or name)
 
+    def _size(self, kw: Dict[str, Any]) -> Tuple[int, int]:
+        """The size asked for outright; or a shape, cut from as many pixels as
+        this model usually draws; or what it usually draws."""
+        width, height = int(kw.get("width") or 0), int(kw.get("height") or 0)
+        aspect = float(kw.get("aspect") or 0)
+        if not (width and height):
+            width, height = self.width, self.height
+            if aspect > 0:
+                width = math.sqrt(self.width * self.height * aspect)
+                height = width / aspect
+        return fit_size(width, height, self.max_pixels)
+
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
         """``prompt`` overrides the last user message (a "try again" is drawn
         from the request it repeats, not from those two words); ``edit`` is
-        the path of a picture to change instead of starting from nothing."""
+        the path of a picture to change instead of starting from nothing;
+        ``width``/``height`` (or ``aspect``, width over height) and ``batch``
+        are the size and the count, when the request named them."""
         prompt = kw.get("prompt") or next(
             (m.content for m in reversed(messages) if m.role == "user"), "")
         if not prompt:
@@ -166,49 +210,64 @@ class ComfyBackend(Backend):
         seed = int(kw.get("seed") or random.randint(0, 2**31 - 1))
         prefix = f"eki_{int(time.time())}"
         source = kw.get("edit") or ""
+        width, height = self._size(kw)
+        count = min(self.max_batch, max(1, int(kw.get("batch") or self.batch)))
         own, bindings = self._workflow()
         if own is not None:
             from .. import workflow
             if source and not bindings.image:
                 raise BackendError(f"{self.title or 'this workflow'} has no LoadImage node, so it can't edit a picture")
-            graph = workflow.fill(own, bindings, prompt=prompt, width=self.width, height=self.height,
-                                  seed=seed, steps=self.steps,
-                                  image=await self._upload(source) if source else "", prefix=prefix)
+            image = await self._upload(source) if source else ""
+            # one graph drawing them all where it has a batch_size to set;
+            # otherwise the same graph queued once per picture, seeds apart
+            together = count == 1 or bool(workflow.batch_slots(own))
+            graphs = [workflow.fill(own, bindings, prompt=prompt, width=width, height=height,
+                                    seed=seed + i, steps=self.steps, image=image, prefix=prefix,
+                                    batch=count if together else 0)
+                      for i in range(1 if together else count)]
             what = self.title or "workflow"
         elif source:
-            graph = flux2_edit_graph(prompt, await self._upload(source), self.steps or 4, seed, prefix)
+            graphs = [flux2_edit_graph(prompt, await self._upload(source), self.steps or 4, seed, prefix, count)]
             what = "flux-2-klein"
         else:
-            graph = flux2_graph(prompt, self.width, self.height, self.steps or 4, seed, prefix)
+            graphs = [flux2_graph(prompt, width, height, self.steps or 4, seed, prefix, count)]
             what = "flux-2-klein"
 
-        try:
-            r = await self.client().post(f"{self.base}/prompt",
-                                         json={"prompt": graph})
-        except httpx.HTTPError as e:
-            raise BackendError(f"ComfyUI unreachable: {e}") from e
-        if r.status_code >= 400:
-            # ComfyUI validates the whole graph and says exactly what it hated
-            raise BackendError(f"ComfyUI rejected the graph: {r.text[:300]}")
-        pid = r.json().get("prompt_id")
-        if not pid:
-            raise BackendError("ComfyUI accepted nothing")
+        pids = []
+        for graph in graphs:
+            try:
+                r = await self.client().post(f"{self.base}/prompt",
+                                             json={"prompt": graph})
+            except httpx.HTTPError as e:
+                raise BackendError(f"ComfyUI unreachable: {e}") from e
+            if r.status_code >= 400:
+                # ComfyUI validates the whole graph and says exactly what it hated
+                raise BackendError(f"ComfyUI rejected the graph: {r.text[:300]}")
+            pid = r.json().get("prompt_id")
+            if not pid:
+                raise BackendError("ComfyUI accepted nothing")
+            pids.append(pid)
 
         steps = f" · {self.steps} steps" if self.steps else ""
+        many = f"{count} × " if count > 1 else ""
         if source:
-            yield f"{what} · editing {os.path.basename(source)}{steps} · seed {seed}\n"
+            yield f"{what} · {many}editing {os.path.basename(source)}{steps} · seed {seed}\n"
         else:
-            yield f"{what} · {self.width}×{self.height}{steps} · seed {seed}\n"
+            yield f"{what} · {many}{width}×{height}{steps} · seed {seed}\n"
 
-        images = await self._await_result(pid)
-        if not images:
-            raise BackendError("ComfyUI finished without producing an image")
+        # more pictures, or bigger ones, are given proportionally longer
+        patience = self.timeout * count * max(1.0, width * height / max(1, self.width * self.height))
         # Markdown, with the file's real path: the app shows the picture, the
         # terminal shows where it is, and the transcript stays plain text
         alt = " ".join(prompt.split())[:80].replace("[", "(").replace("]", ")")
-        for name in images:
-            path = await self._fetch(name)
-            yield f"\n![{alt}]({path.replace(' ', '%20')})\n"
+        drawn = 0
+        for pid in pids:
+            for name in await self._await_result(pid, patience):
+                drawn += 1
+                path = await self._fetch(name)
+                yield f"\n![{alt}]({path.replace(' ', '%20')})\n"
+        if not drawn:
+            raise BackendError("ComfyUI finished without producing an image")
 
     async def _fetch(self, name: str) -> str:
         """The picture, from ComfyUI itself, into eki's own folder — so where
@@ -229,9 +288,9 @@ class ComfyBackend(Backend):
             pass
         return os.path.join(self.output_dir, name)
 
-    async def _await_result(self, pid: str) -> List[str]:
+    async def _await_result(self, pid: str, timeout: float = 0) -> List[str]:
         """Poll the history until this prompt has outputs (or the clock runs out)."""
-        deadline = time.time() + self.timeout
+        deadline = time.time() + (timeout or self.timeout)
         unreachable = 0
         while time.time() < deadline:
             await asyncio.sleep(1.0)

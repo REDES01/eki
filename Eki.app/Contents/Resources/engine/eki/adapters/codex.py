@@ -1,0 +1,136 @@
+"""Codex CLI, driven as a subprocess.
+
+Same rule as Claude Code: run the genuine binary under your own login, never
+extract or re-serve its token.
+
+`codex exec --json` prints one event per line. The event vocabulary has
+changed between releases — `-a untrusted` vanished under us once already — so
+the parser reads defensively: it looks for text in any of the shapes seen in
+the wild and ignores what it doesn't recognise, rather than assuming a schema.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import shutil
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+from . import _codex_events as events
+from .base import Backend, BackendError, Health, Message, register
+
+
+def _find_binary(name: str) -> Optional[str]:
+    if os.path.isabs(name):
+        return name if os.access(name, os.X_OK) else None
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in ("~/.local/bin", "~/.codex/bin", "/opt/homebrew/bin", "/usr/local/bin"):
+        cand = os.path.join(os.path.expanduser(d), name)
+        if os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+@register("codex")
+class CodexBackend(Backend):
+    def __init__(self, info, options: Dict[str, Any]):
+        super().__init__(info, options)
+        self.bin = _find_binary(self.options.get("binary", "codex"))
+        self.model = self.options.get("model")
+        self.sandbox = self.options.get("sandbox", "read-only")
+        self.disabled_features = list(self.options.get("disable_features", []))
+        self.timeout = float(self.options.get("timeout_seconds", 900))
+        self.last_session: Optional[str] = None
+        self.last_usage: Dict[str, Any] = {}
+
+    async def health(self) -> Health:
+        if not self.bin:
+            return Health(False, "codex not found on PATH")
+        proc = await asyncio.create_subprocess_exec(
+            self.bin, "--version",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return Health(False, "codex --version failed")
+        return Health(True, out.decode().strip())
+
+    async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
+        if not self.bin:
+            raise BackendError("codex not found — install Codex CLI and `codex login`")
+        prompt = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        if not prompt:
+            raise BackendError("no user message to send")
+
+        cwd = kw.get("cwd") or self.options.get("cwd")
+        sandbox = "workspace-write" if cwd else self.sandbox
+        # outside a git repo Codex refuses unless told to skip the check;
+        # for a chat turn there is no repo to trust
+        resume = kw.get("resume") or self.options.get("resume")
+        argv = [self.bin, "exec", "--json", "-s", sandbox]
+        if resume:
+            argv = [self.bin, "exec", "resume", resume, "--json", "-s", sandbox]
+        if not cwd:
+            argv.append("--skip-git-repo-check")
+        if self.model:
+            argv += ["-m", self.model]
+        for feature in self.disabled_features:
+            # a feature whose helper binary isn't installed fails closed and
+            # the model then reports it cannot edit anything
+            argv += ["--disable", feature]
+        argv.append(prompt)
+
+        proc = await asyncio.create_subprocess_exec(
+            *argv, cwd=cwd,
+            # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
+            # input instead of answering ("Reading additional input from stdin")
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+        seen_any = False
+        last_error = ""
+        finished = False
+        try:
+            while True:
+                line = await asyncio.wait_for(proc.stdout.readline(),
+                                              timeout=self.timeout)
+                if not line:
+                    break
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                sid = events.session_id(event)
+                if sid:
+                    self.last_session = sid
+                counts = events.usage(event)
+                if counts:
+                    self.last_usage = counts
+                text, err = events.read(event)
+                if text:
+                    seen_any = True
+                    yield text
+                elif err:
+                    # non-fatal item errors (a missing optional host, say) are
+                    # noise unless nothing else arrives
+                    last_error = err
+            finished = True
+        except asyncio.TimeoutError as e:
+            raise BackendError("codex timed out") from e
+        finally:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    proc.kill()
+            try:
+                err = (await proc.stderr.read())[:300].decode("utf-8", "replace").strip()
+            except Exception:                       # noqa: BLE001
+                err = ""
+            # only complain about silence when the stream really ended; a
+            # cancelled job closes this generator, and raising there would
+            # replace the cancellation with a bogus failure
+            if finished and not seen_any:
+                raise BackendError(last_error or err or "codex produced no output")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from hub.store import Store
+from eki.store import Store
 
 
 def test_thread_can_mix_backends(tmp_path):

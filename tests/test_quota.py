@@ -14,10 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from hub.quota import QuotaBoard, Reading, Window
-from hub.quota import claude as claude_quota
-from hub.quota import claude_bridge, statusline_bridge
-from hub.quota import codex as codex_quota
+from eki.quota import QuotaBoard, Reading, Window
+from eki.quota import claude as claude_quota
+from eki.quota import claude_bridge, statusline_bridge
+from eki.quota import codex as codex_quota
 
 NOW = 1_800_000_000
 
@@ -73,7 +73,7 @@ def test_codex_windows_are_sorted_by_length_not_name():
     (3 * 86400, "3D"), (None, "fallback"),
 ])
 def test_windows_are_named_by_their_real_length(seconds, label):
-    from hub.quota import label_for
+    from eki.quota import label_for
     assert label_for(seconds, "fallback") == label
 
 

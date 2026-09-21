@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Sign Hub.app — ad-hoc by default, properly when a Developer ID is set.
+# Sign Eki.app — ad-hoc by default, properly when a Developer ID is set.
 #
-#   ./sign.sh Hub.app
-#   DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./sign.sh Hub.app
-#   … plus NOTARY_PROFILE=hub to notarise and staple.
+#   ./sign.sh Eki.app
+#   DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" ./sign.sh Eki.app
+#   … plus NOTARY_PROFILE=eki to notarise and staple.
 #
 # Without a Developer ID the app still runs: macOS asks once, and the user
 # opens it from System Settings → Privacy & Security → Open Anyway. With one,
 # it opens like anything else. Nothing else about the build changes, so the
 # switch is one environment variable on release day.
 set -euo pipefail
-APP="${1:-Hub.app}"
+APP="${1:-Eki.app}"
 ID="${DEVELOPER_ID:--}"
-ENTITLEMENTS="$(dirname "$0")/hub.entitlements"
+ENTITLEMENTS="$(dirname "$0")/eki.entitlements"
 
 # Inside out: every Mach-O inside the bundle with the same identity, then the
 # bundle itself. Mixing identities — or ad-hoc with signed — makes dyld refuse

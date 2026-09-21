@@ -141,17 +141,17 @@ final class AppModel: ObservableObject {
             }
         }
         engine = .down("The engine didn't answer on 127.0.0.1:8787 — "
-                       + "`hub agent status` will say why.")
+                       + "`eki agent status` will say why.")
     }
 
     @discardableResult
     private func kickLaunchAgent(force: Bool = false) -> Bool {
         let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/local.hub.engine.plist")
+            .appendingPathComponent("Library/LaunchAgents/local.eki.engine.plist")
         guard force || FileManager.default.fileExists(atPath: plist.path) else { return false }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        task.arguments = ["kickstart", "-k", "gui/\(getuid())/local.hub.engine"]
+        task.arguments = ["kickstart", "-k", "gui/\(getuid())/local.eki.engine"]
         try? task.run()
         task.waitUntilExit()
         return task.terminationStatus == 0
@@ -160,15 +160,15 @@ final class AppModel: ObservableObject {
     /// Only when there is no login agent. Returns an error, or nil on success.
     private func spawnEngine() -> String? {
         guard let root = Self.projectRoot() else {
-            return "Couldn't find the hub project next to the app."
+            return "Couldn't find the eki project next to the app."
         }
         let python = root.appendingPathComponent(".venv/bin/python")
         guard FileManager.default.isExecutableFile(atPath: python.path) else {
-            return "No virtualenv at \(python.path) — run ./hub.sh once."
+            return "No virtualenv at \(python.path) — run ./eki.sh once."
         }
         let task = Process()
         task.executableURL = python
-        task.arguments = ["-m", "hub.cli", "serve"]
+        task.arguments = ["-m", "eki.cli", "serve"]
         task.currentDirectoryURL = root
         // not held onto: the engine outlives the app, and so does its work
         do { try task.run() } catch { return error.localizedDescription }
@@ -179,10 +179,10 @@ final class AppModel: ObservableObject {
     static func projectRoot() -> URL? {
         let candidates = [
             Bundle.main.bundleURL.deletingLastPathComponent(),
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("hub"),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("eki"),
         ]
         return candidates.first {
-            FileManager.default.fileExists(atPath: $0.appendingPathComponent("hub/cli.py").path)
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent("eki/cli.py").path)
         }
     }
 

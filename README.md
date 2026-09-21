@@ -1,8 +1,8 @@
-# hub
+# eki
 
 One place to ask, whatever ends up answering.
 
-hub is a small Mac app and a local engine. You type a question; it works out
+eki is a small Mac app and a local engine. You type a question; it works out
 what the question *is* — a quick lookup, a translation, a change to your code,
 a picture — and sends it to the cheapest thing on hand that can actually do it:
 a model running on your own Mac, the Claude Code or Codex CLI you already pay
@@ -14,21 +14,21 @@ mid-answer and the answer still finishes. Open it again and you are looking at
 the same run, replayed from the first word.
 
 - **Local first.** A model on your Mac costs nothing and leaves nothing
-  behind. hub reaches for it whenever it's good enough, starts it on demand,
+  behind. eki reaches for it whenever it's good enough, starts it on demand,
   and unloads it when you haven't used it for a while.
 - **Nothing is hidden.** Every answer says which backend produced it and why
   that one. Usage against your Claude and Codex limits lives in the app and,
   if you want, in the menu bar.
-- **Your credentials stay yours.** hub runs *your* installed CLIs as you. It
+- **Your credentials stay yours.** eki runs *your* installed CLIs as you. It
   never reads, copies or reuses their logins, and it stores no login of its
   own for them. API keys you paste go into the macOS Keychain, never into
-  hub's database or config.
+  eki's database or config.
 
 macOS on Apple silicon, for now.
 
 ## Install
 
-Download `Hub-<version>.zip` from Releases, unzip, drag `Hub.app` to
+Download `Eki-<version>.zip` from Releases, unzip, drag `Eki.app` to
 Applications, open it. The app carries its own Python and engine — there is
 nothing else to install.
 
@@ -36,19 +36,19 @@ Builds that aren't signed with an Apple Developer ID (including anything you
 build yourself) need one extra step the first time: **System Settings →
 Privacy & Security → Open Anyway**.
 
-On first launch hub offers to
+On first launch eki offers to
 
 1. keep the engine running at login (a launch agent — the work outlives the
    window),
 2. add what it finds on this Mac: Claude Code, Codex, an MLX server, Ollama,
    LM Studio, ComfyUI,
-3. install a `hub` command for the terminal.
+3. install a `eki` command for the terminal.
 
 None of the three is required.
 
 ## Using it
 
-Type. hub picks. If you want a particular backend, pick it by name from the row
+Type. eki picks. If you want a particular backend, pick it by name from the row
 of chips. Give a request a **folder** and only backends that can edit files are
 considered — that's how a request becomes a code change rather than advice
 about one.
@@ -61,12 +61,12 @@ switched off, preferred, or downloaded.
 From a terminal, the same engine:
 
 ```
-hub ask "summarise this file" --repo ~/code/thing
-hub runs                # what's happening
-hub watch <id>          # follow one
-hub history -q kyoto    # search past conversations
-hub models              # what's loaded, what it costs in memory
-hub agent status
+eki ask "summarise this file" --repo ~/code/thing
+eki runs                # what's happening
+eki watch <id>          # follow one
+eki history -q kyoto    # search past conversations
+eki models              # what's loaded, what it costs in memory
+eki agent status
 ```
 
 ## Adding things
@@ -90,9 +90,9 @@ what's actually up, hard requirements (a folder needs file editing; a picture
 needs an image model), live quota, then *good enough for this kind of work* —
 and only then cost.
 
-"Good enough" comes from the label hub puts on the request (what kind of work,
+"Good enough" comes from the label eki puts on the request (what kind of work,
 how demanding) and a table of starting beliefs about classes of model in
-`hub/priors.py` — coarse on purpose, and honest about being priors rather than
+`eki/priors.py` — coarse on purpose, and honest about being priors rather than
 measurements.
 
 Labelling itself is free by default: rules that read the request. A small local
@@ -101,29 +101,29 @@ quarter of a second to answer and the rules take over if it doesn't. Whichever
 you use, the router model is never chosen to *answer* anything.
 
 ```
-python -m hub.evals.label_eval --url http://127.0.0.1:8090
+python -m eki.evals.label_eval --url http://127.0.0.1:8090
 ```
 runs both labellers over 200 seed prompts and prints accuracy and latency. The
 rules were tuned against that same set, so read their score as optimistic.
 
 ## Claude and Codex usage
 
-hub can show what's left of your five-hour and weekly Claude limits. The only
-sanctioned way to know that is Claude Code's own status line, so hub offers to
+eki can show what's left of your five-hour and weekly Claude limits. The only
+sanctioned way to know that is Claude Code's own status line, so eki offers to
 add one (chaining any status line you already have); Claude Code then reports
-its limits to hub as you use it. Turn it off and nothing is read. Codex
+its limits to eki as you use it. Turn it off and nothing is read. Codex
 reports its own limits through its `app-server` interface.
 
-hub does not read, copy or reuse either CLI's credentials, and does not send
+eki does not read, copy or reuse either CLI's credentials, and does not send
 your subscription anywhere it wasn't already going.
 
 ## Building it
 
 ```
-./hub.sh                       # a venv and the CLI, for development
+./eki.sh                       # a venv and the CLI, for development
 mac/build_app.sh               # the app, engine from this checkout
 mac/build_app.sh --full        # self-contained: bundled Python + engine
-mac/package.sh                 # dist/Hub-<version>.zip
+mac/package.sh                 # dist/Eki-<version>.zip
 ```
 
 Signing is one variable: without `DEVELOPER_ID` the app is signed ad-hoc and
@@ -136,12 +136,12 @@ Tests: `.venv/bin/python -m pytest -q`.
 ## Layout
 
 ```
-hub/            the engine: runs, router, providers, quota, adapters
-hub/adapters/   one file per kind of backend
-hub/quota/      reading what's left of a subscription, the sanctioned way
-hub/evals/      the labelling seed set and its harness
+eki/            the engine: runs, router, providers, quota, adapters
+eki/adapters/   one file per kind of backend
+eki/quota/      reading what's left of a subscription, the sanctioned way
+eki/evals/      the labelling seed set and its harness
 mac/            the SwiftUI app and the build/sign/package scripts
 ```
 
-MIT licensed — see `LICENSE`, and `NOTICE.md` for what hub bundles and what it
+MIT licensed — see `LICENSE`, and `NOTICE.md` for what eki bundles and what it
 merely drives.

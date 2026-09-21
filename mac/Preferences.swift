@@ -60,7 +60,7 @@ enum Pref {
     static let meterColour = "meterColour"
     static let theme = "theme"
     static let accent = "accent"
-    static let onboarded = "hub.onboarded"
+    static let onboarded = "eki.onboarded"
     static let importedTokenbar = "importedTokenbar"
 
     static var defaults: UserDefaults { .standard }
@@ -99,5 +99,28 @@ enum Pref {
             return trimmed.dropFirst("- key:".count).trimmingCharacters(in: .whitespaces)
         }
         if !keys.isEmpty { setShown(keys) }
+    }
+}
+
+
+extension Pref {
+    /// Settings made before the app was renamed live under the old bundle's
+    /// domain. Copy them across once, so nobody has to set up their menu bar
+    /// twice over a name change.
+    static func adoptOldDomain() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "eki.adoptedFromHub"),
+              let old = UserDefaults(suiteName: "local.hub.app") else { return }
+        for (oldKey, newKey) in [
+            (menuBarProviders, menuBarProviders), (meterStyle, meterStyle),
+            (meterColour, meterColour), (theme, theme), (accent, accent),
+            ("hub.onboarded", onboarded), (importedTokenbar, importedTokenbar),
+        ] {
+            if defaults.object(forKey: newKey) == nil,
+               let value = old.object(forKey: oldKey) {
+                defaults.set(value, forKey: newKey)
+            }
+        }
+        defaults.set(true, forKey: "eki.adoptedFromHub")
     }
 }

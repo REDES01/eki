@@ -37,7 +37,7 @@ struct ModelsPane: View {
 
                 Group2("Local servers",
                        note: "started on demand when a request needs them, unloaded "
-                           + "after a while unused if hub started them, and never "
+                           + "after a while unused if eki started them, and never "
                            + "loaded past what fits in memory") {
                     ForEach(model.localModels) { row in
                         LocalModelCard(row: row)

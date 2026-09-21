@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Make the thing people download: Hub-<version>.zip, notarised if you have an
+# Make the thing people download: Eki-<version>.zip, notarised if you have an
 # identity, ad-hoc if you don't.
 #
 #   ./package.sh
-#   DEVELOPER_ID="Developer ID Application: …" NOTARY_PROFILE=hub ./package.sh
+#   DEVELOPER_ID="Developer ID Application: …" NOTARY_PROFILE=eki ./package.sh
 #
 # ditto (not zip) keeps the signature intact, which is what Gatekeeper and
 # Sparkle both check on the other side.
@@ -11,11 +11,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 VERSION="$(cat ../VERSION)"
 OUT="../dist"
-APP="../Hub.app"
+APP="../Eki.app"
 
 ./build_app.sh --full
 mkdir -p "$OUT"
-ZIP="$OUT/Hub-$VERSION.zip"
+ZIP="$OUT/Eki-$VERSION.zip"
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 shasum -a 256 "$ZIP" | tee "$ZIP.sha256"

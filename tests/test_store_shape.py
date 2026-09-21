@@ -11,12 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from hub.store import Store
+from eki.store import Store
 
 
 @pytest.fixture
 def store(tmp_path):
-    s = Store(tmp_path / "hub.db")
+    s = Store(tmp_path / "eki.db")
     yield s
     s.close()
 

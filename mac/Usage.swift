@@ -120,7 +120,7 @@ struct UsageCard: View {
     private var explanation: String {
         if !usage.note.isEmpty {
             if usage.provider == "claude" && !(model.usage?.claude_bridge ?? false) {
-                return "hub reads Claude's limits from what Claude Code shows in its "
+                return "eki reads Claude's limits from what Claude Code shows in its "
                     + "status line — never from your login. Turn it on to see them here."
             }
             return usage.note.prefix(1).uppercased() + usage.note.dropFirst()
@@ -175,7 +175,7 @@ struct UsagePane: View {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle").font(.system(size: 11))
                         Text("Claude's numbers update whenever you use Claude Code in a "
-                             + "terminal. hub stops reading them if you turn this off.")
+                             + "terminal. eki stops reading them if you turn this off.")
                             .font(.system(size: 11.5))
                         Spacer()
                         Button("Turn off") { Task { await model.setClaudeBridge(false) } }
@@ -237,7 +237,7 @@ struct MenuPanel: View {
 
             Divider().overlay(Palette.hairline)
             HStack {
-                Button("Open hub") {
+                Button("Open eki") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "main")
                 }
@@ -246,7 +246,7 @@ struct MenuPanel: View {
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(GhostButton())
-                    .help("Closes the window onto hub. Runs keep going in the engine.")
+                    .help("Closes the window onto eki. Runs keep going in the engine.")
             }
         }
         .padding(12)

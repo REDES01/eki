@@ -1,4 +1,4 @@
-// Settings (⌘,): how hub looks, and what the menu bar shows.
+// Settings (⌘,): how eki looks, and what the menu bar shows.
 import SwiftUI
 
 struct SettingsView: View {
@@ -55,7 +55,7 @@ struct GeneralSettings: View {
                     .toggleStyle(AccentSwitch())
                 Text("Adds a status line to Claude Code that also records the 5-hour and "
                      + "weekly limits it reports. Any status line you already had keeps "
-                     + "showing. hub never reads your Claude login.")
+                     + "showing. eki never reads your Claude login.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -152,7 +152,7 @@ struct MenuBarSettings: View {
 }
 
 
-/// How hub decides what a request is, and where local models come from.
+/// How eki decides what a request is, and where local models come from.
 struct RoutingSettings: View {
     @EnvironmentObject var model: AppModel
     @State private var settings = HubSettings()
@@ -179,7 +179,7 @@ struct RoutingSettings: View {
                     ForEach(localProviders) { Text($0.label).tag($0.key) }
                 }
                 .disabled(localProviders.isEmpty)
-                Text("Before routing, hub decides what a request is — a question, a "
+                Text("Before routing, eki decides what a request is — a question, a "
                      + "translation, a change to your code — and how demanding it is. "
                      + "The rules cost nothing and never wait. A small local model can "
                      + "read the ones the rules get wrong, at about a quarter second a "
@@ -203,9 +203,9 @@ struct RoutingSettings: View {
                         set: { settings.hf_home = $0 }))
                         .onSubmit(save)
                 }
-                Text("The Python environment hub runs mlx_lm with, and where downloaded "
+                Text("The Python environment eki runs mlx_lm with, and where downloaded "
                      + "weights live. Models are sized against a \(settings.context_budget / 1024)k "
-                     + "context when hub works out whether they fit.")
+                     + "context when eki works out whether they fit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

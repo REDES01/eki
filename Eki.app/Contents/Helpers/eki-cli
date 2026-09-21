@@ -1,0 +1,11 @@
+#!/bin/bash
+# The `eki` command, using the app's own Python and engine.
+# resolve the symlink ~/.local/bin/eki, so the app can be anywhere
+src="$0"
+while [ -L "$src" ]; do src="$(readlink "$src")"; done
+here="$(cd "$(dirname "$src")" && pwd)"
+app="$(cd "$here/.." && pwd)"
+export PYTHONPATH="$app/Resources/engine"
+export EKI_CONFIG="${EKI_CONFIG:-$app/Resources/engine/config.yaml}"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+exec "$app/Resources/python/bin/python3" -m eki.cli "$@"

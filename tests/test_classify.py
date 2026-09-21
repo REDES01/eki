@@ -5,9 +5,9 @@ import json
 import httpx
 import pytest
 
-from hub import classify, priors
-from hub.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health, register
-from hub.router import Need, Router
+from eki import classify, priors
+from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health, register
+from eki.router import Need, Router
 
 
 def run(coro):
@@ -118,7 +118,7 @@ def test_with_nothing_good_enough_the_best_available_wins():
     small = backend("tiny", "mlx", 0, {"model": "Qwen3.5-2B-4bit"})
     router = Router([small])
     choice = router.choose(Need(task="math", difficulty="hard"))
-    assert choice.backend is small and "best hub has" in choice.reason
+    assert choice.backend is small and "best eki has" in choice.reason
 
 
 def test_the_router_model_is_not_used_for_answers():
@@ -143,7 +143,7 @@ def test_class_of_reads_size_and_address():
 
 
 def test_seed_set_labels_are_all_known():
-    from hub.evals.label_eval import load
+    from eki.evals.label_eval import load
     rows = load()
     assert len(rows) > 150
     assert {r["task"] for r in rows} <= set(classify.TASKS)
@@ -151,7 +151,7 @@ def test_seed_set_labels_are_all_known():
 
 
 def test_rules_beat_chance_on_the_seed_set():
-    from hub.evals.label_eval import load, score
+    from eki.evals.label_eval import load, score
     rows = load()
     got = [classify.rules(r["p"]) for r in rows]
     # tuned on this set, so this is a regression guard, not a claim of accuracy

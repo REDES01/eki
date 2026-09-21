@@ -1,6 +1,6 @@
-"""Model setup: names, fit estimates and the scripts hub writes."""
-from hub import deploy
-from hub import settings as settings_mod
+"""Model setup: names, fit estimates and the scripts eki writes."""
+from eki import deploy
+from eki import settings as settings_mod
 
 
 def test_slug_drops_quant_suffixes():

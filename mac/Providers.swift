@@ -234,7 +234,7 @@ struct ProviderCard: View {
             }
         } message: {
             Text(provider.runtime.repo != nil
-                 ? "hub forgets it. The downloaded weights stay in the Hugging Face cache."
+                 ? "eki forgets it. The downloaded weights stay in the Hugging Face cache."
                  : provider.needsKey ? "Its API key is deleted from the Keychain too."
                  : "Nothing on disk is touched.")
         }
@@ -262,7 +262,7 @@ struct ReplaceKeySheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New API key for \(provider.label)").font(.hubTitle)
             SecureField("Paste the key", text: $key).textFieldStyle(.roundedBorder)
-            Text("Stored in your Keychain, never in hub's files.")
+            Text("Stored in your Keychain, never in eki's files.")
                 .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
             if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger) }
             HStack {
@@ -327,7 +327,7 @@ struct AddProviderSheet: View {
                             TemplateRow(template: t, detail: t.found ?? "") { picked = t }
                         }
                     }
-                    SectionLabel(text: "Everything hub can use")
+                    SectionLabel(text: "Everything eki can use")
                     // a second Claude Code or Codex would be the same login twice
                     ForEach(templates.filter { t in
                         t.needs != "binary" || !model.providers.contains { $0.kind == t.kind }
@@ -413,13 +413,13 @@ struct ProviderForm: View {
             if template.needs == "key" {
                 field("API key") { SecureField("Paste the key", text: $apiKey)
                     .textFieldStyle(.roundedBorder) }
-                Text("Kept in your Keychain. hub never writes it to a file.")
+                Text("Kept in your Keychain. eki never writes it to a file.")
                     .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
             }
             if template.needs == "binary" {
                 Text(template.found.map { "Uses \($0), signed in with your own account. "
-                    + "hub runs it; it never reads its login." }
-                     ?? "Install it and sign in first; hub runs it as you.")
+                    + "eki runs it; it never reads its login." }
+                     ?? "Install it and sign in first; eki runs it as you.")
                     .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
             }
             if let probe, !probe.models.isEmpty, template.needs != "binary" {
@@ -522,7 +522,7 @@ struct AddModelSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
             }
-            Text("MLX builds from Hugging Face's mlx-community. hub downloads it, "
+            Text("MLX builds from Hugging Face's mlx-community. eki downloads it, "
                  + "writes a start script, measures it and adds it as a provider.")
                 .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)

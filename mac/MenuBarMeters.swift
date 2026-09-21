@@ -39,7 +39,7 @@ enum MenuBarMeters {
         let template = colour == .mono
         if style == .icon || inputs.isEmpty {
             let symbol = NSImage(systemSymbolName: "circle.hexagongrid",
-                                 accessibilityDescription: "hub") ?? NSImage()
+                                 accessibilityDescription: "eki") ?? NSImage()
             symbol.isTemplate = true
             return symbol
         }

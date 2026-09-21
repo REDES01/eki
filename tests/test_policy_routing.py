@@ -11,11 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from hub.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
-from hub.policy import Policy
-from hub.policy import load as load_policy
-from hub.policy import save as save_policy
-from hub.router import Need, QuotaSource, Router
+from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
+from eki.policy import Policy
+from eki.policy import load as load_policy
+from eki.policy import save as save_policy
+from eki.router import Need, QuotaSource, Router
 
 
 class Fake(Backend):

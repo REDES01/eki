@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Fetch a self-contained CPython and install hub's dependencies into it.
+# Fetch a self-contained CPython and install eki's dependencies into it.
 #
-# The app ships its own interpreter so that installing hub is dragging one
+# The app ships its own interpreter so that installing eki is dragging one
 # thing into /Applications — no system Python, no Homebrew, no venv, and
 # nothing that breaks when macOS replaces python3 out from under it. Apple's
 # developer support recommends exactly this shape: the interpreter lives in
 # Contents/Helpers, signed as part of the bundle.
 #
-# Output: mac/build/python (an install_only CPython with hub's requirements).
+# Output: mac/build/python (an install_only CPython with eki's requirements).
 # Re-running is cheap; it only refetches when the version changes.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PY_VERSION="${HUB_PY_VERSION:-3.12}"
+PY_VERSION="${EKI_PY_VERSION:-3.12}"
 ARCH="$(uname -m)"          # arm64 → aarch64 in python-build-standalone's names
 [ "$ARCH" = "arm64" ] && ARCH=aarch64
 BUILD="build"
@@ -47,7 +47,7 @@ else
   echo "$NAME" > "$STAMP"
 fi
 
-echo "installing hub's dependencies…"
+echo "installing eki's dependencies…"
 "$TARGET/bin/python3" -m pip install --quiet --upgrade pip
 "$TARGET/bin/python3" -m pip install --quiet -r ../requirements.txt
 

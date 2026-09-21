@@ -1,17 +1,17 @@
-# Releasing hub
+# Releasing eki
 
 ## What a release is
 
-`mac/package.sh` produces `dist/Hub-<version>.zip` and its SHA-256. The zip
-contains a self-contained `Hub.app`: the SwiftUI app, a CPython built by
+`mac/package.sh` produces `dist/Eki-<version>.zip` and its SHA-256. The zip
+contains a self-contained `Eki.app`: the SwiftUI app, a CPython built by
 [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-with hub's dependencies, hub's own source, and two launcher scripts. There is
+with eki's dependencies, eki's own source, and two launcher scripts. There is
 no installer and nothing to set up afterwards.
 
 ```
 ./mac/package.sh                       # ad-hoc signed, ~70 MB
 DEVELOPER_ID="Developer ID Application: NAME (TEAMID)" \
-NOTARY_PROFILE=hub ./mac/package.sh    # signed, notarised, stapled
+NOTARY_PROFILE=eki ./mac/package.sh    # signed, notarised, stapled
 ```
 
 Bump `VERSION` first; it becomes `CFBundleShortVersionString` and the zip name.
@@ -33,13 +33,13 @@ registers it through `SMAppService`, which accepts a valid ad-hoc signature.
 When an account exists:
 
 ```
-xcrun notarytool store-credentials hub --apple-id you@example.com \
+xcrun notarytool store-credentials eki --apple-id you@example.com \
   --team-id TEAMID --password <app-specific-password>
 ```
 
 then set `DEVELOPER_ID` and `NOTARY_PROFILE` as above. Nothing in the build
 changes — `mac/sign.sh` signs every Mach-O inside the bundle with that identity
-and applies `mac/hub.entitlements` (hardened runtime, library validation off,
+and applies `mac/eki.entitlements` (hardened runtime, library validation off,
 because the bundled Python loads its own extension modules).
 
 ## Gotchas worth remembering
@@ -54,7 +54,7 @@ because the bundled Python loads its own extension modules).
   produces "a sealed resource is missing or invalid" at verify time.
 - **Sign one identity throughout.** Mixing ad-hoc and signed binaries makes
   dyld refuse Python's extension modules with "different Team IDs".
-- Verify with `codesign --verify --strict Hub.app` — no `--deep`.
+- Verify with `codesign --verify --strict Eki.app` — no `--deep`.
 
 ## Automatic updates
 
@@ -80,8 +80,8 @@ engine, so edits to a checkout have no effect until the app is rebuilt. To
 develop against the checkout again:
 
 ```
-launchctl bootout gui/$UID/local.hub.engine
-./hub.sh agent install
+launchctl bootout gui/$UID/local.eki.engine
+./eki.sh agent install
 ```
 
 and to go back, open the packaged app and turn "keep it running" on again.

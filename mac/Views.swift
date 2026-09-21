@@ -53,7 +53,7 @@ struct ContentView: View {
             // Only greet someone who has nothing set up yet: an upgrade from an
             // earlier build already has providers and an engine.
             await model.refreshProviders()
-            if UserDefaults.standard.bool(forKey: "hub.showWelcome") {
+            if UserDefaults.standard.bool(forKey: "eki.showWelcome") {
                 showWelcome = true
             } else if !onboarded {
                 if model.providers.isEmpty || model.engine != .up { showWelcome = true }

@@ -19,17 +19,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from hub.adapters.base import (Backend, BackendInfo, Capabilities, Cost, Health,
+from eki.adapters.base import (Backend, BackendInfo, Capabilities, Cost, Health,
                                register)
-from hub.config import Config
-from hub.engine import Engine
-from hub.runs import Runner, RunStore, unseen
+from eki.config import Config
+from eki.engine import Engine
+from eki.runs import Runner, RunStore, unseen
 
 
 @pytest.fixture(autouse=True)
 def private_policy(tmp_path, monkeypatch):
-    # the engine reads ~/.hub/policy.json; a test must not inherit yours
-    monkeypatch.setenv("HUB_POLICY", str(tmp_path / "policy.json"))
+    # the engine reads ~/.eki/policy.json; a test must not inherit yours
+    monkeypatch.setenv("EKI_POLICY", str(tmp_path / "policy.json"))
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_the_engine_reopening_marks_orphans_interrupted(tmp_path):
 
 
 def test_a_reader_opening_the_file_leaves_live_runs_alone(tmp_path):
-    """`hub history` must not declare the engine's work dead."""
+    """`eki history` must not declare the engine's work dead."""
     engine_side = RunStore(tmp_path / "runs.db", owner=True)
     rid = engine_side.create("in flight")
     engine_side.update(rid, state="running")
@@ -255,7 +255,7 @@ class Echo(Backend):
 
 
 def echo_config(tmp_path) -> Config:
-    cfg = Config(db_path=str(tmp_path / "hub.db"), quota_url="http://127.0.0.1:1")
+    cfg = Config(db_path=str(tmp_path / "eki.db"), quota_url="http://127.0.0.1:1")
     cfg.backends = [BackendInfo(key="echo", kind="echo", label="echo",
                                 capabilities=Capabilities(context_tokens=10_000),
                                 cost=Cost(tier=0))]

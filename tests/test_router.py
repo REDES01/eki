@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from hub.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
-from hub.router import Need, QuotaSource, Router
+from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
+from eki.router import Need, QuotaSource, Router
 
 
 class Fake(Backend):

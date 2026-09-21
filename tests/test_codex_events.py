@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from hub.adapters import _codex_events as events
+from eki.adapters import _codex_events as events
 
 # verbatim from a successful `codex exec --json` run
 REAL_RUN = [

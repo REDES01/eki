@@ -6,12 +6,12 @@ import sqlite3
 import httpx
 import pytest
 
-from hub import catalog, secrets
-from hub.adapters.base import BackendInfo, Capabilities, Message, build
-from hub.config import Config
-from hub.engine import Engine
-from hub.models import LocalModel, ModelManager
-from hub.providers import Provider, ProviderStore, seed_from_config
+from eki import catalog, secrets
+from eki.adapters.base import BackendInfo, Capabilities, Message, build
+from eki.config import Config
+from eki.engine import Engine
+from eki.models import LocalModel, ModelManager
+from eki.providers import Provider, ProviderStore, seed_from_config
 
 
 def run(coro):
@@ -42,18 +42,18 @@ def mock_http(monkeypatch):
 
 
 def test_api_key_never_lands_in_sqlite(tmp_path):
-    store = ProviderStore(tmp_path / "hub.db")
+    store = ProviderStore(tmp_path / "eki.db")
     store.upsert(Provider(key="openai", kind="openai_compat", label="OpenAI",
                           options={"secret": True, "api_key": "sk-live-123",
                                    "base_url": "https://api.openai.com/v1"}))
-    raw = sqlite3.connect(tmp_path / "hub.db").execute(
+    raw = sqlite3.connect(tmp_path / "eki.db").execute(
         "SELECT options FROM providers").fetchone()[0]
     assert "sk-live-123" not in raw
     assert json.loads(raw)["secret"] is True
 
 
 def test_store_orders_and_updates(tmp_path):
-    store = ProviderStore(tmp_path / "hub.db")
+    store = ProviderStore(tmp_path / "eki.db")
     store.upsert(Provider(key="a", kind="mlx", label="A"))
     store.upsert(Provider(key="b", kind="mlx", label="B"))
     store.upsert(Provider(key="a", kind="mlx", label="A2", enabled=False))
@@ -64,7 +64,7 @@ def test_store_orders_and_updates(tmp_path):
 
 
 def _cfg(tmp_path):
-    cfg = Config(db_path=str(tmp_path / "hub.db"))
+    cfg = Config(db_path=str(tmp_path / "eki.db"))
     cfg.backends = [BackendInfo(key="qwen", kind="mlx", label="Qwen",
                                 capabilities=Capabilities(context_tokens=32000))]
     cfg.options = {"qwen": {"base_url": "http://127.0.0.1:1"}}
@@ -179,7 +179,7 @@ def test_anthropic_api_picks_listed_model_and_streams(mock_http):
 
 
 def test_templates_are_buildable():
-    from hub.adapters.base import kinds
+    from eki.adapters.base import kinds
     ids = [t["id"] for t in catalog.TEMPLATES]
     assert len(ids) == len(set(ids))
     for t in catalog.TEMPLATES:

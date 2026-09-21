@@ -1,6 +1,6 @@
 // First run.
 //
-// Three things decide whether hub is useful five minutes from now: it keeps
+// Three things decide whether eki is useful five minutes from now: it keeps
 // running when the window is closed, it knows what you already have on this
 // Mac, and it's reachable from a terminal. Each is one button, each says what
 // it will do, and none of them is required to get started.
@@ -11,20 +11,20 @@ enum Engine {
     /// The engine inside the app bundle, when this is a packaged build.
     static var bundled: URL? {
         let url = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Helpers/hub-engine")
+            .appendingPathComponent("Contents/Helpers/eki-engine")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 
     static var cli: URL? {
-        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/hub-cli")
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/eki-cli")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 
-    static var agent: SMAppService { SMAppService.agent(plistName: "local.hub.engine.plist") }
+    static var agent: SMAppService { SMAppService.agent(plistName: "local.eki.engine.plist") }
 
     static var plainAgent: URL {
         URL(fileURLWithPath: NSHomeDirectory()
-            + "/Library/LaunchAgents/local.hub.engine.plist")
+            + "/Library/LaunchAgents/local.eki.engine.plist")
     }
 
     static var runsAtLogin: Bool {
@@ -36,7 +36,7 @@ enum Engine {
     static func enableLogin() -> String? {
         guard bundled != nil else {
             return "This build runs the engine from the source checkout — "
-                 + "`hub agent install` sets up the login agent for it."
+                 + "`eki agent install` sets up the login agent for it."
         }
         if agent.status == .enabled { return nil }
         do {
@@ -54,14 +54,14 @@ enum Engine {
     private static func installPlainAgent() -> String? {
         guard let engine = bundled else { return "No bundled engine to run." }
         let plist: [String: Any] = [
-            "Label": "local.hub.engine",
+            "Label": "local.eki.engine",
             "ProgramArguments": [engine.path],
             "RunAtLoad": true,
             "KeepAlive": true,
             "ThrottleInterval": 10,
             "ProcessType": "Interactive",
-            "StandardOutPath": NSHomeDirectory() + "/.hub/engine.log",
-            "StandardErrorPath": NSHomeDirectory() + "/.hub/engine.log",
+            "StandardOutPath": NSHomeDirectory() + "/.eki/engine.log",
+            "StandardErrorPath": NSHomeDirectory() + "/.eki/engine.log",
             "EnvironmentVariables": [
                 "PATH": NSHomeDirectory() + "/.local/bin:/opt/homebrew/bin:/usr/local/bin:"
                       + "/usr/bin:/bin:/usr/sbin:/sbin",
@@ -72,14 +72,14 @@ enum Engine {
             try FileManager.default.createDirectory(
                 at: plainAgent.deletingLastPathComponent(), withIntermediateDirectories: true)
             try FileManager.default.createDirectory(
-                atPath: NSHomeDirectory() + "/.hub", withIntermediateDirectories: true)
+                atPath: NSHomeDirectory() + "/.eki", withIntermediateDirectories: true)
             let data = try PropertyListSerialization.data(fromPropertyList: plist,
                                                           format: .xml, options: 0)
             try data.write(to: plainAgent)
         } catch {
             return error.localizedDescription
         }
-        for args in [["bootout", "gui/\(getuid())/local.hub.engine"],
+        for args in [["bootout", "gui/\(getuid())/local.eki.engine"],
                      ["bootstrap", "gui/\(getuid())", plainAgent.path]] {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -95,19 +95,19 @@ enum Engine {
         if FileManager.default.fileExists(atPath: plainAgent.path) {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            task.arguments = ["bootout", "gui/\(getuid())/local.hub.engine"]
+            task.arguments = ["bootout", "gui/\(getuid())/local.eki.engine"]
             try? task.run()
             task.waitUntilExit()
             try? FileManager.default.removeItem(at: plainAgent)
         }
     }
 
-    /// A `hub` command on the PATH, pointing back into the app.
+    /// A `eki` command on the PATH, pointing back into the app.
     static func installCLI() -> String {
         guard let cli else { return "This build has no bundled CLI." }
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/bin")
-        let link = dir.appendingPathComponent("hub")
+        let link = dir.appendingPathComponent("eki")
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: link.path) {
@@ -119,12 +119,12 @@ enum Engine {
         }
         let onPath = (ProcessInfo.processInfo.environment["PATH"] ?? "")
             .split(separator: ":").contains { $0 == dir.path }
-        return onPath ? "Installed as `hub`."
-                      : "Installed at ~/.local/bin/hub — add that folder to your PATH."
+        return onPath ? "Installed as `eki`."
+                      : "Installed at ~/.local/bin/eki — add that folder to your PATH."
     }
 
     static var cliInstalled: Bool {
-        FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.local/bin/hub")
+        FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.local/bin/eki")
     }
 }
 
@@ -143,9 +143,9 @@ struct OnboardingSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome to hub").font(.system(size: 22, weight: .semibold))
+                Text("Welcome to eki").font(.system(size: 22, weight: .semibold))
                 Text("One place to ask, whatever answers: models on this Mac, the CLIs "
-                     + "you already pay for, APIs you bring a key for. hub picks the "
+                     + "you already pay for, APIs you bring a key for. eki picks the "
                      + "cheapest one that can actually do the job.")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.inkMuted)
@@ -169,7 +169,7 @@ struct OnboardingSheet: View {
             step(number: 2, title: "What's already here",
                  detail: found.isEmpty
                     ? "Looking for Claude Code, Codex and any local servers…"
-                    : "Found on this Mac. hub runs these as you — it never reads a login.") {
+                    : "Found on this Mac. eki runs these as you — it never reads a login.") {
                 EmptyView()
             }
             if !found.isEmpty {
@@ -196,12 +196,12 @@ struct OnboardingSheet: View {
             }
 
             step(number: 3, title: "From a terminal",
-                 detail: "Optional: `hub ask`, `hub runs`, `hub watch` — the same engine, "
+                 detail: "Optional: `eki ask`, `eki runs`, `eki watch` — the same engine, "
                        + "same history.") {
                 if Engine.cliInstalled && cliNote.isEmpty {
                     Tag(text: "installed", color: Palette.ok)
                 } else {
-                    Button("Install `hub`") { cliNote = Engine.installCLI() }
+                    Button("Install `eki`") { cliNote = Engine.installCLI() }
                         .buttonStyle(GhostButton())
                 }
             }
@@ -217,7 +217,7 @@ struct OnboardingSheet: View {
                 Text("You can change all of this later in Settings.")
                     .font(.system(size: 11.5)).foregroundStyle(Palette.inkFaint)
                 Spacer()
-                Button("Start using hub") {
+                Button("Start using eki") {
                     onboarded = true
                     dismiss()
                 }

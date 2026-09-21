@@ -18,23 +18,26 @@ def test_kv_estimate_reads_nested_text_config():
 
 def test_fit_verdicts():
     d = {"weights_gb": 10.0, "context": 8192, "config": {}}
-    assert deploy.fit(d, 20.0)["verdict"] == "fits"
-    assert deploy.fit(d, 11.5)["verdict"] == "tight"
-    assert deploy.fit(d, 5.0)["verdict"] == "too big"
-    assert deploy.fit(d, 20.0)["context"] == 8192              # no config: the smallest window
+    assert deploy.fit(d, 20.0, 30.0)["verdict"] == "fits"
+    assert deploy.fit(d, 11.5, 11.5)["verdict"] == "tight"
+    assert deploy.fit(d, 5.0, 5.0)["verdict"] == "too big"
+    assert deploy.fit(d, 20.0, 30.0)["context"] == 8192              # no config: the smallest window
 
 
-def test_fit_sizes_the_window_like_a_model_already_here():
+def test_fit_sizes_against_the_most_this_mac_can_give():
+    """What's loaded this minute decides whether it can start now, never
+    how much context it gets — a person can pin a smaller window later."""
     hybrid = {"num_hidden_layers": 64, "num_key_value_heads": 4, "num_attention_heads": 24,
               "head_dim": 256, "max_position_embeddings": 262144,
               "layer_types": ["linear_attention"] * 48 + ["full_attention"] * 16}
-    d = {"weights_gb": 14.9, "context": 262144, "config": hybrid}
-    roomy = deploy.fit(d, 30.0)          # 30 − 14.9 − 1.2 = 13.9 GB beside the weights → 128k (8 GB)
-    assert roomy["context"] == 131072 and roomy["window"]["limited_by"] == "speed"
-    assert roomy["need_gb"] == 24.1 and roomy["verdict"] == "fits"
-    tight = deploy.fit(d, 20.0)          # 3.9 GB beside → 2.9 usable → 32k (2 GB)
-    assert tight["context"] == 32768 and tight["window"]["limited_by"] == "memory"
-    assert tight["fits"]
+    d = {"weights_gb": 27.5, "context": 262144, "config": hybrid}       # the 8-bit 27B
+    r = deploy.fit(d, free_gb=22.7, ceiling_gb=37.4)
+    # 37.4 − 27.5 − 1.2 = 8.7 GB beside the weights → 6.5 usable → 96k (6 GB)
+    assert r["context"] == 98304 and r["window"]["limited_by"] == "memory"
+    assert r["need_gb"] == 34.7 and r["verdict"] == "tight" and r["fits"]
+    assert not r["fits_now"]                                            # the 4-bit is loaded
+    roomy = deploy.fit({**d, "weights_gb": 14.9}, free_gb=30.0, ceiling_gb=37.4)
+    assert roomy["context"] == 131072 and roomy["fits_now"]
 
 
 def test_sampling_only_what_was_published():

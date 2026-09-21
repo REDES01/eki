@@ -24,8 +24,8 @@ STEPS = (8192, 16384, 32768, 49152, 65536, 98304, 131072)
 #: novel: a bigger window would fit, and would not be worth waiting for
 SPEED_CAP = 131072
 
-#: the share of free memory the cache may grow into — the rest stays for
-#: other models, the app, and whatever the user has open
+#: the share of the room beside the weights the cache may grow into — the
+#: rest stays for other models, the app, and whatever the user has open
 KV_SHARE = 0.75
 
 #: below this a harness spends most of its window on itself: Codex's
@@ -52,7 +52,7 @@ class Window:
             parts.append(f"native {_k(self.native)}")
         parts.append(f"~{self.kv_gb:g} GB of cache at full")
         if self.limited_by == "memory":
-            parts.append("limited by memory")
+            parts.append("limited by this Mac's memory")
         elif self.limited_by == "pinned" and not self.fits:
             parts.append("more than fits beside it now")
         return " · ".join(parts)

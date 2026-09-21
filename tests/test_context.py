@@ -19,7 +19,7 @@ def test_hybrid_27b_gets_the_speed_cap_when_memory_allows():
 def test_memory_limits_the_window():
     w = context.size(HYBRID, room_gb=4.0)      # 3 GB usable → 48k (3 GB) fits, 64k (4) doesn't
     assert w.tokens == 49152 and w.limited_by == "memory"
-    assert "limited by memory" in w.describe()
+    assert "limited by this Mac's memory" in w.describe()
 
 
 def test_native_limit_wins_for_a_small_model():
@@ -63,10 +63,8 @@ def test_engine_sizes_the_window_from_the_model(tmp_path, monkeypatch):
                    "codex": {"binary": "/bin/echo"}}
     cfg.local_models = [LocalModel(key="qwen", label="Qwen", port=1, start="true", backend="qwen", gb=14.5)]
     eng = Engine(cfg, port=8799)
-    # not running: the weights come off the free memory first → 12 − 14.5 < 0 → smallest step
-    assert eng.providers.get("qwen").capabilities["context_tokens"] == 8192
-    monkeypatch.setattr(LocalModel, "running", property(lambda self: True))
-    eng._build()
+    # sized against the ceiling less its weights (37.4 − 14.5 = 22.9 GB), not
+    # what's free this minute: the window mustn't flap as other models come and go
     p = eng.providers.get("qwen")
     assert p.capabilities["context_tokens"] == 131072
     assert p.runtime["context"]["limited_by"] == "speed"

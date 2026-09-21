@@ -87,7 +87,9 @@ struct ModelFit: Codable, Hashable {
     let gated: Bool
     let need_gb: Double
     let free_gb: Double
-    let fits: Bool
+    var ceiling_gb: Double? = nil
+    let fits: Bool                  // on this Mac at all
+    var fits_now: Bool? = nil       // beside what's loaded this minute
     let verdict: String
     /// how the window was sized (see eki/context.py); nil when the repo has no config
     var window: ContextWindow? = nil
@@ -644,19 +646,21 @@ struct AddModelSheet: View {
                 row("Needs", String(format: "%.1f GB with a %dk context", fit.need_gb, fit.context / 1024))
                 if let window = fit.window {
                     row("Context", window.limited_by == "memory"
-                        ? "\(window.tokens / 1024)k — what fits beside its weights now (native \(window.native / 1024)k)"
+                        ? "\(window.tokens / 1024)k — the most this Mac can give it (native \(window.native / 1024)k); you can set it smaller later"
                         : window.limited_by == "speed"
-                        ? "\(window.tokens / 1024)k — the speed cap (native \(window.native / 1024)k)"
+                        ? "\(window.tokens / 1024)k — the speed cap (native \(window.native / 1024)k); you can change it later"
                         : "\(window.tokens / 1024)k — the model's maximum")
                 }
-                row("Free now", String(format: "%.1f GB", fit.free_gb))
+                row("This Mac", String(format: "%.1f GB for models, %.1f GB free now",
+                                        fit.ceiling_gb ?? 0, fit.free_gb))
                 if !fit.license.isEmpty { row("License", fit.license) }
                 HStack(spacing: 6) {
                     Image(systemName: fit.fits ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .foregroundStyle(fit.fits ? Palette.ok : Palette.inkMuted)
-                    Text(fit.verdict == "fits" ? "Fits beside what's loaded"
-                         : fit.verdict == "tight" ? "Fits, but only just"
-                         : "Too big to run beside what's loaded — it will start once there's room")
+                    Text(!fit.fits ? "Too big for this Mac's memory, even with nothing else loaded"
+                         : (fit.verdict == "tight" ? "Fits, but only just"
+                            : "Fits on this Mac")
+                           + (fit.fits_now == false ? " — starts once other models unload to make room" : ""))
                         .font(.system(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
                 }

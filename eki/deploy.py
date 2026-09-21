@@ -109,24 +109,26 @@ async def details(repo: str) -> Dict[str, Any]:
     }
 
 
-def fit(d: Dict[str, Any], free_gb: float) -> Dict[str, Any]:
-    """Will it run beside what's already loaded, and with how much context?
+def fit(d: Dict[str, Any], free_gb: float, ceiling_gb: float) -> Dict[str, Any]:
+    """Can this Mac run it, with how much context, and is there room now?
 
-    The window is sized the way a model already here gets it (see
-    eki/context.py): from its config, against the memory left beside its
-    weights, under the speed cap. Need = weights + that cache + overhead.
-    A repo without a config gets the smallest window and an honest guess.
+    The window is sized against the most a model can ever get here — the
+    memory ceiling less its weights — the same way an installed model is
+    (see eki/context.py); what happens to be loaded at the moment only
+    decides whether it can start right away. A person who wants a smaller
+    window can pin one after. Need = weights + that cache + overhead.
     """
     config = d.get("config") or {}
-    room = free_gb - d["weights_gb"] - OVERHEAD_GB
+    room = ceiling_gb - d["weights_gb"] - OVERHEAD_GB
     window = context.size(config, room)
     tokens = window.tokens if window else min(context.STEPS[0], d.get("context") or context.STEPS[0])
     need = round(d["weights_gb"] + kv_gb(config, tokens) + OVERHEAD_GB, 1)
-    return {"need_gb": need, "free_gb": free_gb, "context": tokens,
+    return {"need_gb": need, "free_gb": free_gb, "ceiling_gb": ceiling_gb, "context": tokens,
             "window": window.as_dict() if window else None,
-            "fits": need <= free_gb,
-            "verdict": ("fits" if need <= free_gb * 0.85 else
-                        "tight" if need <= free_gb else "too big")}
+            "fits": need <= ceiling_gb,             # on this Mac at all
+            "fits_now": need <= free_gb,            # beside what's loaded this minute
+            "verdict": ("fits" if need <= ceiling_gb * 0.85 else
+                        "tight" if need <= ceiling_gb else "too big")}
 
 
 def sampling(gen: Dict[str, Any]) -> Dict[str, Any]:

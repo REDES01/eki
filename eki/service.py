@@ -595,7 +595,8 @@ async def catalog_fit(repo: str) -> Any:
         d = await deploy_mod.details(repo)
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
-    room = deploy_mod.fit(d, engine().models.memory().free_gb)
+    mem = engine().models.memory()
+    room = deploy_mod.fit(d, mem.free_gb, mem.ceiling_gb)
     prof = profile_mod.from_hub(repo, d).as_dict()
     d.pop("config", None)
     return {**d, **room, "profile": prof}

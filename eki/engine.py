@@ -167,7 +167,10 @@ class Engine:
                 p.runtime["gb"] = round(prof.weights_gb + profile_mod.OVERHEAD_GB, 1)
             model = self.models.models.get(p.key)
             weights = float(p.runtime.get("gb", 0) or 0)
-            room = memory.free_gb if (model and model.running) else memory.free_gb - weights
+            # sized against the most this Mac can give it — not what happens
+            # to be free this minute, which would make the window flap with
+            # every other model loaded or unloaded beside it
+            room = memory.ceiling_gb - weights
             pin = int(p.runtime.get("context_pin") or 0)
             window = (context_mod.pinned(prof.config, pin, room) if pin
                       else context_mod.size(prof.config, room))
@@ -1192,12 +1195,16 @@ class Engine:
             raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
         if not d["weights_gb"]:
             raise BackendError(f"{repo} has no safetensors weights")
-        room = deploy_mod.fit(d, self.models.memory().free_gb)
+        mem = self.models.memory()
+        room = deploy_mod.fit(d, mem.free_gb, mem.ceiling_gb)
         prof = profile_mod.from_hub(repo, d)
         yield prof.describe() + ".\n"
         yield (f"Needs about {room['need_gb']} GB with a {room['context'] // 1024}k context"
                + (f" ({room['window']['limited_by']}-limited)" if room.get("window") else "")
-               + f" — {room['verdict']} ({room['free_gb']} GB free now).\n")
+               + f" — {room['verdict']} on this Mac ({room['ceiling_gb']} GB for models)"
+               + ("" if room["fits_now"] else
+                  f"; {room['free_gb']} GB free now, so it starts once there's room")
+               + ".\n")
         if d["license"]:
             yield f"License: {d['license']}.\n"
 

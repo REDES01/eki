@@ -59,9 +59,16 @@ struct UsageRow: View {
                     Capsule().fill(colour)
                         .frame(width: max(window.used > 0 ? 5 : 0,
                                           geo.size.width * min(1, window.used)))
+                    // where an even burn would be by now
+                    if let elapsed = window.pace?.elapsed, elapsed > 0, elapsed < 1 {
+                        Rectangle().fill(Palette.ink.opacity(0.55))
+                            .frame(width: 1.5, height: 10)
+                            .offset(x: geo.size.width * elapsed - 0.75, y: -2)
+                    }
                 }
             }
             .frame(height: 6)
+            .help(paceHelp)
             Text(UsageFormat.percent(window.used))
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .foregroundStyle(full ? Color.red : Palette.ink)
@@ -79,7 +86,23 @@ struct UsageRow: View {
                 .foregroundStyle(Palette.inkFaint)
                 .padding(.leading, 84)
         }
+        if let pace = window.pace, !pace.why.isEmpty {
+            Text(pace.factor > 1 ? "ahead of pace — costed ×\(fmt(pace.factor)) for routing"
+                                 : "behind pace — costed ×\(fmt(pace.factor)), spend it")
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(pace.factor > 1 ? Color.orange : Palette.inkFaint)
+                .padding(.leading, 84)
         }
+        }
+    }
+
+    private var paceHelp: String {
+        guard let p = window.pace, let e = p.elapsed else { return "" }
+        return "\(Int(e * 100))% of the window has passed; the tick is where an even burn would be"
+    }
+
+    private func fmt(_ x: Double) -> String {
+        x == x.rounded() ? String(Int(x)) : String(format: "%.1f", x)
     }
 }
 

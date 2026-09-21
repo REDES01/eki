@@ -12,6 +12,7 @@ import logging
 from typing import Dict, List, Optional
 
 from .base import QuotaProvider, Reading, Window, label_for  # noqa: F401
+from .pace import ProviderPace, provider_pace
 
 log = logging.getLogger("eki.quota")
 
@@ -53,6 +54,10 @@ class QuotaBoard:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+    def pace(self) -> Dict[str, "ProviderPace"]:
+        """{provider: how fast its windows are being spent} — see quota.pace."""
+        return {key: provider_pace(reading) for key, reading in self.latest.items()}
 
     def exhausted(self) -> Dict[str, str]:
         """{provider: why} for providers with a spent window.

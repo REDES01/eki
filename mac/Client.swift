@@ -157,6 +157,13 @@ struct CostReport: Codable, Hashable {
     let turns: Int
 }
 
+struct UsagePace: Codable, Hashable {
+    let factor: Double
+    let elapsed: Double?          // fraction of the window gone; nil without a reset time
+    let ahead: Double?            // used − elapsed
+    let why: String               // "5H ahead of pace ×3.1", "" when on pace
+}
+
 struct UsageWindow: Codable, Hashable, Identifiable {
     let key: String
     let label: String
@@ -168,6 +175,8 @@ struct UsageWindow: Codable, Hashable, Identifiable {
     var primary: Bool? = true
     /// what the bar can't say: "$113.74 / $120.00" for usage credits
     var detail: String? = ""
+    /// how fast it's being spent against an even burn (see eki/quota/pace.py)
+    var pace: UsagePace? = nil
 
     var id: String { key }
     var isPrimary: Bool { primary ?? true }

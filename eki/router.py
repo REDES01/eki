@@ -63,6 +63,11 @@ class QuotaSource:
         """{provider key: why}."""
         return {}
 
+    def pace(self) -> Dict[str, Any]:
+        """{provider key: quota.pace.ProviderPace}: how fast each window is
+        being spent, as a factor on the provider's cost. Empty: all on pace."""
+        return {}
+
 
 class Router:
     def __init__(self, backends: List[Backend], quota: Optional[QuotaSource] = None,
@@ -97,6 +102,7 @@ class Router:
             return Choice(None, f"no backend named {need.backend!r}")
 
         spent = self.quota.exhausted() if self.quota else {}
+        paces = self.quota.pace() if self.quota else {}
         candidates: List[Backend] = []
 
         for b in self.backends:
@@ -149,10 +155,15 @@ class Router:
         # least of those that do, else its best.
         note = ""
         chosen: Dict[str, Tuple[str, float]] = {}   # backend key → (model, quality)
+
+        def pace_of(b: Backend):
+            return paces.get(b.info.quota_source or "") if b.info.quota_source else None
+
         if need.task and need.difficulty:
             bar = priors.NEED.get(need.difficulty, 0.72)
             for b in candidates:
-                chosen[b.key] = self._pick_model(b, need.task, need.difficulty, bar)
+                chosen[b.key] = self._pick_model(b, need.task, need.difficulty, bar,
+                                                 pace=pace_of(b))
             good = [b for b in candidates if chosen[b.key][1] >= bar]
             if good:
                 note = f" for {need.task}/{need.difficulty}"
@@ -166,30 +177,55 @@ class Router:
                 candidates = [b for b in candidates if chosen[b.key][1] == best]
                 note = f" — the best eki has for {need.difficulty} {need.task}"
 
-        # cheapest first; ties go to the policy's order, then config order,
-        # which is the user's standing preference
+        # cheapest first — the tier, made dearer by a window being spent
+        # ahead of pace and cheaper by one that's behind — then the policy's
+        # order, then config order, which is the user's standing preference
         def tier(b: Backend) -> int:
             return self.policy.tier_for(b.key, b.info.cost.tier)
 
-        candidates.sort(key=lambda b: (tier(b), self.policy.rank(b.key)))
+        def factor(b: Backend) -> float:
+            p = pace_of(b)
+            if p is None:
+                return 1.0
+            m = chosen.get(b.key, ("", 0.0))[0]
+            if not m:                               # the default: known by its label
+                rec = next((r for r in self.models_for(b.key) or [] if r.model == ""), None)
+                m = getattr(rec, "label", "") if rec else ""
+            return p.factor * p.model_factor(m)
+
+        def paced(b: Backend) -> float:
+            return round(tier(b) * factor(b), 2)
+
+        unpaced = min(candidates, key=lambda b: (tier(b), self.policy.rank(b.key)))
+        candidates.sort(key=lambda b: (paced(b), self.policy.rank(b.key)))
         pick = candidates[0]
         model = chosen.get(pick.key, ("", 0.0))[0]
         name = f"{pick.key} ({model})" if model else pick.key
         why = f"{name}: cheapest fit (tier {tier(pick)}){note}"
         if tier(pick) != pick.info.cost.tier:
             why += " by policy"
+        pace = pace_of(pick)
+        if pace is not None and pace.pace.why:
+            why += f", {pace.pace.why}"
+        if unpaced is not pick:
+            other = pace_of(unpaced)
+            if other is not None and other.pace.why:
+                why += f"; {unpaced.key} {other.pace.why}"
         if pick.info.cost.note:
             why += f", {pick.info.cost.note}"
         return Choice(pick, why, rejected, model=model)
 
     def _pick_model(self, backend: Backend, task: str, difficulty: str,
-                    bar: float) -> Tuple[str, float]:
+                    bar: float, pace: Any = None) -> Tuple[str, float]:
         """(model, quality): the cheapest of the provider's models that clears
-        the bar, taking the default when it does; its best when none does."""
+        the bar, taking the default when it does; its best when none does.
+        A model with a window of its own (Fable's week) is costed at its pace."""
         records = list(self.models_for(backend.key) or [])
         if not records:
             return "", self._quality(backend, task)
-        scored = [(r.model, float(r.quality(task, difficulty)), float(getattr(r, "cost", 1.0)))
+        scored = [(r.model, float(r.quality(task, difficulty)),
+                   float(getattr(r, "cost", 1.0))
+                   * (pace.model_factor(r.model or getattr(r, "label", "")) if pace else 1.0))
                   for r in records]
         default = next(((q, c) for m, q, c in scored if m == ""), None)
         adequate = [(c, -q, m, q) for m, q, c in scored if q >= bar]

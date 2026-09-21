@@ -132,6 +132,15 @@ and from its class otherwise. The router picks, behind a provider, the
 cheapest model that clears the bar — the default when it does — and names it
 in the reason: "claude (opus): cheapest fit for math/hard".
 
+A subscription's cost moves with its pace. Each window is compared with an
+even burn: 90% of a 5-hour window used with four hours to go is far ahead of
+pace and makes that provider ×3 dearer, so medium work goes local and the
+rest of the window is there for the hard problem later; a week barely
+touched by Thursday is ×0.5, cheaper than its list price, and gets spent.
+Fable's own week prices Fable alone. The Usage pane marks where an even burn
+would be on each bar, and the reason says when pace decided: "codex: cheapest
+fit … 5H behind pace ×0.5; claude 5H ahead of pace ×3.1".
+
 Memory is read from the OS, not just from what eki loaded. A local model is
 started only if it fits in what the Mac really has free (keeping 4 GB back);
 otherwise the request goes to the next backend that clears its bar, with the

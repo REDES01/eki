@@ -40,6 +40,7 @@ from .adapters import base as adapters
 from . import policy as policy_mod
 from .engine import Engine
 from .quota import claude_bridge, claude_probe
+from .quota import pace as quota_pace
 from .runs import TERMINAL, unseen
 
 log = logging.getLogger("eki")
@@ -628,6 +629,11 @@ def usage_view() -> Any:
                                                   "observed_at": None, "age_seconds": None,
                                                   "error": "", "note": "not read yet"}
         view["label"] = LABELS.get(key, key.title())
+        if reading:
+            for w, wv in zip(reading.windows, view["windows"]):
+                p = quota_pace.window_pace(w)
+                wv["pace"] = {"factor": p.factor, "elapsed": p.elapsed, "ahead": p.ahead,
+                              "why": p.why}
         readings.append(view)
     return {"providers": readings,
             "ceiling": eng.quota.ceiling,

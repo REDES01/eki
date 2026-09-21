@@ -141,6 +141,7 @@ def test_auto_measure_waits_for_the_right_moment(tmp_path, monkeypatch):
     local = NS(key="qwen", running=False)
     fake = NS(
         backends=[NS(info=NS(key=k)) for k in ("qwen", "claude", "codex")],
+        AUTO_RETRY_HOURS=Engine.AUTO_RETRY_HOURS,
         registry=reg,
         models=NS(for_backend=lambda k: local if k == "qwen" else None,
                   can_start=lambda k: True),
@@ -167,10 +168,16 @@ def test_auto_measure_waits_for_the_right_moment(tmp_path, monkeypatch):
     by = {d["provider"]: d["hold"] for d in Engine.auto_measure_due(fake)}
     assert "memory" in by["qwen"]
 
-    # once measured solidly, or once attempted, it's not due again
-    reg.record("codex", "", "math", 0.9, SOLID_ITEMS, difficulty="easy")
+    # once every public slot is measured solidly, or once attempted, it's not due
+    for spec in bench.SETS.values():
+        reg.record("codex", "", spec["task"], 0.9, SOLID_ITEMS, difficulty=spec["difficulty"])
     Engine._auto_mark(fake, "claude", "", "started")
     assert {d["provider"] for d in Engine.auto_measure_due(fake)} == {"qwen"}
+    # one slot alone is a run cut short: due again, after a pause
+    reg.record("qwen", "", "math", 0.7, SOLID_ITEMS, difficulty="easy")
+    assert {d["provider"] for d in Engine.auto_measure_due(fake)} == {"qwen"}
+    Engine._auto_mark(fake, "qwen", "", "started")
+    assert Engine.auto_measure_due(fake) == []
 
     settings.save({"auto_measure": "off"})
     assert Engine.auto_measure_due(fake) == []

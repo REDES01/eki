@@ -25,6 +25,7 @@ from . import policy as policy_mod
 from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
+from . import bench
 from . import classify
 from . import discover_models
 from . import measure
@@ -524,8 +525,10 @@ class Engine:
     # ---- measuring on its own ----------------------------------------
 
     AUTO_DONE = Path("~/.eki/bench/done.json").expanduser()
-    #: a measurement stands this long before eki repeats it on its own
+    #: a complete measurement stands this long before eki repeats it on its own
     AUTO_REPEAT_DAYS = 60
+    #: one cut short (a restart, a model that fell over) is retried after this
+    AUTO_RETRY_HOURS = 6
     #: what a subscription window may already have used before eki spends
     #: some of it on measuring — a full battery is a real bite
     AUTO_QUOTA = {"five_hour": 0.2, "seven_day": 0.5, "seven_day_fable": 0.5}
@@ -571,10 +574,14 @@ class Engine:
             rec = self.registry.get(key, "")
             if rec is None or not rec.enabled or rec.klass == "image":
                 continue
-            if any(m.get("n", 0) >= SOLID_ITEMS for m in rec.measured.values()):
-                continue
+            wanted = {f"{s['task']}/{s['difficulty']}" for s in bench.SETS.values()}
+            solid = {slot for slot, m in rec.measured.items() if m.get("n", 0) >= SOLID_ITEMS}
+            complete = wanted <= solid
             last = done.get(f"{key}/", {}).get("at", 0)
-            if time.time() - last < self.AUTO_REPEAT_DAYS * 86400:
+            wait = self.AUTO_REPEAT_DAYS * 86400 if complete else self.AUTO_RETRY_HOURS * 3600
+            if time.time() - last < wait:
+                continue
+            if complete:
                 continue
             local = self.models.for_backend(key)
             hold = ""

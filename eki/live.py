@@ -345,13 +345,21 @@ def summarize_activity(tool: str, inp: Dict[str, Any]) -> str:
 
 
 _INTENT = re.compile(r"\b(let me|i'll|i will|i am going to|i'm going to|first,? i|now i|next,? i|"
-                     r"going to|will now|let's)\b", re.I)
+                     r"going to|will now|let's|installing|starting|running|adding|creating|"
+                     r"writing|fixing|updating|checking|setting up|wiring|porting)\b", re.I)
+_DONE = re.compile(r"\b(done|finished|complete|completed|all set|ready to|you can now|"
+                   r"is running on|is up and running|nothing (else|more) to do)\b", re.I)
 
 
 def sounds_unfinished(text: str) -> bool:
-    """A turn that announced work instead of doing it: short, and phrased
-    as intent. What a small model does when it forgets it has hands."""
+    """A turn that announced work instead of finishing it: short, phrased as
+    intent or as work in progress, and not a question or a wrap-up. What a
+    small model does when it forgets it has hands — or when its tool call
+    came out malformed and was dropped."""
     t = text.strip()
-    if not t or len(t) > 700:
+    if not t or len(t) > 700 or t.endswith("?"):
         return False
-    return bool(_INTENT.search(t)) and not t.rstrip().endswith("?")
+    last = t.splitlines()[-1].strip()
+    if _DONE.search(last):
+        return False
+    return bool(_INTENT.search(last))

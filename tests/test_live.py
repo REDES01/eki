@@ -255,5 +255,9 @@ def test_a_turn_that_only_announces_sounds_unfinished():
     assert live.sounds_unfinished("On it. First let me fix the page style, then start both.")
     assert live.sounds_unfinished("I'll install the dependencies now.")
     assert not live.sounds_unfinished("Done. Renamed add to sum_two and updated the caller.")
+    # what happened tonight: work was done, then a sentence of work in progress, then silence
+    assert live.sounds_unfinished("Typecheck passes. Now starting the servers.\n\nThe API is up. "
+                                  "The web platform needs a few extra packages — installing them.")
+    assert not live.sounds_unfinished("The API is running on port 8000 and Expo is up. Done.")
     assert not live.sounds_unfinished("Should I also update the tests?")
     assert not live.sounds_unfinished("")

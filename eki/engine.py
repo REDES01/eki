@@ -633,14 +633,15 @@ class Engine:
             prompt = run["prompt"]
             while True:
                 await session.send(prompt)
-                acted, said = False, []
+                tail: List[str] = []                # words since the last tool call
                 async for ev in session.turn():
                     kind = ev["kind"]
                     if kind == "text":
-                        said.append(ev["text"])
+                        tail.append(ev["text"])
                         yield ev["text"]
                     elif kind == "activity":
-                        acted = acted or ev["tool"] not in ("error", "approved")
+                        if ev["tool"] not in ("error", "approved"):
+                            tail = []
                         yield {"kind": "activity", "text": live.summarize_activity(ev["tool"], ev["input"])}
                     elif kind == "note":
                         yield {"kind": "activity", "text": ev["text"]}
@@ -659,8 +660,9 @@ class Engine:
                     elif kind == "exit":
                         self.live.pop(cid, None)
                         raise BackendError(f"{backend.info.label} stopped: {ev.get('error', '')}"[:300])
-                # a local model that announced work and stopped is told to go on
-                if local and not acted and nudges < 2 and live.sounds_unfinished("".join(said)):
+                # a local model that announced work and stopped — or whose
+                # tool call came out malformed and vanished — is told to go on
+                if local and nudges < 2 and live.sounds_unfinished("".join(tail)):
                     nudges += 1
                     prompt = "Go ahead — do it now, with the tools. Don't stop to announce."
                     yield {"kind": "activity", "text": "Nudged to carry on"}

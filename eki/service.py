@@ -129,6 +129,15 @@ async def lifespan(app: FastAPI):
         except Exception:                           # noqa: BLE001
             log.exception("titles")
 
+    async def follow() -> None:
+        # a program that carried on by itself gets its turn written down
+        while True:
+            await asyncio.sleep(2)
+            try:
+                await eng.follow_live()
+            except Exception:                       # noqa: BLE001
+                log.exception("following live sessions")
+
     async def keep_time() -> None:
         """Fire schedules whose time has come; a time missed while the Mac
         slept fires once on waking (within six hours of it)."""
@@ -160,8 +169,10 @@ async def lifespan(app: FastAPI):
     naming = asyncio.create_task(name_old_threads())
     auto = asyncio.create_task(measure_on_its_own())
     clock = asyncio.create_task(keep_time())
+    follower = asyncio.create_task(follow())
     yield
     clock.cancel()
+    follower.cancel()
     auto.cancel()
     naming.cancel()
     fresh.cancel()

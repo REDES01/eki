@@ -103,6 +103,17 @@ while True:
             result("Understood, I won't.")
     elif "fail" in prompt:
         result("Something went wrong", err=True)
+    elif "background" in prompt:
+        # a task started in the background: the turn ends, and a moment
+        # later the program carries on by itself with a turn of its own
+        text("Started the download in the background.")
+        result("Started the download in the background.")
+        import time as _t
+        _t.sleep(0.3)
+        out({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "tu9", "name": "Bash", "input": {"command": "ls downloads"}}]}})
+        text("The download finished; the file is in place.")
+        result("The download finished; the file is in place.")
     else:
         out({"type": "assistant", "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": "tu0", "name": "Read", "input": {"file_path": "/tmp/x/README.md"}}]}})

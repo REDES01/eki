@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Claude Code kept open under eki: the protocol, and the turn events."""
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -269,3 +270,62 @@ def test_the_meter_knows_a_family_window_before_the_first_result():
     assert live.known_window("claude-fable-5-1") == 1_000_000
     assert live.known_window("claude-haiku-4-5") == 200_000
     assert live.known_window("something-else") == 0
+
+
+def test_a_turn_the_program_took_by_itself_becomes_a_turn_in_the_thread(tmp_path, monkeypatch):
+    """Claude Code carries on when a background task finishes. Its events
+    arrive while nobody asked; eki writes them down as their own turn and
+    never hands them to the next question as a stale reply."""
+    from eki import secrets, settings
+    from eki.adapters import claude_code as cc
+    from eki.adapters.base import BackendInfo, Capabilities, Cost
+    from eki.config import Config
+    from eki.engine import Engine
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    cfg = Config(db_path=str(tmp_path / "eki.db"))
+    cfg.backends = [BackendInfo(key="claude_code", kind="claude_code", label="Claude Code", cost=Cost(tier=50),
+                                capabilities=Capabilities(context_tokens=200000, repo=True, tools=True))]
+    cfg.options = {"claude_code": {"binary": FAKE[0]}}
+    monkeypatch.setattr(cc.ClaudeCodeBackend, "live_argv", lambda self, cwd=None, resume=None, session_id=None: FAKE)
+    eng = Engine(cfg)
+
+    async def go():
+        started = await eng.ask("start a background download", backend_key="claude_code")
+        rid, cid = started["run"], started["conversation"]
+        q = eng.runner.subscribe(rid)
+        while True:
+            ev = await asyncio.wait_for(q.get(), timeout=10)
+            if ev["event"] == "state" and ev["state"] in ("done", "failed"):
+                break
+        # the program carried on; the follower notices and writes it down
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            if await eng.follow_live():
+                break
+        else:
+            raise AssertionError("the program's own turn was never followed")
+        for _ in range(50):
+            await asyncio.sleep(0.1)
+            if not eng.runner.running:
+                break
+        turns = eng.store.turns(cid)
+        assert [t["role"] for t in turns] == ["user", "assistant", "assistant"]
+        assert "background" in turns[1]["content"]
+        assert turns[2]["content"].startswith("The download finished")
+        assert turns[2]["reason"] == "carried on by itself"
+        assert json.loads(turns[2]["meta"])["continued"] is True
+        # and the next question gets its own answer, not the stale one
+        again = await eng.ask("hello", conversation=cid, backend_key="claude_code")
+        q = eng.runner.subscribe(again["run"])
+        text = ""
+        while True:
+            ev = await asyncio.wait_for(q.get(), timeout=10)
+            if ev["event"] == "output":
+                text += ev.get("text", "")
+            if ev["event"] == "state" and ev["state"] in ("done", "failed"):
+                break
+        assert text.startswith("Echo: hello")
+        await eng.quota.stop()
+        await eng.close()
+    run(go())

@@ -448,6 +448,9 @@ class CodexSession:
             self._write({"jsonrpc": "2.0", "id": rid,
                          "error": {"code": -32601, "message": f"eki doesn't handle {method}"}})
 
+    def stirred(self) -> bool:
+        return not self.busy and not self._events.empty()
+
     async def turn(self, timeout: float = 600.0) -> AsyncIterator[Dict[str, Any]]:
         self.busy = True
         try:

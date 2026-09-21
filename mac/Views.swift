@@ -47,6 +47,7 @@ struct ContentView: View {
         .overlay {
             if let picture = stage.picture { PictureViewer(picture: picture) }
         }
+        .overlay(alignment: .bottom) { NoticeView() }
         .onChange(of: model.paneRequest) { _, wanted in
             if let wanted { pane = wanted; model.paneRequest = nil }
         }
@@ -566,7 +567,11 @@ struct MessageView: View {
                         .font(.system(size: 10.5, weight: .semibold))
                         .tracking(0.6)
                         .foregroundStyle(Palette.inkMuted)
-                    if let reason = turn.reason, !reason.isEmpty {
+                    if turn.continued {
+                        Tag(text: "carried on by itself", color: Palette.accent)
+                            .help("The program did this on its own — a background task finished "
+                                  + "and it picked up where it left off, the way it would in a terminal.")
+                    } else if let reason = turn.reason, !reason.isEmpty {
                         Text(reason)
                             .font(.system(size: 10.5))
                             .foregroundStyle(Palette.inkFaint)

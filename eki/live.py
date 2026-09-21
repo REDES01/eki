@@ -301,6 +301,11 @@ class LiveSession:
                                      "subtype": event.get("subtype", "")})
             return
 
+    def stirred(self) -> bool:
+        """The program did something while nobody asked — a background task
+        finished and it carried on. Those events are a turn of its own."""
+        return not self.busy and not self._events.empty()
+
     async def turn(self, timeout: float = 600.0) -> AsyncIterator[Dict[str, Any]]:
         """Events of the turn in progress, up to and including its result.
 

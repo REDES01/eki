@@ -490,6 +490,10 @@ class Engine:
             async for piece in self._measure(run):
                 yield piece
             return
+        if run.get("payload") and json.loads(run["payload"]).get("continuation"):
+            async for piece in self._continuation(run):
+                yield piece
+            return
 
         cid = run["conversation_id"]
         shown = self._picture_before(run)
@@ -651,6 +655,7 @@ class Engine:
         """The conversation's session, started or resumed as needed."""
         session = self.live.get(cid)
         if session is not None and session.alive:
+            session.backend_key = backend.key                              # type: ignore[attr-defined]
             return session
         warm = self.warm.pop(cwd or "", None)
         cwd = self._workdir(cwd)
@@ -662,6 +667,7 @@ class Engine:
         if warm is not None and warm.alive and not warm.busy and not resume:
             if cid:
                 self.live[cid] = warm
+            warm.backend_key = backend.key                                 # type: ignore[attr-defined]
             return warm
         if warm is not None:
             await warm.close()
@@ -682,6 +688,7 @@ class Engine:
                 raise BackendError(str(e))
         if cid:
             self.live[cid] = session
+        session.backend_key = backend.key                                  # type: ignore[attr-defined]
         return session
 
     async def _codex_session(self, cid: str, backend: Backend, cwd: str, model: str,
@@ -706,10 +713,59 @@ class Engine:
                 raise BackendError(str(e))
         if cid:
             self.live[cid] = session
+        session.backend_key = backend.key                                  # type: ignore[attr-defined]
         return session
 
+    async def follow_live(self) -> int:
+        """Turns the programs took on their own — a background download
+        finishing, say — become turns in their threads. A wrapper that only
+        listened while answering would lose them, or worse, hand them to
+        the next question as a stale reply."""
+        started = 0
+        for cid, session in list(self.live.items()):
+            if not cid or not session.alive or not session.stirred():
+                continue
+            key = getattr(session, "backend_key", "") or ""
+            busy_here = any((self.runs.get(r) or {}).get("conversation_id") == cid
+                            for r in self.runner.running)
+            if not key or busy_here:
+                continue
+            rid = self.runs.create("", conversation=cid, cwd=session.cwd or "", requested=key,
+                                   payload=json.dumps({"continuation": True}))
+            await self.runner.submit(rid)
+            started += 1
+        return started
+
+    async def _continuation(self, run: Dict[str, Any]) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+        """A run for a turn the program started itself: no question, no
+        routing — read what it did and write it into the thread."""
+        cid = run["conversation_id"]
+        backend = self.get(run["requested"] or "")
+        if backend is None:
+            raise BackendError(f"no provider {run['requested']}")
+        reason = "carried on by itself"
+        yield {"backend": backend.key, "reason": reason}
+        parts: List[str] = []
+        meta: Dict[str, Any] = {"run": run["id"], "continued": True}
+        if run["cwd"]:
+            meta["cwd"] = run["cwd"]
+        try:
+            async for chunk in self._live_turn(run, cid, backend, "", send=False):
+                if isinstance(chunk, str):
+                    parts.append(chunk)
+                yield chunk
+        except BackendError as e:
+            self.store.add_turn(cid, "assistant", "".join(parts) or f"[failed: {e}]", backend.key, reason,
+                                meta={**meta, "failed": True})
+            raise
+        usage = dict(getattr(backend, "last_usage", {}) or {})
+        if usage:
+            meta["usage"] = usage
+        self.store.add_turn(cid, "assistant", "".join(parts) or "*[did something without saying]*",
+                            backend.key, reason, meta=meta)
+
     async def _live_turn(self, run: Dict[str, Any], cid: str, backend: Backend,
-                         model: str) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+                         model: str, send: bool = True) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         """One turn through the open session: text as it streams, tool
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
@@ -730,7 +786,9 @@ class Engine:
         try:
             prompt = run["prompt"]
             while True:
-                await session.send(prompt)
+                if send:
+                    await session.send(prompt)
+                send = True                         # a nudge, if one follows, is sent
                 tail: List[str] = []                # words since the last tool call
                 async for ev in session.turn():
                     kind = ev["kind"]

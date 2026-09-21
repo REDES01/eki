@@ -69,6 +69,8 @@ struct Turn: Codable, Identifiable, Hashable {
     }
     /// The engine restarted under this run; the program can carry on.
     var wasInterrupted: Bool { metaObject?["interrupted"] as? Bool ?? false }
+    /// A turn the program took on its own, after a background task finished.
+    var continued: Bool { metaObject?["continued"] as? Bool ?? false }
     /// How full the harness's context was when this answer finished.
     var contextUse: ContextUse? {
         guard let usage = metaObject?["usage"] as? [String: Any],

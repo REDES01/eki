@@ -152,6 +152,7 @@ def test_auto_measure_waits_for_the_right_moment(tmp_path, monkeypatch):
         AUTO_QUOTA=Engine.AUTO_QUOTA,
     )
     fake._auto_done = lambda: Engine._auto_done(fake)
+    fake._local_for = lambda k: fake.models.for_backend(k)
     fake._quota_idle = lambda k: Engine._quota_idle(fake, k)
 
     due = Engine.auto_measure_due(fake)

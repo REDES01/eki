@@ -56,6 +56,8 @@ class LocalModel:
     idle_minutes: float = DEFAULT_IDLE_MINUTES
     #: the window eki worked out for it (see eki/context.py), for the pane
     context: Dict[str, Any] = field(default_factory=dict)
+    #: what the build is, read from its files (see eki/profile.py)
+    profile: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def pinned(self) -> bool:
@@ -291,6 +293,7 @@ class ModelManager:
             "blocked_by_memory": not m.running and m.gb > 0 and not self.fits(m)[0],
             "busy": self.busy(m.key),
             "context": m.context or None,
+            "profile": m.profile or None,
         } for m in self.models.values()]
 
     # ---- control ---------------------------------------------------------

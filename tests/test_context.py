@@ -48,7 +48,9 @@ def test_engine_sizes_the_window_from_the_model(tmp_path, monkeypatch):
     monkeypatch.setattr(secrets, "get", lambda k: None)
     monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
     settings.save({"router_model": ""})
-    monkeypatch.setattr(context, "read_config", lambda repo: HYBRID if "27B" in repo else None)
+    from eki import profile
+    monkeypatch.setattr(profile, "read", lambda repo: profile.from_files(repo, HYBRID, None)
+                        if "27B" in repo else None)
     monkeypatch.setattr(ModelManager, "memory", lambda self: Memory(
         total_gb=48, ceiling_gb=37.4, committed_gb=14.5, free_gb=12.0))
     cfg = Config(db_path=str(tmp_path / "eki.db"))

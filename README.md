@@ -186,7 +186,17 @@ appears as a second provider, **Codex on <model>** — free, offline, edits
 files — in the running for repo work like any other, measured like any
 other, and gone when the model is removed. Nothing to register by hand.
 
-How much context that model gets is worked out, not typed in: its own
+What that model *is* is read from its own files, not typed in
+(`eki/profile.py`): the build's bits and group size, its weights on disk,
+its layers and how many keep a growing cache, whether its chat template
+does tool calling and has a thinking switch, the author's sampling. The
+profile is rebuilt every time the providers load, so a model added by hand
+is described like one eki set up, and a build swapped under the same name
+is noticed. A template without tool calling gets no Codex companion. What
+a profile never claims is quality: a 4-bit and an 8-bit build of the same
+base share a public prior and are measured separately.
+
+How much context that model gets is worked out the same way: its own
 config says what it supports, the memory beside its weights says what fits
 (hybrid models like Qwen3.5/3.8 keep a growing cache in only some of their
 layers, which is counted as such), and a 128k cap says where a bigger

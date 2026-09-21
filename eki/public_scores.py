@@ -53,6 +53,10 @@ def _norm(name: str) -> str:
     return n.strip("-")
 
 
+#: the build's family name, for anything that keys on it (profiles, boards)
+base_name = _norm
+
+
 def resolve(kind: str, model: str, default_model: str = "") -> Optional[str]:
     """The board's base id for what this provider would run.
 

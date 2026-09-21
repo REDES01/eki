@@ -185,6 +185,13 @@ struct LocalModelCard: View {
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.inkMuted)
+                    if let profile = row.profile, let summary = profile.summary {
+                        Text(summary)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.inkFaint)
+                            .help("Read from the build's own files (\(profile.repo)) each time "
+                                  + "eki loads its models — nothing here is typed in.")
+                    }
                     if let window = row.context, let summary = window.summary {
                         Text(summary)
                             .font(.system(size: 11.5))

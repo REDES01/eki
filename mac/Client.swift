@@ -145,8 +145,26 @@ struct LocalModelRow: Codable, Identifiable, Hashable {
     var unloads_at: Double? = nil
     /// the window eki worked out from the model's config and the memory
     var context: ContextWindow? = nil
+    /// what the build is, read from its files (see eki/profile.py)
+    var profile: ModelProfile? = nil
 
     var id: String { key }
+}
+
+struct ModelProfile: Codable, Hashable {
+    let repo: String
+    let base: String
+    let family: String
+    let params_b: Double
+    let quant_bits: Int
+    let quant_group: Int
+    let weights_gb: Double
+    let native_context: Int
+    var hybrid: Bool? = false
+    var tools: Bool? = nil
+    var thinking_switch: Bool? = false
+    var vision_weights: Bool? = false
+    var summary: String? = nil
 }
 
 struct ContextWindow: Codable, Hashable {

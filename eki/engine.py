@@ -25,6 +25,7 @@ from urllib.parse import unquote
 
 from . import config as config_mod
 from . import context as context_mod
+from . import profile as profile_mod
 from . import policy as policy_mod
 from . import priors
 from . import public_scores
@@ -101,12 +102,12 @@ class Engine:
                     gb=float(r.get("gb", 0) or 0), note=r.get("note", ""),
                     backend=p.key, kind=r.get("kind", "llm"),
                     idle_minutes=float(r.get("idle_minutes", DEFAULT_IDLE_MINUTES) or 0),
-                    context=r.get("context") or {}))
+                    context=r.get("context") or {}, profile=r.get("profile") or {}))
         previous = getattr(self, "models", None)
         self.models = ModelManager(local, self.cfg.memory_ceiling_gb)
         if previous is not None:                    # keep who-started-what across reloads
             self.models.adopt(previous)
-        self._size_windows(providers)
+        self._profile_models(providers)
         for p in providers:
             if not p.enabled:
                 continue
@@ -137,15 +138,17 @@ class Engine:
                              models_for=self.registry.for_provider)
         self._health = {}
 
-    def _size_windows(self, providers: List[Provider]) -> None:
-        """Give each local model the context it can actually use.
+    def _profile_models(self, providers: List[Provider]) -> None:
+        """Describe each local model from its own files, and give it the
+        context it can actually use.
 
-        The model's config says what it supports, the memory beside its
-        weights says what fits, and a speed cap says where a bigger window
-        stops being worth the wait (see eki/context.py). Worked out here,
-        every time the providers load, so the number a harness is handed
-        is never a catalog's guess. A model whose weights aren't cached
-        yet keeps whatever it has.
+        The build on disk (eki/profile.py) says what it is — bits, weights,
+        layers, tools, sampling; the memory beside its weights and a speed
+        cap say how much context it gets (eki/context.py). Worked out here,
+        every time the providers load, so nothing a harness is handed is a
+        catalog's guess, and a model added by hand is described like one
+        eki set up. A model whose weights aren't cached yet keeps what it
+        has.
         """
         memory = self.models.memory()
         for p in providers:
@@ -153,21 +156,29 @@ class Engine:
                 continue
             if p.runtime.get("kind", "llm") != "llm":
                 continue
-            config = context_mod.read_config(str(p.options["model"]))
-            if not config:
+            prof = profile_mod.read(str(p.options["model"]))
+            if prof is None:
                 continue
+            before = (int(p.capabilities.get("context_tokens") or 0),
+                      p.runtime.get("context"), p.runtime.get("profile"), p.runtime.get("gb"))
+            p.runtime["profile"] = prof.as_dict()
+            if not p.runtime.get("gb") and prof.weights_gb:
+                # not measured yet: the weights plus what the server adds
+                p.runtime["gb"] = round(prof.weights_gb + profile_mod.OVERHEAD_GB, 1)
             model = self.models.models.get(p.key)
             weights = float(p.runtime.get("gb", 0) or 0)
             room = memory.free_gb if (model and model.running) else memory.free_gb - weights
-            window = context_mod.size(config, room)
-            if window is None:
-                continue
-            before = (int(p.capabilities.get("context_tokens") or 0), p.runtime.get("context"))
-            p.capabilities["context_tokens"] = window.tokens
-            p.runtime["context"] = window.as_dict()
+            window = context_mod.size(prof.config, room)
+            if window is not None:
+                p.capabilities["context_tokens"] = window.tokens
+                p.runtime["context"] = window.as_dict()
             if model is not None:
-                model.context = p.runtime["context"]
-            if before != (window.tokens, p.runtime["context"]):
+                model.context = p.runtime.get("context") or {}
+                model.profile = p.runtime["profile"]
+                model.gb = model.gb or weights
+            after = (int(p.capabilities.get("context_tokens") or 0),
+                     p.runtime.get("context"), p.runtime.get("profile"), p.runtime.get("gb"))
+            if before != after:
                 self.providers.upsert(p)
 
     def _companions(self) -> None:
@@ -198,9 +209,15 @@ class Engine:
             if self.get(key) or self.providers.get(key):
                 continue
             context = int(p.capabilities.get("context_tokens") or 32000)
+            prof = p.runtime.get("profile") or {}
+            unfit = ""
             if not context_mod.harness_ready(context):
-                self.failed[key] = (f"{p.label}'s {context // 1024}k context is too small for "
-                                    f"Codex, which needs {context_mod.HARNESS_MIN // 1024}k")
+                unfit = (f"{p.label}'s {context // 1024}k context is too small for "
+                         f"Codex, which needs {context_mod.HARNESS_MIN // 1024}k")
+            elif prof.get("tools") is False:
+                unfit = f"{p.label}'s chat template has no tool calling, so Codex can't work through it"
+            if unfit:
+                self.failed[key] = unfit
                 for rec in self.registry.for_provider(key, enabled_only=False):
                     self.registry.remove(key, rec.model)
                 continue

@@ -63,6 +63,28 @@ class CodexBackend(Backend):
             detail += " · can't edit files: codex-code-mode-host is missing"
         return Health(True, detail)
 
+    def gateway_flags(self) -> List[str]:
+        gateway = self.options.get("gateway")
+        if not gateway:
+            return []
+        return ["-c", "model_provider=eki",
+                "-c", 'model_providers.eki.name="eki"',
+                "-c", f'model_providers.eki.base_url="{gateway}"',
+                "-c", 'model_providers.eki.wire_api="responses"',
+                "-c", f"model_context_window={int(self.options.get('context_tokens', 32000))}",
+                "-c", "model_reasoning_effort=\"medium\""]
+
+    def live_argv(self) -> List[str]:
+        """The app-server (see eki/codex_live.py): the program without its
+        screen, questions and approvals over stdio."""
+        argv = [self.bin, "--enable", "default_mode_request_user_input",
+                "-c", "suppress_unstable_features_warning=true"]
+        for feature in self.disabled_features:
+            argv += ["--disable", feature]
+        argv += self.gateway_flags()
+        argv.append("app-server")
+        return argv
+
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
         if not self.bin:
             raise BackendError("codex not found — install Codex CLI and `codex login`")
@@ -86,16 +108,9 @@ class CodexBackend(Backend):
             argv.append("--skip-git-repo-check")
         if self.model:
             argv += ["-m", self.model]
-        gateway = self.options.get("gateway")
-        if gateway:
-            # a local model, served through eki's own Responses endpoint
-            # (see eki/gateway.py): Codex's harness, the Mac's model
-            argv += ["-c", "model_provider=eki",
-                     "-c", 'model_providers.eki.name="eki"',
-                     "-c", f'model_providers.eki.base_url="{gateway}"',
-                     "-c", 'model_providers.eki.wire_api="responses"',
-                     "-c", f"model_context_window={int(self.options.get('context_tokens', 32000))}",
-                     "-c", "model_reasoning_effort=\"medium\""]
+        # a local model, served through eki's own Responses endpoint
+        # (see eki/gateway.py): Codex's harness, the Mac's model
+        argv += self.gateway_flags()
         for feature in self.disabled_features:
             # a feature whose helper binary isn't installed fails closed and
             # the model then reports it cannot edit anything

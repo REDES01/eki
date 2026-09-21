@@ -102,6 +102,13 @@ async def lifespan(app: FastAPI):
             except Exception as e:                  # noqa: BLE001
                 log.info("claude probe: %s", e)
 
+    try:
+        noted = eng.note_interruptions()
+        if noted:
+            log.info("noted %d interrupted run(s)", noted)
+    except Exception:                               # noqa: BLE001
+        log.exception("interruptions")
+
     async def name_old_threads() -> None:
         await asyncio.sleep(15)                     # let the local servers settle
         try:
@@ -206,6 +213,15 @@ def run_diff(rid: str) -> Any:
     return {"id": rid, "diff": engine().diff(rid)}
 
 
+@app.post("/api/runs/{rid}/resume")
+async def run_resume(rid: str) -> Any:
+    """Carry on after an interruption (see Engine.resume)."""
+    got = await engine().resume(rid)
+    if not got:
+        raise HTTPException(409, "that run isn't one that can be resumed")
+    return got
+
+
 class AnswerBody(BaseModel):
     request_id: str
     response: Dict[str, Any]          # {"behavior": "allow", "updatedInput": …} or a deny
@@ -226,15 +242,15 @@ async def run_answer(rid: str, body: AnswerBody) -> Any:
 
 
 @app.get("/api/conversations/{cid}/commands")
-async def conversation_commands(cid: str, cwd: str = "") -> Any:
-    """The slash commands Claude Code offers in this thread."""
-    return {"commands": await engine().commands_for(cid, cwd)}
+async def conversation_commands(cid: str, cwd: str = "", backend: str = "") -> Any:
+    """The slash commands the program in this thread offers."""
+    return {"commands": await engine().commands_for(cid, cwd, backend)}
 
 
 @app.get("/api/commands")
-async def folder_commands(cwd: str = "") -> Any:
+async def folder_commands(cwd: str = "", backend: str = "") -> Any:
     """The same, for a thread that hasn't started: a session is opened ahead."""
-    return {"commands": await engine().commands_for("", cwd)}
+    return {"commands": await engine().commands_for("", cwd, backend)}
 
 
 @app.get("/api/runs/{rid}/stream")

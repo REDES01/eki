@@ -405,6 +405,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func resume(_ run: String) {
+        Task {
+            do {
+                let started = try await client.resume(run: run)
+                if started.conversation == conversationID {
+                    await reload(reattach: false)
+                    attach(started.run)
+                }
+                await refreshLive()
+            } catch {
+                chatError = error.localizedDescription
+            }
+        }
+    }
+
     func retry(_ run: String) {
         Task {
             do {
@@ -502,12 +517,13 @@ final class AppModel: ObservableObject {
     @Published var commandsLoading = false
 
     func loadCommands(cwd: String) {
-        let key = conversationID + "|" + cwd
+        let key = conversationID + "|" + cwd + "|" + preferredBackend
         guard key != commandsKey, !commandsLoading else { return }
         commandsLoading = true
         Task {
             defer { commandsLoading = false }
-            let got = (try? await client.commands(conversation: conversationID, cwd: cwd)) ?? []
+            let got = (try? await client.commands(conversation: conversationID, cwd: cwd,
+                                                  backend: preferredBackend)) ?? []
             // an empty answer (engine still starting the session, or down)
             // is not remembered, so the next "/" asks again
             if !got.isEmpty { commandsKey = key }

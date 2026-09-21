@@ -67,6 +67,8 @@ struct Turn: Codable, Identifiable, Hashable {
     var didNotFinish: Bool {
         (metaObject?["failed"] as? Bool ?? false) || (metaObject?["stopped"] as? Bool ?? false)
     }
+    /// The engine restarted under this run; the program can carry on.
+    var wasInterrupted: Bool { metaObject?["interrupted"] as? Bool ?? false }
 
     private var metaObject: [String: Any]? {
         guard let meta, let data = meta.data(using: .utf8) else { return nil }
@@ -402,17 +404,22 @@ actor EngineClient {
 
     /// The slash commands Claude Code offers in a thread (or for a folder,
     /// before a thread has one).
-    func commands(conversation: String, cwd: String) async throws -> [SlashCommand] {
+    func commands(conversation: String, cwd: String, backend: String) async throws -> [SlashCommand] {
         struct W: Codable { let commands: [SlashCommand] }
         let escaped = cwd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let path = conversation.isEmpty ? "api/commands?cwd=\(escaped)"
-                                        : "api/conversations/\(conversation)/commands?cwd=\(escaped)"
+        let b = backend.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let path = conversation.isEmpty ? "api/commands?cwd=\(escaped)&backend=\(b)"
+                                        : "api/conversations/\(conversation)/commands?cwd=\(escaped)&backend=\(b)"
         return try await decode(W.self, "GET", path).commands
     }
 
     func cancel(run id: String) async {
         guard let req = try? request("POST", "api/runs/\(id)/cancel") else { return }
         _ = try? await session.data(for: req)
+    }
+
+    func resume(run id: String) async throws -> Started {
+        try await decode(Started.self, "POST", "api/runs/\(id)/resume")
     }
 
     func retry(run id: String) async throws -> Started {

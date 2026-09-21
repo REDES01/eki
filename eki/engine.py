@@ -32,6 +32,7 @@ from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
 from . import bench
 from . import classify
+from . import codex_live
 from . import discover_models
 from . import live
 from . import measure
@@ -73,7 +74,7 @@ class Engine:
         self._health: Dict[str, Tuple[float, Any]] = {}
         self._side_tasks: set = set()               # titles and the like
         #: Claude Code kept open per conversation (see eki/live.py)
-        self.live: Dict[str, live.LiveSession] = {}
+        self.live: Dict[str, Any] = {}
         #: a question or permission prompt a run is waiting on: run id → event
         self.pending: Dict[str, Dict[str, Any]] = {}
         #: sessions opened ahead of a thread (for the composer's command list,
@@ -321,6 +322,43 @@ class Engine:
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
+    def note_interruptions(self) -> int:
+        """A line in each thread whose run the previous engine took with it,
+        so the thread says what happened and offers to carry on."""
+        noted = 0
+        for run in self.runs.just_interrupted:
+            cid = run.get("conversation_id")
+            if not cid or run.get("kind") != "ask":
+                continue
+            self.store.add_turn(cid, "assistant", "*[interrupted — the engine restarted]*",
+                                run.get("backend") or "", run.get("reason") or "",
+                                meta={"run": run["id"], "interrupted": True,
+                                      **({"cwd": run["cwd"]} if run.get("cwd") else {})})
+            noted += 1
+        self.runs.just_interrupted = []
+        return noted
+
+    async def resume(self, rid: str) -> Optional[Dict[str, str]]:
+        """Carry on after an interruption. A thread whose program keeps its
+        own session (Claude Code, Codex) is told to continue where it left
+        off, with everything it knew; anything else gets the question again."""
+        old = self.runs.get(rid)
+        if not old or old["state"] not in ("failed", "cancelled", "interrupted"):
+            return None
+        cid = old["conversation_id"]
+        backend = old.get("backend") or ""
+        if cid and backend and self.store.session(cid, backend):
+            prompt = "Carry on where you left off."
+            turn = self.store.add_turn(cid, "user", prompt)
+            new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
+                                   requested=backend, images=False, user_turn=turn)
+            await self.runner.submit(new)
+            return {"run": new, "conversation": cid, "resumed": "session"}
+        got = await self.retry(rid)
+        if got:
+            got["resumed"] = "again"
+        return got
+
     async def retry(self, rid: str) -> Optional[Dict[str, str]]:
         """Answer the same question again, as a new run.
 
@@ -377,6 +415,9 @@ class Engine:
             raise BackendError(why)
 
         reason = choice.reason
+        paused = self._yield_measurements(choice.backend.key)
+        if paused:
+            reason += "; paused a measurement to make way"
         model = self._local_for(choice.backend.key)
         meta_label = label.to_json()
         if model is not None and not model.running:
@@ -438,8 +479,7 @@ class Engine:
             meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
         stream = (self._live_turn(run, cid, backend, choice.model)
-                  if backend.info.kind == "claude_code" and self.settings.get("live_claude", True)
-                  else backend.stream(history, **kw))
+                  if self._lives(backend) else backend.stream(history, **kw))
         try:
             async for chunk in stream:
                 if isinstance(chunk, str):
@@ -486,14 +526,25 @@ class Engine:
             self._side_tasks.add(task)
             task.add_done_callback(self._side_tasks.discard)
 
-    # ---- Claude Code, kept open --------------------------------------
+    # ---- Claude Code and Codex, kept open --------------------------------
 
-    async def _live_session(self, cid: str, backend: Backend, cwd: str) -> live.LiveSession:
+    def _lives(self, backend: Backend) -> bool:
+        """Whether a backend runs as an open session under eki's interface."""
+        kind = backend.info.kind
+        if kind == "claude_code":
+            return bool(self.settings.get("live_claude", True))
+        if kind == "codex":
+            return bool(self.settings.get("live_codex", True))
+        return False
+
+    async def _live_session(self, cid: str, backend: Backend, cwd: str, model: str = "") -> Any:
         """The conversation's session, started or resumed as needed."""
         session = self.live.get(cid)
         if session is not None and session.alive:
             return session
         resume = self.store.session(cid, backend.key) if cid else None
+        if backend.info.kind == "codex":
+            return await self._codex_session(cid, backend, cwd, model, resume)
         warm = self.warm.pop(cwd or "", None)
         if warm is not None and warm.alive and not warm.busy and not resume:
             if cid:
@@ -520,13 +571,36 @@ class Engine:
             self.live[cid] = session
         return session
 
+    async def _codex_session(self, cid: str, backend: Backend, cwd: str, model: str,
+                             resume: Optional[str]) -> codex_live.CodexSession:
+        argv = backend.live_argv()                                          # type: ignore[attr-defined]
+        wanted = model or str(self.options.get(backend.key, {}).get("model") or "")
+        permissions = str(self.settings.get("permissions", "auto"))
+        session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
+                                          permissions=permissions, resume=resume or "")
+        try:
+            await session.start()
+        except RuntimeError as e:
+            if resume:
+                session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
+                                                  permissions=permissions)
+                await session.start()
+            else:
+                raise BackendError(str(e))
+        if cid:
+            self.live[cid] = session
+        return session
+
     async def _live_turn(self, run: Dict[str, Any], cid: str, backend: Backend,
                          model: str) -> AsyncIterator[Union[str, Dict[str, Any]]]:
         """One turn through the open session: text as it streams, tool
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
-        session = await self._live_session(cid, backend, run["cwd"] or "")
-        if model and session.model and model not in session.model:
+        session = await self._live_session(cid, backend, run["cwd"] or "", model)
+        if cid and session.session_id:
+            # known from the handshake: a turn cut short can still be resumed
+            self.store.set_session(cid, backend.key, session.session_id)
+        if model and (not session.model or model not in session.model):
             try:
                 await session.set_model(model)
             except RuntimeError:
@@ -557,7 +631,7 @@ class Engine:
                         raise BackendError(str(ev.get("result") or "Claude Code reported an error")[:300])
                 elif kind == "exit":
                     self.live.pop(cid, None)
-                    raise BackendError(f"Claude Code stopped: {ev.get('error', '')}"[:300])
+                    raise BackendError(f"{backend.info.label} stopped: {ev.get('error', '')}"[:300])
         except (asyncio.CancelledError, GeneratorExit):
             self.pending.pop(rid, None)
             if session.alive:
@@ -589,10 +663,20 @@ class Engine:
             self.pending.pop(rid, None)
         return ok
 
-    async def commands_for(self, cid: str = "", cwd: str = "") -> List[Dict[str, Any]]:
+    async def commands_for(self, cid: str = "", cwd: str = "",
+                           backend_key: str = "") -> List[Dict[str, Any]]:
         """The slash commands for a thread; for a thread not started yet, a
-        session is opened ahead for its folder and kept for the first run."""
+        session is opened ahead for its folder and kept for the first run.
+        A thread that is (or will be) Codex gets eki's short list for it."""
         session = self.live.get(cid) if cid else None
+        if session is not None and isinstance(session, codex_live.CodexSession):
+            return list(session.commands)
+        if session is None and backend_key:
+            chosen = self.get(backend_key.partition(":")[0])
+            if chosen is not None and chosen.info.kind == "codex":
+                return list(codex_live.COMMANDS)
+            if chosen is not None and chosen.info.kind != "claude_code":
+                return []
         if session is None or not session.alive:
             session = self.warm.get(cwd or "")
         if session is None or not session.alive:
@@ -870,6 +954,35 @@ class Engine:
                     hold = f"waiting for a quieter window ({why})"
             out.append({"provider": key, "hold": hold})
         return out
+
+    #: a measurement paused for your work is tried again after this
+    AUTO_PAUSE_MINUTES = 30
+
+    def _yield_measurements(self, backend_key: str) -> List[str]:
+        """Your request comes first: a measurement running on the same
+        provider — or the same local model behind another provider — is
+        stopped, its finished slots kept, and picked up again later."""
+        mine = self._local_for(backend_key)
+        stopped: List[str] = []
+        for rid in list(self.runner.running):
+            run = self.runs.get(rid) or {}
+            if run.get("kind") != "measure":
+                continue
+            job = json.loads(run.get("payload") or "{}")
+            provider = job.get("provider", "")
+            same = provider == backend_key or (
+                mine is not None and self._local_for(provider) is mine)
+            if not same:
+                continue
+            if self.runner.cancel(rid):
+                stopped.append(provider)
+                done = self._auto_done()
+                done[f"{provider}/{job.get('model', '')}"] = {
+                    "at": int(time.time()) - self.AUTO_RETRY_HOURS * 3600
+                    + self.AUTO_PAUSE_MINUTES * 60, "note": "paused for a request"}
+                self.AUTO_DONE.parent.mkdir(parents=True, exist_ok=True)
+                self.AUTO_DONE.write_text(json.dumps(done, indent=1))
+        return stopped
 
     async def auto_measure_once(self) -> Optional[str]:
         """Start one measurement that's due, if now is a good time."""

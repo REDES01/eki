@@ -84,8 +84,14 @@ class RunStore:
         if "payload" not in cols:
             self._conn.execute("ALTER TABLE runs ADD COLUMN payload TEXT NOT NULL DEFAULT ''")
         self._adopt_old_jobs()
+        #: runs this engine found still "live" from a previous one, now
+        #: interrupted — the engine writes a note into their threads
+        self.just_interrupted: List[Dict[str, Any]] = []
         if owner:
             # anything still live belongs to an engine that is gone
+            rows = self._conn.execute(
+                "SELECT * FROM runs WHERE state IN ('running','queued')").fetchall()
+            self.just_interrupted = [dict(r) for r in rows]
             self._conn.execute(
                 "UPDATE runs SET state = 'interrupted', ended_at = ?"
                 " WHERE state IN ('running','queued')", (int(time.time()),))

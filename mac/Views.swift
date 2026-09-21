@@ -11,6 +11,7 @@ enum Pane: Hashable {
     case chat(String)      // "" = a new one
     case usage
     case models
+    case artifacts
 }
 
 struct ContentView: View {
@@ -30,6 +31,7 @@ struct ContentView: View {
                 case .chat: ChatPane()
                 case .usage: UsagePane()
                 case .models: ModelsPane()
+                case .artifacts: GalleryPane()
                 }
             }
             .frame(minWidth: 520, minHeight: 400)
@@ -101,6 +103,8 @@ struct Sidebar: View {
                             selected: pane == .usage) { choose(.usage) }
                     RailRow(icon: "slider.horizontal.3", title: "Models & routing",
                             selected: pane == .models) { choose(.models) }
+                    RailRow(icon: "square.on.square", title: "Artifacts",
+                            selected: pane == .artifacts) { choose(.artifacts) }
 
                     // what you're waiting on comes first, then what you keep
                     let working = model.conversations.filter { $0.live == true }
@@ -610,7 +614,15 @@ struct TurnActions: View {
                 .help(cwd)
             }
 
-            if let run = turn.run, turn.didNotFinish {
+            if let run = turn.run, turn.wasInterrupted {
+                Button {
+                    model.resume(run)
+                } label: {
+                    Label("Resume", systemImage: "play.fill")
+                }
+                .buttonStyle(GhostButton())
+                .help("Tell the program to carry on where it left off")
+            } else if let run = turn.run, turn.didNotFinish {
                 Button {
                     model.retry(run)
                 } label: {

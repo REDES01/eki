@@ -205,3 +205,37 @@ def test_each_slot_is_reported_the_moment_it_completes():
     assert slots == [{"slot": "math/easy", "score": 0.5, "n": 2},
                      {"slot": "chat/easy", "score": 0.0, "n": 1}]
     assert pieces[-1]["results"]["math/easy"] == {"score": 0.5, "n": 2}
+
+
+def test_a_request_pauses_a_measurement_on_the_same_model(tmp_path, monkeypatch):
+    """The measurement on the 27B stops when you ask the 27B — or Codex on
+    the 27B — for something; its finished slots stay, and it's due again later."""
+    import json
+    import time
+    from types import SimpleNamespace as NS
+    from eki.engine import Engine
+
+    cancelled = []
+    local = NS(key="qwen")
+    runs = {
+        "m1": {"id": "m1", "kind": "measure", "payload": json.dumps({"provider": "qwen", "model": ""})},
+        "m2": {"id": "m2", "kind": "measure", "payload": json.dumps({"provider": "claude", "model": ""})},
+        "a1": {"id": "a1", "kind": "ask", "payload": ""},
+    }
+    fake = NS(
+        runner=NS(running=["m1", "m2", "a1"], cancel=lambda rid: cancelled.append(rid) or True),
+        runs=NS(get=lambda rid: runs.get(rid)),
+        _local_for=lambda key: local if key in ("qwen", "codex-qwen") else None,
+        _auto_done=lambda: {},
+        AUTO_DONE=tmp_path / "done.json", AUTO_RETRY_HOURS=Engine.AUTO_RETRY_HOURS,
+        AUTO_PAUSE_MINUTES=Engine.AUTO_PAUSE_MINUTES,
+    )
+    # Codex driving the 27B needs the 27B: the 27B's measurement yields, Claude's doesn't
+    assert Engine._yield_measurements(fake, "codex-qwen") == ["qwen"]
+    assert cancelled == ["m1"]
+    done = json.loads((tmp_path / "done.json").read_text())
+    # due again in about half an hour, not six
+    assert time.time() - done["qwen/"]["at"] > (Engine.AUTO_RETRY_HOURS * 3600
+                                                - Engine.AUTO_PAUSE_MINUTES * 60 - 5)
+    assert Engine._yield_measurements(fake, "claude") == ["claude"]
+    assert Engine._yield_measurements(fake, "codex") == []

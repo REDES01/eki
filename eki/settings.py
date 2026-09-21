@@ -37,6 +37,8 @@ DEFAULTS: Dict[str, Any] = {
     #: commands, its questions and permission prompts as cards — rather than
     #: one silent run per message
     "live_claude": True,
+    #: the same for Codex, through its app-server (eki/codex_live.py)
+    "live_codex": True,
     #: appended to Claude Code's own system prompt
     "claude_system_prompt": "",
     #: "auto": Claude Code and Codex run commands and edit files without

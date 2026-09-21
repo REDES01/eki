@@ -46,6 +46,8 @@ DEFAULTS: Dict[str, Any] = {
     #: needs a say becomes a card in the thread. Questions they ask *you*
     #: always come through.
     "permissions": "auto",
+    #: a macOS notification when a scheduled task finishes
+    "notify_scheduled": True,
 }
 
 

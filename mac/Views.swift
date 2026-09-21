@@ -12,6 +12,7 @@ enum Pane: Hashable {
     case usage
     case models
     case artifacts
+    case scheduled
 }
 
 struct ContentView: View {
@@ -31,6 +32,7 @@ struct ContentView: View {
                 case .chat: ChatPane()
                 case .usage: UsagePane()
                 case .models: ModelsPane()
+                case .scheduled: SchedulesPane()
                 case .artifacts: GalleryPane()
                 }
             }
@@ -105,6 +107,8 @@ struct Sidebar: View {
                             selected: pane == .models) { choose(.models) }
                     RailRow(icon: "square.on.square", title: "Artifacts",
                             selected: pane == .artifacts) { choose(.artifacts) }
+                    RailRow(icon: "calendar.badge.clock", title: "Scheduled",
+                            selected: pane == .scheduled) { choose(.scheduled) }
 
                     // what you're waiting on comes first, then what you keep
                     let working = model.conversations.filter { $0.live == true }

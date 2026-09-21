@@ -27,6 +27,7 @@ from . import config as config_mod
 from . import policy as policy_mod
 from . import priors
 from . import public_scores
+from . import schedules as schedules_mod
 from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
@@ -122,6 +123,7 @@ class Engine:
         self.classifier = self._classifier()
         if not hasattr(self, "registry"):
             self.registry = Registry(self.cfg.db)
+            self.schedules = schedules_mod.Schedules(self.cfg.db)
         self._companions()
         self.router = Router(self.backends, self.quota, policy=self.policy,
                              is_up=self._is_up,
@@ -880,6 +882,60 @@ class Engine:
         note = f" ({final['skipped']} needed a judge and none was up)" if final.get("skipped") else ""
         speed = f" at {final['tok_s']} tokens/s" if final.get("tok_s") else ""
         yield f"\nMeasured{speed}: {measure.summary(results)}{note}\n"
+
+    # ---- on a timetable -------------------------------------------------
+
+    async def fire(self, schedule: schedules_mod.Schedule) -> Dict[str, str]:
+        """One firing: a fresh thread named after the schedule and the time,
+        the request routed like anything typed (or pinned to its provider)."""
+        stamp = time.strftime("%b %-d, %H:%M")
+        cid = self.store.new_conversation(f"{schedule.name} · {stamp}")
+        self.store.set_conversation(cid, title=f"{schedule.name} · {stamp}")
+        started = await self.ask(schedule.prompt, conversation=cid,
+                                 backend_key=schedule.backend, repo=schedule.cwd)
+        self.schedules.advance(schedule.id, ran=True, conversation=cid, run=started["run"])
+        if self.settings.get("notify_scheduled", True):
+            task = asyncio.create_task(self._notify_when_done(started["run"], schedule.name))
+            self._side_tasks.add(task)
+            task.add_done_callback(self._side_tasks.discard)
+        return started
+
+    async def fire_due(self) -> List[str]:
+        """Every schedule whose time has come, one run each."""
+        fired = []
+        for s in self.schedules.due():
+            try:
+                started = await self.fire(s)
+                fired.append(started["run"])
+            except Exception as e:                  # noqa: BLE001
+                self.schedules.advance(s.id, ran=True, run=f"failed: {e}"[:120])
+        return fired
+
+    async def _notify_when_done(self, rid: str, name: str) -> None:
+        """A macOS notification when a scheduled run ends, app open or not."""
+        queue = self.runner.subscribe(rid)
+        state = ""
+        try:
+            while True:
+                event = await asyncio.wait_for(queue.get(), timeout=6 * 3600)
+                if event.get("event") == "state" and event.get("state") in ("done", "failed", "cancelled"):
+                    state = event["state"]
+                    break
+        except asyncio.TimeoutError:
+            return
+        finally:
+            self.runner.unsubscribe(rid, queue)
+        run = self.runs.get(rid) or {}
+        text = (run.get("output") or "").strip().splitlines()
+        body = (text[-1][:120] if text else "finished") if state == "done" else f"{state}: {run.get('error') or ''}"[:120]
+        try:
+            await asyncio.create_subprocess_exec(
+                "osascript", "-e",
+                f'display notification "{body.replace(chr(34), chr(39))}" with title "eki" '
+                f'subtitle "{name.replace(chr(34), chr(39))}"',
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        except OSError:
+            pass
 
     # ---- measuring on its own ----------------------------------------
 

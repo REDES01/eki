@@ -31,6 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>local.eki.app</string>
   <key>CFBundleExecutable</key><string>Eki</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -52,13 +53,16 @@ if [ ! -s "$MERMAID" ]; then
 fi
 [ -s "$MERMAID" ] && cp "$MERMAID" "$RES/mermaid.min.js"
 
+# The app icon. The master drawing is assets/AppIcon.svg.
+cp assets/AppIcon.icns "$RES/AppIcon.icns"
+
 echo "compiling…"
 swiftc -O -target arm64-apple-macos14.0 \
   -framework AppKit -framework SwiftUI -framework ServiceManagement -framework WebKit \
   -o "$MACOS/Eki" \
   EkiApp.swift Client.swift Model.swift Theme.swift Markdown.swift \
-  Artifacts.swift Images.swift ImageViewer.swift \
-  Views.swift Downloads.swift Models.swift Live.swift \
+  Artifacts.swift Gallery.swift Images.swift ImageViewer.swift \
+  Views.swift Downloads.swift Models.swift Live.swift Schedules.swift \
   Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift
 
 if [ "$FULL" = "1" ]; then

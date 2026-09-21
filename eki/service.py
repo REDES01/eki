@@ -123,6 +123,19 @@ async def lifespan(app: FastAPI):
         except Exception:                           # noqa: BLE001
             log.exception("titles")
 
+    async def keep_time() -> None:
+        """Fire schedules whose time has come; a time missed while the Mac
+        slept fires once on waking (within six hours of it)."""
+        await asyncio.sleep(20)
+        while True:
+            try:
+                fired = await eng.fire_due()
+                if fired:
+                    log.info("scheduled: started %s", ", ".join(fired))
+            except Exception:                       # noqa: BLE001
+                log.exception("schedules")
+            await asyncio.sleep(30)
+
     async def measure_on_its_own() -> None:
         """Every so often, when nothing else is running, measure one
         provider that has no solid numbers yet (see Engine.auto_measure_due)."""
@@ -140,7 +153,9 @@ async def lifespan(app: FastAPI):
     fresh = asyncio.create_task(keep_claude_fresh())
     naming = asyncio.create_task(name_old_threads())
     auto = asyncio.create_task(measure_on_its_own())
+    clock = asyncio.create_task(keep_time())
     yield
+    clock.cancel()
     auto.cancel()
     naming.cancel()
     fresh.cancel()
@@ -614,6 +629,66 @@ async def registry_measure(provider: str, body: MeasureBody) -> Any:
         return await engine().measure(provider, body.model)
     except KeyError as e:
         raise HTTPException(404, f"unknown model {e}")
+
+
+# ---- schedules -------------------------------------------------------------
+
+class ScheduleBody(BaseModel):
+    name: str = ""
+    prompt: str = ""
+    cwd: str = ""
+    backend: str = ""
+    spec: Dict[str, Any] = {}
+    enabled: bool = True
+
+
+class SchedulePatch(BaseModel):
+    name: Optional[str] = None
+    prompt: Optional[str] = None
+    cwd: Optional[str] = None
+    backend: Optional[str] = None
+    spec: Optional[Dict[str, Any]] = None
+    enabled: Optional[bool] = None
+
+
+@app.get("/api/schedules")
+def schedules_list() -> Any:
+    return {"schedules": [s.to_json() for s in engine().schedules.all()]}
+
+
+@app.post("/api/schedules")
+def schedules_create(body: ScheduleBody) -> Any:
+    if not body.prompt.strip():
+        raise HTTPException(400, "a schedule needs something to ask")
+    if body.spec.get("kind") not in ("interval", "daily"):
+        raise HTTPException(400, "schedule kind must be interval or daily")
+    return engine().schedules.create(body.name, body.prompt.strip(), body.spec, body.cwd,
+                                     body.backend, body.enabled).to_json()
+
+
+@app.patch("/api/schedules/{sid}")
+def schedules_update(sid: str, body: SchedulePatch) -> Any:
+    got = engine().schedules.update(sid, **body.model_dump(exclude_none=True))
+    if got is None:
+        raise HTTPException(404, "no such schedule")
+    return got.to_json()
+
+
+@app.delete("/api/schedules/{sid}")
+def schedules_delete(sid: str) -> Any:
+    if not engine().schedules.delete(sid):
+        raise HTTPException(404, "no such schedule")
+    return {"ok": True}
+
+
+@app.post("/api/schedules/{sid}/run")
+async def schedules_run(sid: str) -> Any:
+    """Fire it now, on top of its timetable."""
+    eng = engine()
+    s = eng.schedules.get(sid)
+    if s is None:
+        raise HTTPException(404, "no such schedule")
+    return await eng.fire(s)
 
 
 @app.get("/api/bench")

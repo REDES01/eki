@@ -191,6 +191,30 @@ struct RoutingSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Permissions") {
+                Picker("Commands and edits", selection: Binding(
+                    get: { settings.permissions },
+                    set: { settings.permissions = $0; save() })) {
+                    Text("Run without asking").tag("auto")
+                    Text("Ask me each time").tag("ask")
+                }
+                .pickerStyle(.segmented)
+                Text("Claude Code and Codex can run commands and change files as they work. "
+                     + "By default eki lets them, using their own skip-permissions modes, so "
+                     + "a task runs through without a dozen prompts. “Ask me each time” turns "
+                     + "every permission into a card in the thread — Allow, Always allow, Deny. "
+                     + "Questions they ask you come through either way.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Claude system prompt") {
+                    TextField("Added to Claude Code's own", text: Binding(
+                        get: { settings.claude_system_prompt },
+                        set: { settings.claude_system_prompt = $0 }), axis: .vertical)
+                        .lineLimit(1...4)
+                        .onSubmit(save)
+                }
+            }
+
             Section("Measuring") {
                 Picker("Measure on its own", selection: Binding(
                     get: { settings.auto_measure },

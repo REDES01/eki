@@ -100,6 +100,8 @@ struct HubSettings: Codable, Hashable {
     var claude_probe: Bool = false
     var claude_probe_minutes: Int = 30
     var auto_measure: String = "local"
+    var permissions: String = "auto"
+    var claude_system_prompt: String = ""
 }
 
 extension EngineClient {
@@ -118,6 +120,8 @@ extension EngineClient {
             "claude_probe": settings.claude_probe,
             "claude_probe_minutes": settings.claude_probe_minutes,
             "auto_measure": settings.auto_measure,
+            "permissions": settings.permissions,
+            "claude_system_prompt": settings.claude_system_prompt,
         ])
     }
 

@@ -18,6 +18,7 @@ import shutil
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from . import _codex_events as events
+from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 
 
@@ -74,9 +75,13 @@ class CodexBackend(Backend):
         # outside a git repo Codex refuses unless told to skip the check;
         # for a chat turn there is no repo to trust
         resume = kw.get("resume") or self.options.get("resume")
-        argv = [self.bin, "exec", "--json", "-s", sandbox]
+        auto = settings_mod.load().get("permissions", "auto") == "auto"
+        # Settings → Permissions "auto": Codex's own skip-everything mode;
+        # otherwise the sandbox keeps it to the folder
+        guard = ["--dangerously-bypass-approvals-and-sandbox"] if auto else ["-s", sandbox]
+        argv = [self.bin, "exec", "--json", *guard]
         if resume:
-            argv = [self.bin, "exec", "resume", resume, "--json", "-s", sandbox]
+            argv = [self.bin, "exec", "resume", resume, "--json", *guard]
         if not cwd:
             argv.append("--skip-git-repo-check")
         if self.model:

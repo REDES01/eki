@@ -39,6 +39,11 @@ DEFAULTS: Dict[str, Any] = {
     "live_claude": True,
     #: appended to Claude Code's own system prompt
     "claude_system_prompt": "",
+    #: "auto": Claude Code and Codex run commands and edit files without
+    #: asking (their own "skip permissions" modes); "ask": each one that
+    #: needs a say becomes a card in the thread. Questions they ask *you*
+    #: always come through.
+    "permissions": "auto",
 }
 
 

@@ -227,3 +227,25 @@ def test_a_session_opened_for_the_command_list_is_adopted_by_the_first_run(tmp_p
         await eng.quota.stop()
         await eng.close()
     run(go())
+
+
+def test_permissions_setting_shapes_both_programs_argv(tmp_path, monkeypatch):
+    from eki import settings
+    from eki.adapters.base import BackendInfo
+    from eki.adapters.claude_code import ClaudeCodeBackend
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(ClaudeCodeBackend, "_no_bare_flag", lambda self: None)
+    b = ClaudeCodeBackend(BackendInfo(key="claude", kind="claude_code", label="c"), {"binary": "/bin/echo"})
+    # the default: run without asking, in both modes
+    live = b.live_argv("/tmp/p", None, "sid")
+    assert "--permission-mode" in live and live[live.index("--permission-mode") + 1] == "bypassPermissions"
+    assert "--allow-dangerously-skip-permissions" in live and "--permission-prompt-tool" in live
+    assert "--dangerously-skip-permissions" in b._argv("hi", None, "/tmp/p")
+    # ask me each time: the prompt tool carries every permission as a card
+    settings.save({"permissions": "ask"})
+    live = b.live_argv("/tmp/p", None, "sid")
+    assert live[live.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--allow-dangerously-skip-permissions" not in live
+    assert "--dangerously-skip-permissions" not in b._argv("hi", None, "/tmp/p")
+    # a chat turn with no folder asks in its default mode
+    assert "--permission-mode" not in b.live_argv(None, None, "sid")

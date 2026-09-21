@@ -19,6 +19,7 @@ import shutil
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 
 
@@ -93,14 +94,22 @@ class ClaudeCodeBackend(Backend):
             argv += ["--model", self.model]
         if resume:
             argv += ["--resume", resume]
+        if self._auto():
+            argv.append("--dangerously-skip-permissions")
         if cwd:
-            # Headless, there is nobody to answer a permission prompt: without
-            # a mode the run ends with "I don't have permission to write".
-            # Only a run that was given a folder gets edit rights, and only
-            # for that folder — a chat turn stays read-only.
-            argv += ["--add-dir", cwd,
-                     "--permission-mode", self.permission_mode]
+            argv += ["--add-dir", cwd]
+            if not self._auto():
+                # Headless, there is nobody to answer a permission prompt:
+                # without a mode the run ends with "I don't have permission to
+                # write". Only a run that was given a folder gets edit rights,
+                # and only for that folder — a chat turn stays read-only.
+                argv += ["--permission-mode", self.permission_mode]
         return argv
+
+    @staticmethod
+    def _auto() -> bool:
+        """Settings → Permissions: "auto" runs without asking."""
+        return settings_mod.load().get("permissions", "auto") == "auto"
 
     def live_argv(self, cwd: Optional[str], resume: Optional[str], session_id: str) -> List[str]:
         """The two-way streaming mode (see eki/live.py): the program stays up
@@ -115,8 +124,15 @@ class ClaudeCodeBackend(Backend):
         if self.model:
             argv += ["--model", self.model]
         argv += ["--resume", resume] if resume else ["--session-id", session_id]
+        if self._auto():
+            # its own "skip permissions" mode; questions still come through
+            # the prompt tool, since they need you either way
+            argv += ["--permission-mode", "bypassPermissions",
+                     "--allow-dangerously-skip-permissions"]
+        elif cwd:
+            argv += ["--permission-mode", self.permission_mode]
         if cwd:
-            argv += ["--add-dir", cwd, "--permission-mode", self.permission_mode]
+            argv += ["--add-dir", cwd]
         return argv
 
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:

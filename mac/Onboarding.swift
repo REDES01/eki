@@ -196,7 +196,14 @@ struct OnboardingSheet: View {
                 }
             }
 
-            step(number: 3, title: "From a terminal",
+            step(number: 3, title: "They run without asking",
+                 detail: "Claude Code and Codex run commands and edit files as they work. "
+                       + "eki lets them, so a task runs through — you can make it ask you "
+                       + "each time instead in Settings → Routing → Permissions.") {
+                Tag(text: "on", color: Palette.warn)
+            }
+
+            step(number: 4, title: "From a terminal",
                  detail: "Optional: `eki ask`, `eki runs`, `eki watch` — the same engine, "
                        + "same history.") {
                 if Engine.cliInstalled && cliNote.isEmpty {
@@ -226,7 +233,7 @@ struct OnboardingSheet: View {
             }
         }
         .padding(26)
-        .frame(width: 540, height: 560)
+        .frame(width: 540, height: 620)
         .task {
             found = (try? await model.client.discover()) ?? []
             await model.refreshProviders()

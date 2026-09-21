@@ -15,6 +15,7 @@ enum Pane: Hashable {
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var stage = Stage.shared
     @State private var pane: Pane = .chat("")
     @AppStorage(Pref.onboarded) private var onboarded: Bool = false
     @State private var showWelcome = false
@@ -39,6 +40,9 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) { EngineBadge() }
         }
         .toolbarBackground(Palette.canvas, for: .windowToolbar)
+        .overlay {
+            if let picture = stage.picture { PictureViewer(picture: picture) }
+        }
         .onChange(of: model.paneRequest) { _, wanted in
             if let wanted { pane = wanted; model.paneRequest = nil }
         }
@@ -393,15 +397,45 @@ struct EngineBadge: View {
 
 struct ChatPane: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var stage = Stage.shared
+    @AppStorage("eki.artifactWidth") private var panelWidth: Double = 480
     @State private var draft: String = ""
     @State private var repo: String = ""
+    @AppStorage("eki.permissionsNoticed") private var permissionsNoticed = false
+
+    /// The chat keeps this much however wide the panel is dragged.
+    private static let chatMinimum: Double = 340
 
     var body: some View {
+        GeometryReader { geo in
+            let most = max(300, Double(geo.size.width) - Self.chatMinimum)
+            HStack(spacing: 0) {
+                conversation
+                if let artifact = stage.artifact {
+                    PanelHandle(width: $panelWidth, limit: 300...most)
+                    ArtifactPanel(artifact: artifact)
+                        .frame(width: min(panelWidth, most))
+                        .transition(.move(edge: .trailing))
+                }
+            }
+        }
+        // what's open beside one thread has no business beside the next
+        .onChange(of: model.conversationID) { stage.artifact = nil }
+    }
+
+    private var conversation: some View {
         VStack(spacing: 0) {
             if case .down(let why) = model.engine {
                 Banner(text: why, tone: Palette.danger) {
                     Button("Retry") { Task { await model.ensureEngine() } }
                         .buttonStyle(GhostButton())
+                }
+            }
+            if !permissionsNoticed {
+                Banner(text: "Claude Code and Codex now run commands and edit files without "
+                           + "asking. Change it in Settings → Routing → Permissions.",
+                       tone: Palette.warn) {
+                    Button("OK") { permissionsNoticed = true }.buttonStyle(GhostButton())
                 }
             }
             transcript

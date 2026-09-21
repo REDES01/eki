@@ -42,6 +42,10 @@ Benchmark questions and answers remain the property of their creators; eki
 carries only the published scores. Rebuild with
 `python -m eki.evals.build_public_scores`.
 
+**Mermaid** (MIT, © Knut Sveidqvist and contributors) — `mermaid.min.js` is
+fetched at build time and carried in the app's Resources so diagram artifacts
+draw offline. It is not in this repository.
+
 eki *drives* these, and does not redistribute them:
 
 - **Claude Code** and **Codex** — run as the user's own installed CLIs, with the

@@ -41,11 +41,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Mermaid draws the diagram artifacts. Fetched once and carried inside the app
+# so diagrams work offline; without it the panel falls back to the CDN.
+MERMAID="build/vendor/mermaid.min.js"
+if [ ! -s "$MERMAID" ]; then
+  mkdir -p build/vendor
+  curl -fsSL --max-time 60 -o "$MERMAID" \
+    "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" \
+    || { rm -f "$MERMAID"; echo "note: couldn't fetch mermaid; diagrams will load it from the CDN"; }
+fi
+[ -s "$MERMAID" ] && cp "$MERMAID" "$RES/mermaid.min.js"
+
 echo "compiling…"
 swiftc -O -target arm64-apple-macos14.0 \
-  -framework AppKit -framework SwiftUI -framework ServiceManagement \
+  -framework AppKit -framework SwiftUI -framework ServiceManagement -framework WebKit \
   -o "$MACOS/Eki" \
   EkiApp.swift Client.swift Model.swift Theme.swift Markdown.swift \
+  Artifacts.swift Images.swift ImageViewer.swift \
   Views.swift Downloads.swift Models.swift Live.swift \
   Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift
 

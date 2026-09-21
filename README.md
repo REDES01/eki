@@ -82,6 +82,14 @@ Ollama, LM Studio), ComfyUI for images. *Models & routing → Add provider*
 finds what's already on the Mac, tests before saving, and puts any key in the
 Keychain.
 
+**Pictures and artifacts.** Say *generate an image of…* and the request goes
+to the image backend — eki starts ComfyUI if it's asleep — and the picture
+appears in the chat; click it for a viewer with zoom, copy, save and *Show in
+Finder*. An answer that contains a whole HTML page, an SVG or a Mermaid diagram
+shows a card instead of a wall of source; the card opens it live in a panel
+beside the chat, with the code one click away. The panel has no storage and no
+file access, and links open in your browser.
+
 A note on Codex: it edits files through a separate helper,
 `codex-code-mode-host`, that the standalone install doesn't always ship —
 without it Codex answers questions and declines every edit. eki says so on

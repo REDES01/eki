@@ -87,8 +87,10 @@ struct UsageRow: View {
                 .padding(.leading, 84)
         }
         if let pace = window.pace, !pace.why.isEmpty {
-            Text(pace.factor > 1 ? "ahead of pace — costed ×\(fmt(pace.factor)) for routing"
-                                 : "behind pace — costed ×\(fmt(pace.factor)), spend it")
+            Text(pace.why.contains("on credits")
+                     ? "spent — on credits now, costed ×\(fmt(pace.factor)) for routing"
+                     : pace.factor > 1 ? "ahead of pace — costed ×\(fmt(pace.factor)) for routing"
+                                       : "behind pace — costed ×\(fmt(pace.factor)), spend it")
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(pace.factor > 1 ? Color.orange : Palette.inkFaint)
                 .padding(.leading, 84)

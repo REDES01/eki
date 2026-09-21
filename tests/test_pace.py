@@ -125,3 +125,49 @@ def test_fables_own_window_prices_fable_not_opus():
     c = _router(mac, {"claude": claude}).choose(need)
     assert c.backend.key == "claude" and c.model == "opus"
     assert "5H behind pace" in c.reason
+
+
+# ---- credits: what pays once a window is gone -------------------------------
+
+def test_a_spent_window_with_credits_left_is_dear_not_gone():
+    import time
+    board = QuotaBoard([])
+    spent = Window("five_hour", "5H", 1.0, resets_at=int(time.time() + 3 * H), window_seconds=5 * H)
+    board.latest["claude"] = Reading("claude", [spent, Window("credits", "CREDITS", 0.94, kind="credits")])
+    assert board.exhausted() == {}                             # still takes requests…
+    p = board.pace()["claude"]
+    assert p.factor == CEIL and p.pace.why == "5H spent, on credits ×4"   # …at a price
+    # credits gone too: now it's a wall, and the reason says both
+    board.latest["claude"].windows[1] = Window("credits", "CREDITS", 1.0, kind="credits")
+    assert board.exhausted() == {"claude": "5H at 100%, credits spent too"}
+    # no credits pool at all: a spent window is simply spent
+    board.latest["claude"] = Reading("claude", [spent])
+    assert board.exhausted() == {"claude": "5H at 100%"}
+
+
+def test_fables_spent_week_prices_fable_and_leaves_opus_alone():
+    reading = Reading("claude", [
+        five_hour(0.3, 2.5),
+        Window("seven_day_fable", "FABLE WEEK", 1.0, resets_at=int(NOW + 2 * 24 * H),
+               window_seconds=7 * 24 * H, primary=False),
+        Window("credits", "CREDITS", 0.5, kind="credits")])
+    board = QuotaBoard([])
+    board.latest["claude"] = reading
+    assert board.exhausted() == {}
+    p = provider_pace(reading, NOW)
+    assert p.model_factor("fable") == CEIL and p.models["fable"].on_credits
+    assert p.model_factor("opus") == 1.0
+
+
+def test_on_credits_the_work_goes_elsewhere_when_anything_else_clears_the_bar():
+    mac = Mac()
+    claude = provider_pace(Reading("claude", [
+        five_hour(1.0, 3), Window("credits", "CREDITS", 0.5, kind="credits")]), NOW)
+    codex = provider_pace(Reading("codex", [five_hour(0.5, 2.5)]), NOW)
+    c = _router(mac, {"claude": claude, "codex": codex}).choose(
+        Need(repo=True, task="repo", difficulty="hard"))
+    assert c.backend.key == "codex" and "claude 5H spent, on credits ×4" in c.reason
+    # …and when nothing else does, Claude on credits beats not answering
+    mac.records["codex"][0].public["scores"]["repo/hard"] = 0.5
+    c = _router(mac, {"claude": claude}).choose(Need(repo=True, task="repo", difficulty="hard"))
+    assert c.backend.key == "claude" and "on credits" in c.reason

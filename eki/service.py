@@ -630,8 +630,15 @@ def usage_view() -> Any:
                                                   "error": "", "note": "not read yet"}
         view["label"] = LABELS.get(key, key.title())
         if reading:
+            paced = quota_pace.provider_pace(reading, ceiling=eng.quota.ceiling)
             for w, wv in zip(reading.windows, view["windows"]):
                 p = quota_pace.window_pace(w)
+                if w.kind == "window":
+                    token = w.key.rsplit("_", 1)[-1].lower()
+                    own = paced.pace if w.primary and paced.pace.window == w.label \
+                        else paced.models.get(token)
+                    if own is not None and own.on_credits:
+                        p = own
                 wv["pace"] = {"factor": p.factor, "elapsed": p.elapsed, "ahead": p.ahead,
                               "why": p.why}
         readings.append(view)

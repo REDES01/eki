@@ -12,7 +12,7 @@ import logging
 from typing import Dict, List, Optional
 
 from .base import QuotaProvider, Reading, Window, label_for  # noqa: F401
-from .pace import ProviderPace, provider_pace
+from .pace import ProviderPace, credits_left, provider_pace
 
 log = logging.getLogger("eki.quota")
 
@@ -57,17 +57,27 @@ class QuotaBoard:
 
     def pace(self) -> Dict[str, "ProviderPace"]:
         """{provider: how fast its windows are being spent} — see quota.pace."""
-        return {key: provider_pace(reading) for key, reading in self.latest.items()}
+        return {key: provider_pace(reading, ceiling=self.ceiling)
+                for key, reading in self.latest.items()}
 
     def exhausted(self) -> Dict[str, str]:
-        """{provider: why} for providers with a spent window.
+        """{provider: why} for providers that can't take a request now.
 
-        Only real windows count. A credit or spend meter running high means
-        money, not a wall, and the router shouldn't treat it as one.
+        A spent window is a wall only when nothing pays past it: with credits
+        left the provider stays in, at the dearest pace (see quota.pace), and
+        a credit meter running high on its own means money, not a wall.
         """
         out: Dict[str, str] = {}
         for key, reading in self.latest.items():
+            credits = credits_left(reading)
             for w in reading.windows:
+                if w.kind == "window" and w.used >= self.ceiling and not w.primary:
+                    continue                        # one model's window: priced, not a wall
                 if w.kind == "window" and w.used >= self.ceiling:
-                    out[key] = f"{w.label} at {round(w.used * 100)}%"
+                    if credits:
+                        continue
+                    why = f"{w.label} at {round(w.used * 100)}%"
+                    if credits is not None:
+                        why += ", credits spent too"
+                    out[key] = why
         return out

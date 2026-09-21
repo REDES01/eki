@@ -35,6 +35,8 @@ class Pace:
     window: str = ""
     used: float = 0.0
     elapsed: Optional[float] = None       # None: no reset time known
+    #: the window is gone and the work is being paid for from credits
+    on_credits: bool = False
 
     @property
     def ahead(self) -> Optional[float]:
@@ -42,6 +44,8 @@ class Pace:
 
     @property
     def why(self) -> str:
+        if self.on_credits:
+            return f"{self.window} spent, on credits ×{self.factor:g}"
         if not self.window or abs(self.factor - 1.0) < 0.05:
             return ""
         side = "ahead of" if self.factor > 1 else "behind"
@@ -85,16 +89,30 @@ def window_pace(w: Window, now: Optional[float] = None) -> Pace:
     return Pace(factor=factor, window=w.label, used=w.used, elapsed=elapsed)
 
 
-def provider_pace(reading: Reading, now: Optional[float] = None) -> ProviderPace:
+def credits_left(reading: Reading) -> Optional[float]:
+    """0..1 of the credits pool still there, or None when there is no pool."""
+    pools = [w for w in reading.windows if w.kind == "credits"]
+    if not pools:
+        return None
+    return max(0.0, 1.0 - max(w.used for w in pools))
+
+
+def provider_pace(reading: Reading, now: Optional[float] = None,
+                  ceiling: float = 0.99) -> ProviderPace:
     """The tightest account-wide window sets the provider's pace; a window
-    for one model sets that model's."""
+    for one model sets that model's. A window that's spent while credits
+    remain doesn't take the provider out — the board's `exhausted` leaves it
+    in — but it's as dear as pacing gets: every token is now money."""
     out = ProviderPace()
+    credits = credits_left(reading)
     for w in reading.windows:
         if w.kind != "window":
             # credits are money spent only once the windows are gone: shown
             # with a pace of their own, but not what prices the provider now
             continue
         p = window_pace(w, now)
+        if w.used >= ceiling and credits:
+            p = Pace(factor=CEIL, window=w.label, used=w.used, elapsed=p.elapsed, on_credits=True)
         if w.primary:
             if p.factor > out.pace.factor or not out.pace.window:
                 out.pace = p

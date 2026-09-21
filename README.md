@@ -137,9 +137,13 @@ even burn: 90% of a 5-hour window used with four hours to go is far ahead of
 pace and makes that provider ×3 dearer, so medium work goes local and the
 rest of the window is there for the hard problem later; a week barely
 touched by Thursday is ×0.5, cheaper than its list price, and gets spent.
-Fable's own week prices Fable alone. The Usage pane marks where an even burn
-would be on each bar, and the reason says when pace decided: "codex: cheapest
-fit … 5H behind pace ×0.5; claude 5H ahead of pace ×3.1".
+Fable's own week prices Fable alone. Usage credits are what pays once a
+window is gone, so they never price a provider on their own; a spent window
+with credits left keeps the provider available at the dearest pace (×4,
+"5H spent, on credits") and only a spent window with no credits is a wall.
+The Usage pane marks where an even burn would be on each bar, and the reason
+says when pace decided: "codex: cheapest fit … 5H behind pace ×0.5; claude 5H
+ahead of pace ×3.1".
 
 Memory is read from the OS, not just from what eki loaded. A local model is
 started only if it fits in what the Mac really has free (keeping 4 GB back);

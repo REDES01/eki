@@ -21,6 +21,22 @@ model per kind of work (`eki/evals/public_scores.json`):
 | Data | Licence | Used for |
 | --- | --- | --- |
 | [Epoch AI, *Capabilities & Benchmarking*](https://epoch.ai/benchmarks) | CC BY 4.0 | starting beliefs about what each model is good at, before eki has measured anything itself |
+| [OpenEvals/leaderboard-data](https://huggingface.co/datasets/OpenEvals/leaderboard-data) (Hugging Face) | MIT | the same, for open-weight models |
+| [OpenRouter model list](https://openrouter.ai/models) | public API | API prices, which become relative cost weights |
+
+eki measures models itself with items sampled from public benchmark datasets,
+fetched on first use from the Hugging Face datasets server into `~/.eki/bench/`
+(nothing is redistributed with eki):
+
+| Dataset | Licence |
+| --- | --- |
+| [GSM8K](https://huggingface.co/datasets/openai/gsm8k) (Cobbe et al. 2021) | MIT |
+| [MATH](https://huggingface.co/datasets/EleutherAI/hendrycks_math) (Hendrycks et al. 2021) | MIT |
+| [AIME 2025](https://huggingface.co/datasets/math-ai/aime25) | Apache-2.0 |
+| [MBPP](https://huggingface.co/datasets/google-research-datasets/mbpp) (Austin et al. 2021) | CC BY 4.0 |
+| [HumanEval](https://huggingface.co/datasets/openai/openai_humaneval) (Chen et al. 2021) | MIT |
+| [TriviaQA](https://huggingface.co/datasets/mandarjoshi/trivia_qa) (Joshi et al. 2017) | Apache-2.0 |
+| [MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) (Wang et al. 2024) | MIT |
 
 Benchmark questions and answers remain the property of their creators; eki
 carries only the published scores. Rebuild with

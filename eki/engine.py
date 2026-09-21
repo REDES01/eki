@@ -32,7 +32,7 @@ from . import secrets
 from . import settings as settings_mod
 from . import titles
 from .models import LocalModel, ModelManager
-from .capability import Registry
+from .capability import SOLID_ITEMS, Registry
 from .providers import Provider, ProviderStore, seed_from_config
 from .quota import QuotaBoard, QuotaProvider
 from .quota import claude_bridge
@@ -486,9 +486,18 @@ class Engine:
 
         yield f"Running the battery against {provider} {model}…\n".replace("  ", " ")
         final: Dict[str, Any] = {}
+        recorded: Dict[str, Dict[str, Any]] = {}
         try:
             async for piece in measure.run(subject, judge):
-                if isinstance(piece, dict):
+                if isinstance(piece, dict) and "slot" in piece:
+                    # kept the moment a slot completes, so a run cut short
+                    # still leaves what it learned
+                    task, _, difficulty = piece["slot"].partition("/")
+                    self.registry.record(provider, model, task, piece["score"], piece["n"],
+                                         difficulty=difficulty or "easy")
+                    recorded[piece["slot"]] = piece
+                    yield f"  → {piece['slot']}: {piece['score']:.2f} over {piece['n']}\n"
+                elif isinstance(piece, dict):
                     final = piece
                 else:
                     yield piece
@@ -501,12 +510,101 @@ class Engine:
                 self.models.release(local.key)
         results = final.get("results", {})
         for slot, r in results.items():
+            if slot in recorded:
+                continue
             task, _, difficulty = slot.partition("/")
             self.registry.record(provider, model, task, r["score"], r["n"],
-                                 final.get("tok_s"), difficulty=difficulty or "easy")
+                                 difficulty=difficulty or "easy")
+        if final.get("tok_s"):
+            self.registry.record_speed(provider, model, final["tok_s"])
         note = f" ({final['skipped']} needed a judge and none was up)" if final.get("skipped") else ""
         speed = f" at {final['tok_s']} tokens/s" if final.get("tok_s") else ""
         yield f"\nMeasured{speed}: {measure.summary(results)}{note}\n"
+
+    # ---- measuring on its own ----------------------------------------
+
+    AUTO_DONE = Path("~/.eki/bench/done.json").expanduser()
+    #: a measurement stands this long before eki repeats it on its own
+    AUTO_REPEAT_DAYS = 60
+    #: what a subscription window may already have used before eki spends
+    #: some of it on measuring — a full battery is a real bite
+    AUTO_QUOTA = {"five_hour": 0.2, "seven_day": 0.5, "seven_day_fable": 0.5}
+
+    def _auto_done(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.AUTO_DONE.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _auto_mark(self, provider: str, model: str, note: str) -> None:
+        done = self._auto_done()
+        done[f"{provider}/{model}"] = {"at": int(time.time()), "note": note}
+        self.AUTO_DONE.parent.mkdir(parents=True, exist_ok=True)
+        self.AUTO_DONE.write_text(json.dumps(done, indent=1))
+
+    def _quota_idle(self, key: str) -> Tuple[bool, str]:
+        reading = self.quota.latest.get(key)
+        if reading is None or not reading.windows:
+            return True, ""
+        for w in reading.windows:
+            limit = self.AUTO_QUOTA.get(w.key)
+            if limit is not None and w.used > limit:
+                return False, f"{w.label} at {int(w.used * 100)}%"
+        return True, ""
+
+    def auto_measure_due(self) -> List[Dict[str, str]]:
+        """What eki would measure next, and what holds each back.
+
+        Only a provider's default model, only when nothing solid is measured
+        for it yet (or the last run is old), and only in the mode set:
+        "local" spends nothing but time; "all" also spends subscription
+        windows, when they're nearly idle.
+        """
+        conf = settings_mod.load()
+        mode = conf.get("auto_measure", "local")
+        out: List[Dict[str, str]] = []
+        if mode == "off":
+            return out
+        done = self._auto_done()
+        for backend in self.backends:
+            key = backend.info.key
+            rec = self.registry.get(key, "")
+            if rec is None or not rec.enabled or rec.klass == "image":
+                continue
+            if any(m.get("n", 0) >= SOLID_ITEMS for m in rec.measured.values()):
+                continue
+            last = done.get(f"{key}/", {}).get("at", 0)
+            if time.time() - last < self.AUTO_REPEAT_DAYS * 86400:
+                continue
+            local = self.models.for_backend(key)
+            hold = ""
+            if local is None and mode != "all":
+                hold = "only local models are measured on their own"
+            elif local is not None and not local.running and not self.models.can_start(local.key):
+                hold = "not enough memory to load it"
+            elif local is None:
+                ok, why = self._quota_idle(key)
+                if not ok:
+                    hold = f"waiting for a quieter window ({why})"
+            out.append({"provider": key, "hold": hold})
+        return out
+
+    async def auto_measure_once(self) -> Optional[str]:
+        """Start one measurement that's due, if now is a good time."""
+        if self.runner.running:
+            return None                             # never alongside your own work
+        for due in self.auto_measure_due():
+            if due["hold"]:
+                continue
+            key = due["provider"]
+            self._auto_mark(key, "", "started")
+            try:
+                started = await self.measure(key)
+            except Exception as e:                  # noqa: BLE001
+                self._auto_mark(key, "", f"failed: {e}")
+                continue
+            return started["run"]
+        return None
 
     # ---- models ------------------------------------------------------
 

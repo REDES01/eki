@@ -99,6 +99,7 @@ struct HubSettings: Codable, Hashable {
     var router: String = "rules"
     var claude_probe: Bool = false
     var claude_probe_minutes: Int = 30
+    var auto_measure: String = "local"
 }
 
 extension EngineClient {
@@ -116,6 +117,7 @@ extension EngineClient {
             "router": settings.router,
             "claude_probe": settings.claude_probe,
             "claude_probe_minutes": settings.claude_probe_minutes,
+            "auto_measure": settings.auto_measure,
         ])
     }
 

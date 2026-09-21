@@ -191,6 +191,26 @@ struct RoutingSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Measuring") {
+                Picker("Measure on its own", selection: Binding(
+                    get: { settings.auto_measure },
+                    set: { settings.auto_measure = $0; save() })) {
+                    Text("Off").tag("off")
+                    Text("Local models").tag("local")
+                    Text("Everything").tag("all")
+                }
+                .pickerStyle(.segmented)
+                Text("eki puts the same public test items — GSM8K, MATH, AIME, MBPP, "
+                     + "HumanEval, TriviaQA, MMLU-Pro — to every provider, so a 4-bit "
+                     + "local build and a frontier model land on one scale. Local models "
+                     + "are measured when nothing else is running and cost only time. "
+                     + "“Everything” also measures Claude, Codex and API providers, only "
+                     + "while their windows are nearly idle; a full run is a real bite of "
+                     + "a 5-hour window, once per provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Local models") {
                 LabeledContent("MLX Python") {
                     TextField("", text: Binding(

@@ -119,8 +119,21 @@ def lookup(kind: str, model: str, default_model: str = "",
     if not got:
         return None
     entry = next((e for m, e in load()["models"].items() if _base(m) == base), {})
-    return {"base": base, "name": entry.get("name") or base, "scores": got,
-            "date": entry.get("date", "")}
+    out = {"base": base, "name": entry.get("name") or base, "scores": got,
+           "date": entry.get("date", "")}
+    if entry.get("price"):
+        out["price"] = entry["price"]
+    return out
+
+
+def price(kind: str, model: str, default_model: str = "") -> Optional[Dict[str, float]]:
+    """{"in": $/M, "out": $/M} from the public price list, or None."""
+    base = resolve(kind, model, default_model)
+    if base is None:
+        return None
+    entry = next((e for m, e in load()["models"].items() if _base(m) == base and e.get("price")),
+                 None)
+    return entry["price"] if entry else None
 
 
 def nearest(slot_scores: Dict[str, float], task: str, difficulty: str) -> Optional[float]:

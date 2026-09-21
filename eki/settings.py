@@ -28,6 +28,11 @@ DEFAULTS: Dict[str, Any] = {
     #: you have the app open. /usage asks no model anything, so it's free.
     "claude_probe": False,
     "claude_probe_minutes": 10,
+    #: measure providers on their own, with the public benchmark items:
+    #: "local" (free: eki's own model servers, when idle), "all" (also
+    #: Claude, Codex and API providers, when their windows are nearly idle),
+    #: or "off"
+    "auto_measure": "local",
 }
 
 

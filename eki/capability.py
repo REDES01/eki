@@ -51,12 +51,20 @@ CREATE TABLE IF NOT EXISTS models (
 COST_WEIGHT = {"small_open": 0.05, "mid_open": 0.1, "large_open": 0.2, "image": 0.2,
                "frontier_agent_fast": 1.0, "frontier_api": 3.0, "frontier_agent": 5.0}
 #: a flagship that is metered on its own window (Claude Code shows "Current
-#: week (Fable)") costs more than the tier's other models. A placeholder
-#: until pacing prices that window directly; per-model cost_weight overrides.
-COST_NAMES = {"fable": 8.0}
+#: week (Fable)") costs more than the tier's other models. Used only when no
+#: public price is known; per-model cost_weight overrides.
+COST_NAMES = {"fable": 10.0}
+#: public API prices become a cost weight on the same scale: the blended
+#: $/M tokens (a quarter in, three quarters out) over this anchor, chosen so
+#: that Opus lands on the frontier_agent weight of 5
+PRICE_ANCHOR = 4.0
 
 #: below this many measured items a score is still the prior
 MIN_ITEMS = 3
+#: from this many, eki's own measurement outranks the public boards: the
+#: boards ran thousands of items, but on a different harness and a different
+#: build; a few dozen on this one say more about what will happen here
+SOLID_ITEMS = 10
 
 
 @dataclass
@@ -94,18 +102,25 @@ class ModelRecord:
 
     def _quality(self, task: str, difficulty: str = "") -> Tuple[float, str]:
         got = self.measured.get(f"{task}/{difficulty}") if difficulty else None
-        if got and got.get("n", 0) >= MIN_ITEMS:
+        if got and got.get("n", 0) >= SOLID_ITEMS:
             return float(got["score"]), "measured"
         if self.public.get("scores") and difficulty:
             found = public_scores.nearest(self.public["scores"], task, difficulty)
             if found is not None:
                 return float(found), "public"
+        if got and got.get("n", 0) >= MIN_ITEMS:
+            return float(got["score"]), "measured"
         return priors.QUALITY.get(self.klass, {}).get(task, 0.0), "prior"
 
     @property
     def cost(self) -> float:
         if self.cost_weight is not None:
             return self.cost_weight
+        price = (self.public or {}).get("price") or {}
+        if price.get("out") and self.klass.startswith("frontier"):
+            # a local build's price is memory and time, not dollars
+            blended = 0.25 * float(price.get("in", 0.0)) + 0.75 * float(price["out"])
+            return round(max(0.2, blended / PRICE_ANCHOR), 2)
         name = (self.model or (self.public or {}).get("base") or "").lower()
         for token, weight in COST_NAMES.items():
             if token in name:
@@ -227,6 +242,12 @@ class Registry:
         if speed_tok_s:
             rec.speed_tok_s = round(speed_tok_s, 1)
         return self.upsert(rec)
+
+    def record_speed(self, provider: str, model: str, tok_s: float) -> None:
+        rec = self.get(provider, model)
+        if rec is not None and tok_s:
+            rec.speed_tok_s = round(tok_s, 1)
+            self.upsert(rec)
 
     def set_enabled(self, provider: str, model: str, enabled: bool) -> bool:
         rec = self.get(provider, model)

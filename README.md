@@ -106,23 +106,31 @@ and only then cost.
 how demanding) and a score per model per kind of work, from three sources in
 order of how much they know:
 
-1. **eki's own measurement.** *Models…* on a provider lists the models behind
-   it (Claude Code's fable/opus/sonnet, Codex's list, whatever a local server
-   loaded); *Measure* runs one through a short battery with checkable
-   answers, a local model grading the open-ended ones. It tells a 2B from a
-   27B and catches a broken setup. It can't rank the top — every task it can
-   check, Fable and Opus both pass — and a measurement only speaks for the
-   difficulty it was taken at.
-2. **The public boards.** A snapshot of Epoch AI's benchmark hub ships with
-   eki, reduced to one number per model per kind of work, relative to the
-   best model on each benchmark. This is what separates Fable from Opus from
-   Sonnet, and what a hard request is judged against.
-3. **The model's class**, for a model neither of the above has seen — a
-   quantised local build, say.
+1. **eki's own measurement.** The same public test items — thirty each from
+   GSM8K, MATH (level 5), AIME 2025, MBPP, HumanEval, TriviaQA and MMLU-Pro,
+   plus a short hand battery — put to every provider through the same
+   adapters. A number, a boxed expression, a letter or a test suite says
+   whether the answer is right; only the open-ended items need a local model
+   as judge. Because every model sees the same items on the same harness, the
+   4-bit build you actually run and a frontier model land on one scale, which
+   no board offers. It runs on its own when nothing else is (*Settings →
+   Routing → Measure on its own*): local models by default, Claude, Codex and
+   API providers too if you say so, and only while their windows are nearly
+   idle — a full run is a real bite of a 5-hour window. The items are fetched
+   once from the Hugging Face datasets server into `~/.eki/bench/`.
+2. **The public boards.** A snapshot of Epoch AI's benchmark hub (the closed
+   frontier models) merged with Hugging Face's official leaderboard data (the
+   open-weight models down to 0.8B) ships with eki, reduced to one number per
+   model per kind of work, relative to the best model on each benchmark. A
+   measurement of a few dozen items on this Mac outranks it; until then it
+   is what separates Fable from Opus from Sonnet.
+3. **The model's class**, for a model neither of the above has seen.
 
-Each model also carries a relative cost. The router picks, behind a
-provider, the cheapest model that clears the bar — the default when it does —
-and names it in the reason: "claude (opus): cheapest fit for math/hard".
+Each model also carries a relative cost, from its public API price where one
+is listed (OpenRouter's model list; Opus sits at 5, Fable at 10, Sonnet at 2)
+and from its class otherwise. The router picks, behind a provider, the
+cheapest model that clears the bar — the default when it does — and names it
+in the reason: "claude (opus): cheapest fit for math/hard".
 
 Memory is read from the OS, not just from what eki loaded. A local model is
 started only if it fits in what the Mac really has free (keeping 4 GB back);

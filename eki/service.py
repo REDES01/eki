@@ -34,6 +34,7 @@ from . import providers as providers_mod
 from . import deploy as deploy_mod
 from . import migrate
 from . import secrets
+from . import bench
 from . import settings as settings_mod
 from .adapters import base as adapters
 from . import policy as policy_mod
@@ -110,10 +111,25 @@ async def lifespan(app: FastAPI):
         except Exception:                           # noqa: BLE001
             log.exception("titles")
 
+    async def measure_on_its_own() -> None:
+        """Every so often, when nothing else is running, measure one
+        provider that has no solid numbers yet (see Engine.auto_measure_due)."""
+        await asyncio.sleep(120)
+        while True:
+            try:
+                rid = await eng.auto_measure_once()
+                if rid:
+                    log.info("measuring on my own: run %s", rid)
+            except Exception:                       # noqa: BLE001
+                log.exception("auto measure")
+            await asyncio.sleep(600)
+
     reaper = asyncio.create_task(reap())
     fresh = asyncio.create_task(keep_claude_fresh())
     naming = asyncio.create_task(name_old_threads())
+    auto = asyncio.create_task(measure_on_its_own())
     yield
+    auto.cancel()
     naming.cancel()
     fresh.cancel()
     reaper.cancel()
@@ -537,6 +553,28 @@ async def registry_measure(provider: str, body: MeasureBody) -> Any:
         return await engine().measure(provider, body.model)
     except KeyError as e:
         raise HTTPException(404, f"unknown model {e}")
+
+
+@app.get("/api/bench")
+def bench_status() -> Any:
+    """The public items eki measures with, and what it would measure next."""
+    return {"sets": bench.status(), "attribution": bench.attribution(),
+            "due": engine().auto_measure_due(),
+            "auto_measure": settings_mod.load().get("auto_measure", "local")}
+
+
+@app.post("/api/bench/fetch")
+async def bench_fetch(force: bool = False) -> Any:
+    """Fetch (or refetch) the public items; a new sample when forced."""
+    loop = asyncio.get_running_loop()
+    got = {}
+    for name in bench.SETS:
+        try:
+            items = await loop.run_in_executor(None, lambda n=name: bench.fetch(n, force=force))
+            got[name] = len(items)
+        except Exception as e:                      # noqa: BLE001
+            got[name] = f"failed: {e}"
+    return got
 
 
 class RegistryPatch(BaseModel):

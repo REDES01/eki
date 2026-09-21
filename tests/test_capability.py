@@ -4,7 +4,7 @@ import asyncio
 
 from eki import measure
 from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
-from eki.capability import MIN_ITEMS, ModelRecord, Registry
+from eki.capability import COST_WEIGHT, MIN_ITEMS, SOLID_ITEMS, ModelRecord, Registry
 from eki.router import Need, Router
 
 
@@ -170,8 +170,14 @@ def test_public_scores_rank_what_the_battery_cannot():
     assert fable["base"].startswith("claude-fable-") and opus["base"].startswith("claude-opus-")
     hard = lambda r: ps.nearest(r["scores"], "chat", "hard")     # noqa: E731
     assert hard(fable) >= hard(opus) > hard(sonnet)
-    # a local quantised build the boards never saw stays unknown, not guessed
-    assert ps.lookup("mlx", "mlx-community/Qwen3.5-2B-MLX-4bit") is None
+    # a local build resolves to its base model on the open board — the 4-bit
+    # part is what eki's own measurement is for — and prices come along
+    small = ps.lookup("mlx", "mlx-community/Qwen3.5-2B-MLX-4bit")
+    assert small and small["base"] == "qwen3.5-2b" and "chat/medium" in small["scores"]
+    assert ps.lookup("mlx", "mlx-community/Qwen3.5-27B-MLX-4bit")["price"]["out"] > 0
+    assert fable["price"]["out"] > opus["price"]["out"] > sonnet["price"]["out"]
+    # a build the boards never saw stays unknown, not guessed
+    assert ps.lookup("mlx", "someone/Made-Up-7B-4bit") is None
     # a family name resolves to its newest version
     assert ps.resolve("mlx", "qwen3.5-9b") is not None
 
@@ -189,8 +195,28 @@ def test_quality_prefers_measured_then_public_then_class():
                       public={"scores": {"chat/hard": 0.74}})
     assert rec.basis("chat", "hard") == "public" and rec.quality("chat", "hard") == 0.74
     assert rec.basis("image", "hard") == "prior"
+    # a few of eki's own items don't outrank a board that ran thousands…
     rec.measured["chat/hard"] = {"score": 0.5, "n": 5}
+    assert rec.basis("chat", "hard") == "public"
+    # …but a few dozen on this very build do
+    rec.measured["chat/hard"] = {"score": 0.5, "n": SOLID_ITEMS}
     assert rec.basis("chat", "hard") == "measured" and rec.quality("chat", "hard") == 0.5
+
+
+def test_public_prices_become_cost_weights():
+    opus = ModelRecord("claude", "opus", klass="frontier_agent",
+                       public={"price": {"in": 5.0, "out": 25.0}})
+    fable = ModelRecord("claude", "fable", klass="frontier_agent",
+                        public={"price": {"in": 10.0, "out": 50.0}})
+    sonnet = ModelRecord("claude", "sonnet", klass="frontier_agent_fast",
+                         public={"price": {"in": 2.0, "out": 10.0}})
+    assert opus.cost == 5.0 and fable.cost == 10.0 and sonnet.cost == 2.0
+    # a local build's price is memory and time, not the API's dollars
+    local = ModelRecord("qwen", "", klass="large_open", public={"price": {"in": 0.2, "out": 1.5}})
+    assert local.cost == COST_WEIGHT["large_open"]
+    # and an explicit weight beats everything
+    assert ModelRecord("claude", "opus", klass="frontier_agent", cost_weight=1.5,
+                       public={"price": {"in": 5.0, "out": 25.0}}).cost == 1.5
 
 
 def test_router_pays_for_the_stronger_model_only_when_the_bar_needs_it():

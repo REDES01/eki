@@ -100,14 +100,30 @@ struct Suggestion: Codable, Identifiable, Hashable {
     let installed: Bool
     var label: String? = ""
     var others: [Other]? = []
+    /// board slots inherited from an older generation of the same line
+    var estimated: [String]? = []
+    var supersedes: [String]? = []
 
     var id: String { repo }
     var build: String { repo.replacingOccurrences(of: "mlx-community/", with: "") }
-    /// "Code 68 · Chat 78 · Math 86" — percent of the best model on the boards
+    /// "Code 68 · Chat ~78 · Math ~86" — percent of the best model on the
+    /// boards; ~ where the number is inherited from a predecessor
     var scoreLine: String {
-        [("code", "Code"), ("chat", "Chat"), ("math", "Math")]
-            .compactMap { key, word in scores[key].map { "\(word) \(Int(($0 * 100).rounded()))" } }
-            .joined(separator: " · ")
+        let groups = [("code", "Code", ["code/", "repo/"]), ("chat", "Chat", ["chat/", "writing/", "research/"]),
+                      ("math", "Math", ["math/"])]
+        return groups.compactMap { key, word, prefixes -> String? in
+            guard let v = scores[key] else { return nil }
+            let inherited = (estimated ?? []).contains { slot in prefixes.contains { slot.hasPrefix($0) } }
+            return "\(word) \(inherited ? "~" : "")\(Int((v * 100).rounded()))"
+        }.joined(separator: " · ")
+    }
+    var scoreHelp: String {
+        var text = "Percent of the best model on the public boards, medium and hard tasks."
+        if let older = supersedes, !older.isEmpty, !(estimated ?? []).isEmpty {
+            text += " ~ inherited from \(older.joined(separator: ", ")) — an older generation of the same "
+                + "line that the boards have measured more; the newer one is assumed no worse there."
+        }
+        return text
     }
 }
 
@@ -718,6 +734,7 @@ struct AddModelSheet: View {
                             .font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
                         if !s.scoreLine.isEmpty {
                             Text(s.scoreLine).font(.system(size: 10.5)).foregroundStyle(Palette.inkMuted)
+                                .help(s.scoreHelp)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

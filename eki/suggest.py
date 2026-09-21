@@ -23,7 +23,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -61,6 +61,47 @@ USUAL_CONTEXT = 32768
 #: a build that leaves this much of the ceiling free is preferred over a
 #: higher-precision one that doesn't: the Mac has other things to run
 COMFORT = 0.6
+
+
+#: "qwen3.8-27b" → family "qwen-27b", version 3.8: the vendor's name, the
+#: generation right after it, and everything else (size, variant) as is
+_FAMILY = re.compile(r"^(?P<vendor>[a-z]+)-?(?P<version>\d+(?:\.\d+)?)(?P<rest>(?:-.*)?)$")
+
+
+def family(base: str) -> Tuple[str, float]:
+    """The line a base belongs to and its generation, so that Qwen3.8 27B
+    is seen as the successor of Qwen3.5 27B rather than a rival."""
+    m = _FAMILY.match(base)
+    if not m:
+        return base, 0.0
+    return m.group("vendor") + m.group("rest"), float(m.group("version"))
+
+
+def supersede(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Within a family keep the newest generation, and let it inherit
+    the benchmarks its predecessors have that it lacks. The boards lag
+    a release by months; a vendor's newer model of the same size is not
+    worse on chat because nobody has scored it on chat yet. Inherited
+    slots are listed as estimated so the card can say so."""
+    lines: Dict[str, List[Dict[str, Any]]] = {}
+    for e in entries:
+        key, version = family(e["base"])
+        e["version"] = version
+        lines.setdefault(key, []).append(e)
+    out = []
+    for members in lines.values():
+        members.sort(key=lambda e: (e["version"], e.get("date", "")), reverse=True)
+        newest = members[0]
+        inherited: Dict[str, float] = {}
+        for older in members[1:]:
+            for slot, v in older["slots"].items():
+                if slot not in newest["slots"] and slot not in inherited:
+                    inherited[slot] = v
+        newest["estimated"] = sorted(inherited)
+        newest["supersedes"] = [m["name"] for m in members[1:]]
+        newest["scores"] = _rollup({**inherited, **newest["slots"]})
+        out.append(newest)
+    return out
 
 
 def _rollup(slots: Dict[str, float]) -> Dict[str, float]:
@@ -180,7 +221,8 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
             rolled = _rollup(slots)
             if not rolled or not _trusted(base, slots):
                 continue
-            entry = by_base.setdefault(base, {"base": base, "scores": rolled, "builds": []})
+            entry = by_base.setdefault(base, {"base": base, "scores": rolled, "slots": slots, "builds": [],
+                                              "name": _name(base), "date": _date(base)})
             bits = _bits(row)
             if bits >= 3:                           # 2-bit builds lose too much to recommend
                 entry["builds"].append({"repo": row["id"], "bits": bits, "downloads": row.get("downloads", 0),
@@ -188,7 +230,8 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
         for entry in by_base.values():
             if any(b["plain"] for b in entry["builds"]):
                 entry["builds"] = [b for b in entry["builds"] if b["plain"]]
-        ranked = sorted(by_base.values(), key=lambda e: e["scores"]["overall"], reverse=True)
+        ranked = sorted(supersede([e for e in by_base.values() if e["builds"]]),
+                        key=lambda e: e["scores"]["overall"], reverse=True)
         # a build whose weights alone don't fit is out before any config is read
         shortlist = []
         for entry in ranked:
@@ -220,13 +263,12 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
         pick = _choose(entry["builds"], ceiling_gb)
         if pick is None:
             continue
-        name = next((e.get("name") for m, e in public_scores.load()["models"].items()
-                     if public_scores._base(m) == entry["base"]), entry["base"])
         out.append({
-            "base": entry["base"], "name": str(name).split("/")[-1], "repo": pick["repo"], "bits": pick["bits"],
+            "base": entry["base"], "name": entry["name"], "repo": pick["repo"], "bits": pick["bits"],
             "weights_gb": pick["weights_gb"], "need_gb": pick["need_gb"], "context": pick["context"],
             "native": pick["native"], "fits_now": pick["fits_now"], "downloads": pick["downloads"],
-            "scores": entry["scores"],
+            "scores": entry["scores"], "estimated": entry.get("estimated", []),
+            "supersedes": entry.get("supersedes", []),
             "installed": entry["base"] in have,
             "others": [{"repo": b["repo"], "bits": b["bits"], "need_gb": b["need_gb"],
                         "context": b["context"], "fits": b["fits"]}
@@ -234,6 +276,20 @@ async def build(ceiling_gb: float, free_gb: float, installed: List[str]) -> Dict
         })
     return {"suggestions": _label(out[:SHOWN]), "ceiling_gb": ceiling_gb, "free_gb": free_gb,
             "built": int(time.time()), "attribution": public_scores.attribution()}
+
+
+def _entry(base: str) -> Dict[str, Any]:
+    return next((e for m, e in public_scores.load()["models"].items()
+                 if public_scores._base(m) == base), {})
+
+
+def _name(base: str) -> str:
+    return str(_entry(base).get("name") or base).split("/")[-1]
+
+
+def _date(base: str) -> str:
+    return max((e.get("date", "") for m, e in public_scores.load()["models"].items()
+                if public_scores._base(m) == base), default="")
 
 
 def _label(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

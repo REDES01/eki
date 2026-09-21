@@ -42,7 +42,8 @@ def test_the_handshake_starts_a_thread_with_the_permissions_asked_for():
         finally:
             await s.close()
         s = await _session(permissions="auto")
-        assert s._thread_params() == {"approvalPolicy": "never", "sandbox": "danger-full-access", "cwd": "/tmp"}
+        # still on-request: "never" makes Codex refuse what its rules flag; eki says yes instead
+        assert s._thread_params() == {"approvalPolicy": "on-request", "sandbox": "danger-full-access", "cwd": "/tmp"}
         await s.close()
     run(go())
 
@@ -91,6 +92,21 @@ def test_a_command_approval_maps_allow_always_and_deny():
             got = await _collect(s, "run it", lambda ev: {"behavior": "allow", "updatedInput": ev["input"],
                                                           "updatedPermissions": ev["suggestions"]})
             assert "".join(e["text"] for e in got if e["kind"] == "text") == "Removed build (acceptForSession)."
+        finally:
+            await s.close()
+    run(go())
+
+
+def test_in_auto_mode_eki_approves_and_says_so():
+    async def go():
+        s = await _session(permissions="auto")
+        try:
+            got = await _collect(s, "run it")               # no answer callback: none needed
+            kinds = [e["kind"] for e in got]
+            assert "permission" not in kinds
+            approved = next(e for e in got if e["kind"] == "activity" and e["tool"] == "approved")
+            assert live.summarize_activity(approved["tool"], approved["input"]) == "Approved rm -rf build"
+            assert "".join(e["text"] for e in got if e["kind"] == "text") == "Removed build (accept)."
         finally:
             await s.close()
     run(go())

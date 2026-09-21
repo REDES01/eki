@@ -28,6 +28,10 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 log = logging.getLogger("eki.codex_live")
 
 INIT_TIMEOUT = 60.0
+#: what Codex asks before doing, when its rules say so
+APPROVALS = ("item/commandExecution/requestApproval", "execCommandApproval",
+             "item/fileChange/requestApproval", "applyPatchApproval",
+             "item/permissions/requestApproval")
 #: warnings that say nothing the user can act on
 NOISE = ("Model metadata for", "Skill descriptions were shortened", "Under-development features")
 COMMANDS = [
@@ -102,9 +106,12 @@ class CodexSession:
         self.session_id = thread.get("id") or (result or {}).get("threadId") or self.resume
 
     def _thread_params(self) -> Dict[str, Any]:
+        # "never" would make Codex refuse anything its rules flag (rm -rf,
+        # say) instead of asking; on-request keeps the question coming, and
+        # in "auto" eki answers it yes on your behalf
         auto = self.permissions == "auto"
         params: Dict[str, Any] = {
-            "approvalPolicy": "never" if auto else "on-request",
+            "approvalPolicy": "on-request",
             "sandbox": "danger-full-access" if auto else ("workspace-write" if self.cwd else "read-only"),
         }
         if self.cwd:
@@ -375,6 +382,15 @@ class CodexSession:
 
     def _server_request(self, rid: Any, method: str, params: Dict[str, Any]) -> None:
         key = f"{method}#{rid}"
+        if self.permissions == "auto" and method in APPROVALS:
+            # Settings → Permissions "run without asking": approved here, and
+            # said so in the thread, so what ran is never a mystery
+            what = _plain_command(params.get("command") or "") if "command" in params \
+                else ", ".join(c.get("path", "") for c in params.get("changes") or []) or method
+            self._reply(rid, {"decision": "accept"} if method != "item/permissions/requestApproval"
+                        else {"permissions": params.get("permissions") or {}, "scope": "turn"})
+            self._events.put_nowait({"kind": "activity", "tool": "approved", "input": {"text": what}})
+            return
         self._pending[key] = {"id": rid, "method": method, "params": params, "request_id": key}
         if method == "item/tool/requestUserInput":
             questions = [{"question": q.get("question", ""), "header": q.get("header", ""),

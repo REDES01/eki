@@ -539,15 +539,29 @@ class Engine:
             return bool(self.settings.get("live_codex", True))
         return False
 
+    SCRATCH = Path("~/.eki/scratch").expanduser()
+
+    def _workdir(self, cwd: str) -> str:
+        """Where a program runs: the folder you gave, else eki's scratch
+        folder — never the engine's working directory, which is wherever
+        eki happens to be installed."""
+        if cwd:
+            return cwd
+        self.SCRATCH.mkdir(parents=True, exist_ok=True)
+        return str(self.SCRATCH)
+
     async def _live_session(self, cid: str, backend: Backend, cwd: str, model: str = "") -> Any:
         """The conversation's session, started or resumed as needed."""
         session = self.live.get(cid)
         if session is not None and session.alive:
             return session
+        warm = self.warm.pop(cwd or "", None)
+        cwd = self._workdir(cwd)
         resume = self.store.session(cid, backend.key) if cid else None
         if backend.info.kind == "codex":
+            if warm is not None:
+                self.warm[cwd] = warm                   # not ours to take
             return await self._codex_session(cid, backend, cwd, model, resume)
-        warm = self.warm.pop(cwd or "", None)
         if warm is not None and warm.alive and not warm.busy and not resume:
             if cid:
                 self.live[cid] = warm
@@ -688,7 +702,7 @@ class Engine:
                 return []
             import uuid
             argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))   # type: ignore[attr-defined]
-            session = live.LiveSession(argv, cwd or None, None,
+            session = live.LiveSession(argv, self._workdir(cwd), None,
                                        str(self.settings.get("claude_system_prompt", "")))
             try:
                 await session.start()

@@ -315,6 +315,8 @@ def summarize_activity(tool: str, inp: Dict[str, Any]) -> str:
     short = path.split("/")[-1] if path else ""
     if tool == "error":
         return "⚠ " + str(inp.get("text", ""))[:200]
+    if tool == "approved":
+        return "Approved " + str(inp.get("text", ""))[:160]
     if tool in ("Read", "NotebookRead"):
         return f"Reading {short}"
     if tool in ("Edit", "MultiEdit", "NotebookEdit"):

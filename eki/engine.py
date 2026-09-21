@@ -26,10 +26,13 @@ from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
 from . import classify
+from . import discover_models
+from . import measure
 from . import secrets
 from . import settings as settings_mod
 from . import titles
 from .models import LocalModel, ModelManager
+from .capability import Registry
 from .providers import Provider, ProviderStore, seed_from_config
 from .quota import QuotaBoard, QuotaProvider
 from .quota.claude import ClaudeStatusLine
@@ -99,10 +102,13 @@ class Engine:
                                 ceiling=self.policy.quota_ceiling or self.cfg.quota_ceiling)
         self.settings = settings_mod.load()
         self.classifier = self._classifier()
+        if not hasattr(self, "registry"):
+            self.registry = Registry(self.cfg.db)
         self.router = Router(self.backends, self.quota, policy=self.policy,
                              is_up=self._is_up,
                              reserved={self.settings["router_model"]}
-                             if self.settings["router_model"] else set())
+                             if self.settings["router_model"] else set(),
+                             models_for=self.registry.for_provider)
         self._health = {}
 
     def _classifier(self) -> classify.Classifier:
@@ -115,6 +121,18 @@ class Engine:
         model = str(provider.options.get("model", ""))
         return classify.Classifier(classify.ModelClassifier(base, model),
                                    use_model=self.settings.get("router") == "model")
+
+    async def discover_models(self) -> Dict[str, List[str]]:
+        """Ask every reachable provider which models it offers."""
+        found: Dict[str, List[str]] = {}
+        for b in list(self.backends):
+            if self._is_up(b.key) is False:
+                continue
+            try:
+                found[b.key] = await discover_models.discover(b, self.registry)
+            except Exception:                       # noqa: BLE001
+                found[b.key] = []
+        return found
 
     async def reload(self) -> None:
         """Pick up provider changes without restarting: runs in flight keep
@@ -252,6 +270,10 @@ class Engine:
             async for piece in self._deploy(run):
                 yield piece
             return
+        if run.get("kind") == "measure":
+            async for piece in self._measure(run):
+                yield piece
+            return
 
         cid = run["conversation_id"]
         label = await self._label(run)
@@ -288,8 +310,10 @@ class Engine:
         # A fresh instance per run. Adapters keep per-call state — the
         # session id to resume, the token usage — on themselves, and two runs
         # on one shared instance would hand each other their sessions.
-        backend = adapters.build(choice.backend.info,
-                                 self.options.get(choice.backend.key, {}))
+        options = dict(self.options.get(choice.backend.key, {}))
+        if choice.model:
+            options["model"] = choice.model
+        backend = adapters.build(choice.backend.info, options)
 
         # Everything up to and including this run's question — and nothing a
         # parallel run in the same conversation added after it.
@@ -354,7 +378,7 @@ class Engine:
             self._side_tasks.add(task)
             task.add_done_callback(self._side_tasks.discard)
 
-    def _titler(self) -> Optional[Backend]:
+    def _titler(self, exclude: str = "") -> Optional[Backend]:
         """A local model that's up and answers in words, cheapest first —
         the router model if it's loaded, else whatever local server is."""
         wanted = []
@@ -365,7 +389,7 @@ class Engine:
                    if b.info.cost.tier == 0 and b.info.capabilities.text]
         for key in wanted:
             backend = self.get(key)
-            if backend is None:
+            if backend is None or key == exclude:
                 continue
             if self._is_up(key) is not True:
                 continue
@@ -418,6 +442,66 @@ class Engine:
             elif model is not None:
                 self.models.touch(key)
         return label
+
+    # ---- measuring ---------------------------------------------------
+
+    async def measure(self, provider: str, model: str = "") -> Dict[str, str]:
+        if self.get(provider) is None:
+            raise KeyError(provider)
+        if self.registry.get(provider, model) is None:
+            raise KeyError(f"{provider}:{model}")
+        label = f"{provider} ({model})" if model else provider
+        rid = self.runs.create(f"Measure {label}", requested="eki", kind="measure",
+                               payload=json.dumps({"provider": provider, "model": model}))
+        await self.runner.submit(rid)
+        return {"run": rid}
+
+    async def _measure(self, run: Dict[str, Any]) -> AsyncIterator[Union[str, Dict[str, str]]]:
+        job = json.loads(run["payload"] or "{}")
+        provider, model = job["provider"], job.get("model", "")
+        backend = self.get(provider)
+        if backend is None:
+            raise BackendError(f"no provider {provider}")
+        yield {"backend": "eki", "reason": f"measuring {provider} {model}".rstrip()}
+        options = dict(self.options.get(provider, {}))
+        if model:
+            options["model"] = model
+        local = self.models.for_backend(provider)
+        if local is not None:
+            if not local.running:
+                message = await self.models.start(local.key)
+                if not local.running:
+                    raise BackendError(message)
+            self.models.hold(local.key)
+        subject = adapters.build(backend.info, options)
+
+        def judge() -> Optional[Backend]:
+            # a local grader only, and never the model being measured
+            return self._titler(exclude=provider)
+
+        yield f"Running the battery against {provider} {model}…\n".replace("  ", " ")
+        final: Dict[str, Any] = {}
+        try:
+            async for piece in measure.run(subject, judge):
+                if isinstance(piece, dict):
+                    final = piece
+                else:
+                    yield piece
+        finally:
+            try:
+                await subject.close()
+            except Exception:                       # noqa: BLE001
+                pass
+            if local is not None:
+                self.models.release(local.key)
+        results = final.get("results", {})
+        for slot, r in results.items():
+            task, _, difficulty = slot.partition("/")
+            self.registry.record(provider, model, task, r["score"], r["n"],
+                                 final.get("tok_s"), difficulty=difficulty or "easy")
+        note = f" ({final['skipped']} needed a judge and none was up)" if final.get("skipped") else ""
+        speed = f" at {final['tok_s']} tokens/s" if final.get("tok_s") else ""
+        yield f"\nMeasured{speed}: {measure.summary(results)}{note}\n"
 
     # ---- models ------------------------------------------------------
 

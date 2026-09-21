@@ -10,7 +10,7 @@ model was that?".
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import priors
 from .adapters.base import Backend
@@ -37,6 +37,14 @@ class Choice:
     backend: Optional[Backend]
     reason: str
     rejected: List[str] = field(default_factory=list)
+    #: which of the provider's models, "" for its default
+    model: str = ""
+
+    @property
+    def label(self) -> str:
+        if self.backend is None:
+            return ""
+        return f"{self.backend.key} ({self.model})" if self.model else self.backend.key
 
 
 class QuotaSource:
@@ -60,7 +68,8 @@ class Router:
     def __init__(self, backends: List[Backend], quota: Optional[QuotaSource] = None,
                  policy: Optional["Policy"] = None,
                  is_up: Optional[Callable[[str], Optional[bool]]] = None,
-                 reserved: Optional[set] = None):
+                 reserved: Optional[set] = None,
+                 models_for: Optional[Callable[[str], List[Any]]] = None):
         self.backends = backends
         self.quota = quota
         #: current preferences; replaced wholesale when the user edits them
@@ -70,6 +79,9 @@ class Router:
         #: backends kept out of automatic routing because they have another
         #: job — the router model itself. Still available by name.
         self.reserved = reserved or set()
+        #: the registry's records for a provider's models: each has .model
+        #: and .quality(task). None or empty means "just the default".
+        self.models_for = models_for or (lambda key: [])
 
     def _quality(self, backend: Backend, task: str) -> float:
         return priors.quality(backend.info.kind, getattr(backend, "options", {}) or {},
@@ -130,24 +142,28 @@ class Router:
             return Choice(None, "no backend can serve this request", rejected)
 
         # Cheap is not the same as good enough. A labelled request keeps only
-        # the backends whose class is believed to handle that kind of work at
+        # the backends with a model believed to handle that kind of work at
         # that difficulty; if none clears the bar, the best available wins
-        # instead of the cheapest.
+        # instead of the cheapest. Within a provider, the model chosen is the
+        # cheapest adequate one: the default if it clears the bar, else the
+        # least of those that do, else its best.
         note = ""
+        chosen: Dict[str, Tuple[str, float]] = {}   # backend key → (model, quality)
         if need.task and need.difficulty:
             bar = priors.NEED.get(need.difficulty, 0.72)
-            scored = [(self._quality(b, need.task), b) for b in candidates]
-            good = [b for q, b in scored if q >= bar]
+            for b in candidates:
+                chosen[b.key] = self._pick_model(b, need.task, need.difficulty, bar)
+            good = [b for b in candidates if chosen[b.key][1] >= bar]
             if good:
                 note = f" for {need.task}/{need.difficulty}"
-                for q, b in scored:
-                    if q < bar:
+                for b in candidates:
+                    if chosen[b.key][1] < bar:
                         rejected.append(f"{b.key}: likely not good enough for "
                                         f"{need.difficulty} {need.task}")
                 candidates = good
             else:
-                best = max(q for q, _ in scored)
-                candidates = [b for q, b in scored if q == best]
+                best = max(chosen[b.key][1] for b in candidates)
+                candidates = [b for b in candidates if chosen[b.key][1] == best]
                 note = f" — the best eki has for {need.difficulty} {need.task}"
 
         # cheapest first; ties go to the policy's order, then config order,
@@ -157,9 +173,29 @@ class Router:
 
         candidates.sort(key=lambda b: (tier(b), self.policy.rank(b.key)))
         pick = candidates[0]
-        why = f"{pick.key}: cheapest fit (tier {tier(pick)}){note}"
+        model = chosen.get(pick.key, ("", 0.0))[0]
+        name = f"{pick.key} ({model})" if model else pick.key
+        why = f"{name}: cheapest fit (tier {tier(pick)}){note}"
         if tier(pick) != pick.info.cost.tier:
             why += " by policy"
         if pick.info.cost.note:
             why += f", {pick.info.cost.note}"
-        return Choice(pick, why, rejected)
+        return Choice(pick, why, rejected, model=model)
+
+    def _pick_model(self, backend: Backend, task: str, difficulty: str,
+                    bar: float) -> Tuple[str, float]:
+        """(model, quality): the cheapest of the provider's models that clears
+        the bar, taking the default when it does; its best when none does."""
+        records = list(self.models_for(backend.key) or [])
+        if not records:
+            return "", self._quality(backend, task)
+        scored = [(r.model, float(r.quality(task, difficulty))) for r in records]
+        default = next((q for m, q in scored if m == ""), None)
+        if default is not None and default >= bar:
+            return "", default
+        adequate = sorted((q, m) for m, q in scored if q >= bar)
+        if adequate:
+            q, m = adequate[0]
+            return m, q
+        q, m = max((q, m) for m, q in scored)
+        return m, q

@@ -97,7 +97,12 @@ async def lifespan(app: FastAPI):
                 log.info("claude probe: %s", e)
 
     async def name_old_threads() -> None:
-        await asyncio.sleep(20)                     # let the local servers settle
+        await asyncio.sleep(15)                     # let the local servers settle
+        try:
+            await eng.discover_models()
+        except Exception:                           # noqa: BLE001
+            log.exception("model discovery")
+        await asyncio.sleep(5)
         try:
             named = await eng.backfill_titles()
             if named:
@@ -449,6 +454,7 @@ async def provider_delete(key: str) -> Any:
     if not eng.providers.delete(key):
         raise HTTPException(404, "no such provider")
     secrets.delete(key)
+    eng.registry.remove_provider(key)
     await eng.reload()
     return {"deleted": key}
 
@@ -507,6 +513,47 @@ async def deploy_model(body: DeployBody) -> Any:
     if "/" not in body.repo:
         raise HTTPException(400, "a Hugging Face repo looks like org/name")
     return await engine().deploy(body.repo, body.label)
+
+
+# ---- models behind providers ---------------------------------------------
+
+class MeasureBody(BaseModel):
+    model: str = ""
+
+
+@app.get("/api/registry")
+def registry_list() -> Any:
+    return {"models": [m.to_json() for m in engine().registry.all()]}
+
+
+@app.post("/api/registry/discover")
+async def registry_discover() -> Any:
+    return {"found": await engine().discover_models()}
+
+
+@app.post("/api/registry/{provider}/measure")
+async def registry_measure(provider: str, body: MeasureBody) -> Any:
+    try:
+        return await engine().measure(provider, body.model)
+    except KeyError as e:
+        raise HTTPException(404, f"unknown model {e}")
+
+
+class RegistryPatch(BaseModel):
+    model: str = ""
+    enabled: Optional[bool] = None
+    forget: bool = False
+
+
+@app.patch("/api/registry/{provider}")
+def registry_patch(provider: str, body: RegistryPatch) -> Any:
+    reg = engine().registry
+    if body.enabled is not None and not reg.set_enabled(provider, body.model, body.enabled):
+        raise HTTPException(404, "unknown model")
+    if body.forget and not reg.forget_measurements(provider, body.model):
+        raise HTTPException(404, "unknown model")
+    rec = reg.get(provider, body.model)
+    return rec.to_json() if rec else {}
 
 
 @app.get("/api/settings")

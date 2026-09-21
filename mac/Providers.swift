@@ -180,6 +180,7 @@ struct ProviderCard: View {
     let provider: ProviderDTO
     @State private var confirmRemove = false
     @State private var editingKey = false
+    @State private var showingModels = false
     @State private var fixing = false
     @State private var fixNote = ""
 
@@ -230,9 +231,11 @@ struct ProviderCard: View {
                         .help("Wins ties against providers of the same cost")
                 }
                 Menu {
+                    Button("Models…") { showingModels = true }
                     if provider.needsKey {
                         Button("Replace API key…") { editingKey = true }
                     }
+                    Divider()
                     Button("Remove…", role: .destructive) { confirmRemove = true }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -263,6 +266,7 @@ struct ProviderCard: View {
                  : "Nothing on disk is touched.")
         }
         .sheet(isPresented: $editingKey) { ReplaceKeySheet(provider: provider) }
+        .sheet(isPresented: $showingModels) { ModelsSheet(provider: provider) }
         .alert("Codex", isPresented: Binding(get: { !fixNote.isEmpty },
                                              set: { if !$0 { fixNote = "" } })) {
             Button("OK") { fixNote = "" }

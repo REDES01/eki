@@ -61,6 +61,7 @@ enum Pref {
     static let meterColour = "meterColour"
     static let theme = "theme"
     static let accent = "accent"
+    static let zoom = "eki.zoom"
     static let onboarded = "eki.onboarded"
     static let importedTokenbar = "importedTokenbar"
 
@@ -68,6 +69,12 @@ enum Pref {
 
     static var accentChoice: Accent {
         Accent(rawValue: defaults.string(forKey: Pref.accent) ?? "") ?? .terracotta
+    }
+
+    /// How large the window's text is drawn; 1 until ⌘+ or ⌘− says otherwise.
+    static var zoomFactor: Double {
+        let stored = defaults.double(forKey: zoom)
+        return stored > 0 ? stored : 1
     }
 
     /// The providers the menu bar shows, in the order it shows them.

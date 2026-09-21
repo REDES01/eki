@@ -24,7 +24,7 @@ struct DeployCard: View {
                 HStack(spacing: 9) {
                     Dot(color: colour, size: 8, pulsing: live)
                     Text(run?.prompt ?? "Setting up…")
-                        .font(.system(size: 13.5, weight: .medium))
+                        .font(.zoomed(size: 13.5, weight: .medium))
                         .lineLimit(1)
                     Spacer()
                     if live {
@@ -37,7 +37,7 @@ struct DeployCard: View {
                 }
                 if !recent.isEmpty {
                     Text(recent.joined(separator: "\n"))
-                        .font(.system(size: 11.5).monospacedDigit())
+                        .font(.zoomed(size: 11.5).monospacedDigit())
                         .foregroundStyle(state == "failed" ? Palette.danger : Palette.inkMuted)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -45,7 +45,7 @@ struct DeployCard: View {
                 }
                 if let error = run?.error, !error.isEmpty, state == "failed" {
                     Text(error)
-                        .font(.system(size: 11.5))
+                        .font(.zoomed(size: 11.5))
                         .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)

@@ -144,11 +144,11 @@ struct OnboardingSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome to eki").font(.system(size: 22, weight: .semibold))
+                Text("Welcome to eki").font(.zoomed(size: 22, weight: .semibold))
                 Text("One place to ask, whatever answers: models on this Mac, the CLIs "
                      + "you already pay for, APIs you bring a key for. eki picks the "
                      + "cheapest one that can actually do the job.")
-                    .font(.system(size: 13))
+                    .font(.zoomed(size: 13))
                     .foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -177,8 +177,8 @@ struct OnboardingSheet: View {
                 VStack(spacing: 6) {
                     ForEach(found) { t in
                         HStack(spacing: 10) {
-                            Text(t.title).font(.system(size: 13, weight: .medium))
-                            Text(t.found ?? "").font(.system(size: 11))
+                            Text(t.title).font(.zoomed(size: 13, weight: .medium))
+                            Text(t.found ?? "").font(.zoomed(size: 11))
                                 .foregroundStyle(Palette.inkFaint).lineLimit(1)
                             Spacer()
                             if added.contains(t.id) {
@@ -214,16 +214,16 @@ struct OnboardingSheet: View {
                 }
             }
             if !cliNote.isEmpty {
-                Text(cliNote).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text(cliNote).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
             }
             if !error.isEmpty {
-                Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger)
+                Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
             }
 
             Spacer()
             HStack {
                 Text("You can change all of this later in Settings.")
-                    .font(.system(size: 11.5)).foregroundStyle(Palette.inkFaint)
+                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkFaint)
                 Spacer()
                 Button("Start using eki") {
                     onboarded = true
@@ -232,7 +232,7 @@ struct OnboardingSheet: View {
                 .buttonStyle(AccentButton())
             }
         }
-        .padding(26)
+        .padding(.all, 26)
         .frame(width: 540, height: 620)
         .task {
             found = (try? await model.client.discover()) ?? []
@@ -249,13 +249,13 @@ struct OnboardingSheet: View {
                                @ViewBuilder trailing: () -> C) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.zoomed(size: 12, weight: .semibold))
                 .foregroundStyle(Palette.accent)
                 .frame(width: 22, height: 22)
                 .background(Palette.accent.opacity(0.12), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 14, weight: .medium))
-                Text(detail).font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                Text(title).font(.zoomed(size: 14, weight: .medium))
+                Text(detail).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)

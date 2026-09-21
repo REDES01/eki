@@ -54,8 +54,8 @@ struct ModelsPane: View {
                     }
                     if !model.modelMessage.isEmpty {
                         HStack(spacing: 6) {
-                            Image(systemName: "info.circle").font(.system(size: 11))
-                            Text(model.modelMessage).font(.system(size: 12))
+                            Image(systemName: "info.circle").font(.zoomed(size: 11))
+                            Text(model.modelMessage).font(.zoomed(size: 12))
                         }
                         .foregroundStyle(Palette.inkMuted)
                         .padding(.top, 2)
@@ -63,7 +63,7 @@ struct ModelsPane: View {
                 }
 
             }
-            .frame(maxWidth: Metric.column, alignment: .leading)
+            .column(alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Metric.gutter)
             .padding(.vertical, 26)
@@ -95,7 +95,7 @@ struct Group2<Content: View>: View {
             SectionLabel(text: title)
             if !note.isEmpty {
                 Text(note)
-                    .font(.system(size: 12))
+                    .font(.zoomed(size: 12))
                     .foregroundStyle(Palette.inkMuted)
                     .padding(.bottom, 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -121,7 +121,7 @@ struct MemoryCard: View {
                         }
                         Spacer()
                         Text("\(fmt(free)) GB free of \(fmt(memory.total_gb))")
-                            .font(.system(size: 13, weight: .medium).monospacedDigit())
+                            .font(.zoomed(size: 13, weight: .medium).monospacedDigit())
                             .foregroundStyle(Palette.inkMuted)
                     }
                     // one bar, three parts: eki's models, everything else, free
@@ -142,7 +142,7 @@ struct MemoryCard: View {
                         legend(Palette.inkFaint.opacity(0.55), "everything else \(fmt(other)) GB")
                         Spacer()
                         Text("models can take \(fmt(memory.free_gb)) GB more")
-                            .font(.system(size: 11.5))
+                            .font(.zoomed(size: 11.5))
                             .foregroundStyle(Palette.inkFaint)
                             .help("The smaller of what's under MLX's \(fmt(memory.ceiling_gb)) GB "
                                   + "ceiling and what the Mac can hand out, keeping 4 GB back")
@@ -150,7 +150,7 @@ struct MemoryCard: View {
                     if let holders = memory.holders, !holders.isEmpty {
                         Text(holders.map { "\($0.name) \(fmt($0.gb)) GB" }
                                 .joined(separator: " · "))
-                            .font(.system(size: 11))
+                            .font(.zoomed(size: 11))
                             .foregroundStyle(Palette.inkFaint)
                             .lineLimit(1)
                             .help("The biggest things holding memory right now. eki never "
@@ -164,7 +164,7 @@ struct MemoryCard: View {
     private func legend(_ colour: Color, _ text: String) -> some View {
         HStack(spacing: 5) {
             Circle().fill(colour).frame(width: 7, height: 7)
-            Text(text).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+            Text(text).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
         }
     }
 
@@ -183,7 +183,7 @@ struct LocalModelCard: View {
                 Dot(color: row.running ? Palette.ok : Palette.inkFaint.opacity(0.5),
                     size: 8, pulsing: model.busyModel == row.key)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(row.label).font(.system(size: 13.5, weight: .medium))
+                    Text(row.label).font(.zoomed(size: 13.5, weight: .medium))
                     HStack(spacing: 8) {
                         Text(":\(row.port)")
                         if let engine = row.engine {
@@ -194,11 +194,11 @@ struct LocalModelCard: View {
                         if !row.note.isEmpty { Text(row.note) }
                         if let fate { Text(fate) }
                     }
-                    .font(.system(size: 11.5))
+                    .font(.zoomed(size: 11.5))
                     .foregroundStyle(Palette.inkMuted)
                     if let profile = row.profile, let summary = profile.summary {
                         Text(summary)
-                            .font(.system(size: 11.5))
+                            .font(.zoomed(size: 11.5))
                             .foregroundStyle(Palette.inkFaint)
                             .help("Read from the build's own files (\(profile.repo)) each time "
                                   + "eki loads its models — nothing here is typed in.")
@@ -255,9 +255,9 @@ extension LocalModelCard {
         } label: {
             HStack(spacing: 4) {
                 Text(summary)
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.zoomed(size: 8, weight: .semibold))
             }
-            .font(.system(size: 11.5))
+            .font(.zoomed(size: 11.5))
             .foregroundStyle(window.fits == false ? Palette.warn : Palette.inkFaint)
         }
         .menuStyle(.borderlessButton)
@@ -302,7 +302,7 @@ extension LocalModelCard {
                 set: { _ in Task { await model.setIdle(row.key, minutes: 0) } }))
         } label: {
             Image(systemName: row.pinned == true ? "pin.fill" : "timer")
-                .font(.system(size: 12, weight: .medium))
+                .font(.zoomed(size: 12, weight: .medium))
                 .foregroundStyle(row.pinned == true ? Palette.accent : Palette.inkMuted)
                 .frame(width: 22, height: 22)
         }
@@ -333,13 +333,13 @@ struct RoutingCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 7) {
                         Text(backend.label)
-                            .font(.system(size: 13.5, weight: .medium))
+                            .font(.zoomed(size: 13.5, weight: .medium))
                             .foregroundStyle(enabled ? Palette.ink : Palette.inkFaint)
                         if isFirst { Tag(text: "first choice", color: Palette.accent) }
                         if !backend.ok { Tag(text: "down", color: Palette.danger) }
                     }
                     Text(detail)
-                        .font(.system(size: 11.5))
+                        .font(.zoomed(size: 11.5))
                         .foregroundStyle(Palette.inkMuted)
                         .lineLimit(1)
                 }

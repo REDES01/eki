@@ -185,25 +185,25 @@ struct ArtifactCard: View {
         } label: {
             HStack(spacing: 11) {
                 Image(systemName: artifact.symbol)
-                    .font(.system(size: 15))
+                    .font(.zoomed(size: 15))
                     .foregroundStyle(isOpen ? Palette.accent : Palette.inkMuted)
                     .frame(width: 34, height: 34)
                     .background(Palette.fill, in: RoundedRectangle(cornerRadius: 7))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(artifact.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.zoomed(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Text("\(artifact.kindLabel) · \(artifact.lineCount) lines")
-                        .font(.system(size: 11))
+                        .font(.zoomed(size: 11))
                         .foregroundStyle(Palette.inkFaint)
                 }
                 Spacer(minLength: 12)
                 Text(isOpen ? "Close" : "Open")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.zoomed(size: 11.5, weight: .medium))
                     .foregroundStyle(Palette.inkMuted)
                 Image(systemName: "sidebar.right")
-                    .font(.system(size: 11.5))
+                    .font(.zoomed(size: 11.5))
                     .foregroundStyle(Palette.inkFaint)
             }
             .padding(.horizontal, 11)
@@ -267,6 +267,8 @@ struct ArtifactPanel: View {
     @ObservedObject var stage = Stage.shared
     @Environment(\.colorScheme) private var scheme
     let artifact: Artifact
+    /// In the gallery the panel can also remove what it shows.
+    var walks = false
 
     @State private var showingCode = false
     @State private var reloads = 0
@@ -274,14 +276,14 @@ struct ArtifactPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Rectangle().fill(Palette.hairline).frame(height: 1)
+            header.background(Palette.canvas).zIndex(2)
+            Rectangle().fill(Palette.hairline).frame(height: 1).zIndex(2)
             if showingCode {
                 ScrollView([.vertical, .horizontal]) {
                     Text(artifact.source)
                         .font(.hubMono)
                         .textSelection(.enabled)
-                        .padding(14)
+                        .padding(.all, 14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .background(Palette.surface)
@@ -297,10 +299,10 @@ struct ArtifactPanel: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: artifact.symbol)
-                .font(.system(size: 12))
+                .font(.zoomed(size: 12))
                 .foregroundStyle(Palette.inkMuted)
             Text(artifact.title)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.zoomed(size: 12.5, weight: .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
             Picker("", selection: $showingCode) {
@@ -320,6 +322,7 @@ struct ArtifactPanel: View {
             }
             icon("square.and.arrow.down", "Save As…") { ArtifactActions.save(artifact) }
             icon("safari", "Open in browser") { ArtifactActions.openInBrowser(artifact) }
+            if walks { icon("trash", "Remove from gallery") { stage.remove() } }
             icon("xmark", "Close") {
                 withAnimation(.easeOut(duration: 0.18)) { stage.artifact = nil }
             }
@@ -332,7 +335,7 @@ struct ArtifactPanel: View {
     private func icon(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.zoomed(size: 11.5, weight: .medium))
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }

@@ -80,18 +80,93 @@ enum Palette {
 enum Metric {
     /// A reading measure, not a window width: long lines are hard to track.
     static let column: CGFloat = 720
-    static let gutter: CGFloat = 26
+    static let gutter: Pt = 26                // a Pt, so it follows the zoom
     static let radius: CGFloat = 12
     static let smallRadius: CGFloat = 8
 }
 
-extension Font {
-    static let hubBody = Font.system(size: 14.5)
-    static let hubMessage = Font.system(size: 14.5)
-    static let hubLabel = Font.system(size: 11, weight: .medium)
-    static let hubTitle = Font.system(size: 15, weight: .semibold)
-    static let hubMono = Font.system(size: 13, design: .monospaced)
-    static let hubMonoSmall = Font.system(size: 11.5, design: .monospaced)
+// MARK: - type, and how large it's drawn
+
+/// ⌘+ and ⌘− make the window's contents larger and smaller; ⌘0 puts them back.
+/// The factor travels down the environment — type here, layout in Scale.swift —
+/// so everything redraws where it stands: nothing is rebuilt, and what you were
+/// reading stays under your eyes.
+enum Zoom {
+    static let steps: [Double] = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5]
+
+    static var canGrow: Bool { Pref.zoomFactor < steps.last! - 0.001 }
+    static var canShrink: Bool { Pref.zoomFactor > steps.first! + 0.001 }
+
+    static func larger() { set(steps.first { $0 > Pref.zoomFactor + 0.001 } ?? steps.last!) }
+    static func smaller() { set(steps.last { $0 < Pref.zoomFactor - 0.001 } ?? steps.first!) }
+    static func reset() { set(1) }
+
+    private static func set(_ factor: Double) { Pref.defaults.set(factor, forKey: Pref.zoom) }
+}
+
+private struct ZoomKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    /// 1 everywhere but the main window, which sets what you chose.
+    var zoom: CGFloat {
+        get { self[ZoomKey.self] }
+        set { self[ZoomKey.self] = newValue }
+    }
+}
+
+/// A font named by its size at rest. A plain `Font` never sees the
+/// environment, so it can't follow the zoom; `.font(_:)` below resolves one
+/// of these against it instead.
+struct Face {
+    var size: CGFloat
+    var weight: Font.Weight = .regular
+    var design: Font.Design = .default
+    private var fixedDigits = false
+
+    static func zoomed(size: CGFloat, weight: Font.Weight = .regular,
+                       design: Font.Design = .default) -> Face {
+        Face(size: size, weight: weight, design: design)
+    }
+
+    func monospacedDigit() -> Face { var f = self; f.fixedDigits = true; return f }
+    func monospaced() -> Face { var f = self; f.design = .monospaced; return f }
+
+    func font(at zoom: CGFloat) -> Font {
+        let font = Font.system(size: size * zoom, weight: weight, design: design)
+        return fixedDigits ? font.monospacedDigit() : font
+    }
+
+    static let hubBody = Face(size: 14.5)
+    static let hubMessage = Face(size: 14.5)
+    static let hubLabel = Face(size: 11, weight: .medium)
+    static let hubTitle = Face(size: 15, weight: .semibold)
+    static let hubMono = Face(size: 13, design: .monospaced)
+    static let hubMonoSmall = Face(size: 11.5, design: .monospaced)
+}
+
+private struct ZoomedFont: ViewModifier {
+    let face: Face
+    @Environment(\.zoom) private var zoom
+
+    func body(content: Content) -> some View { content.font(face.font(at: zoom)) }
+}
+
+/// The reading measure grows with the type, so a line keeps its length in
+/// words rather than in points.
+private struct Column: ViewModifier {
+    let alignment: Alignment
+    @Environment(\.zoom) private var zoom
+
+    func body(content: Content) -> some View {
+        content.frame(maxWidth: Metric.column * zoom, alignment: alignment)
+    }
+}
+
+extension View {
+    func font(_ face: Face) -> some View { modifier(ZoomedFont(face: face)) }
+    func column(alignment: Alignment = .center) -> some View { modifier(Column(alignment: alignment)) }
 }
 
 // MARK: - small shared pieces
@@ -102,7 +177,7 @@ struct SectionLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(.zoomed(size: 10.5, weight: .semibold))
             .tracking(0.9)
             .foregroundStyle(Palette.inkFaint)
     }
@@ -111,12 +186,12 @@ struct SectionLabel: View {
 /// A card. Everything raised off the canvas uses this one, so the app has a
 /// single idea of what "a thing on the page" looks like.
 struct Card<Content: View>: View {
-    var padding: CGFloat = 14
+    var padding: Pt = 14
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         content()
-            .padding(padding)
+            .padding(.all, padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
             .overlay(RoundedRectangle(cornerRadius: Metric.radius)
@@ -127,7 +202,7 @@ struct Card<Content: View>: View {
 /// A status dot, with an optional slow pulse for "this is happening now".
 struct Dot: View {
     let color: Color
-    var size: CGFloat = 7
+    var size: Pt = 7
     var pulsing: Bool = false
     @State private var on = false
 
@@ -149,7 +224,7 @@ struct Tag: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .medium))
+            .font(.zoomed(size: 10.5, weight: .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 2.5)
@@ -164,7 +239,7 @@ struct GhostButton: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.zoomed(size: 12, weight: .medium))
             .foregroundStyle(configuration.isPressed ? Palette.ink : Palette.inkMuted)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
@@ -192,7 +267,7 @@ struct AccentSwitch: ToggleStyle {
                     .fill(.white)
                     .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
                     .frame(width: 14, height: 14)
-                    .padding(2)
+                    .padding(.all, 2)
             }
             .animation(.easeOut(duration: 0.15), value: configuration.isOn)
             .onTapGesture { configuration.isOn.toggle() }
@@ -216,7 +291,7 @@ struct AccentButton: ButtonStyle {
 
         var body: some View {
             configuration.label
-            .font(.system(size: 12.5, weight: .medium))
+            .font(.zoomed(size: 12.5, weight: .medium))
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

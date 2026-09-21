@@ -84,7 +84,7 @@ struct SchedulesPane: View {
                     }
                     if schedules.isEmpty {
                         Text("Nothing scheduled yet.")
-                            .font(.system(size: 12.5)).foregroundStyle(Palette.inkFaint)
+                            .font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkFaint)
                     }
                     Button { adding = true } label: {
                         Label("Add schedule", systemImage: "plus")
@@ -92,10 +92,10 @@ struct SchedulesPane: View {
                     .buttonStyle(GhostButton())
                 }
                 if !note.isEmpty {
-                    Text(note).font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                    Text(note).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                 }
             }
-            .frame(maxWidth: Metric.column, alignment: .leading)
+            .column(alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Metric.gutter)
             .padding(.vertical, 28)
@@ -158,10 +158,10 @@ struct ScheduleCard: View {
                 Toggle("", isOn: Binding(get: { schedule.enabled }, set: toggle))
                     .labelsHidden().toggleStyle(AccentSwitch()).controlSize(.mini)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(schedule.name).font(.system(size: 13.5, weight: .semibold))
+                    Text(schedule.name).font(.zoomed(size: 13.5, weight: .semibold))
                     Text(schedule.when + (schedule.backend.isEmpty ? "" : " · \(schedule.backend)")
                          + (schedule.cwd.isEmpty ? "" : " · " + URL(fileURLWithPath: schedule.cwd).lastPathComponent))
-                        .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                        .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
                 }
                 Spacer()
                 Button("Run now", action: runNow).buttonStyle(GhostButton())
@@ -173,7 +173,7 @@ struct ScheduleCard: View {
                     }
             }
             Text(schedule.prompt)
-                .font(.system(size: 12.5)).foregroundStyle(Palette.ink)
+                .font(.zoomed(size: 12.5)).foregroundStyle(Palette.ink)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 14) {
@@ -193,9 +193,9 @@ struct ScheduleCard: View {
                     }
                 }
             }
-            .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+            .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
         }
-        .padding(14)
+        .padding(.all, 14)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
         .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.hairline, lineWidth: 1))
         .opacity(schedule.enabled ? 1 : 0.7)
@@ -237,7 +237,7 @@ struct ScheduleSheet: View {
             TextEditor(text: $prompt)
                 .font(.hubBody)
                 .scrollContentBackground(.hidden)
-                .padding(8)
+                .padding(.all, 8)
                 .frame(height: 110)
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
                 .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
@@ -279,7 +279,7 @@ struct ScheduleSheet: View {
                             if days.contains(d) { days.remove(d) } else { days.insert(d) }
                         } label: {
                             Text(dayNames[d])
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.zoomed(size: 11, weight: .medium))
                                 .padding(.horizontal, 7).padding(.vertical, 4)
                                 .background(days.contains(d) ? Palette.accent.opacity(0.2) : Palette.fill,
                                             in: Capsule())
@@ -299,7 +299,7 @@ struct ScheduleSheet: View {
             }
 
             if !problem.isEmpty {
-                Text(problem).font(.system(size: 12)).foregroundStyle(Palette.danger)
+                Text(problem).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
             }
             HStack {
                 Spacer()
@@ -310,7 +310,7 @@ struct ScheduleSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(22)
+        .padding(.all, 22)
         .frame(width: 540)
         .onAppear {
             guard let s = schedule else { folder = model.lastRepo; return }

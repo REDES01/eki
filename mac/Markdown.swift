@@ -145,7 +145,7 @@ enum MarkdownParser {
     }
 
     /// Inline emphasis and `code`, with the raw text as the fallback.
-    static func inline(_ text: String) -> AttributedString {
+    static func inline(_ text: String, zoom: CGFloat = 1) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: true,
             interpretedSyntax: .inlineOnlyPreservingWhitespace)
@@ -154,7 +154,7 @@ enum MarkdownParser {
         }
         // SwiftUI renders `code` in the body font unless told otherwise
         for run in attributed.runs where run.inlinePresentationIntent == .code {
-            attributed[run.range].font = .hubMono
+            attributed[run.range].font = Face.hubMono.font(at: zoom)
             attributed[run.range].foregroundColor = Palette.accent
         }
         return attributed
@@ -163,21 +163,22 @@ enum MarkdownParser {
 
 struct MarkdownText: View {
     let content: String
+    @Environment(\.zoom) private var zoom
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             ForEach(MarkdownParser.blocks(content)) { block in
                 switch block {
                 case .text(let text):
-                    Text(MarkdownParser.inline(text))
+                    Text(MarkdownParser.inline(text, zoom: zoom))
                         .font(.hubMessage)
                         .lineSpacing(4.5)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .heading(let text, let level):
-                    Text(MarkdownParser.inline(text))
-                        .font(.system(size: level <= 2 ? 16 : 14.5, weight: .semibold))
+                    Text(MarkdownParser.inline(text, zoom: zoom))
+                        .font(.zoomed(size: level <= 2 ? 16 : 14.5, weight: .semibold))
                         .padding(.top, 3)
                         .textSelection(.enabled)
 
@@ -193,7 +194,7 @@ struct MarkdownText: View {
                                     .foregroundStyle(Palette.inkFaint)
                                     .frame(minWidth: split.marker == "•" ? 0 : 17,
                                            alignment: .trailing)
-                                Text(MarkdownParser.inline(split.body))
+                                Text(MarkdownParser.inline(split.body, zoom: zoom))
                                     .font(.hubMessage)
                                     .lineSpacing(4)
                                     .textSelection(.enabled)
@@ -226,7 +227,7 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language)
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.zoomed(size: 10.5, weight: .medium))
                     .foregroundStyle(Palette.inkFaint)
                 Spacer()
                 Button(copied ? "copied" : "copy") {
@@ -248,7 +249,7 @@ struct CodeBlock: View {
                 Text(code)
                     .font(.hubMono)
                     .textSelection(.enabled)
-                    .padding(11)
+                    .padding(.all, 11)
             }
         }
         .background(Palette.fill.opacity(0.45))

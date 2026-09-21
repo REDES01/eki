@@ -20,6 +20,7 @@ struct EkiApp: App {
     @AppStorage(Pref.meterStyle) private var meterStyle: String = MeterStyle.stacked.rawValue
     @AppStorage(Pref.meterColour) private var meterColour: String = MeterColour.mono.rawValue
     @AppStorage(Pref.menuBarProviders) private var shownRaw: String = ""
+    @AppStorage(Pref.zoom) private var zoom: Double = 1
 
     private var scheme: ColorScheme? { Theme(rawValue: theme)?.scheme }
 
@@ -32,6 +33,7 @@ struct EkiApp: App {
                 // one accent for the whole app, so switches, pickers and
                 // selections follow what you picked rather than system blue
                 .tint(Palette.accent)
+                .environment(\.zoom, zoom)
                 .id(accent)                  // re-read the accent everywhere on change
         }
         .defaultSize(width: 1040, height: 680)
@@ -41,6 +43,19 @@ struct EkiApp: App {
                     .keyboardShortcut("n", modifiers: .command)
                 Button("Refresh") { Task { await model.refreshAll() } }
                     .keyboardShortcut("r", modifiers: .command)
+            }
+            // the View menu; `zoom` is read so the items grey out at either end
+            CommandGroup(before: .toolbar) {
+                Button("Actual Size") { Zoom.reset() }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .disabled(zoom == 1)
+                Button("Zoom In") { Zoom.larger() }
+                    .keyboardShortcut("+", modifiers: .command)
+                    .disabled(!Zoom.canGrow)
+                Button("Zoom Out") { Zoom.smaller() }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .disabled(!Zoom.canShrink)
+                Divider()
             }
         }
 
@@ -68,6 +83,17 @@ struct EkiApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// The menu says ⌘+, but the key under that plus is "=" and nobody holds
+    /// shift to zoom. Caught before the menu sees it, so it's one step either way.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let held = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard held == .command, event.charactersIgnoringModifiers == "=" else { return event }
+            Zoom.larger()
+            return nil
+        }
+    }
+
     /// Closing the last window keeps the menu bar item. eki is still there.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false

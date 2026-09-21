@@ -96,7 +96,7 @@ struct ModelsSheet: View {
                     Text("What the router can pick from, and what each is good at. "
                          + "Bold is eki's own measurement, plain is the public boards, "
                          + "faint is a guess from the model's class.")
-                        .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
+                        .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -105,11 +105,11 @@ struct ModelsSheet: View {
 
             // header row
             HStack(spacing: 0) {
-                Text("Model").font(.system(size: 10.5, weight: .semibold))
+                Text("Model").font(.zoomed(size: 10.5, weight: .semibold))
                     .foregroundStyle(Palette.inkFaint)
                     .frame(width: nameWidth, alignment: .leading)
                 ForEach(shownTasks, id: \.self) { task in
-                    Text(task.uppercased()).font(.system(size: 10, weight: .semibold))
+                    Text(task.uppercased()).font(.zoomed(size: 10, weight: .semibold))
                         .tracking(0.5).foregroundStyle(Palette.inkFaint)
                         .frame(width: 58, alignment: .trailing)
                 }
@@ -124,20 +124,20 @@ struct ModelsSheet: View {
                     }
                     if models.isEmpty {
                         Text("Nothing listed yet — the provider is asked when it's reachable.")
-                            .font(.system(size: 12)).foregroundStyle(Palette.inkFaint)
+                            .font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
                             .padding(.top, 8)
                     }
                 }
             }
 
             if !note.isEmpty {
-                Text(note).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text(note).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
             }
             Text(footer)
-                .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+                .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(22)
+        .padding(.all, 22)
         .frame(width: provider == nil ? 820 : 720, height: provider == nil ? 560 : 460)
         .task { await load() }
     }
@@ -181,10 +181,10 @@ struct ModelsSheet: View {
                     .disabled(m.isDefault)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title(m))
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.zoomed(size: 12.5, weight: .medium))
                         .foregroundStyle(m.enabled ? Palette.ink : Palette.inkFaint)
                         .lineLimit(1)
-                    Text(sub(m)).font(.system(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                    Text(sub(m)).font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
                         .lineLimit(1)
                 }
             }
@@ -209,20 +209,20 @@ struct ModelsSheet: View {
     /// on: measured if eki has it, else the public boards, else the prior.
     private func cell(_ s: ModelScore?) -> some View {
         guard let s else {
-            return Text("–").font(.system(size: 12)).foregroundStyle(Palette.inkFaint)
+            return Text("–").font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
         }
         if let m = s.measured["hard"] ?? s.measured["medium"] ?? s.measured["easy"] {
             return Text(String(format: "%.2f", m.score))
-                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .font(.zoomed(size: 12, weight: .bold).monospacedDigit())
                 .foregroundStyle(Palette.ink)
         }
         if let p = s.public?["hard"] ?? s.public?["medium"] ?? s.public?["easy"] {
             return Text(String(format: "%.2f", p))
-                .font(.system(size: 12).monospacedDigit())
+                .font(.zoomed(size: 12).monospacedDigit())
                 .foregroundStyle(Palette.ink)
         }
         return Text(String(format: "%.2f", s.prior))
-            .font(.system(size: 12).monospacedDigit())
+            .font(.zoomed(size: 12).monospacedDigit())
             .foregroundStyle(Palette.inkFaint)
     }
 

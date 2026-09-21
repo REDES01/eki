@@ -37,6 +37,7 @@ struct MadeItem: Identifiable, Hashable {
     }
 
     let id: String
+    let mark: String                // what it is called once hidden; the same every launch
     let what: What
     let conversation: String
     let chat: String
@@ -69,20 +70,23 @@ struct MadeItem: Identifiable, Hashable {
             for block in MarkdownParser.blocks(turn.content) {
                 let what: What
                 let mark: String
+                let name: String
                 switch block {
                 case .code(let code, let language):
                     guard let artifact = Artifact(code: code, language: language) else { continue }
                     what = .artifact(artifact)
                     mark = turn.conversation_id + artifact.id
+                    name = Hidden.mark(artifact, in: turn.conversation_id)
                 case .image(let alt, let source):
                     what = .picture(Picture(source: source, alt: alt))
                     mark = source
+                    name = Hidden.mark(Picture(source: source))
                 default:
                     continue
                 }
                 guard seen.insert(mark).inserted else { continue }
                 n += 1
-                out.append(MadeItem(id: "\(turn.id)-\(n)", what: what,
+                out.append(MadeItem(id: "\(turn.id)-\(n)", mark: name, what: what,
                                     conversation: turn.conversation_id,
                                     chat: chat.isEmpty ? "Untitled chat" : chat,
                                     backend: turn.backend ?? "", when: when))
@@ -115,6 +119,7 @@ struct GalleryPane: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var stage = Stage.shared
     @AppStorage("eki.artifactWidth") private var panelWidth: Double = 480
+    @Environment(\.zoom) private var zoom
     @State private var items: [MadeItem] = []
     @State private var loaded = false
     @State private var failed = ""
@@ -126,7 +131,7 @@ struct GalleryPane: View {
     private var shown: [MadeItem] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         return items.filter { item in
-            guard filter.keeps(item) else { return false }
+            guard filter.keeps(item), !stage.hidden.contains(item.mark) else { return false }
             if q.isEmpty { return true }
             return item.title.lowercased().contains(q) || item.chat.lowercased().contains(q)
                 || item.kindLabel.lowercased().contains(q)
@@ -140,14 +145,20 @@ struct GalleryPane: View {
                 grid
                 if let artifact = stage.artifact {
                     PanelHandle(width: $panelWidth, limit: 300...most)
-                    ArtifactPanel(artifact: artifact)
+                    ArtifactPanel(artifact: artifact, walks: true)
                         .frame(width: min(panelWidth, most))
                         .transition(.move(edge: .trailing))
                 }
             }
         }
         .task { await load() }
-        .onDisappear { stage.artifact = nil }
+        // the list being walked is the list on screen, filter and search included
+        .onChange(of: shown.map(\.id)) { if stage.live != nil { stage.deck = shown } }
+        .onDisappear {
+            stage.artifact = nil
+            stage.deck = []
+            stage.current = nil
+        }
     }
 
     private var grid: some View {
@@ -158,13 +169,15 @@ struct GalleryPane: View {
                 empty
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210, maximum: 320), spacing: 16)],
-                              alignment: .leading, spacing: 18) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210 * zoom, maximum: 320 * zoom),
+                                                 spacing: 16 * zoom)],
+                              alignment: .leading, spacing: 18 * zoom) {
                         ForEach(shown) { item in
-                            MadeTile(item: item, open: { open(item) }, goToChat: { goToChat(item) })
+                            MadeTile(item: item, open: { open(item) }, goToChat: { goToChat(item) },
+                                     remove: { stage.deck = shown; stage.remove(item) })
                         }
                     }
-                    .padding(Metric.gutter)
+                    .padding(.all, Metric.gutter)
                 }
             }
         }
@@ -178,10 +191,19 @@ struct GalleryPane: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Artifacts").font(.hubTitle)
-                Text(loaded ? summary : "Looking…")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.inkFaint)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(loaded ? summary : "Looking…")
+                        .foregroundStyle(Palette.inkFaint)
+                        .lineLimit(1)
+                    if removedCount > 0 {
+                        Button("· \(removedCount) removed, bring back") { stage.restoreAll() }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Palette.inkMuted)
+                            .lineLimit(1)
+                            .help("Show everything removed from the gallery again. Files already in the Trash stay there.")
+                    }
+                }
+                .font(.zoomed(size: 11.5))
             }
             .layoutPriority(1)
             Spacer(minLength: 12)
@@ -203,9 +225,24 @@ struct GalleryPane: View {
                 .controlSize(.small)
                 SearchField(text: $query).frame(width: 170)
             }
+            Button {
+                if let first = shown.first(where: { if case .picture = $0.what { return true } else { return false } }) {
+                    stage.deck = shown
+                    stage.present(first)
+                    stage.sorting = true
+                }
+            } label: {
+                Image(systemName: "hand.draw")
+                    .font(.zoomed(size: 11.5, weight: .medium))
+                    .frame(width: 24, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Palette.inkMuted)
+            .help("Edit images: go through the pictures, swiping to keep, trash or recover")
             Button { Task { await load() } } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.zoomed(size: 11.5, weight: .medium))
                     .frame(width: 24, height: 22)
                     .contentShape(Rectangle())
             }
@@ -215,6 +252,10 @@ struct GalleryPane: View {
         }
         .padding(.horizontal, Metric.gutter)
         .padding(.vertical, 12)
+    }
+
+    private var removedCount: Int {
+        stage.hidden.isEmpty ? 0 : items.filter { stage.hidden.contains($0.mark) }.count
     }
 
     private var summary: String {
@@ -227,20 +268,20 @@ struct GalleryPane: View {
     private var empty: some View {
         VStack(spacing: 8) {
             Image(systemName: "square.on.square.dashed")
-                .font(.system(size: 26))
+                .font(.zoomed(size: 26))
                 .foregroundStyle(Palette.inkFaint)
             Text(!failed.isEmpty ? "Couldn't ask the engine"
                  : !loaded ? "Looking…"
                  : items.isEmpty ? "Nothing made yet" : "Nothing matches")
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.zoomed(size: 13.5, weight: .medium))
             Text(!failed.isEmpty ? failed
                  : items.isEmpty ? "Ask for a page, a diagram or a picture — it will be kept here."
                  : "Try another filter, or fewer words.")
-                .font(.system(size: 12))
+                .font(.zoomed(size: 12))
                 .foregroundStyle(Palette.inkFaint)
                 .multilineTextAlignment(.center)
         }
-        .padding(40)
+        .padding(.all, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -257,18 +298,12 @@ struct GalleryPane: View {
     }
 
     private func open(_ item: MadeItem) {
-        switch item.what {
-        case .artifact(let artifact):
-            withAnimation(.easeOut(duration: 0.18)) {
-                stage.artifact = stage.artifact?.id == artifact.id ? nil : artifact
-            }
-        case .picture(let picture):
-            let pictures = shown.compactMap { made -> Picture? in
-                if case .picture(let p) = made.what { return p }
-                return nil
-            }
-            stage.show(picture, among: pictures)
+        if case .artifact(let artifact) = item.what, stage.artifact?.id == artifact.id {
+            withAnimation(.easeOut(duration: 0.18)) { stage.artifact = nil }
+            return
         }
+        stage.deck = shown
+        stage.present(item)
     }
 
     private func goToChat(_ item: MadeItem) {
@@ -286,6 +321,7 @@ struct MadeTile: View {
     let item: MadeItem
     let open: () -> Void
     let goToChat: () -> Void
+    var remove: () -> Void = {}
 
     @State private var thumb: NSImage?
     @State private var missing = false
@@ -316,11 +352,11 @@ struct MadeTile: View {
             Rectangle().fill(Palette.hairline).frame(height: 1)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.zoomed(size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                 Text(caption)
-                    .font(.system(size: 11))
+                    .font(.zoomed(size: 11))
                     .foregroundStyle(Palette.inkFaint)
                     .lineLimit(1)
             }
@@ -363,7 +399,7 @@ struct MadeTile: View {
             ZStack {
                 Palette.fill.opacity(0.55)
                 Image(systemName: missing ? "photo.badge.exclamationmark" : symbol)
-                    .font(.system(size: 24))
+                    .font(.zoomed(size: 24))
                     .foregroundStyle(Palette.inkFaint)
             }
         }
@@ -394,6 +430,8 @@ struct MadeTile: View {
                 Button("Show in Finder") { PictureActions.reveal(picture) }
             }
         }
+        Divider()
+        Button("Remove from Gallery") { remove() }
     }
 
     private func draw() async {

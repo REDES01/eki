@@ -18,13 +18,31 @@ final class Stage: ObservableObject {
     @Published var artifact: Artifact?
     @Published var picture: Picture?
     @Published var gallery: [Picture] = []
+    /// When the gallery opened what's on screen: everything it is showing, to
+    /// walk through, and which of them this is. (Swipes.swift)
+    @Published var deck: [MadeItem] = []
+    @Published var current: MadeItem?
+    @Published var hidden: Set<String> = Hidden.load()
+    @Published var notice: Notice?
+    @Published var pull: Pull?
+    /// Sorting: the viewer's edit mode, the only place swipes mean anything.
+    @Published var sorting = false
+    var undone: [Removed] = []
 
     func show(_ picture: Picture, among gallery: [Picture]) {
+        current = nil
         self.gallery = gallery.contains(picture) ? gallery : [picture]
         self.picture = picture
     }
 
     func step(_ by: Int) {
+        if live != nil {                            // from the gallery: its pictures, in its order
+            let reel = self.reel
+            if let at = reel.firstIndex(where: { $0.id == live?.id }), reel.count > 1 {
+                present(reel[(at + by + reel.count) % reel.count])
+            }
+            return
+        }
         guard let picture, let at = gallery.firstIndex(of: picture), gallery.count > 1 else { return }
         self.picture = gallery[(at + by + gallery.count) % gallery.count]
     }
@@ -179,9 +197,9 @@ struct InlineImage: View {
                             chip("folder", "Show in Finder") { PictureActions.reveal(picture) }
                         }
                     }
-                    .padding(4)
+                    .padding(.all, 4)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    .padding(8)
+                    .padding(.all, 8)
                     .transition(.opacity)
                 }
             }
@@ -213,7 +231,7 @@ struct InlineImage: View {
                 .foregroundStyle(Palette.inkFaint)
             VStack(alignment: .leading, spacing: 2) {
                 Text("This picture isn't where it was")
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.zoomed(size: 12.5, weight: .medium))
                 Text(source)
                     .font(.hubMonoSmall)
                     .foregroundStyle(Palette.inkFaint)
@@ -230,7 +248,7 @@ struct InlineImage: View {
     private func chip(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.zoomed(size: 11.5, weight: .medium))
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }

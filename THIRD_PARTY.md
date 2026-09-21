@@ -15,6 +15,17 @@ following, each under its own licence:
 | [pyte](https://github.com/selectel/pyte) | LGPL-3.0 | rendering Claude Code's /usage panel to read it, used unmodified |
 | [CPython](https://github.com/python/cpython) (via [python-build-standalone](https://github.com/astral-sh/python-build-standalone)) | PSF-2.0 | the interpreter bundled inside Eki.app |
 
+eki ships a snapshot of public benchmark results, reduced to one number per
+model per kind of work (`eki/evals/public_scores.json`):
+
+| Data | Licence | Used for |
+| --- | --- | --- |
+| [Epoch AI, *Capabilities & Benchmarking*](https://epoch.ai/benchmarks) | CC BY 4.0 | starting beliefs about what each model is good at, before eki has measured anything itself |
+
+Benchmark questions and answers remain the property of their creators; eki
+carries only the published scores. Rebuild with
+`python -m eki.evals.build_public_scores`.
+
 eki *drives* these, and does not redistribute them:
 
 - **Claude Code** and **Codex** — run as the user's own installed CLIs, with the

@@ -13,7 +13,14 @@ struct ModelScore: Codable, Hashable {
         let n: Int
     }
     let prior: Double
+    var `public`: [String: Double]? = [:]   // easy | medium | hard, from the boards
     let measured: [String: Measured]     // easy | medium | hard
+}
+
+struct PublicRef: Codable, Hashable {
+    let base: String
+    let name: String
+    let date: String
 }
 
 struct RegistryModel: Codable, Identifiable, Hashable {
@@ -25,6 +32,8 @@ struct RegistryModel: Codable, Identifiable, Hashable {
     var speed_tok_s: Double?
     let `class`: String
     let source: String
+    var cost: Double? = 1
+    var `public`: PublicRef? = nil
     let scores: [String: ModelScore]
 
     var id: String { "\(provider):\(model)" }
@@ -70,9 +79,9 @@ struct ModelsSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Models behind \(provider.label)").font(.hubTitle)
-                    Text("What the router can pick from, and what each is believed or "
-                         + "known to be good at. Solid numbers are measured; faint ones "
-                         + "are guesses from the model's class.")
+                    Text("What the router can pick from, and what each is good at. "
+                         + "Bold is eki's own measurement, plain is the public boards, "
+                         + "faint is a guess from the model's class.")
                         .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -110,9 +119,11 @@ struct ModelsSheet: View {
             if !note.isEmpty {
                 Text(note).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
             }
-            Text("Measure runs a short battery — capitals, arithmetic, translations, a haiku "
-                 + "— against the model and keeps the scores. A local model grades the "
-                 + "open-ended answers; on a paid model this spends a little of its quota.")
+            Text("Public scores: Epoch AI, Capabilities & Benchmarking (CC BY 4.0), relative to "
+                 + "the best model on each benchmark. Measure runs eki's own short battery — "
+                 + "capitals, arithmetic, translations, a haiku — which tells a small model "
+                 + "from a large one and catches a broken setup, but can't rank the top; the "
+                 + "boards do that. Cost is relative: ×5 means five times the fast tier.")
                 .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -159,14 +170,20 @@ struct ModelsSheet: View {
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    /// Best available: measured at the hardest level there is, else the prior.
+    /// The hard-work number, since that's what a choice between models turns
+    /// on: measured if eki has it, else the public boards, else the prior.
     private func cell(_ s: ModelScore?) -> some View {
         guard let s else {
             return Text("–").font(.system(size: 12)).foregroundStyle(Palette.inkFaint)
         }
-        if let m = s.measured["medium"] ?? s.measured["easy"] {
+        if let m = s.measured["hard"] ?? s.measured["medium"] ?? s.measured["easy"] {
             return Text(String(format: "%.2f", m.score))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .foregroundStyle(Palette.ink)
+        }
+        if let p = s.public?["hard"] ?? s.public?["medium"] ?? s.public?["easy"] {
+            return Text(String(format: "%.2f", p))
+                .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(Palette.ink)
         }
         return Text(String(format: "%.2f", s.prior))
@@ -175,8 +192,10 @@ struct ModelsSheet: View {
     }
 
     private func sub(_ m: RegistryModel) -> String {
-        var bits = [m.class.replacingOccurrences(of: "_", with: " ")]
-        if m.context_tokens > 0 { bits.append("\(m.context_tokens / 1000)k") }
+        var bits: [String] = []
+        if let p = m.public, !p.name.isEmpty { bits.append("boards: \(p.name)") }
+        else { bits.append(m.class.replacingOccurrences(of: "_", with: " ")) }
+        if let c = m.cost { bits.append(String(format: "cost ×%g", c)) }
         if let s = m.speed_tok_s { bits.append("\(Int(s)) tok/s") }
         return bits.joined(separator: " · ")
     }

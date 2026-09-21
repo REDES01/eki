@@ -21,9 +21,10 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import priors
+from . import public_scores
 from .classify import TASKS
 
 SCHEMA = """
@@ -37,12 +38,22 @@ CREATE TABLE IF NOT EXISTS models (
     price_out      REAL,
     speed_tok_s    REAL,
     class          TEXT NOT NULL DEFAULT '',
-    measured       TEXT NOT NULL DEFAULT '{}', -- {task: {score, n, at}}
+    measured       TEXT NOT NULL DEFAULT '{}', -- {task/difficulty: {score, n, at}}
     source         TEXT NOT NULL DEFAULT '',   -- listed | seeded | user
     updated_at     INTEGER NOT NULL,
     PRIMARY KEY (provider, model)
 );
 """
+#: relative cost of running a model, within and across providers, when no
+#: price is known: what a request on it "spends" compared to the fast tier
+#: the top tier at 5× the fast tier follows the vendors' own API price ratio
+#: (Opus to Sonnet); a per-model cost_weight overrides it
+COST_WEIGHT = {"small_open": 0.05, "mid_open": 0.1, "large_open": 0.2, "image": 0.2,
+               "frontier_agent_fast": 1.0, "frontier_api": 3.0, "frontier_agent": 5.0}
+#: a flagship that is metered on its own window (Claude Code shows "Current
+#: week (Fable)") costs more than the tier's other models. A placeholder
+#: until pacing prices that window directly; per-model cost_weight overrides.
+COST_NAMES = {"fable": 8.0}
 
 #: below this many measured items a score is still the prior
 MIN_ITEMS = 3
@@ -61,23 +72,45 @@ class ModelRecord:
     klass: str = ""
     measured: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     source: str = ""
+    #: what the public boards say: {"base", "name", "date", "scores": {task/difficulty}}
+    public: Dict[str, Any] = field(default_factory=dict)
+    #: relative cost; None means "by class"
+    cost_weight: Optional[float] = None
 
     @property
     def key(self) -> str:
         return f"{self.provider}:{self.model}" if self.model else self.provider
 
     def quality(self, task: str, difficulty: str = "") -> float:
-        """Measured when there's enough of it at this difficulty, the class's
-        prior otherwise. A score from easy items says nothing about hard
-        work, so it never stands in for one."""
-        got = self.measured.get(f"{task}/{difficulty}") if difficulty else None
-        if got and got.get("n", 0) >= MIN_ITEMS:
-            return float(got["score"])
-        return priors.QUALITY.get(self.klass, {}).get(task, 0.0)
+        """In order of how much it knows: eki's own measurement at this
+        difficulty, what the public boards report, the class's prior.
+
+        A score from easy items says nothing about hard work, so it never
+        stands in for one; a public score at a harder level can."""
+        return self._quality(task, difficulty)[0]
 
     def basis(self, task: str, difficulty: str = "") -> str:
+        return self._quality(task, difficulty)[1]
+
+    def _quality(self, task: str, difficulty: str = "") -> Tuple[float, str]:
         got = self.measured.get(f"{task}/{difficulty}") if difficulty else None
-        return "measured" if got and got.get("n", 0) >= MIN_ITEMS else "prior"
+        if got and got.get("n", 0) >= MIN_ITEMS:
+            return float(got["score"]), "measured"
+        if self.public.get("scores") and difficulty:
+            found = public_scores.nearest(self.public["scores"], task, difficulty)
+            if found is not None:
+                return float(found), "public"
+        return priors.QUALITY.get(self.klass, {}).get(task, 0.0), "prior"
+
+    @property
+    def cost(self) -> float:
+        if self.cost_weight is not None:
+            return self.cost_weight
+        name = (self.model or (self.public or {}).get("base") or "").lower()
+        for token, weight in COST_NAMES.items():
+            if token in name:
+                return weight
+        return COST_WEIGHT.get(self.klass, 1.0)
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -85,8 +118,14 @@ class ModelRecord:
             "enabled": self.enabled, "context_tokens": self.context_tokens,
             "price_in": self.price_in, "price_out": self.price_out,
             "speed_tok_s": self.speed_tok_s, "class": self.klass, "source": self.source,
+            "cost": self.cost,
+            "public": {k: self.public.get(k, "") for k in ("base", "name", "date")}
+            if self.public else None,
             "scores": {t: {
                 "prior": round(priors.QUALITY.get(self.klass, {}).get(t, 0.0), 2),
+                "public": {d: round(v, 2) for d in ("easy", "medium", "hard")
+                           if (v := public_scores.nearest(self.public.get("scores", {}), t, d))
+                           is not None} if self.public.get("scores") else {},
                 "measured": {d: {"score": round(m["score"], 2), "n": m["n"]}
                              for d in ("easy", "medium", "hard")
                              if (m := self.measured.get(f"{t}/{d}"))},
@@ -102,6 +141,11 @@ class Registry:
         self._conn = sqlite3.connect(str(p), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(models)")}
+        if "public" not in cols:
+            self._conn.execute("ALTER TABLE models ADD COLUMN public TEXT NOT NULL DEFAULT '{}'")
+        if "cost_weight" not in cols:
+            self._conn.execute("ALTER TABLE models ADD COLUMN cost_weight REAL")
         self._conn.commit()
 
     # ---- reading ---------------------------------------------------------
@@ -129,22 +173,26 @@ class Registry:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO models (provider, model, label, enabled, context_tokens,"
-                " price_in, price_out, speed_tok_s, class, measured, source, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+                " price_in, price_out, speed_tok_s, class, measured, source, updated_at,"
+                " public, cost_weight)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(provider, model) DO UPDATE SET label=excluded.label,"
                 " enabled=excluded.enabled, context_tokens=excluded.context_tokens,"
                 " price_in=excluded.price_in, price_out=excluded.price_out,"
                 " speed_tok_s=excluded.speed_tok_s, class=excluded.class,"
                 " measured=excluded.measured, source=excluded.source,"
-                " updated_at=excluded.updated_at",
+                " updated_at=excluded.updated_at, public=excluded.public,"
+                " cost_weight=excluded.cost_weight",
                 (rec.provider, rec.model, rec.label, int(rec.enabled), rec.context_tokens,
                  rec.price_in, rec.price_out, rec.speed_tok_s, rec.klass,
-                 json.dumps(rec.measured), rec.source, int(time.time())))
+                 json.dumps(rec.measured), rec.source, int(time.time()),
+                 json.dumps(rec.public), rec.cost_weight))
             self._conn.commit()
         return rec
 
     def seen(self, provider: str, model: str, label: str = "", context_tokens: int = 0,
-             klass: str = "", source: str = "listed") -> ModelRecord:
+             klass: str = "", source: str = "listed",
+             public: Optional[Dict[str, Any]] = None) -> ModelRecord:
         """A model a provider listed: recorded once, and what was measured
         or set by hand about it is kept across listings."""
         have = self.get(provider, model)
@@ -154,12 +202,14 @@ class Registry:
                 have.label, changed = label, True
             if context_tokens and have.context_tokens != context_tokens:
                 have.context_tokens, changed = context_tokens, True
-            if klass and not have.klass:
+            if klass and have.klass != klass:           # derived, never user-set
                 have.klass, changed = klass, True
+            if public is not None and public != have.public:
+                have.public, changed = public, True
             return self.upsert(have) if changed else have
         return self.upsert(ModelRecord(provider=provider, model=model, label=label or model,
                                        context_tokens=context_tokens, klass=klass,
-                                       source=source))
+                                       source=source, public=public or {}))
 
     def record(self, provider: str, model: str, task: str, score: float, items: int,
                speed_tok_s: Optional[float] = None, difficulty: str = "easy"
@@ -206,4 +256,6 @@ class Registry:
             enabled=bool(row["enabled"]), context_tokens=row["context_tokens"],
             price_in=row["price_in"], price_out=row["price_out"],
             speed_tok_s=row["speed_tok_s"], klass=row["class"],
-            measured=json.loads(row["measured"] or "{}"), source=row["source"])
+            measured=json.loads(row["measured"] or "{}"), source=row["source"],
+            public=json.loads(row["public"] or "{}") if "public" in row.keys() else {},
+            cost_weight=row["cost_weight"] if "cost_weight" in row.keys() else None)

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from . import priors
+from . import public_scores
 from .adapters.base import Backend
 from .capability import Registry
 
@@ -53,14 +54,29 @@ def codex_models() -> List[Tuple[str, str, int]]:
     return out
 
 
-async def discover(backend: Backend, registry: Registry) -> List[str]:
-    """Record every model this backend offers. Returns their ids."""
+def codex_default() -> Tuple[str, str]:
+    """(model, reasoning effort) from ~/.codex/config.toml, if set."""
+    try:
+        text = Path("~/.codex/config.toml").expanduser().read_text()
+    except OSError:
+        return "", ""
+    model = re.search(r'^model\s*=\s*"([^"]+)"', text, re.M)
+    effort = re.search(r'^model_reasoning_effort\s*=\s*"([^"]+)"', text, re.M)
+    return (model.group(1) if model else ""), (effort.group(1) if effort else "")
+
+
+async def discover(backend: Backend, registry: Registry,
+                   default_model: str = "") -> List[str]:
+    """Record every model this backend offers. Returns their ids.
+
+    `default_model` is what the provider runs when none is named — Claude
+    Code's current model from its status line, Codex's config — so the
+    default entry can be looked up on the public boards too.
+    """
     info, key, kind = backend.info, backend.key, backend.info.kind
     options = getattr(backend, "options", {}) or {}
     caps = info.capabilities
     found: List[Tuple[str, str, int]] = [("", f"{info.label} (default)", caps.context_tokens)]
-    # a local server serves one model; its name is what the class is read from
-    default_model = str(options.get("model") or "")
     if kind == "claude_code":
         found += [(a, a.capitalize(), caps.context_tokens)
                   for a in claude_aliases(getattr(backend, "bin", "") or "claude")]
@@ -76,9 +92,16 @@ async def discover(backend: Backend, registry: Registry) -> List[str]:
         # a local server with one thing loaded is that thing; a hosted API
         # lists dozens, and the default entry is the one the user configured
         found += [(n, n.split("/")[-1], caps.context_tokens) for n in names[:60]]
+    effort = ""
+    if kind == "codex":
+        cfg_model, effort = codex_default()
+        default_model = default_model or cfg_model
+    default_model = default_model or str(options.get("model") or "")
     ids = []
     for model, label, context in found:
         klass = priors.class_of_model(kind, model or default_model, options, caps)
-        registry.seen(key, model, label=label, context_tokens=context, klass=klass)
+        public = public_scores.lookup(kind, model, default_model, effort) or {}
+        registry.seen(key, model, label=label, context_tokens=context, klass=klass,
+                      public=public)
         ids.append(model)
     return ids

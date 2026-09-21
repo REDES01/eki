@@ -157,3 +157,57 @@ def test_measured_scores_change_the_choice():
     assert router.choose(Need(task="chat", difficulty="easy")).backend is small
     # but that measurement says nothing about hard chat, where its prior loses
     assert router.choose(Need(task="chat", difficulty="hard")).backend is big
+
+
+# ---- the public boards ----------------------------------------------------
+
+def test_public_scores_rank_what_the_battery_cannot():
+    from eki import public_scores as ps
+    fable = ps.lookup("claude_code", "fable")
+    opus = ps.lookup("claude_code", "opus")
+    sonnet = ps.lookup("claude_code", "sonnet")
+    assert fable and opus and sonnet
+    assert fable["base"].startswith("claude-fable-") and opus["base"].startswith("claude-opus-")
+    hard = lambda r: ps.nearest(r["scores"], "chat", "hard")     # noqa: E731
+    assert hard(fable) >= hard(opus) > hard(sonnet)
+    # a local quantised build the boards never saw stays unknown, not guessed
+    assert ps.lookup("mlx", "mlx-community/Qwen3.5-2B-MLX-4bit") is None
+    # a family name resolves to its newest version
+    assert ps.resolve("mlx", "qwen3.5-9b") is not None
+
+
+def test_nearest_prefers_harder_evidence_and_discounts_easier():
+    from eki import public_scores as ps
+    assert ps.nearest({"math/hard": 0.9}, "math", "easy") == 0.9
+    assert ps.nearest({"math/easy": 0.9}, "math", "hard") == 0.81
+    assert ps.nearest({"chat/medium": 0.8}, "translate", "medium") == 0.8
+    assert ps.nearest({}, "math", "hard") is None
+
+
+def test_quality_prefers_measured_then_public_then_class():
+    rec = ModelRecord("claude", "sonnet", klass="frontier_agent_fast",
+                      public={"scores": {"chat/hard": 0.74}})
+    assert rec.basis("chat", "hard") == "public" and rec.quality("chat", "hard") == 0.74
+    assert rec.basis("image", "hard") == "prior"
+    rec.measured["chat/hard"] = {"score": 0.5, "n": 5}
+    assert rec.basis("chat", "hard") == "measured" and rec.quality("chat", "hard") == 0.5
+
+
+def test_router_pays_for_the_stronger_model_only_when_the_bar_needs_it():
+    claude = _backend("claude", "claude_code", 50, tools=True, repo=True)
+    sonnet = ModelRecord("claude", "", klass="frontier_agent_fast",
+                         public={"scores": {"math/hard": 0.85, "chat/medium": 0.8}})
+    opus = ModelRecord("claude", "opus", klass="frontier_agent",
+                       public={"scores": {"math/hard": 0.978, "chat/medium": 0.97}})
+    fable = ModelRecord("claude", "fable", klass="frontier_agent",
+                        public={"scores": {"math/hard": 0.981, "chat/medium": 0.937}})
+    assert fable.cost > opus.cost > sonnet.cost
+    router = Router([claude], models_for=lambda k: [sonnet, opus, fable])
+    # the default clears medium chat: no model named
+    assert router.choose(Need(task="chat", difficulty="medium")).model == ""
+    # hard maths: sonnet's 0.85 misses 0.88; opus and fable both clear, opus is cheaper
+    assert router.choose(Need(task="math", difficulty="hard")).model == "opus"
+    # raise the bar past opus and fable earns its price
+    fable.public["scores"]["math/hard"] = 0.99
+    opus.public["scores"]["math/hard"] = 0.87
+    assert router.choose(Need(task="math", difficulty="hard")).model == "fable"

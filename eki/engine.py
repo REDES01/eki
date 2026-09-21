@@ -35,6 +35,7 @@ from .models import LocalModel, ModelManager
 from .capability import Registry
 from .providers import Provider, ProviderStore, seed_from_config
 from .quota import QuotaBoard, QuotaProvider
+from .quota import claude_bridge
 from .quota.claude import ClaudeStatusLine
 from .quota.codex import CodexAppServer
 from .router import Need, Router
@@ -128,8 +129,12 @@ class Engine:
         for b in list(self.backends):
             if self._is_up(b.key) is False:
                 continue
+            default = ""
+            if b.info.kind == "claude_code":
+                reading = claude_bridge.reading() or {}
+                default = str(reading.get("model") or "")
             try:
-                found[b.key] = await discover_models.discover(b, self.registry)
+                found[b.key] = await discover_models.discover(b, self.registry, default)
             except Exception:                       # noqa: BLE001
                 found[b.key] = []
         return found

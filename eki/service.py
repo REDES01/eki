@@ -543,6 +543,7 @@ class RegistryPatch(BaseModel):
     model: str = ""
     enabled: Optional[bool] = None
     forget: bool = False
+    cost_weight: Optional[float] = None
 
 
 @app.patch("/api/registry/{provider}")
@@ -552,6 +553,12 @@ def registry_patch(provider: str, body: RegistryPatch) -> Any:
         raise HTTPException(404, "unknown model")
     if body.forget and not reg.forget_measurements(provider, body.model):
         raise HTTPException(404, "unknown model")
+    if body.cost_weight is not None:
+        rec = reg.get(provider, body.model)
+        if rec is None:
+            raise HTTPException(404, "unknown model")
+        rec.cost_weight = body.cost_weight
+        reg.upsert(rec)
     rec = reg.get(provider, body.model)
     return rec.to_json() if rec else {}
 

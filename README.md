@@ -103,15 +103,26 @@ needs an image model), live quota, then *good enough for this kind of work* —
 and only then cost.
 
 "Good enough" comes from the label eki puts on the request (what kind of work,
-how demanding) and a score per model per kind of work. Scores start as
-priors — starting beliefs about classes of model in `eki/priors.py`, coarse on
-purpose — and are replaced by measurement: *Models…* on any provider lists
-the models behind it (Claude Code's fable/opus/sonnet, Codex's list, whatever
-a local server loaded) and *Measure* runs each through a short battery with
-checkable answers, a local model grading the open-ended ones. A measurement
-only speaks for the difficulty it was taken at; five perfect easy answers say
-nothing about hard work. The router then picks the cheapest model behind a
-provider that clears the bar, and names it in the reason.
+how demanding) and a score per model per kind of work, from three sources in
+order of how much they know:
+
+1. **eki's own measurement.** *Models…* on a provider lists the models behind
+   it (Claude Code's fable/opus/sonnet, Codex's list, whatever a local server
+   loaded); *Measure* runs one through a short battery with checkable
+   answers, a local model grading the open-ended ones. It tells a 2B from a
+   27B and catches a broken setup. It can't rank the top — every task it can
+   check, Fable and Opus both pass — and a measurement only speaks for the
+   difficulty it was taken at.
+2. **The public boards.** A snapshot of Epoch AI's benchmark hub ships with
+   eki, reduced to one number per model per kind of work, relative to the
+   best model on each benchmark. This is what separates Fable from Opus from
+   Sonnet, and what a hard request is judged against.
+3. **The model's class**, for a model neither of the above has seen — a
+   quantised local build, say.
+
+Each model also carries a relative cost. The router picks, behind a
+provider, the cheapest model that clears the bar — the default when it does —
+and names it in the reason: "claude (opus): cheapest fit for math/hard".
 
 Memory is read from the OS, not just from what eki loaded. A local model is
 started only if it fits in what the Mac really has free (keeping 4 GB back);

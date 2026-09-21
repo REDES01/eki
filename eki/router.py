@@ -189,13 +189,16 @@ class Router:
         records = list(self.models_for(backend.key) or [])
         if not records:
             return "", self._quality(backend, task)
-        scored = [(r.model, float(r.quality(task, difficulty))) for r in records]
-        default = next((q for m, q in scored if m == ""), None)
-        if default is not None and default >= bar:
-            return "", default
-        adequate = sorted((q, m) for m, q in scored if q >= bar)
+        scored = [(r.model, float(r.quality(task, difficulty)), float(getattr(r, "cost", 1.0)))
+                  for r in records]
+        default = next(((q, c) for m, q, c in scored if m == ""), None)
+        adequate = [(c, -q, m, q) for m, q, c in scored if q >= bar]
         if adequate:
-            q, m = adequate[0]
+            # the cheapest that clears the bar; the default when it costs no
+            # more than that (it's what the user set up, and it needs no flag)
+            c, _, m, q = min(adequate)
+            if default is not None and default[0] >= bar and default[1] <= c:
+                return "", default[0]
             return m, q
-        q, m = max((q, m) for m, q in scored)
+        q, m = max((q, m) for m, q, _ in scored)
         return m, q

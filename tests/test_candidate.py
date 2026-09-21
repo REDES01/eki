@@ -8,6 +8,7 @@ calls. `python -m eki.candidate .` against a real checkout is the other half.
 """
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import textwrap
@@ -182,9 +183,12 @@ def test_the_candidate_never_sees_the_real_home(tmp_path):
                              skip=["tests"], keep=True, say=kept.append)
     assert report.fit
     work = Path([line for line in kept if line.startswith("kept: ")][0][6:])
-    for home in ("fresh", "upgrade"):
-        assert (work / home / ".eki" / "home-was").read_text() == str(work / home)
-    assert str(work) != os.path.expanduser("~")
+    try:
+        for home in ("fresh", "upgrade"):
+            assert (work / home / ".eki" / "home-was").read_text() == str(work / home)
+        assert str(work) != os.path.expanduser("~")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)      # --keep is the caller's to clean
 
 
 def test_the_sandbox_is_gone_afterwards(tmp_path, monkeypatch):

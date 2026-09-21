@@ -184,3 +184,15 @@ def test_templates_are_buildable():
     assert len(ids) == len(set(ids))
     for t in catalog.TEMPLATES:
         assert t["kind"] in kinds(), t["id"]
+
+
+def test_started_models_survive_an_engine_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(ModelManager, "STARTED_FILE", tmp_path / "started.json")
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: True))
+    first = ModelManager([LocalModel(key="a", label="a", port=1, start="x", stop="y")])
+    first.started.add("a")
+    first.touch("a")
+    first._save_started()
+    # a new engine on the same Mac still knows it owns that server
+    second = ModelManager([LocalModel(key="a", label="a", port=1, start="x", stop="y")])
+    assert second.started == {"a"}

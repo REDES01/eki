@@ -12,11 +12,13 @@ them.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 import subprocess
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 #: Fraction of installed memory MLX will work with before macOS starts killing
@@ -75,6 +77,11 @@ def total_memory_gb() -> float:
 
 
 class ModelManager:
+    #: which servers hub started, remembered across engine restarts — the
+    #: engine gets restarted for its own reasons and that is no reason to
+    #: leave a model loaded forever
+    STARTED_FILE = Path("~/.hub/started.json").expanduser()
+
     def __init__(self, models: List[LocalModel], ceiling_gb: float = 0.0):
         self.models = {m.key: m for m in models}
         self.ceiling_gb = ceiling_gb or default_ceiling_gb()
@@ -83,6 +90,27 @@ class ModelManager:
         self.started: set = set()
         self.last_used: Dict[str, float] = {}
         self._starting: Dict[str, asyncio.Lock] = {}
+        self._remember()
+
+    def _remember(self) -> None:
+        """Read back what a previous engine started, dropping what has stopped."""
+        try:
+            data = json.loads(self.STARTED_FILE.read_text())
+        except (OSError, ValueError):
+            return
+        for key, when in (data or {}).items():
+            model = self.models.get(key)
+            if model is not None and model.running:
+                self.started.add(key)
+                self.last_used[key] = float(when)
+
+    def _save_started(self) -> None:
+        try:
+            self.STARTED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self.STARTED_FILE.write_text(json.dumps(
+                {k: self.last_used.get(k, time.time()) for k in self.started}))
+        except OSError:
+            pass
 
     def adopt(self, previous: "ModelManager") -> None:
         self.started = {k for k in previous.started if k in self.models}
@@ -100,6 +128,8 @@ class ModelManager:
 
     def touch(self, key: str) -> None:
         self.last_used[key] = time.time()
+        if key in self.started:
+            self._save_started()
 
     async def reap_idle(self, now: Optional[float] = None) -> List[str]:
         """Stop hub-started models nobody has used for their idle window."""
@@ -111,6 +141,7 @@ class ModelManager:
                 continue
             if not m.running:
                 self.started.discard(key)
+                self._save_started()
                 continue
             if now - self.last_used.get(key, now) >= m.idle_minutes * 60:
                 await self.stop(key)
@@ -167,6 +198,7 @@ class ModelManager:
         await self._spawn(model.start)
         self.started.add(key)
         self.touch(key)
+        self._save_started()
         for _ in range(int(model_start_timeout(model) / 0.5)):
             await asyncio.sleep(0.5)
             if model.running:
@@ -186,6 +218,7 @@ class ModelManager:
             await asyncio.sleep(0.5)
             if not model.running:
                 self.started.discard(key)
+                self._save_started()
                 return f"{key} stopped"
         return f"{key} is still listening on :{model.port}"
 

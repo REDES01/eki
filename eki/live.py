@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -341,3 +342,16 @@ def summarize_activity(tool: str, inp: Dict[str, Any]) -> str:
     if tool == "AskUserQuestion":
         return "Asking you"
     return tool
+
+
+_INTENT = re.compile(r"\b(let me|i'll|i will|i am going to|i'm going to|first,? i|now i|next,? i|"
+                     r"going to|will now|let's)\b", re.I)
+
+
+def sounds_unfinished(text: str) -> bool:
+    """A turn that announced work instead of doing it: short, and phrased
+    as intent. What a small model does when it forgets it has hands."""
+    t = text.strip()
+    if not t or len(t) > 700:
+        return False
+    return bool(_INTENT.search(t)) and not t.rstrip().endswith("?")

@@ -187,3 +187,41 @@ def test_a_codex_run_goes_through_the_open_session(tmp_path, monkeypatch):
         await eng.quota.stop()
         await eng.close()
     run(go())
+
+
+def test_a_local_model_that_stops_to_announce_is_nudged(tmp_path, monkeypatch):
+    """The fake echoes what it's told; a companion's first turn that only
+    announces gets one "go ahead" and the thread shows the nudge."""
+    from eki import secrets, settings
+    from eki.adapters import codex as cx
+    from eki.adapters.base import BackendInfo, Capabilities, Cost
+    from eki.config import Config
+    from eki.engine import Engine
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    cfg = Config(db_path=str(tmp_path / "eki.db"))
+    cfg.backends = [BackendInfo(key="codex-qwen", kind="codex", label="Codex on Qwen", cost=Cost(tier=0),
+                                capabilities=Capabilities(context_tokens=32000, repo=True, tools=True))]
+    cfg.options = {"codex-qwen": {"binary": FAKE[0], "local_model": "qwen", "model": "qwen"}}
+    monkeypatch.setattr(cx.CodexBackend, "live_argv", lambda self: FAKE + ["--announce-only"])
+    eng = Engine(cfg)
+
+    async def go():
+        started = await eng.ask("Let me first check the folder", backend_key="codex-qwen")
+        rid = started["run"]
+        q = eng.runner.subscribe(rid)
+        events = []
+        while True:
+            ev = await asyncio.wait_for(q.get(), timeout=10)
+            events.append(ev)
+            if ev["event"] == "state" and ev["state"] in ("done", "failed", "cancelled"):
+                break
+        text = "".join(e.get("text", "") for e in events if e["event"] == "output")
+        lines = [e["text"] for e in events if e["event"] == "activity"]
+        assert "Nudged to carry on" in lines
+        assert "Echo: Go ahead" in text            # the second turn happened
+        session = eng.live[started["conversation"]]
+        assert "same turn" in session.developer_instructions
+        await eng.quota.stop()
+        await eng.close()
+    run(go())

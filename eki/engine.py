@@ -592,14 +592,18 @@ class Engine:
         argv = backend.live_argv()                                          # type: ignore[attr-defined]
         wanted = model or str(self.options.get(backend.key, {}).get("model") or "")
         permissions = str(self.settings.get("permissions", "auto"))
+        local = bool(self.options.get(backend.key, {}).get("local_model"))
+        guidance = codex_live.LOCAL_INSTRUCTIONS if local else ""
         session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
-                                          permissions=permissions, resume=resume or "")
+                                          permissions=permissions, resume=resume or "",
+                                          developer_instructions=guidance)
         try:
             await session.start()
         except RuntimeError as e:
             if resume:
                 session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
-                                                  permissions=permissions)
+                                                  permissions=permissions,
+                                                  developer_instructions=guidance)
                 await session.start()
             else:
                 raise BackendError(str(e))
@@ -623,31 +627,46 @@ class Engine:
                 pass
         rid = run["id"]
         usage: Dict[str, Any] = {}
+        local = bool(self.options.get(backend.key, {}).get("local_model"))
+        nudges = 0
         try:
-            await session.send(run["prompt"])
-            async for ev in session.turn():
-                kind = ev["kind"]
-                if kind == "text":
-                    yield ev["text"]
-                elif kind == "activity":
-                    yield {"kind": "activity", "text": live.summarize_activity(ev["tool"], ev["input"])}
-                elif kind == "note":
-                    yield {"kind": "activity", "text": ev["text"]}
-                elif kind in ("ask", "permission"):
-                    self.pending[rid] = {**ev, "run": rid}
-                    yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
-                elif kind == "cancel":
-                    self.pending.pop(rid, None)
-                    yield {"kind": "cancel", "request_id": ev["request_id"]}
-                elif kind == "rate_limit":
-                    self._note_rate_limits(ev["info"])
-                elif kind == "result":
-                    usage = ev.get("usage") or {}
-                    if ev.get("is_error"):
-                        raise BackendError(str(ev.get("result") or "Claude Code reported an error")[:300])
-                elif kind == "exit":
-                    self.live.pop(cid, None)
-                    raise BackendError(f"{backend.info.label} stopped: {ev.get('error', '')}"[:300])
+            prompt = run["prompt"]
+            while True:
+                await session.send(prompt)
+                acted, said = False, []
+                async for ev in session.turn():
+                    kind = ev["kind"]
+                    if kind == "text":
+                        said.append(ev["text"])
+                        yield ev["text"]
+                    elif kind == "activity":
+                        acted = acted or ev["tool"] not in ("error", "approved")
+                        yield {"kind": "activity", "text": live.summarize_activity(ev["tool"], ev["input"])}
+                    elif kind == "note":
+                        yield {"kind": "activity", "text": ev["text"]}
+                    elif kind in ("ask", "permission"):
+                        self.pending[rid] = {**ev, "run": rid}
+                        yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
+                    elif kind == "cancel":
+                        self.pending.pop(rid, None)
+                        yield {"kind": "cancel", "request_id": ev["request_id"]}
+                    elif kind == "rate_limit":
+                        self._note_rate_limits(ev["info"])
+                    elif kind == "result":
+                        usage = ev.get("usage") or {}
+                        if ev.get("is_error"):
+                            raise BackendError(str(ev.get("result") or f"{backend.info.label} reported an error")[:300])
+                    elif kind == "exit":
+                        self.live.pop(cid, None)
+                        raise BackendError(f"{backend.info.label} stopped: {ev.get('error', '')}"[:300])
+                # a local model that announced work and stopped is told to go on
+                if local and not acted and nudges < 2 and live.sounds_unfinished("".join(said)):
+                    nudges += 1
+                    prompt = "Go ahead — do it now, with the tools. Don't stop to announce."
+                    yield {"kind": "activity", "text": "Nudged to carry on"}
+                    yield "\n\n"
+                    continue
+                break
         except (asyncio.CancelledError, GeneratorExit):
             self.pending.pop(rid, None)
             if session.alive:

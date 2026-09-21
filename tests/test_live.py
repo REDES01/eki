@@ -249,3 +249,11 @@ def test_permissions_setting_shapes_both_programs_argv(tmp_path, monkeypatch):
     assert "--dangerously-skip-permissions" not in b._argv("hi", None, "/tmp/p")
     # a chat turn with no folder asks in its default mode
     assert "--permission-mode" not in b.live_argv(None, None, "sid")
+
+
+def test_a_turn_that_only_announces_sounds_unfinished():
+    assert live.sounds_unfinished("On it. First let me fix the page style, then start both.")
+    assert live.sounds_unfinished("I'll install the dependencies now.")
+    assert not live.sounds_unfinished("Done. Renamed add to sum_two and updated the caller.")
+    assert not live.sounds_unfinished("Should I also update the tests?")
+    assert not live.sounds_unfinished("")

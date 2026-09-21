@@ -32,6 +32,13 @@ INIT_TIMEOUT = 60.0
 APPROVALS = ("item/commandExecution/requestApproval", "execCommandApproval",
              "item/fileChange/requestApproval", "applyPatchApproval",
              "item/permissions/requestApproval")
+#: what a local model needs telling before it drives a harness: the
+#: failure they all share is announcing an action and stopping
+LOCAL_INSTRUCTIONS = (
+    "You are working through tools. When you say you will do something, do it in "
+    "this same turn by calling the tool — never end a turn with only a plan or an "
+    "announcement. Keep going until the task is complete or you need something "
+    "only the user can give; then say so plainly.")
 #: warnings that say nothing the user can act on
 NOISE = ("Model metadata for", "Skill descriptions were shortened", "Under-development features")
 COMMANDS = [
@@ -46,13 +53,15 @@ COMMANDS = [
 
 class CodexSession:
     def __init__(self, argv: List[str], cwd: Optional[str], env: Optional[Dict[str, str]],
-                 model: str = "", permissions: str = "auto", resume: str = ""):
+                 model: str = "", permissions: str = "auto", resume: str = "",
+                 developer_instructions: str = ""):
         self.argv = argv
         self.cwd = cwd
         self.env = env
         self.model = model
         self.permissions = permissions
         self.resume = resume
+        self.developer_instructions = developer_instructions
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.session_id: str = ""                  # Codex's thread id
         self.turn_id: str = ""
@@ -118,6 +127,8 @@ class CodexSession:
             params["cwd"] = self.cwd
         if self.model:
             params["model"] = self.model
+        if self.developer_instructions:
+            params["developerInstructions"] = self.developer_instructions
         return params
 
     async def close(self) -> None:

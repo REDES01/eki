@@ -88,6 +88,8 @@ while True:
             else:
                 notify("item/completed", {"item": {"type": "commandExecution", "id": "c1", "status": "declined"}})
                 reply = "Understood, I won't."
+        elif "--announce-only" in ARGV and turns == 1:
+            reply = "On it. Let me first check the folder."       # announces, does nothing
         else:
             notify("item/started", {"item": {"type": "commandExecution", "id": "c0", "command": "/bin/zsh -lc 'ls'"}})
             notify("item/completed", {"item": {"type": "commandExecution", "id": "c0", "status": "completed"}})

@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -35,6 +35,7 @@ from . import deploy as deploy_mod
 from . import migrate
 from . import secrets
 from . import bench
+from . import gateway
 from . import settings as settings_mod
 from .adapters import base as adapters
 from . import policy as policy_mod
@@ -326,6 +327,13 @@ def conversations(limit: int = 30, q: str = "", archived: bool = False) -> Any:
         row["live"] = row["id"] in live       # the sidebar shows what's working
         out.append(row)
     return out
+
+
+@app.get("/api/artifacts")
+def artifacts(limit: int = 400) -> Any:
+    """Every answer that may hold a page, a drawing, a diagram or a picture,
+    across all threads — the app's gallery reads them the way the chat does."""
+    return engine().store.made(limit)
 
 
 @app.get("/api/conversations/{cid}")
@@ -650,6 +658,39 @@ async def put_settings(body: Dict[str, Any]) -> Any:
     return saved
 
 
+# ---- eki as a model provider (Codex → local models) ------------------------
+
+@app.post("/v1/responses")
+async def responses_api(request: Request) -> Any:
+    """OpenAI's Responses API, for Codex, over eki's local models: the model
+    is a provider key; the server behind it is started if asleep."""
+    body = await request.json()
+    eng = engine()
+    key = str(body.get("model") or "")
+    provider = eng.providers.get(key)
+    if provider is None or not provider.options.get("base_url"):
+        raise HTTPException(404, f"no local model {key!r}")
+    local = eng.models.for_backend(key)
+    if local is not None and not local.running:
+        message = await eng.models.start(key)
+        if not local.running:
+            raise HTTPException(503, message)
+    if local is not None:
+        eng.models.hold(key)
+
+    async def frames() -> AsyncIterator[str]:
+        try:
+            async for frame in gateway.respond(str(provider.options["base_url"]),
+                                               str(provider.options.get("model") or key), body):
+                yield frame
+        finally:
+            if local is not None:
+                eng.models.release(key)
+
+    return StreamingResponse(frames(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store"})
+
+
 # ---- usage ----------------------------------------------------------------
 
 LABELS = {"claude": "Claude", "codex": "Codex"}
@@ -820,7 +861,7 @@ def main(argv: Optional[list] = None) -> int:
     for note in migrate.run(Path(__file__).resolve().parent.parent):
         log.info("migrated: %s", note)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    STATE["engine"] = Engine(config_mod.load(args.config), owner=True)
+    STATE["engine"] = Engine(config_mod.load(args.config), owner=True, port=args.port)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 

@@ -15,13 +15,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
+from urllib.parse import unquote
 
 from . import config as config_mod
 from . import policy as policy_mod
+from . import priors
+from . import public_scores
 from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
@@ -48,7 +53,9 @@ HEALTH_TTL = 20.0
 
 
 class Engine:
-    def __init__(self, cfg, owner: bool = False):
+    def __init__(self, cfg, owner: bool = False, port: int = 8787):
+        #: where the service listens; Codex is pointed here for local models
+        self.port = port
         """`owner=True` only for the service: the process that executes runs."""
         self.cfg = cfg
         self.store = Store(cfg.db)
@@ -114,12 +121,64 @@ class Engine:
         self.classifier = self._classifier()
         if not hasattr(self, "registry"):
             self.registry = Registry(self.cfg.db)
+        self._companions()
         self.router = Router(self.backends, self.quota, policy=self.policy,
                              is_up=self._is_up,
                              reserved={self.settings["router_model"]}
                              if self.settings["router_model"] else set(),
                              models_for=self.registry.for_provider)
         self._health = {}
+
+    def _companions(self) -> None:
+        """Codex driving each local model: derived, never stored.
+
+        A local model has no harness; Codex has one and takes any provider
+        that speaks the Responses API, which eki does for its own models
+        (eki/gateway.py). So every local text model big enough to be worth
+        it gets a "codex-<key>" backend: free, offline, edits files, and in
+        the running for repo work like any other. Added or removed with the
+        model itself.
+        """
+        codex = next((b for b in self.backends if b.info.kind == "codex"
+                      and getattr(b, "bin", None)), None)
+        if codex is None:
+            return
+        reserved = self.settings.get("router_model") or ""
+        for p in self.providers.all():
+            if (not p.enabled or p.kind not in ("mlx", "openai_compat") or not p.runtime.get("port")
+                    or p.runtime.get("kind", "llm") != "llm" or not p.options.get("model")
+                    or p.key == reserved):
+                continue
+            klass = priors.class_of_model(p.kind, str(p.options["model"]), p.options)
+            if klass == "small_open":
+                continue                            # a 2B can't carry a harness
+            key = f"codex-{p.key}"
+            if self.get(key) or self.providers.get(key):
+                continue
+            context = int(p.capabilities.get("context_tokens") or 32000)
+            info = adapters.BackendInfo(
+                key=key, kind="codex", label=f"Codex on {p.label}",
+                capabilities=adapters.Capabilities(context_tokens=context, text=True,
+                                                   tools=True, repo=True),
+                cost=adapters.Cost(tier=0, note="local, through Codex"))
+            options = {**self.options.get(codex.key, {}), "model": p.key, "local_model": p.key,
+                       "gateway": f"http://127.0.0.1:{self.port}/v1", "context_tokens": context}
+            options.pop("secret", None)
+            try:
+                self.backends.append(adapters.build(info, options))
+            except Exception as e:                  # noqa: BLE001
+                self.failed[key] = str(e)
+                continue
+            self.options[key] = options
+            self.registry.seen(key, "", label=info.label, context_tokens=context, klass=klass,
+                               source="derived",
+                               public=public_scores.lookup(p.kind, str(p.options["model"])))
+
+    def _local_for(self, key: str) -> Optional[LocalModel]:
+        """The local server behind a backend: its own, or the one a Codex
+        companion drives."""
+        local_key = self.options.get(key, {}).get("local_model") or key
+        return self.models.for_backend(local_key)
 
     def _classifier(self) -> classify.Classifier:
         """The small local model that labels requests, if one is set up."""
@@ -182,7 +241,7 @@ class Engine:
         returns None, which the router reads as "don't know" rather than
         "down". A slow health probe has no business inside a routing decision.
         """
-        model = self.models.for_backend(key)
+        model = self._local_for(key)
         if model is None:
             return None
         if model.running:
@@ -290,7 +349,8 @@ class Engine:
             return
 
         cid = run["conversation_id"]
-        label = await self._label(run)
+        shown = self._picture_before(run)
+        label = await self._label(run, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
         requested, _, wanted_model = (run["requested"] or "").partition(":")
         need = Need(repo=bool(run["cwd"]), tools=bool(run["cwd"]),
@@ -311,7 +371,7 @@ class Engine:
             raise BackendError(why)
 
         reason = choice.reason
-        model = self.models.for_backend(choice.backend.key)
+        model = self._local_for(choice.backend.key)
         meta_label = label.to_json()
         if model is not None and not model.running:
             reason += f"; starting {model.label}"
@@ -346,6 +406,21 @@ class Engine:
         kw: Dict[str, Any] = {}
         if run["cwd"]:
             kw["cwd"] = run["cwd"]
+        # "make it bluer", said to a picture: the image model is handed the
+        # picture to change. "try again" repeats whatever made it, anew.
+        drawn: Dict[str, str] = {}
+        if backend.info.capabilities.images_out and not backend.info.capabilities.text:
+            drawn = {"prompt": run["prompt"], "source": ""}
+            follow = classify.image_followup(run["prompt"]) if shown else ""
+            if follow == "edit":
+                drawn["source"] = shown["path"]
+            elif follow == "redo" and shown.get("prompt"):
+                drawn = {"prompt": shown["prompt"], "source": shown.get("source", "")}
+            if drawn["source"] and not os.path.isfile(drawn["source"]):
+                drawn["source"] = ""
+            kw["prompt"] = drawn["prompt"]
+            if drawn["source"]:
+                kw["edit"] = drawn["source"]
         resumed = self.store.session(cid, backend.key) if cid else None
         if resumed:
             kw["resume"] = resumed
@@ -353,6 +428,8 @@ class Engine:
         meta: Dict[str, Any] = {"run": run["id"], "label": meta_label}
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
+        if drawn:
+            meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
         stream = (self._live_turn(run, cid, backend, choice.model)
                   if backend.info.kind == "claude_code" and self.settings.get("live_claude", True)
@@ -589,12 +666,46 @@ class Engine:
             await asyncio.sleep(0.5)                # never a burst
         return named
 
-    async def _label(self, run: Dict[str, Any]) -> classify.Label:
+    _PICTURE = re.compile(r"!\[[^\]]*\]\(([^)\s]+\.(?:png|jpe?g|webp))\)", re.I)
+
+    def _picture_before(self, run: Dict[str, Any]) -> Dict[str, str]:
+        """The picture this request was said to, if the last answer was one.
+
+        Only the answer immediately before counts: once the thread has moved
+        on to words, "make it shorter" is about the words. Returns its path
+        and, when known, the request that drew it and what it was drawn from."""
+        cid = run.get("conversation_id")
+        if not cid:
+            return {}
+        try:
+            before = [t for t in self.store.turns(cid) if t["id"] < run["user_turn"]]
+        except Exception:                           # noqa: BLE001
+            return {}
+        last = next((t for t in reversed(before) if t["role"] == "assistant"), None)
+        if last is None:
+            return {}
+        backend = self.get(last["backend"] or "")
+        if backend is None or not backend.info.capabilities.images_out:
+            return {}
+        found = self._PICTURE.findall(last["content"] or "")
+        if not found:
+            return {}
+        try:
+            made = (json.loads(last["meta"] or "{}") or {}).get("image") or {}
+        except (TypeError, ValueError):
+            made = {}
+        asked = next((t["content"] for t in reversed(before)
+                      if t["role"] == "user" and t["id"] < last["id"]), "")
+        return {"path": unquote(found[-1]), "prompt": made.get("prompt") or asked,
+                "source": made.get("source") or ""}
+
+    async def _label(self, run: Dict[str, Any], after_image: bool = False) -> classify.Label:
         """What kind of request this is. Never allowed to fail a run."""
         try:
-            label = await self.classifier.label(run["prompt"], has_folder=bool(run["cwd"]))
+            label = await self.classifier.label(run["prompt"], has_folder=bool(run["cwd"]),
+                                                after_image=after_image)
         except Exception:                           # noqa: BLE001
-            label = classify.rules(run["prompt"], bool(run["cwd"]))
+            label = classify.rules(run["prompt"], bool(run["cwd"]), after_image)
         self.runs.update(run["id"], label=json.dumps(label.to_json()))
         key = self.settings.get("router_model") or ""
         if key and self.classifier.use_model:
@@ -630,7 +741,7 @@ class Engine:
         options = dict(self.options.get(provider, {}))
         if model:
             options["model"] = model
-        local = self.models.for_backend(provider)
+        local = self._local_for(provider)
         if local is not None:
             if not local.running:
                 message = await self.models.start(local.key)
@@ -741,7 +852,7 @@ class Engine:
                 continue
             if complete:
                 continue
-            local = self.models.for_backend(key)
+            local = self._local_for(key)
             hold = ""
             if local is None and mode != "all":
                 hold = "only local models are measured on their own"

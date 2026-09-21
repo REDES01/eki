@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="128" height="128" alt="eki logo"></p>
+
 # eki
 
 One place to ask, whatever ends up answering.
@@ -170,6 +172,23 @@ python -m eki.evals.label_eval --url http://127.0.0.1:8090
 ```
 runs both labellers over 200 seed prompts and prints accuracy and latency. The
 rules were tuned against that same set, so read their score as optimistic.
+
+## A local model with Codex's hands
+
+A model on this Mac has no harness of its own — no tools, no file editing,
+no agent loop. Codex has one, and takes any provider that speaks OpenAI's
+Responses API. eki speaks it, on its own port, for every local model it
+manages (`eki/gateway.py`): Codex calls `/v1/responses` with the model's
+provider key, eki starts the model if it's asleep, translates the request
+into the chat call the local server understands, and turns the stream back
+into the items Codex expects. So each local text model of a useful size
+appears as a second provider, **Codex on <model>** — free, offline, edits
+files — in the running for repo work like any other, measured like any
+other, and gone when the model is removed. Nothing to register by hand.
+
+Claude Code is not driven this way: it speaks only Anthropic's API, and
+pointing it at another model would mean running Anthropic's program outside
+what it supports.
 
 ## Claude and Codex usage
 

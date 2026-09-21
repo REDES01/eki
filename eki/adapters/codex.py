@@ -86,6 +86,16 @@ class CodexBackend(Backend):
             argv.append("--skip-git-repo-check")
         if self.model:
             argv += ["-m", self.model]
+        gateway = self.options.get("gateway")
+        if gateway:
+            # a local model, served through eki's own Responses endpoint
+            # (see eki/gateway.py): Codex's harness, the Mac's model
+            argv += ["-c", "model_provider=eki",
+                     "-c", 'model_providers.eki.name="eki"',
+                     "-c", f'model_providers.eki.base_url="{gateway}"',
+                     "-c", 'model_providers.eki.wire_api="responses"',
+                     "-c", f"model_context_window={int(self.options.get('context_tokens', 32000))}",
+                     "-c", "model_reasoning_effort=\"medium\""]
         for feature in self.disabled_features:
             # a feature whose helper binary isn't installed fails closed and
             # the model then reports it cannot edit anything

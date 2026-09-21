@@ -40,7 +40,19 @@ struct RegistryModel: Codable, Identifiable, Hashable {
     var isDefault: Bool { model.isEmpty }
 }
 
+struct BenchStatus: Codable {
+    struct SetInfo: Codable { let items: Int; let task: String; let difficulty: String }
+    struct Due: Codable, Hashable { let provider: String; let hold: String }
+    let sets: [String: SetInfo]
+    let due: [Due]
+    let auto_measure: String
+}
+
 extension EngineClient {
+    func bench() async throws -> BenchStatus {
+        try await decode(BenchStatus.self, "GET", "api/bench")
+    }
+
     func registry() async throws -> [RegistryModel] {
         struct W: Codable { let models: [RegistryModel] }
         return try await decode(W.self, "GET", "api/registry").models
@@ -69,8 +81,10 @@ private let shownTasks = ["chat", "writing", "translate", "code", "repo", "math"
 struct ModelsSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let provider: ProviderDTO
+    /// nil: every provider's models in one table
+    let provider: ProviderDTO?
     @State private var models: [RegistryModel] = []
+    @State private var bench: BenchStatus?
     @State private var measuring: Set<String> = []
     @State private var note = ""
 
@@ -78,7 +92,7 @@ struct ModelsSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Models behind \(provider.label)").font(.hubTitle)
+                    Text(provider.map { "Models behind \($0.label)" } ?? "Every model").font(.hubTitle)
                     Text("What the router can pick from, and what each is good at. "
                          + "Bold is eki's own measurement, plain is the public boards, "
                          + "faint is a guess from the model's class.")
@@ -93,7 +107,7 @@ struct ModelsSheet: View {
             HStack(spacing: 0) {
                 Text("Model").font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(Palette.inkFaint)
-                    .frame(width: 190, alignment: .leading)
+                    .frame(width: nameWidth, alignment: .leading)
                 ForEach(shownTasks, id: \.self) { task in
                     Text(task.uppercased()).font(.system(size: 10, weight: .semibold))
                         .tracking(0.5).foregroundStyle(Palette.inkFaint)
@@ -119,17 +133,38 @@ struct ModelsSheet: View {
             if !note.isEmpty {
                 Text(note).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
             }
-            Text("Public scores: Epoch AI, Capabilities & Benchmarking (CC BY 4.0), relative to "
-                 + "the best model on each benchmark. Measure runs eki's own short battery — "
-                 + "capitals, arithmetic, translations, a haiku — which tells a small model "
-                 + "from a large one and catches a broken setup, but can't rank the top; the "
-                 + "boards do that. Cost is relative: ×5 means five times the fast tier.")
+            Text(footer)
                 .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(22)
-        .frame(width: 720, height: 460)
+        .frame(width: provider == nil ? 820 : 720, height: provider == nil ? 560 : 460)
         .task { await load() }
+    }
+
+    private var nameWidth: CGFloat { provider == nil ? 250 : 190 }
+
+    private var footer: String {
+        var text = "Measure puts the same public items to a model — GSM8K, MATH, AIME, MBPP, "
+            + "HumanEval, TriviaQA, MMLU-Pro, thirty each — so every model, local or not, "
+            + "lands on one scale; a few dozen items here outrank the boards. Public scores: "
+            + "Epoch AI and Hugging Face's leaderboard data, relative to the best model on "
+            + "each benchmark. Cost is relative to the fast tier, from API prices where known."
+        if let b = bench {
+            let have = b.sets.values.reduce(0) { $0 + $1.items }
+            text += have > 0 ? " \(have) items are fetched." : " Items are fetched on first use."
+            let waiting = b.due.filter { !$0.hold.isEmpty }
+            let ready = b.due.filter { $0.hold.isEmpty }
+            if b.auto_measure == "off" {
+                text += " Measuring on its own is off."
+            } else if !ready.isEmpty {
+                text += " Next on its own: \(ready.map(\.provider).joined(separator: ", "))."
+            } else if !waiting.isEmpty {
+                text += " Waiting: " + waiting.map { "\($0.provider) (\($0.hold))" }
+                    .joined(separator: "; ") + "."
+            }
+        }
+        return text
     }
 
     private func row(_ m: RegistryModel) -> some View {
@@ -138,14 +173,14 @@ struct ModelsSheet: View {
                 Toggle("", isOn: Binding(
                     get: { m.enabled },
                     set: { on in Task {
-                        try? await model.client.setModel(provider: provider.key, model: m.model,
+                        try? await model.client.setModel(provider: m.provider, model: m.model,
                                                          enabled: on)
                         await load()
                     } }))
                     .labelsHidden().toggleStyle(AccentSwitch()).controlSize(.mini)
                     .disabled(m.isDefault)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(m.isDefault ? "Default" : m.label)
+                    Text(title(m))
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(m.enabled ? Palette.ink : Palette.inkFaint)
                         .lineLimit(1)
@@ -153,7 +188,7 @@ struct ModelsSheet: View {
                         .lineLimit(1)
                 }
             }
-            .frame(width: 190, alignment: .leading)
+            .frame(width: nameWidth, alignment: .leading)
             ForEach(shownTasks, id: \.self) { task in
                 cell(m.scores[task])
                     .frame(width: 58, alignment: .trailing)
@@ -191,6 +226,12 @@ struct ModelsSheet: View {
             .foregroundStyle(Palette.inkFaint)
     }
 
+    private func title(_ m: RegistryModel) -> String {
+        guard provider == nil else { return m.isDefault ? "Default" : m.label }
+        let name = model.providers.first { $0.key == m.provider }?.label ?? m.provider
+        return m.isDefault ? name : "\(name) · \(m.label)"
+    }
+
     private func sub(_ m: RegistryModel) -> String {
         var bits: [String] = []
         if let p = m.public, !p.name.isEmpty { bits.append("boards: \(p.name)") }
@@ -201,19 +242,29 @@ struct ModelsSheet: View {
     }
 
     private func load() async {
-        models = ((try? await model.client.registry()) ?? [])
-            .filter { $0.provider == provider.key }
-            .sorted { ($0.isDefault ? 0 : 1, $0.label) < ($1.isDefault ? 0 : 1, $1.label) }
+        let all = (try? await model.client.registry()) ?? []
+        if let provider {
+            models = all.filter { $0.provider == provider.key }
+                .sorted { ($0.isDefault ? 0 : 1, $0.label) < ($1.isDefault ? 0 : 1, $1.label) }
+        } else {
+            let order = Dictionary(uniqueKeysWithValues:
+                model.providers.enumerated().map { ($1.key, $0) })
+            models = all.filter { $0.enabled }
+                .sorted { (order[$0.provider] ?? 99, $0.isDefault ? 0 : 1, $0.label)
+                        < (order[$1.provider] ?? 99, $1.isDefault ? 0 : 1, $1.label) }
+        }
+        bench = try? await model.client.bench()
     }
 
     private func measure(_ m: RegistryModel) async {
         measuring.insert(m.id)
         defer { measuring.remove(m.id) }
         do {
-            let run = try await model.client.measure(provider: provider.key, model: m.model)
-            note = "Measuring \(m.isDefault ? "the default" : m.label)… it takes a minute or two."
+            let run = try await model.client.measure(provider: m.provider, model: m.model)
+            note = "Measuring \(title(m))… slots land as they complete; a local model takes "
+                + "half an hour or more."
             // wait for the run to finish, then reload the scores
-            for _ in 0..<180 {
+            for _ in 0..<2700 {
                 try? await Task.sleep(for: .seconds(2))
                 if let r = try? await model.client.run(run), !r.isLive {
                     note = r.state == "done" ? (lastLine(r.output) ?? "") : (r.error ?? "failed")

@@ -11,6 +11,7 @@ struct ModelsPane: View {
     @EnvironmentObject var model: AppModel
     @State private var addingProvider = false
     @State private var addingModel = false
+    @State private var showingAll = false
 
     var body: some View {
         ScrollView {
@@ -31,6 +32,10 @@ struct ModelsPane: View {
                         .buttonStyle(GhostButton())
                         Button { addingModel = true } label: {
                             Label("Add local model", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(GhostButton())
+                        Button { showingAll = true } label: {
+                            Label("Every model", systemImage: "tablecells")
                         }
                         .buttonStyle(GhostButton())
                     }
@@ -63,6 +68,7 @@ struct ModelsPane: View {
         .task { await model.refreshProviders() }
         .sheet(isPresented: $addingProvider) { AddProviderSheet() }
         .sheet(isPresented: $addingModel) { AddModelSheet() }
+        .sheet(isPresented: $showingAll) { ModelsSheet(provider: nil) }
     }
 }
 

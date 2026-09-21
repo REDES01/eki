@@ -232,12 +232,17 @@ class ComfyBackend(Backend):
     async def _await_result(self, pid: str) -> List[str]:
         """Poll the history until this prompt has outputs (or the clock runs out)."""
         deadline = time.time() + self.timeout
+        unreachable = 0
         while time.time() < deadline:
             await asyncio.sleep(1.0)
             try:
                 r = await self.client().get(f"{self.base}/history/{pid}")
                 entry = r.json().get(pid)
+                unreachable = 0
             except (httpx.HTTPError, json.JSONDecodeError):
+                unreachable += 1
+                if unreachable >= 10:               # gone, not busy
+                    raise BackendError("ComfyUI stopped answering while drawing")
                 continue
             if not entry:
                 continue

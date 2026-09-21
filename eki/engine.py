@@ -270,7 +270,18 @@ class Engine:
         """The local server behind a backend: its own, or the one a Codex
         companion drives."""
         local_key = self.options.get(key, {}).get("local_model") or key
-        return self.models.for_backend(local_key)
+        own = self.models.for_backend(local_key)
+        if own is not None:
+            return own
+        # another provider on the same local server — a second ComfyUI
+        # workflow, say — shares its lifecycle: held while in use, never
+        # unloaded from under it
+        base = str(self.options.get(key, {}).get("base_url") or "")
+        m = re.search(r"127\.0\.0\.1:(\d+)|localhost:(\d+)", base)
+        if m:
+            port = int(m.group(1) or m.group(2))
+            return next((lm for lm in self.models.models.values() if lm.port == port), None)
+        return None
 
     def _classifier(self) -> classify.Classifier:
         """The small local model that labels requests, if one is set up."""

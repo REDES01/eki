@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Parser tests written against events captured from a real run.
 
 The first parser for this stream was written from guesswork and matched

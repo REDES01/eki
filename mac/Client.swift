@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Talking to the engine.
 //
 // The app never does work itself — not even a chat turn. It asks the engine

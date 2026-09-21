@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """ComfyUI as a backend you can route to.
 
 A picture instead of a paragraph: the same router that picks who answers a

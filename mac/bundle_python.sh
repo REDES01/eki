@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Fetch a self-contained CPython and install eki's dependencies into it.
 #
 # The app ships its own interpreter so that installing eki is dragging one

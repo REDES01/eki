@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The menu bar item: your usage, at a glance, in the style you picked.
 //
 // Drawn as one NSImage rather than a row of SwiftUI views because that is

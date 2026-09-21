@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Starting beliefs about what each class of model is good at.
 
 eki has no history on its first day, so it starts from public evidence: on

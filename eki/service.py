@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The engine, over HTTP, for the Mac app and the CLI.
 
 Localhost only, by default — this thing can start subprocesses that edit

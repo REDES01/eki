@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The window.
 //
 // Shaped like the chat apps it sits beside: a quiet rail on the left, one

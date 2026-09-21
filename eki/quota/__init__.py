@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Usage limits, inside the engine.
 
 What used to be tokenbar — a second server on :8777 that the router asked over

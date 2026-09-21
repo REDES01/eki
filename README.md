@@ -143,5 +143,5 @@ eki/evals/      the labelling seed set and its harness
 mac/            the SwiftUI app and the build/sign/package scripts
 ```
 
-MIT licensed — see `LICENSE`, and `NOTICE.md` for what eki bundles and what it
-merely drives.
+Licensed under the Apache License 2.0 — see `LICENSE` and `NOTICE`, and
+`THIRD_PARTY.md` for what eki bundles and what it merely drives.

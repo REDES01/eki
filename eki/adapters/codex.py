@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Codex CLI, driven as a subprocess.
 
 Same rule as Claude Code: run the genuine binary under your own login, never

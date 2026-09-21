@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // First run.
 //
 // Three things decide whether eki is useful five minutes from now: it keeps

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Codex (ChatGPT plan) limits, from the Codex CLI's own app-server.
 
 `codex app-server` answers `account/rateLimits/read` for whoever is signed in

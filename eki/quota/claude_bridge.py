@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Install or remove the status-line bridge in Claude Code's settings.
 
 This edits ~/.claude/settings.json, which belongs to you, not to eki — so it

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """eki — tell it to do something; it keeps doing it until it's done.
 
     eki ask "why is this slow?"          routed; the answer streams here

@@ -1,0 +1,8 @@
+eki
+Copyright 2026 the eki authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Packaged builds of Eki.app include third-party software under their own
+licenses; see THIRD_PARTY.md for the list and what eki merely drives
+(Claude Code, Codex, mlx_lm, ComfyUI) without redistributing.

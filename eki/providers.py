@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Providers: everything eki can send work to, stored in the database.
 
 A provider is one record that serves as a routing backend, a quota source

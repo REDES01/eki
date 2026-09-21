@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Make the thing people download: Eki-<version>.zip, notarised if you have an
 # identity, ad-hoc if you don't.
 #

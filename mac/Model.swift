@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // App state.
 //
 // The window is a viewer. Sending a message asks the engine to start a run

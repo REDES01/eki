@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Just enough Markdown.
 //
 // Models answer in Markdown whether or not you asked them to, so rendering it

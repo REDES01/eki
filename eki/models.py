@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Local models: what's loaded, what it costs in memory, start and stop.
 
 Unified memory is the scarce resource on this machine, not disk or cores. Two

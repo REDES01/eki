@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // eki — one window for every model you can already talk to, and a menu bar
 // item for how much of each you have left.
 //

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """What kind of request is this, and how hard is it?
 
 The router needs two things a cost table can't tell it: what the request is

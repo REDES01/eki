@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Runs: the only way anything happens.
 
 There is no such thing as a chat turn that lives in a window. Every request —

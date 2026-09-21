@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Find an MLX model on Hugging Face, see whether it fits, and set it up.
 
 Deploying is a run like any other: it survives the window closing, it shows

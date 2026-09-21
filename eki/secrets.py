@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """API keys, kept in the macOS Keychain — never in eki's database or config.
 
 Only keys the user pastes into eki live here: an Anthropic, OpenAI, xAI or

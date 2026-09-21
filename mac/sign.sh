@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Sign Eki.app — ad-hoc by default, properly when a Developer ID is set.
 #
 #   ./sign.sh Eki.app

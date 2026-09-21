@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """YAML in, typed objects out. Backends are config, not code."""
 from __future__ import annotations
 

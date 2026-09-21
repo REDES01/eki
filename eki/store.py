@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """One store for every conversation, whichever backend answered.
 
 The schema records which backend served each turn, so a thread can start on a

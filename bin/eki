@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # The `eki` command, for a checkout: this repo's venv, this repo's source.
 # A packaged Eki.app ships its own copy of this as Contents/Helpers/eki-cli.
 src="$0"

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Labelling a request, and what the label does to routing."""
 import asyncio
 import json

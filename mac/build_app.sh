@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Compile Eki.app from the Swift files here. Needs Xcode command line tools.
 #
 #   ./build_app.sh            the app only, engine from the checkout (dev)
@@ -62,7 +63,7 @@ if [ "$FULL" = "1" ]; then
   /usr/bin/rsync -a --exclude "__pycache__" --exclude "*.pyc" \
     "$PROJECT/eki" "$RES/engine/"
   cp "$PROJECT/config.yaml" "$RES/engine/config.yaml"
-  cp "$PROJECT/LICENSE" "$PROJECT/NOTICE.md" "$RES/" 2>/dev/null || true
+  cp "$PROJECT/LICENSE" "$PROJECT/NOTICE" "$PROJECT/THIRD_PARTY.md" "$RES/" 2>/dev/null || true
 
   cat > "$HELPERS/eki-engine" <<'SH'
 #!/bin/bash

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """eki's own settings: the few knobs that aren't a provider or a policy.
 
 Kept in ~/.eki/settings.json so both the engine and the CLI read the same

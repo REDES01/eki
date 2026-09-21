@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The store's job: one conversation, whichever backend answered each turn."""
 import sys
 from pathlib import Path

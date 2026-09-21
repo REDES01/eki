@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """What a usage limit looks like, whoever reports it.
 
 Two rules carried over from tokenbar, both learned the hard way:

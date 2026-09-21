@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // One place for every colour, radius and type size in the app.
 //
 // The palette is warm rather than blue-grey — paper, not chrome — because the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Model setup: names, fit estimates and the scripts eki writes."""
 from eki import deploy
 from eki import settings as settings_mod

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Providers in the database, secrets out of it, and the two API adapters."""
 import asyncio
 import json

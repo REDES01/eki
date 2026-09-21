@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Claude through the Anthropic API, with the user's own API key.
 
 This is the metered path — an `x-api-key` the user pasted, billed per token.

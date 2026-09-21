@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Backend registry. Importing a module here registers its kind."""
 from .base import (  # noqa: F401
     Backend, BackendError, BackendInfo, Capabilities, Cost, Health, Message,

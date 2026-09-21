@@ -1,6 +1,6 @@
 # Third-party software
 
-eki is MIT licensed. It depends on, and (when packaged) redistributes, the
+eki is licensed under the Apache License 2.0. It depends on, and (when packaged) redistributes, the
 following, each under its own licence:
 
 | Component | Licence | Used for |

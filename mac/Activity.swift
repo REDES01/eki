@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Activity: everything the engine is doing, and everything it has done.
 //
 // There is nothing to dispatch from here — you start work by saying something

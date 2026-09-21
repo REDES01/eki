@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Ask Claude Code for a reading, instead of waiting to be told.
 
 The status-line bridge is passive: it records whatever Claude Code reports

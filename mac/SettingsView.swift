@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Settings (⌘,): how eki looks, and what the menu bar shows.
 import SwiftUI
 

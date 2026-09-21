@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Claude Code, driven as a subprocess.
 
 This is the sanctioned way to spend a subscription from outside the client: run

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Anything that speaks OpenAI's /v1/chat/completions.
 
 That covers OpenAI itself, xAI, OpenRouter, Ollama, LM Studio, vLLM and

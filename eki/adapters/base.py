@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """What a backend is, and what the router is allowed to ask about it.
 
 A backend is anything that can answer a turn: a local model over HTTP, an

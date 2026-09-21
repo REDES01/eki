@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Local weights, and the rules the router follows.
 //
 // Two settings that belong together: what is loaded into memory right now, and

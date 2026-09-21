@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Usage limits: parsing, the board, and the status-line bridge.
 
 The first test is the bug that shipped once in tokenbar: a source reporting

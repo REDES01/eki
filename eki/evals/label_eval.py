@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Is the router model actually better than the rules?
 
 Caveat worth keeping in mind: the rules in eki.classify were tuned against

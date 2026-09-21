@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Carry an older install across the rename from "hub" to "eki".
 
 Everything that had the old name in it moves here: the data directory, the

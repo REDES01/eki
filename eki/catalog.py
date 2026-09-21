@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The kinds of provider eki knows how to add, and how to find them.
 
 Each template is what the Add Provider sheet offers: what the user has to

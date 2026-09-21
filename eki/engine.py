@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The part that isn't a CLI or a window.
 
 Owns the backends, the router, the conversation store and the runs, so that

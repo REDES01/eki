@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Routing rules added once the cheap answer stopped being the right one.
 
 Two of these are regression tests for things the router actually did: it sent

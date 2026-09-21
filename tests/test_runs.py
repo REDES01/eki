@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Runs: the one primitive, and the ways it can quietly go wrong.
 
 Most of these exist because of a specific failure:

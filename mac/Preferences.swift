@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // What the user chose about how the app looks, kept in UserDefaults.
 //
 // These are display choices, so they live with the app, not the engine: the

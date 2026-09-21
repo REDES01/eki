@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The shape of what the store hands a client.
 
 These look pedantic until a field goes missing: the Mac app decodes turns into

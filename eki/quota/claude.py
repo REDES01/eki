@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Claude subscription limits, from what Claude Code itself reported.
 
 Reads the file the status-line bridge keeps. That means the numbers are only

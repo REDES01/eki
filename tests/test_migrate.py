@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Carrying an install across the rename, without losing anything."""
 import json
 import sqlite3

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Routing preferences you can change without editing config.
 
 config.yaml describes what exists; this describes what you currently want.

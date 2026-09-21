@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Usage: every limit every provider reports, and how old each number is.
 //
 // Rules carried over from tokenbar, because you set them there:

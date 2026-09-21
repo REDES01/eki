@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Asking Claude Code for a reading — and refusing to answer for the user."""
 import asyncio
 import json

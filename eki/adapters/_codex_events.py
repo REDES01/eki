@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Reading Codex's JSONL event stream.
 
 Shapes observed on codex-cli 0.154.0:

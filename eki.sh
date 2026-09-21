@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # eki launcher: venv on first run, then the CLI.
 set -euo pipefail
 cd "$(dirname "$0")"

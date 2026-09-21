@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Providers and new models.
 //
 // Adding a provider is picking what it is and giving it the one thing it

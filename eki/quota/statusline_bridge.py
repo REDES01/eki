@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Claude Code status-line command that also records your usage limits.
 
 Claude Code documents a `rate_limits` object in the JSON it pipes to a status

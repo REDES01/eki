@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Local models served by mlx_lm, over its OpenAI-compatible endpoint.
 
 Free and private, so the router reaches for this first whenever a request

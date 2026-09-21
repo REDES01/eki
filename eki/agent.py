@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Keep the engine alive without anyone remembering to start it.
 
 A launchd agent: it starts the engine at login and starts it again if it

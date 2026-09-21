@@ -54,7 +54,7 @@ fi
 [ -s "$MERMAID" ] && cp "$MERMAID" "$RES/mermaid.min.js"
 
 # The app icon. The master drawing is assets/AppIcon.svg.
-cp assets/AppIcon.icns "$RES/AppIcon.icns"
+[ -f assets/AppIcon.icns ] && cp assets/AppIcon.icns "$RES/AppIcon.icns"
 
 echo "compiling…"
 swiftc -O -target arm64-apple-macos14.0 \

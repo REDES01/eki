@@ -168,7 +168,9 @@ class Engine:
             model = self.models.models.get(p.key)
             weights = float(p.runtime.get("gb", 0) or 0)
             room = memory.free_gb if (model and model.running) else memory.free_gb - weights
-            window = context_mod.size(prof.config, room)
+            pin = int(p.runtime.get("context_pin") or 0)
+            window = (context_mod.pinned(prof.config, pin, room) if pin
+                      else context_mod.size(prof.config, room))
             if window is not None:
                 p.capabilities["context_tokens"] = window.tokens
                 p.runtime["context"] = window.as_dict()

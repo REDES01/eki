@@ -569,6 +569,16 @@ final class AppModel: ObservableObject {
         backends = (try? await client.backends()) ?? backends
     }
 
+    /// Pin a local model's context window; 0 lets eki work it out.
+    func setContext(_ key: String, tokens: Int) async {
+        do {
+            modelMessage = try await client.setContext(key, tokens: tokens)
+        } catch {
+            modelMessage = error.localizedDescription
+        }
+        await refreshModels()
+    }
+
     /// How long a local server stays loaded unused; 0 keeps it loaded.
     func setIdle(_ key: String, minutes: Double) async {
         do {

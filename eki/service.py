@@ -893,6 +893,34 @@ class IdleBody(BaseModel):
     minutes: float                  # 0 keeps it loaded
 
 
+class ContextBody(BaseModel):
+    tokens: int = 0                                 # 0 = worked out by eki
+
+
+@app.put("/api/models/{key}/context")
+async def set_model_context(key: str, body: ContextBody) -> Any:
+    """Pin a local model's context window, or hand it back to eki (0).
+    Saved with its provider; the harnesses are told on their next session."""
+    eng = engine()
+    model = eng.models.get(key)
+    if model is None:
+        raise HTTPException(404, "no such model")
+    if body.tokens < 0 or body.tokens > 2_000_000:
+        raise HTTPException(422, "a token count, or 0 for automatic")
+    p = eng.providers.get(model.backend or key)
+    if p is None:
+        raise HTTPException(404, "no such provider")
+    if body.tokens:
+        p.runtime["context_pin"] = int(body.tokens)
+    else:
+        p.runtime.pop("context_pin", None)
+    eng.providers.upsert(p)
+    await eng.reload()
+    fresh = eng.models.get(key)
+    window = (fresh.context if fresh else None) or {}
+    return {"message": window.get("summary") or f"{model.label}: context set"}
+
+
 @app.put("/api/models/{key}/idle")
 def set_model_idle(key: str, body: IdleBody) -> Any:
     """How long this server stays loaded unused. Changed in place — no engine

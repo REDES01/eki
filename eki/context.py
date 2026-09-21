@@ -39,17 +39,22 @@ class Window:
     native: int                 # what the model itself supports
     kv_gb: float                # cache at `tokens`, fp16
     per_token_kb: float
-    limited_by: str             # native | memory | speed
+    limited_by: str             # native | memory | speed | pinned
+    fits: bool = True           # the cache at full fits in the room it was sized against
 
     def describe(self) -> str:
         parts = [f"{_k(self.tokens)} context"]
-        if self.limited_by == "native":
+        if self.limited_by == "pinned":
+            parts.append("set by you")
+        if self.limited_by == "native" or self.tokens == self.native:
             parts.append("the model's maximum")
         else:
             parts.append(f"native {_k(self.native)}")
         parts.append(f"~{self.kv_gb:g} GB of cache at full")
         if self.limited_by == "memory":
             parts.append("limited by memory")
+        elif self.limited_by == "pinned" and not self.fits:
+            parts.append("more than fits beside it now")
         return " · ".join(parts)
 
     def as_dict(self) -> Dict[str, Any]:
@@ -122,6 +127,25 @@ def size(config: Dict[str, Any], room_gb: float, cap: int = SPEED_CAP) -> Option
         why = "speed" if limit > chosen else "native"
     return Window(tokens=chosen, native=limit, kv_gb=round(chosen * per_token, 1),
                   per_token_kb=round(per_token * 1024 * 1024, 1), limited_by=why)
+
+
+#: what a person may pin a window to: the auto steps, and past the speed
+#: cap for those who'd rather wait than compact
+CHOICES = STEPS + (196608, 262144)
+
+
+def pinned(config: Dict[str, Any], tokens: int, room_gb: float) -> Optional[Window]:
+    """A window the user chose: honoured up to the model's maximum, and
+    said plainly when the cache at full is more than what's free now."""
+    limit = native(config)
+    if not limit:
+        return None
+    tokens = max(STEPS[0], min(int(tokens), limit))
+    per_token = kv_gb(config, 1 << 20) / (1 << 20)
+    cache = tokens * per_token
+    return Window(tokens=tokens, native=limit, kv_gb=round(cache, 1),
+                  per_token_kb=round(per_token * 1024 * 1024, 1), limited_by="pinned",
+                  fits=cache <= max(0.0, room_gb) * KV_SHARE)
 
 
 def harness_ready(tokens: int) -> bool:

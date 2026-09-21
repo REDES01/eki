@@ -172,6 +172,7 @@ struct ContextWindow: Codable, Hashable {
     let native: Int
     let kv_gb: Double
     let limited_by: String
+    var fits: Bool? = true
     var summary: String? = nil
 }
 
@@ -599,6 +600,14 @@ actor EngineClient {
         let path = "api/models/\(key)/\(running ? "start" : "stop")"
             + (force ? "?force=true" : "")
         return try await decode(Wrapper.self, "POST", path).message
+    }
+
+    /// Pin a local model's context window; 0 hands it back to eki.
+    @discardableResult
+    func setContext(_ key: String, tokens: Int) async throws -> String {
+        struct Wrapper: Codable { let message: String }
+        return try await decode(Wrapper.self, "PUT", "api/models/\(key)/context",
+                                body: ["tokens": tokens]).message
     }
 
     @discardableResult

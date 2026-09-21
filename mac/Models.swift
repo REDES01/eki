@@ -193,12 +193,7 @@ struct LocalModelCard: View {
                                   + "eki loads its models — nothing here is typed in.")
                     }
                     if let window = row.context, let summary = window.summary {
-                        Text(summary)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Palette.inkFaint)
-                            .help("Worked out from the model's config and the memory beside "
-                                  + "its weights each time eki loads its models; Codex and "
-                                  + "Claude Code are told this number.")
+                        contextMenu(window, summary: summary)
                     }
                 }
                 Spacer()
@@ -229,6 +224,41 @@ struct LocalModelCard: View {
 }
 
 extension LocalModelCard {
+    /// the windows a person may pin; past 128k a turn takes a while
+    static let contextChoices = [8192, 16384, 32768, 49152, 65536, 98304, 131072, 196608, 262144]
+
+    /// The window line doubles as its menu: eki's choice, or one of yours.
+    func contextMenu(_ window: ContextWindow, summary: String) -> some View {
+        let pinned = window.limited_by == "pinned"
+        return Menu {
+            Section("Context window") {
+                Toggle("Worked out by eki", isOn: Binding(
+                    get: { !pinned },
+                    set: { _ in Task { await model.setContext(row.key, tokens: 0) } }))
+                ForEach(Self.contextChoices.filter { $0 <= window.native }, id: \.self) { tokens in
+                    Toggle("\(tokens / 1024)k" + (tokens > 131072 ? " — slow" : ""), isOn: Binding(
+                        get: { pinned && window.tokens == tokens },
+                        set: { _ in Task { await model.setContext(row.key, tokens: tokens) } }))
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(summary)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(window.fits == false ? Palette.warn : Palette.inkFaint)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(pinned
+              ? "A window you set. Codex and Claude Code are told this number; "
+                + "eki's own choice is back one click away."
+              : "Worked out from the model's config and the memory beside its weights "
+                + "each time eki loads its models. Click to set one yourself.")
+    }
+
     static let idleChoices: [(String, Double)] = [
         ("5 minutes", 5), ("15 minutes", 15), ("30 minutes", 30),
         ("1 hour", 60), ("4 hours", 240),

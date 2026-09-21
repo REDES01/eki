@@ -42,18 +42,25 @@ def test_an_untrusted_folder_stops_before_starting_anything(tmp_path, monkeypatc
     assert started == []                               # no session was opened
 
 
-def test_a_session_that_reports_nothing_is_an_error(monkeypatch):
+def test_a_panel_without_plan_limits_is_an_error(monkeypatch):
     monkeypatch.setattr(claude_probe, "trusted", lambda *a, **kw: True)
     monkeypatch.setattr(claude_probe, "_drive",
-                        lambda *a, **kw: (False, "Claude Code answered but reported no limits"))
-    with pytest.raises(RuntimeError, match="reported no limits"):
+                        lambda *a, **kw: (["Session", "Total cost: $0.0000"], ""))
+    with pytest.raises(RuntimeError, match="no plan limits"):
         run(claude_probe.refresh())
 
 
-def test_a_reading_comes_back_as_the_outcome(monkeypatch):
+def test_a_read_panel_is_saved(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_probe, "trusted", lambda *a, **kw: True)
-    monkeypatch.setattr(claude_probe, "_drive", lambda *a, **kw: (True, "read it"))
-    assert run(claude_probe.refresh()) == "read it"
+    monkeypatch.setattr(claude_probe, "USAGE", tmp_path / "claude-usage.json")
+    monkeypatch.setattr(claude_probe, "QUOTA_DIR", tmp_path)
+    monkeypatch.setattr(claude_probe, "_drive", lambda *a, **kw: ([
+        "Current session", "██  4% used", "Resets 4:10pm (Asia/Tokyo)",
+        "Current week (Fable)", "████ 17% used", "Resets Sep 21 at 11pm (Asia/Tokyo)",
+    ], ""))
+    assert "2 limits" in run(claude_probe.refresh())
+    saved = claude_probe.reading()
+    assert set(saved["rate_limits"]) == {"five_hour", "seven_day_fable"}
 
 
 def test_the_session_it_opens_can_do_nothing(monkeypatch):

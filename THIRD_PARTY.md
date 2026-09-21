@@ -12,6 +12,7 @@ following, each under its own licence:
 | [httpx](https://github.com/encode/httpx) | BSD-3-Clause | talking to model servers |
 | [PyYAML](https://github.com/yaml/pyyaml) | MIT | reading config.yaml |
 | [keyring](https://github.com/jaraco/keyring) | MIT | API keys in the macOS Keychain |
+| [pyte](https://github.com/selectel/pyte) | LGPL-3.0 | rendering Claude Code's /usage panel to read it, used unmodified |
 | [CPython](https://github.com/python/cpython) (via [python-build-standalone](https://github.com/astral-sh/python-build-standalone)) | PSF-2.0 | the interpreter bundled inside Eki.app |
 
 eki *drives* these, and does not redistribute them:

@@ -27,6 +27,8 @@ class Window:
     #: False for a limit that covers one model rather than the whole account —
     #: shown in full, but not what the menu bar's two meters are about
     primary: bool = True
+    #: anything the meter can't say by itself: "$113.74 / $120.00"
+    detail: str = ""
 
 
 @dataclass

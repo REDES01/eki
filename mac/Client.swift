@@ -148,6 +148,8 @@ struct UsageWindow: Codable, Hashable, Identifiable {
     let kind: String                  // "window" | "credits"
     /// false for a limit that covers one model rather than the whole account
     var primary: Bool? = true
+    /// what the bar can't say: "$113.74 / $120.00" for usage credits
+    var detail: String? = ""
 
     var id: String { key }
     var isPrimary: Bool { primary ?? true }

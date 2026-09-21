@@ -43,6 +43,7 @@ struct UsageRow: View {
     private var full: Bool { window.used >= 1.0 }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
             Text(window.label)
                 .font(.system(size: 10.5, weight: .semibold))
@@ -70,6 +71,14 @@ struct UsageRow: View {
                 .foregroundStyle(Palette.inkFaint)
                 .frame(width: 70, alignment: .trailing)
                 .help(UsageFormat.clock(window.resets_at))
+        }
+        // money has a figure worth reading, not just a bar
+        if let detail = window.detail, !detail.isEmpty {
+            Text(detail + " spent")
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(Palette.inkFaint)
+                .padding(.leading, 84)
+        }
         }
     }
 }
@@ -123,7 +132,7 @@ struct UsageCard: View {
                 HStack(spacing: 8) {
                     if probing {
                         ProgressView().controlSize(.small)
-                        Text("Asking Claude Code…")
+                        Text("Reading /usage…")
                             .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
                     } else {
                         Button("Refresh now") {
@@ -134,8 +143,9 @@ struct UsageCard: View {
                             }
                         }
                         .buttonStyle(GhostButton())
-                        .help("Starts a one-word Claude Code session and reads its "
-                              + "status line. Costs a few hundred tokens.")
+                        .help("Opens Claude Code's /usage panel in a throwaway session "
+                              + "and reads it. /usage doesn't ask a model anything, so "
+                              + "this costs nothing.")
                     }
                     Spacer()
                 }
@@ -232,10 +242,10 @@ struct UsagePane: View {
                                 .font(.system(size: 12.5)).foregroundStyle(Palette.ink)
                         }
                         .toggleStyle(AccentSwitch())
-                        Text("Every \(settings.claude_probe_minutes) minutes, and only while "
-                             + "you have this open, eki starts a one-word Claude Code session "
-                             + "just to read its status line. A few hundred tokens of your "
-                             + "subscription each time.")
+                        Text("Every \(settings.claude_probe_minutes) minutes while you have "
+                             + "this open, eki opens Claude Code's /usage panel in a throwaway "
+                             + "session and reads it — including per-model limits and usage "
+                             + "credits. /usage doesn't ask a model anything, so it's free.")
                             .font(.system(size: 11.5))
                         if model.usage?.claude_probe_ready == false {
                             Text(model.usage?.claude_probe_hint ?? "")

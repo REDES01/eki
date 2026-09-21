@@ -24,10 +24,10 @@ DEFAULTS: Dict[str, Any] = {
     "router_model": "",
     #: "rules" (free, always on) or "model" (the router model, rules as backup)
     "router": "rules",
-    #: let eki start a tiny Claude Code session to refresh the usage reading
-    #: while you have the app open. Costs a few hundred tokens each time.
+    #: let eki open Claude Code's /usage panel to refresh the reading while
+    #: you have the app open. /usage asks no model anything, so it's free.
     "claude_probe": False,
-    "claude_probe_minutes": 30,
+    "claude_probe_minutes": 10,
 }
 
 

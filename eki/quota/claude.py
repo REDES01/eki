@@ -28,6 +28,8 @@ SHAPES = (
     # behind a Claude apps gateway: a spend limit, which can exceed 100%
     ("spend_limit", "SPEND", None, "credits"),
     ("spend", "SPEND", None, "credits"),
+    # usage credits: money spent past the plan, from /usage
+    ("credits", "CREDITS", None, "credits"),
 )
 
 
@@ -35,7 +37,8 @@ def describe(key: str) -> Tuple[str, Optional[int], str, bool]:
     """(label, window seconds, kind, is it account-wide) for a reported key."""
     for prefix, label, seconds, kind in SHAPES:
         if key == prefix:
-            return label, seconds, kind, True
+            # money isn't a window: shown, but never one of the two meters
+            return label, seconds, kind, kind == "window"
         if key.startswith(prefix + "_"):
             # a per-model limit: "seven_day_opus" reads as OPUS WEEK
             model = key[len(prefix) + 1:].replace("_", " ").upper()
@@ -62,10 +65,9 @@ def parse(payload: Dict[str, Any], now: int) -> Reading:
         windows.append(Window(key=key, label=label,
                               used=float(pct) / 100.0,      # documented as 0..100
                               resets_at=resets, window_seconds=seconds, kind=kind,
-                              primary=primary))
-    # account-wide first, then by length, so the meters read 5H, WEEK, then
-    # whatever a particular model has left
-    windows.sort(key=lambda w: (not w.primary, w.window_seconds or 0))
+                              primary=primary, detail=str(win.get("detail") or "")))
+    # account-wide first, then per-model windows, then money
+    windows.sort(key=lambda w: (not w.primary, w.kind != "window", w.window_seconds or 0))
     observed = int(payload.get("observed_at") or 0) or None
     note = ""
     if not windows:
@@ -77,15 +79,42 @@ def parse(payload: Dict[str, Any], now: int) -> Reading:
     return Reading("claude", windows=windows, observed_at=observed, note=note)
 
 
+def merge(usage: Optional[Reading], status: Optional[Reading]) -> Optional[Reading]:
+    """One reading from two sources, each window from whichever saw it last.
+
+    /usage (the probe) sees everything but only when asked; the status line
+    sees just the session and week, but every time you use Claude Code. So a
+    fresh status line updates those two, and the per-model allowances and
+    credits stay as /usage last reported them.
+    """
+    readings = [r for r in (usage, status) if r is not None and r.windows]
+    if not readings:
+        return usage or status
+    readings.sort(key=lambda r: r.observed_at or 0)     # oldest first; newest wins
+    by_key: Dict[str, Window] = {}
+    for r in readings:
+        for w in r.windows:
+            by_key[w.key] = w
+    windows = sorted(by_key.values(), key=lambda w: (not w.primary, w.kind != "window",
+                                                     w.window_seconds or 0))
+    return Reading("claude", windows=windows,
+                   observed_at=max(r.observed_at or 0 for r in readings) or None)
+
+
 class ClaudeStatusLine(QuotaProvider):
-    min_interval = 10.0          # a local file read; cheap
+    min_interval = 10.0          # local file reads; cheap
 
     async def fetch(self) -> Reading:
-        payload = claude_bridge.reading()
-        if payload is None:
-            if not claude_bridge.installed():
-                return Reading("claude", note="bridge not installed — turn it on in "
-                                              "Usage to read Claude's limits")
-            return Reading("claude", note="waiting for Claude Code to report limits "
-                                          "(use it once interactively)")
-        return parse(payload, int(time.time()))
+        from . import claude_probe
+        now = int(time.time())
+        usage = claude_probe.reading()
+        status = claude_bridge.reading()
+        merged = merge(parse(usage, now) if usage else None,
+                       parse(status, now) if status else None)
+        if merged is not None and (merged.windows or merged.note):
+            return merged
+        if not claude_bridge.installed():
+            return Reading("claude", note="bridge not installed — turn it on in "
+                                          "Usage to read Claude's limits")
+        return Reading("claude", note="waiting for Claude Code to report limits — "
+                                      "Refresh now reads them from /usage")

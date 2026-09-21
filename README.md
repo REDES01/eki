@@ -108,11 +108,23 @@ rules were tuned against that same set, so read their score as optimistic.
 
 ## Claude and Codex usage
 
-eki can show what's left of your five-hour and weekly Claude limits. The only
-sanctioned way to know that is Claude Code's own status line, so eki offers to
-add one (chaining any status line you already have); Claude Code then reports
-its limits to eki as you use it. Turn it off and nothing is read. Codex
-reports its own limits through its `app-server` interface.
+eki shows what's left of your Claude plan the way Claude Code's own `/usage`
+shows it: the five-hour session, the week, any per-model weekly allowance
+(Fable, for example) and the usage credits you've spent past the plan.
+
+It gets there two ways, neither of which touches your login:
+
+- **`/usage`, on request.** *Refresh now* — or every ten minutes while the
+  app is open, if you turn that on — opens Claude Code in a scratch folder,
+  in plan mode with no tools, shows `/usage`, reads the panel and quits.
+  `/usage` asks Anthropic about your account without asking a model
+  anything, so it costs nothing. The first time, Claude Code asks whether to
+  trust that folder; eki leaves that answer to you.
+- **The status line, passively.** An opt-in status line records the session
+  and weekly limits Claude Code reports whenever you use it yourself, so
+  those two stay current between refreshes.
+
+Codex reports its own limits through its `app-server` interface.
 
 eki does not read, copy or reuse either CLI's credentials, and does not send
 your subscription anywhere it wasn't already going.

@@ -74,6 +74,11 @@ struct UsageCard: View {
     @EnvironmentObject var model: AppModel
     let usage: ProviderUsage
     var compact = false
+    @State private var probing = false
+    @State private var probeNote = ""
+
+    private var isClaude: Bool { usage.provider == "claude" }
+    private var bridgeOn: Bool { model.usage?.claude_bridge ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 7 : 10) {
@@ -93,7 +98,7 @@ struct UsageCard: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                if usage.provider == "claude" && !(model.usage?.claude_bridge ?? false) && !compact {
+                if isClaude && !bridgeOn && !compact {
                     Button("Read Claude's limits") {
                         Task { await model.setClaudeBridge(true) }
                     }
@@ -109,6 +114,34 @@ struct UsageCard: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.inkFaint)
                     .lineLimit(2)
+            }
+            if isClaude && bridgeOn && !compact {
+                HStack(spacing: 8) {
+                    if probing {
+                        ProgressView().controlSize(.small)
+                        Text("Asking Claude Code…")
+                            .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    } else {
+                        Button("Refresh now") {
+                            Task {
+                                probing = true
+                                probeNote = await model.probeClaude()
+                                probing = false
+                            }
+                        }
+                        .buttonStyle(GhostButton())
+                        .help("Starts a one-word Claude Code session and reads its "
+                              + "status line. Costs a few hundred tokens.")
+                    }
+                    Spacer()
+                }
+                if !probeNote.isEmpty {
+                    Text(probeNote)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
             }
         }
         .padding(compact ? 10 : 14)
@@ -132,6 +165,7 @@ struct UsageCard: View {
 struct UsagePane: View {
     @EnvironmentObject var model: AppModel
     @State private var refreshing = false
+    @State private var settings = HubSettings()
 
     var body: some View {
         ScrollView {
@@ -172,14 +206,40 @@ struct UsagePane: View {
                 }
 
                 if model.usage?.claude_bridge == true {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle").font(.system(size: 11))
-                        Text("Claude's numbers update whenever you use Claude Code in a "
-                             + "terminal. eki stops reading them if you turn this off.")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle").font(.system(size: 11))
+                            Text("Claude's numbers update whenever you use Claude Code in a "
+                                 + "terminal. eki stops reading them if you turn this off.")
+                                .font(.system(size: 11.5))
+                            Spacer()
+                            Button("Turn off") { Task { await model.setClaudeBridge(false) } }
+                                .buttonStyle(GhostButton())
+                        }
+                        Divider().opacity(0.4)
+                        Toggle(isOn: Binding(
+                            get: { settings.claude_probe },
+                            set: { on in
+                                settings.claude_probe = on
+                                Task { settings = (try? await model.client.save(settings: settings))
+                                    ?? settings }
+                            })) {
+                            Text("Keep it fresh while eki is open")
+                                .font(.system(size: 12.5)).foregroundStyle(Palette.ink)
+                        }
+                        .toggleStyle(AccentSwitch())
+                        Text("Every \(settings.claude_probe_minutes) minutes, and only while "
+                             + "you have this open, eki starts a one-word Claude Code session "
+                             + "just to read its status line. A few hundred tokens of your "
+                             + "subscription each time.")
                             .font(.system(size: 11.5))
-                        Spacer()
-                        Button("Turn off") { Task { await model.setClaudeBridge(false) } }
-                            .buttonStyle(GhostButton())
+                        if model.usage?.claude_probe_ready == false {
+                            Text(model.usage?.claude_probe_hint ?? "")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.inkFaint)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .foregroundStyle(Palette.inkMuted)
                 }
@@ -190,7 +250,10 @@ struct UsagePane: View {
             .padding(.vertical, 26)
         }
         .background(Palette.canvas)
-        .task { await model.refreshUsage(force: false) }
+        .task {
+            await model.refreshUsage(force: false)
+            settings = (try? await model.client.settings()) ?? settings
+        }
     }
 }
 

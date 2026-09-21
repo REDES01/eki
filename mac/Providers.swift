@@ -96,6 +96,8 @@ struct HubSettings: Codable, Hashable {
     var context_budget: Int = 32768
     var router_model: String = ""
     var router: String = "rules"
+    var claude_probe: Bool = false
+    var claude_probe_minutes: Int = 30
 }
 
 extension EngineClient {
@@ -111,6 +113,8 @@ extension EngineClient {
             "context_budget": settings.context_budget,
             "router_model": settings.router_model,
             "router": settings.router,
+            "claude_probe": settings.claude_probe,
+            "claude_probe_minutes": settings.claude_probe_minutes,
         ])
     }
 

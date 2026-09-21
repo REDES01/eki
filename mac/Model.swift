@@ -79,6 +79,25 @@ final class AppModel: ObservableObject {
         if let fresh = try? await client.usage(refresh: force) { usage = fresh }
     }
 
+    /// Ask Claude Code for a reading now. Returns what to tell the user, if
+    /// anything — the first run needs them to trust the probe folder.
+    func probeClaude() async -> String {
+        do {
+            usage = try await client.probeClaude()
+            return ""
+        } catch ClientError.http(_, let body) {
+            // FastAPI wraps the reason as {"detail": "…"}
+            if let data = body.data(using: .utf8),
+               let wrapped = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let detail = wrapped["detail"] as? String {
+                return detail
+            }
+            return body.isEmpty ? "Claude Code didn't report any limits." : body
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func setClaudeBridge(_ enabled: Bool) async {
         do {
             usage = try await client.setClaudeBridge(enabled)

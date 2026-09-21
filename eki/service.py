@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -35,7 +36,7 @@ from . import settings as settings_mod
 from .adapters import base as adapters
 from . import policy as policy_mod
 from .engine import Engine
-from .quota import claude_bridge
+from .quota import claude_bridge, claude_probe
 from .runs import TERMINAL, unseen
 
 log = logging.getLogger("eki")
@@ -66,8 +67,37 @@ async def lifespan(app: FastAPI):
             except Exception:                       # noqa: BLE001
                 log.exception("idle reaper")
 
+    async def keep_claude_fresh() -> None:
+        """While the app is open, keep the Claude reading from going stale.
+
+        Only with the setting on, only when someone has actually looked at
+        usage in the last few minutes, and only when the reading is older
+        than the interval — an idle Mac spends nothing.
+        """
+        while True:
+            await asyncio.sleep(60)
+            try:
+                conf = settings_mod.load()
+                if not conf["claude_probe"] or not claude_probe.trusted():
+                    continue
+                if time.time() - STATE.get("usage_seen", 0) > 300:
+                    continue
+                reading = eng.quota.latest.get("claude")
+                age = reading.age_seconds if reading else None
+                if age is not None and age < float(conf["claude_probe_minutes"]) * 60:
+                    continue
+                await claude_probe.refresh(_claude_binary())
+                await eng.quota.refresh(force=True)
+                log.info("refreshed Claude usage")
+            except claude_probe.NotTrusted:
+                continue
+            except Exception as e:                  # noqa: BLE001
+                log.info("claude probe: %s", e)
+
     reaper = asyncio.create_task(reap())
+    fresh = asyncio.create_task(keep_claude_fresh())
     yield
+    fresh.cancel()
     reaper.cancel()
     await eng.quota.stop()
     await eng.runner.stop()
@@ -446,6 +476,7 @@ LABELS = {"claude": "Claude", "codex": "Codex"}
 
 
 def usage_view() -> Any:
+    STATE["usage_seen"] = time.time()   # someone is looking; see refresh_claude()
     eng = engine()
     readings = []
     for key in eng.quota.providers:
@@ -457,7 +488,10 @@ def usage_view() -> Any:
         readings.append(view)
     return {"providers": readings,
             "ceiling": eng.quota.ceiling,
-            "claude_bridge": claude_bridge.installed()}
+            "claude_bridge": claude_bridge.installed(),
+            "claude_probe": bool(settings_mod.load()["claude_probe"]),
+            "claude_probe_ready": claude_probe.trusted(),
+            "claude_probe_hint": claude_probe.TRUST_HINT}
 
 
 @app.get("/api/usage")
@@ -482,6 +516,24 @@ async def claude_bridge_toggle(body: BridgeBody) -> Any:
         message = claude_bridge.install() if body.enabled else claude_bridge.uninstall()
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+    await engine().quota.refresh(force=True)
+    return {"message": message, **usage_view()}
+
+
+def _claude_binary() -> str:
+    backend = engine().get("claude")
+    return getattr(backend, "bin", "") or "claude"
+
+
+@app.post("/api/usage/claude-probe")
+async def refresh_claude() -> Any:
+    """Go and get a reading rather than waiting for one."""
+    try:
+        message = await claude_probe.refresh(_claude_binary())
+    except claude_probe.NotTrusted as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:                          # noqa: BLE001
+        raise HTTPException(502, str(e))
     await engine().quota.refresh(force=True)
     return {"message": message, **usage_view()}
 

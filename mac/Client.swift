@@ -176,6 +176,9 @@ struct UsageReport: Codable, Hashable {
     let providers: [ProviderUsage]
     let ceiling: Double
     let claude_bridge: Bool
+    var claude_probe: Bool? = false          // background refresh is on
+    var claude_probe_ready: Bool? = false    // the probe folder is trusted
+    var claude_probe_hint: String? = ""
     var message: String? = nil
 }
 
@@ -355,6 +358,11 @@ actor EngineClient {
     func usage(refresh: Bool = false) async throws -> UsageReport {
         try await decode(UsageReport.self, refresh ? "POST" : "GET",
                          refresh ? "api/usage/refresh" : "api/usage")
+    }
+
+    /// Start a throwaway Claude Code session and read its status line.
+    func probeClaude() async throws -> UsageReport {
+        try await decode(UsageReport.self, "POST", "api/usage/claude-probe")
     }
 
     func setClaudeBridge(_ enabled: Bool) async throws -> UsageReport {

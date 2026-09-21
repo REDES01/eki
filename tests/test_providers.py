@@ -96,7 +96,11 @@ def test_engine_seeds_once_then_reads_the_table(tmp_path, fake_keychain):
     assert {p.key for p in again.providers.all()} == {"qwen", "grok"}
 
 
-def test_stopped_but_startable_model_stays_a_candidate(tmp_path, fake_keychain):
+def test_stopped_but_startable_model_stays_a_candidate(tmp_path, fake_keychain, monkeypatch):
+    from eki import memory
+    # whatever this Mac has loaded right now: the test's Mac has room
+    monkeypatch.setattr(memory, "snapshot",
+                        lambda: memory.Snapshot(total_gb=64, available_gb=40, used_gb=20, level=90))
     eng = Engine(_cfg(tmp_path))
     # port 1 is never listening; it has a start command and fits in memory
     assert eng._is_up("qwen") is None

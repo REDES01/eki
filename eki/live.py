@@ -47,7 +47,7 @@ class LiveSession:
         self.session_id: str = ""
         self.model: str = ""
         #: what Claude Code reports for the model once a turn has finished;
-        #: 200k is every current Claude model's window until then
+        #: until then, what its family is known to have
         self.context_window: int = 200_000
         self.permission_mode: str = ""
         self.commands: List[Dict[str, Any]] = []
@@ -237,6 +237,7 @@ class LiveSession:
             if sub == "init":
                 self.session_id = event.get("session_id") or self.session_id
                 self.model = event.get("model") or self.model
+                self.context_window = known_window(self.model) or self.context_window
                 self.permission_mode = event.get("permissionMode") or ""
                 self._terminal_only |= set(event.get("terminal_slash_commands") or [])
                 self.commands = [c for c in self.commands if c["name"] not in self._terminal_only]
@@ -321,6 +322,19 @@ class LiveSession:
                     return
         finally:
             self.busy = False
+
+
+#: context windows by family, for the meter before the first turn reports
+#: one; every current Claude family runs at a million tokens
+KNOWN_WINDOWS = {"fable": 1_000_000, "opus": 1_000_000, "sonnet": 1_000_000, "haiku": 200_000}
+
+
+def known_window(model: str) -> int:
+    name = (model or "").lower()
+    for family, window in KNOWN_WINDOWS.items():
+        if family in name:
+            return window
+    return 0
 
 
 def summarize_activity(tool: str, inp: Dict[str, Any]) -> str:

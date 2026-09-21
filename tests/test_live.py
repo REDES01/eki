@@ -53,7 +53,7 @@ def test_a_turn_streams_text_and_tool_lines_then_a_result():
             assert live.summarize_activity(got[0]["tool"], got[0]["input"]) == "Reading README.md"
             assert got[-1]["usage"]["output_tokens"] > 0 and not s.busy
             # every assistant message says how full the thread is
-            assert got[-2]["used"] > 12000 and got[-2]["window"] == 200000
+            assert got[-2]["used"] > 12000 and got[-2]["window"] == 1_000_000   # a sonnet: known before the result
         finally:
             await s.close()
     run(go())
@@ -263,3 +263,9 @@ def test_a_turn_that_only_announces_sounds_unfinished():
     assert not live.sounds_unfinished("The API is running on port 8000 and Expo is up. Done.")
     assert not live.sounds_unfinished("Should I also update the tests?")
     assert not live.sounds_unfinished("")
+
+
+def test_the_meter_knows_a_family_window_before_the_first_result():
+    assert live.known_window("claude-fable-5-1") == 1_000_000
+    assert live.known_window("claude-haiku-4-5") == 200_000
+    assert live.known_window("something-else") == 0

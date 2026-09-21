@@ -783,8 +783,23 @@ class Engine:
             self.pending.pop(rid, None)
         if context.get("used"):
             usage = {**usage, "context_used": context["used"], "context_window": context["window"]}
+            self._learn_window(backend.key, model, context["window"])
         backend.last_usage = usage                                          # type: ignore[attr-defined]
         backend.last_session = session.session_id                           # type: ignore[attr-defined]
+
+    def _learn_window(self, key: str, model: str, window: int) -> None:
+        """A harness said how big its model's context is: the registry and
+        the provider keep that, not the number a template guessed."""
+        if not window:
+            return
+        for alias in {model or "", ""} if not model else {model}:
+            rec = self.registry.get(key, alias)
+            if rec is not None and rec.context_tokens != window:
+                self.registry.seen(key, alias, context_tokens=window)
+        p = self.providers.get(key)
+        if p is not None and not model and int(p.capabilities.get("context_tokens") or 0) != window:
+            p.capabilities["context_tokens"] = window
+            self.providers.upsert(p)
 
     def _note_rate_limits(self, info: Dict[str, Any]) -> None:
         """Claude Code reports its windows as it goes; the quota board may

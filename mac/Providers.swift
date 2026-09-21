@@ -69,6 +69,29 @@ struct ProbeResult: Codable, Hashable {
     let models: [String]
 }
 
+/// What a ComfyUI has to offer, for building a workflow around.
+struct ComfyFiles: Codable {
+    struct Template: Codable, Identifiable, Hashable {
+        let id: String
+        let title: String
+        let needs: String           // which file list it wants: checkpoints | unets
+        let note: String
+    }
+    let files: [String: [String]]
+    let nodes: Int
+    let templates: [Template]
+}
+
+/// A workflow read by the engine: where the prompt goes, and what this
+/// ComfyUI would refuse.
+struct WorkflowCheck: Codable {
+    let graph: JSONValue
+    let summary: String
+    let problems: [String]
+    let can_edit: Bool
+    let ok: Bool
+}
+
 struct CatalogModel: Codable, Identifiable, Hashable {
     let repo: String
     let downloads: Int
@@ -336,6 +359,15 @@ extension EngineClient {
 
     func testProvider(_ body: [String: Any]) async throws -> ProbeResult {
         try await decode(ProbeResult.self, "POST", "api/providers/test", body: body)
+    }
+
+    func comfyFiles(_ baseURL: String) async throws -> ComfyFiles {
+        let q = baseURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? baseURL
+        return try await decode(ComfyFiles.self, "GET", "api/comfy/files?base_url=\(q)")
+    }
+
+    func checkWorkflow(_ body: [String: Any]) async throws -> WorkflowCheck {
+        try await decode(WorkflowCheck.self, "POST", "api/comfy/workflow", body: body)
     }
 
     func addProvider(_ body: [String: Any]) async throws -> ProviderDTO {
@@ -656,13 +688,31 @@ struct ProviderForm: View {
     @State private var probe: ProbeResult?
     @State private var busy = false
     @State private var error = ""
+    // ComfyUI: the workflow is the model
+    @State private var comfy: ComfyFiles?
+    @State private var workflowSource = "template"          // template | import
+    @State private var templateID = ""
+    @State private var modelFile = ""
+    @State private var check: WorkflowCheck?
+    @State private var importing = false
+
+    private var isComfy: Bool { template.kind == "comfyui" }
 
     private var body_: [String: Any] {
         var b: [String: Any] = ["template": template.id, "label": label]
         if template.needs == "url" { b["base_url"] = url }
         if template.needs == "key" { b["api_key"] = apiKey }
         if !chosenModel.isEmpty { b["model"] = chosenModel }
+        if isComfy, let check, check.ok || !check.problems.isEmpty {
+            b["options"] = ["workflow_graph": check.graph.any, "title": label.isEmpty ? workflowTitle : label]
+        }
         return b
+    }
+
+    private var workflowTitle: String {
+        if workflowSource == "import" { return "Imported workflow" }
+        return modelFile.isEmpty ? (comfy?.templates.first { $0.id == templateID }?.title ?? "Workflow")
+            : (modelFile as NSString).deletingPathExtension
     }
 
     var body: some View {
@@ -680,6 +730,7 @@ struct ProviderForm: View {
                 field("Address") { TextField("http://127.0.0.1:8000/v1", text: $url)
                     .textFieldStyle(.roundedBorder) }
             }
+            if isComfy { comfySection }
             if template.needs == "key" {
                 field("API key") { SecureField("Paste the key", text: $apiKey)
                     .textFieldStyle(.roundedBorder) }
@@ -727,15 +778,106 @@ struct ProviderForm: View {
         .padding(22)
         .onAppear {
             url = template.found ?? template.options.base_url ?? ""
+            if isComfy { Task { await loadComfy() } }
         }
     }
 
     private var ready: Bool {
+        if isComfy { return !url.isEmpty && (check?.ok ?? false) }
         switch template.needs {
         case "key": return !apiKey.isEmpty
         case "url": return !url.isEmpty
         default: return true
         }
+    }
+
+    /// The workflow is the model: one built for a model file this ComfyUI
+    /// has, or an API-format export of the person's own. eki reads where
+    /// the prompt, size and seed go and says what ComfyUI would refuse.
+    @ViewBuilder private var comfySection: some View {
+        field("Workflow") {
+            HStack(spacing: 8) {
+                Picker("", selection: $workflowSource) {
+                    Text("Built for a model here").tag("template")
+                    Text("Import an export").tag("import")
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                Spacer()
+                if comfy == nil {
+                    Button("Read ComfyUI") { Task { await loadComfy() } }.buttonStyle(GhostButton())
+                }
+            }
+        }
+        if workflowSource == "template", let comfy {
+            HStack(spacing: 8) {
+                Picker("", selection: $templateID) {
+                    ForEach(comfy.templates) { t in Text(t.title).tag(t.id) }
+                }
+                .labelsHidden().frame(width: 220)
+                let needs = comfy.templates.first { $0.id == templateID }?.needs ?? "checkpoints"
+                let files = comfy.files[needs] ?? []
+                Picker("", selection: $modelFile) {
+                    Text(files.isEmpty ? "no \(needs) in this ComfyUI" : "choose a file").tag("")
+                    ForEach(files, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .onChange(of: modelFile) { Task { await checkTemplate() } }
+                .onChange(of: templateID) { modelFile = ""; check = nil }
+            }
+            if let t = comfy.templates.first(where: { $0.id == templateID }) {
+                Text(t.note).font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+            }
+        } else if workflowSource == "import" {
+            HStack(spacing: 8) {
+                Button("Choose a workflow file…") { importing = true }.buttonStyle(GhostButton())
+                Text("In ComfyUI: Workflow → Export (API). The editor's own save file won't do.")
+                    .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                if case .success(let file) = result { Task { await importWorkflow(file) } }
+            }
+        }
+        if let check {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .foregroundStyle(check.ok ? Palette.ok : Palette.warn)
+                    Text("eki fills: \(check.summary)" + (check.can_edit ? " — can edit pictures too" : ""))
+                        .font(.system(size: 12))
+                }
+                ForEach(check.problems, id: \.self) { p in
+                    Text(p).font(.system(size: 11.5)).foregroundStyle(Palette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func loadComfy() async {
+        error = ""
+        do {
+            comfy = try await model.client.comfyFiles(url)
+            if templateID.isEmpty { templateID = comfy?.templates.first?.id ?? "" }
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func checkTemplate() async {
+        guard !modelFile.isEmpty else { check = nil; return }
+        error = ""
+        do {
+            check = try await model.client.checkWorkflow(["base_url": url, "template": templateID, "file": modelFile])
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func importWorkflow(_ file: URL) async {
+        error = ""
+        let reading = file.startAccessingSecurityScopedResource()
+        defer { if reading { file.stopAccessingSecurityScopedResource() } }
+        do {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            check = try await model.client.checkWorkflow(["base_url": url, "text": text])
+            if label.isEmpty { label = file.deletingPathExtension().lastPathComponent }
+        } catch { self.error = error.localizedDescription }
     }
 
     /// A hosted API won't guess which model you mean.

@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import uvicorn
 from fastapi import Request, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+import httpx
 from pydantic import BaseModel
 
 from . import catalog
@@ -33,6 +34,7 @@ from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
 from . import engines as engines_mod
+from . import workflow as workflow_mod
 from . import profile as profile_mod
 from . import suggest as suggest_mod
 from . import migrate
@@ -498,6 +500,61 @@ async def provider_test(body: ProviderBody) -> Any:
     return await _probe(_draft(body), body.api_key)
 
 
+class WorkflowBody(BaseModel):
+    base_url: str = "http://127.0.0.1:8188"
+    text: str = ""                                  # an API-format export, pasted or read from a file
+    template: str = ""                              # or one of workflow_mod.TEMPLATES…
+    file: str = ""                                  # …made for this model file
+
+
+async def _object_info(base_url: str) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{base_url.rstrip('/')}/object_info")
+    r.raise_for_status()
+    return r.json()
+
+
+@app.get("/api/comfy/files")
+async def comfy_files(base_url: str = "http://127.0.0.1:8188") -> Any:
+    """The model files a ComfyUI can see, by loader, and the templates eki
+    can build a workflow from for them."""
+    try:
+        info = await _object_info(base_url)
+    except Exception as e:                          # noqa: BLE001
+        raise HTTPException(502, f"ComfyUI: {e}")
+    files = workflow_mod.files_available(info)
+    return {"files": files, "nodes": len(info),
+            "templates": [{"id": k, "title": t["title"], "needs": t["needs"], "note": t["note"]}
+                          for k, t in workflow_mod.TEMPLATES.items()]}
+
+
+@app.post("/api/comfy/workflow")
+async def comfy_workflow(body: WorkflowBody) -> Any:
+    """Read a workflow (pasted, or built from a template for a model file),
+    find where the prompt and the rest go, and check it against that
+    ComfyUI. Nothing is saved: the Add sheet sends the graph back with the
+    provider."""
+    if body.template:
+        t = workflow_mod.TEMPLATES.get(body.template)
+        if t is None:
+            raise HTTPException(400, "no such template")
+        graph = t["make"](body.file) if body.file else t["make"]()
+    else:
+        try:
+            graph = workflow_mod.parse(body.text)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    bindings = workflow_mod.infer(graph)
+    try:
+        info = await _object_info(body.base_url)
+        problems = workflow_mod.problems(graph, info)
+    except Exception as e:                          # noqa: BLE001
+        problems = [f"couldn't check it against ComfyUI: {e}"]
+    return {"graph": graph, "bindings": bindings.as_dict(), "summary": bindings.describe(),
+            "problems": problems, "can_edit": bindings.image is not None,
+            "ok": bindings.prompt is not None and not problems}
+
+
 @app.post("/api/providers")
 async def provider_create(body: ProviderBody) -> Any:
     eng = engine()
@@ -507,6 +564,13 @@ async def provider_create(body: ProviderBody) -> Any:
         if not body.api_key:
             raise HTTPException(400, "this provider needs an API key")
         secrets.put(draft.key, body.api_key)
+    graph = draft.options.pop("workflow_graph", None)
+    if isinstance(graph, dict) and graph:
+        # the workflow is the model: kept in eki's folder, bound once here
+        draft.options["workflow"] = workflow_mod.save(draft.key, graph)
+        draft.options["bindings"] = workflow_mod.infer(graph).as_dict()
+        draft.options.setdefault("title", draft.label)
+        draft.runtime.setdefault("kind", "image")
     eng.providers.upsert(draft)
     await eng.reload()
     return _provider_view(draft, await _probe(draft))

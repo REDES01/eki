@@ -28,6 +28,8 @@ the same run, replayed from the first word.
 
 macOS on Apple silicon, for now.
 
+Where it's going: [ROADMAP.md](ROADMAP.md).
+
 ## Install
 
 Download `Eki-<version>.zip` from Releases, unzip, drag `Eki.app` to
@@ -217,6 +219,19 @@ model's config, downloads just those files, checks each against the Hub's
 sha256, and serves it with `llama-server --jinja` so tool calls work and
 Codex can drive it. On Apple Silicon an MLX build of the same model is
 usually faster; GGUF is for the models that only exist that way.
+
+**Images: the workflow is the model.** ComfyUI stays wherever you
+installed it; eki connects to it (Add provider → ComfyUI) and asks what it
+has. A workflow is either built by eki for a model file that ComfyUI can
+see — the standard checkpoint graph for SD 1.5 / SDXL, the FLUX.2-klein
+graph — or your own, exported from ComfyUI as *Workflow → Export (API)*.
+Either way eki reads the graph to find where the prompt, the negative
+prompt, the size, the seed, the steps and a source picture go
+(`eki/workflow.py`), checks it against that ComfyUI's node classes and
+model files before you add it, and at request time fills the slots and
+posts it. Results come back through ComfyUI's own API into `~/.eki/images`,
+so its output folder is nobody's business. A workflow with a LoadImage
+node can edit pictures as well as draw them.
 
 What that model *is* is read from its own files, not typed in
 (`eki/profile.py`): the build's bits and group size, its weights on disk,

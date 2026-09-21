@@ -65,7 +65,7 @@ TEMPLATES: List[Dict[str, Any]] = [
      "capabilities": {"context_tokens": 32000},
      "options": {"base_url": "http://127.0.0.1:1234/v1"}},
     {"id": "comfyui", "title": "ComfyUI", "kind": "comfyui",
-     "blurb": "Local image generation.",
+     "blurb": "Pictures from a ComfyUI you already run — any workflow you export, or one eki builds for a model it finds there.",
      "needs": "url", "port": 8188, "tier": 0, "note": "local, free",
      "capabilities": {"context_tokens": 512, "text": False, "images_out": True},
      "options": {"base_url": "http://127.0.0.1:8188", "output_dir": "~/flux/output"}},

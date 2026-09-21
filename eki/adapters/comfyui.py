@@ -57,6 +57,34 @@ def flux2_graph(prompt: str, width: int, height: int, steps: int,
     }
 
 
+def flux2_edit_graph(prompt: str, image: str, steps: int, seed: int,
+                     prefix: str) -> Dict[str, Any]:
+    """FLUX.2-klein told to change a picture it is shown, rather than draw one.
+
+    The picture rides along as a reference latent on the conditioning; the
+    latent being denoised is still empty, so this takes real instructions
+    ("remove the hat") instead of img2img's blend. The source is brought to
+    about a megapixel on a 64px grid — the grid is not optional — and the
+    output takes its size from that, so an edit keeps the original's shape."""
+    graph = flux2_graph(prompt, 1024, 1024, steps, seed, prefix)
+    graph.update({
+        "20": {"class_type": "LoadImage", "inputs": {"image": image}},
+        "21": {"class_type": "ImageScaleToTotalPixels",
+               "inputs": {"image": ["20", 0], "upscale_method": "lanczos",
+                          "megapixels": 1.0, "resolution_steps": 64}},
+        "22": {"class_type": "VAEEncode", "inputs": {"pixels": ["21", 0], "vae": ["3", 0]}},
+        "23": {"class_type": "ReferenceLatent",
+               "inputs": {"conditioning": ["4", 0], "latent": ["22", 0]}},
+        "24": {"class_type": "GetImageSize", "inputs": {"image": ["21", 0]}},
+    })
+    graph["5"]["inputs"]["conditioning"] = ["23", 0]
+    graph["6"]["inputs"]["positive"] = ["23", 0]
+    for node in ("8", "9"):
+        graph[node]["inputs"]["width"] = ["24", 0]
+        graph[node]["inputs"]["height"] = ["24", 1]
+    return graph
+
+
 @register("comfyui")
 class ComfyBackend(Backend):
     def __init__(self, info, options: Dict[str, Any]):
@@ -66,9 +94,23 @@ class ComfyBackend(Backend):
             self.options.get("output_dir", "~/flux/output"))
         self.width = int(self.options.get("width", 1024))
         self.height = int(self.options.get("height", 1024))
-        self.steps = int(self.options.get("steps", 4))
+        self.steps = int(self.options.get("steps", 0))
         self.timeout = float(self.options.get("timeout_seconds", 300))
         self._client: Optional[httpx.AsyncClient] = None
+        # a workflow of the user's (see eki/workflow.py); without one, the
+        # built-in FLUX.2-klein graph
+        self.workflow_path = str(self.options.get("workflow") or "")
+        self._graph: Optional[Dict[str, Any]] = None
+        self._bindings = None
+        self.title = str(self.options.get("title") or "")
+
+    def _workflow(self):
+        from .. import workflow
+        if self._graph is None and self.workflow_path:
+            self._graph = workflow.load(self.workflow_path)
+            stored = self.options.get("bindings")
+            self._bindings = workflow.Bindings.from_dict(stored) if stored else workflow.infer(self._graph)
+        return self._graph, self._bindings
 
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -93,14 +135,52 @@ class ComfyBackend(Backend):
         except Exception:                           # noqa: BLE001
             return 0
 
+    async def _upload(self, path: str) -> str:
+        """Hand ComfyUI a picture to work from; returns the name LoadImage wants."""
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            raise BackendError(f"can't read the picture to change: {e}") from e
+        name = "eki_src_" + os.path.basename(path)
+        try:
+            r = await self.client().post(
+                f"{self.base}/upload/image",
+                files={"image": (name, data, "image/png")}, data={"overwrite": "true"})
+        except httpx.HTTPError as e:
+            raise BackendError(f"ComfyUI unreachable: {e}") from e
+        if r.status_code >= 400:
+            raise BackendError(f"ComfyUI refused the picture: {r.text[:200]}")
+        got = r.json()
+        return os.path.join(got.get("subfolder") or "", got.get("name") or name)
+
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
-        prompt = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        """``prompt`` overrides the last user message (a "try again" is drawn
+        from the request it repeats, not from those two words); ``edit`` is
+        the path of a picture to change instead of starting from nothing."""
+        prompt = kw.get("prompt") or next(
+            (m.content for m in reversed(messages) if m.role == "user"), "")
         if not prompt:
             raise BackendError("no prompt to draw")
 
         seed = int(kw.get("seed") or random.randint(0, 2**31 - 1))
         prefix = f"eki_{int(time.time())}"
-        graph = flux2_graph(prompt, self.width, self.height, self.steps, seed, prefix)
+        source = kw.get("edit") or ""
+        own, bindings = self._workflow()
+        if own is not None:
+            from .. import workflow
+            if source and not bindings.image:
+                raise BackendError(f"{self.title or 'this workflow'} has no LoadImage node, so it can't edit a picture")
+            graph = workflow.fill(own, bindings, prompt=prompt, width=self.width, height=self.height,
+                                  seed=seed, steps=self.steps,
+                                  image=await self._upload(source) if source else "", prefix=prefix)
+            what = self.title or "workflow"
+        elif source:
+            graph = flux2_edit_graph(prompt, await self._upload(source), self.steps or 4, seed, prefix)
+            what = "flux-2-klein"
+        else:
+            graph = flux2_graph(prompt, self.width, self.height, self.steps or 4, seed, prefix)
+            what = "flux-2-klein"
 
         try:
             r = await self.client().post(f"{self.base}/prompt",
@@ -114,7 +194,11 @@ class ComfyBackend(Backend):
         if not pid:
             raise BackendError("ComfyUI accepted nothing")
 
-        yield f"flux-2-klein · {self.width}×{self.height} · {self.steps} steps · seed {seed}\n"
+        steps = f" · {self.steps} steps" if self.steps else ""
+        if source:
+            yield f"{what} · editing {os.path.basename(source)}{steps} · seed {seed}\n"
+        else:
+            yield f"{what} · {self.width}×{self.height}{steps} · seed {seed}\n"
 
         images = await self._await_result(pid)
         if not images:
@@ -123,8 +207,27 @@ class ComfyBackend(Backend):
         # terminal shows where it is, and the transcript stays plain text
         alt = " ".join(prompt.split())[:80].replace("[", "(").replace("]", ")")
         for name in images:
-            path = os.path.join(self.output_dir, name)
+            path = await self._fetch(name)
             yield f"\n![{alt}]({path.replace(' ', '%20')})\n"
+
+    async def _fetch(self, name: str) -> str:
+        """The picture, from ComfyUI itself, into eki's own folder — so where
+        ComfyUI writes its output is nobody's business. Falls back to the
+        configured output folder when the download fails."""
+        subfolder, filename = os.path.split(name)
+        dest_dir = os.path.expanduser("~/.eki/images")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, filename)
+        try:
+            r = await self.client().get(f"{self.base}/view",
+                                        params={"filename": filename, "subfolder": subfolder, "type": "output"})
+            if r.status_code == 200 and r.content and r.headers.get("content-type", "").startswith("image/"):
+                with open(dest, "wb") as f:
+                    f.write(r.content)
+                return dest
+        except httpx.HTTPError:
+            pass
+        return os.path.join(self.output_dir, name)
 
     async def _await_result(self, pid: str) -> List[str]:
         """Poll the history until this prompt has outputs (or the clock runs out)."""

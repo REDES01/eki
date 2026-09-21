@@ -20,7 +20,9 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from . import memory
 
 #: Fraction of installed memory MLX will work with before macOS starts killing
 #: things. The wired limit can't be raised without sudo, so treat this as the
@@ -53,7 +55,11 @@ class Memory:
     total_gb: float
     ceiling_gb: float
     committed_gb: float             # what the running models are said to cost
-    free_gb: float = field(default=0.0)
+    free_gb: float = field(default=0.0)      # what a model could still take
+    available_gb: float = 0.0       # the OS's view: what it could hand out now
+    other_gb: float = 0.0           # in use by everything that isn't an eki model
+    pressure: str = "normal"        # the kernel's band: normal | warning | critical
+    holders: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -91,6 +97,7 @@ class ModelManager:
         self.started: set = set()
         self.last_used: Dict[str, float] = {}
         self._starting: Dict[str, asyncio.Lock] = {}
+        self._busy: Dict[str, int] = {}
         self._remember()
 
     def _remember(self) -> None:
@@ -121,30 +128,91 @@ class ModelManager:
         return next((m for m in self.models.values()
                      if m.backend == backend_key and m.port), None)
 
+    def fits(self, m: LocalModel) -> Tuple[bool, str]:
+        """Would loading this leave the Mac working? Two ceilings: what MLX
+        will address, and what the OS actually has free right now."""
+        if not m.gb:
+            return True, ""
+        committed = self.committed_gb()
+        if committed + m.gb > self.ceiling_gb:
+            loaded = ", ".join(x.key for x in self.models.values() if x.running) or "nothing"
+            return False, (f"{m.gb} GB on top of {committed} GB ({loaded}) passes the "
+                           f"{self.ceiling_gb} GB ceiling")
+        snap = memory.snapshot()
+        if m.gb > snap.headroom_gb:
+            return False, (f"needs {m.gb} GB, the Mac has {snap.available_gb} GB available "
+                           f"(keeping {memory.RESERVE_GB:g} back)")
+        return True, ""
+
     def can_start(self, key: str) -> bool:
+        """Startable now, or after unloading eki's own idle servers."""
         m = self.models.get(key)
         if m is None or not m.start:
             return False
-        return not m.gb or self.committed_gb() + m.gb <= self.ceiling_gb
+        if self.fits(m)[0]:
+            return True
+        reclaimable = sum(x.gb for x in self.idle_started() if x.key != key)
+        if not reclaimable or not m.gb:
+            return False
+        snap = memory.snapshot()
+        return (m.gb <= snap.headroom_gb + reclaimable
+                and self.committed_gb() - reclaimable + m.gb <= self.ceiling_gb)
+
+    def busy(self, key: str) -> bool:
+        return self._busy.get(key, 0) > 0
+
+    def hold(self, key: str) -> None:
+        """A run is using this server: it must not be unloaded under it."""
+        self._busy[key] = self._busy.get(key, 0) + 1
+
+    def release(self, key: str) -> None:
+        self._busy[key] = max(0, self._busy.get(key, 0) - 1)
+        self.touch(key)
+
+    def idle_started(self, min_idle: float = 180.0) -> List[LocalModel]:
+        """eki's own servers nobody has touched lately, biggest first."""
+        now = time.time()
+        out = [m for k, m in self.models.items()
+               if k in self.started and m.running and m.stop and not self.busy(k)
+               and now - self.last_used.get(k, 0) >= min_idle]
+        return sorted(out, key=lambda m: -m.gb)
+
+    async def make_room(self, gb: float) -> List[str]:
+        """Unload idle eki-started servers until `gb` more would fit.
+        Never touches anything eki didn't start."""
+        stopped: List[str] = []
+        for m in self.idle_started():
+            snap = memory.snapshot()
+            if gb <= snap.headroom_gb and self.committed_gb() + gb <= self.ceiling_gb:
+                break
+            await self.stop(m.key)
+            stopped.append(m.key)
+        return stopped
 
     def touch(self, key: str) -> None:
         self.last_used[key] = time.time()
         if key in self.started:
             self._save_started()
 
-    async def reap_idle(self, now: Optional[float] = None) -> List[str]:
-        """Stop eki-started models nobody has used for their idle window."""
+    async def reap_idle(self, now: Optional[float] = None,
+                        pressure: Optional[str] = None) -> List[str]:
+        """Stop eki-started models nobody has used for their idle window —
+        or, when the Mac is under memory pressure, for two minutes."""
         now = now or time.time()
+        if pressure is None:
+            pressure = memory.snapshot().pressure
         stopped = []
         for key in list(self.started):
             m = self.models.get(key)
-            if m is None or not m.idle_minutes or not m.stop:
+            if m is None or not m.stop or self.busy(key):
                 continue
             if not m.running:
                 self.started.discard(key)
                 self._save_started()
                 continue
-            if now - self.last_used.get(key, now) >= m.idle_minutes * 60:
+            idle = now - self.last_used.get(key, now)
+            limit = 120.0 if pressure != "normal" else m.idle_minutes * 60
+            if (m.idle_minutes or pressure != "normal") and idle >= limit:
                 await self.stop(key)
                 stopped.append(key)
         return stopped
@@ -157,9 +225,17 @@ class ModelManager:
 
     def memory(self) -> Memory:
         committed = self.committed_gb()
-        return Memory(total_gb=total_memory_gb(), ceiling_gb=self.ceiling_gb,
-                      committed_gb=committed,
-                      free_gb=round(max(0.0, self.ceiling_gb - committed), 1))
+        snap = memory.snapshot()
+        # a model can take the smaller of: what's under the ceiling, and what
+        # the OS could actually hand out after the reserve
+        free = min(self.ceiling_gb - committed, snap.headroom_gb)
+        return Memory(total_gb=snap.total_gb or total_memory_gb(), ceiling_gb=self.ceiling_gb,
+                      committed_gb=committed, free_gb=round(max(0.0, free), 1),
+                      available_gb=snap.available_gb,
+                      other_gb=round(max(0.0, snap.used_gb - committed), 1),
+                      pressure=snap.pressure,
+                      holders=[{"name": h.name, "gb": h.gb, "pid": h.pid}
+                               for h in memory.grouped_holders()])
 
     def describe(self) -> List[Dict[str, Any]]:
         return [{
@@ -169,9 +245,8 @@ class ModelManager:
             "started_by_hub": m.key in self.started,
             "last_used": self.last_used.get(m.key),
             "can_start": bool(m.start) and not m.running,
-            "blocked_by_memory": (not m.running
-                                  and m.gb > 0
-                                  and self.committed_gb() + m.gb > self.ceiling_gb),
+            "blocked_by_memory": not m.running and m.gb > 0 and not self.fits(m)[0],
+            "busy": self.busy(m.key),
         } for m in self.models.values()]
 
     # ---- control ---------------------------------------------------------
@@ -190,20 +265,25 @@ class ModelManager:
             return f"{key} is already up on :{model.port}"
         if not model.start:
             return f"{key} has no start command configured"
-        committed = self.committed_gb()
-        if not force and model.gb and committed + model.gb > self.ceiling_gb:
-            loaded = ", ".join(m.key for m in self.models.values() if m.running)
-            return (f"not starting {key}: {model.gb}GB on top of {committed}GB "
-                    f"({loaded}) passes the {self.ceiling_gb}GB ceiling — "
-                    f"stop something first")
+        ok, why = self.fits(model)
+        if not ok and not force:
+            # make room from eki's own idle servers, never from anything else
+            freed = await self.make_room(model.gb)
+            ok, why = self.fits(model)
+            if not ok:
+                return f"not starting {key}: {why} — stop something first"
+            self._last_freed = freed
         await self._spawn(model.start)
         self.started.add(key)
         self.touch(key)
         self._save_started()
+        freed = getattr(self, "_last_freed", [])
+        self._last_freed = []
         for _ in range(int(model_start_timeout(model) / 0.5)):
             await asyncio.sleep(0.5)
             if model.running:
-                return f"{key} is up on :{model.port}"
+                note = f" (unloaded {', '.join(freed)} to make room)" if freed else ""
+                return f"{key} is up on :{model.port}{note}"
         return f"started {key}, but nothing is listening on :{model.port} yet"
 
     async def stop(self, key: str) -> str:

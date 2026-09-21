@@ -116,15 +116,27 @@ struct LocalModelRow: Codable, Identifiable, Hashable {
     let running: Bool
     let can_start: Bool
     let blocked_by_memory: Bool
+    var busy: Bool? = false
+    var started_by_hub: Bool? = false
 
     var id: String { key }
 }
 
 struct MemoryReport: Codable, Hashable {
+    struct Holder: Codable, Hashable, Identifiable {
+        let name: String
+        let gb: Double
+        let pid: Int
+        var id: Int { pid }
+    }
     let total_gb: Double
     let ceiling_gb: Double
     let committed_gb: Double
     let free_gb: Double
+    var available_gb: Double? = nil      // the OS's view
+    var other_gb: Double? = nil          // everything that isn't an eki model
+    var pressure: String? = "normal"
+    var holders: [Holder]? = []
 }
 
 struct ModelsReport: Codable, Hashable {

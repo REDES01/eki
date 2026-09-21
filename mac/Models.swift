@@ -97,36 +97,61 @@ struct MemoryCard: View {
 
     var body: some View {
         if let memory = model.memory {
+            let other = memory.other_gb ?? 0
+            let free = memory.available_gb ?? memory.free_gb
             Card(padding: 16) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Unified memory").font(.hubTitle)
+                        if memory.pressure == "warning" || memory.pressure == "critical" {
+                            Tag(text: "under pressure", color: Palette.danger)
+                        }
                         Spacer()
-                        Text("\(fmt(memory.committed_gb)) / \(fmt(memory.ceiling_gb)) GB")
+                        Text("\(fmt(free)) GB free of \(fmt(memory.total_gb))")
                             .font(.system(size: 13, weight: .medium).monospacedDigit())
                             .foregroundStyle(Palette.inkMuted)
                     }
+                    // one bar, three parts: eki's models, everything else, free
                     GeometryReader { geo in
-                        let fraction = memory.ceiling_gb > 0
-                            ? min(1, memory.committed_gb / memory.ceiling_gb) : 0
-                        ZStack(alignment: .leading) {
+                        let total = max(memory.total_gb, 1)
+                        HStack(spacing: 2) {
+                            Capsule().fill(Palette.accent)
+                                .frame(width: max(memory.committed_gb > 0 ? 6 : 0,
+                                                  geo.size.width * memory.committed_gb / total))
+                            Capsule().fill(Palette.inkFaint.opacity(0.55))
+                                .frame(width: max(other > 0 ? 6 : 0, geo.size.width * other / total))
                             Capsule().fill(Palette.fill)
-                            Capsule()
-                                .fill(LinearGradient(
-                                    colors: [Palette.accent.opacity(0.85), Palette.accent],
-                                    startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(6, geo.size.width * fraction))
                         }
                     }
                     .frame(height: 9)
-                    // the ceiling is what MLX will actually work with, not the
-                    // sticker number — worth saying, since they differ by 10GB
-                    Text("\(fmt(memory.free_gb)) GB free · the ceiling is what MLX will "
-                         + "work with, of \(fmt(memory.total_gb)) GB installed")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.inkFaint)
+                    HStack(spacing: 14) {
+                        legend(Palette.accent, "eki models \(fmt(memory.committed_gb)) GB")
+                        legend(Palette.inkFaint.opacity(0.55), "everything else \(fmt(other)) GB")
+                        Spacer()
+                        Text("models can take \(fmt(memory.free_gb)) GB more")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.inkFaint)
+                            .help("The smaller of what's under MLX's \(fmt(memory.ceiling_gb)) GB "
+                                  + "ceiling and what the Mac can hand out, keeping 4 GB back")
+                    }
+                    if let holders = memory.holders, !holders.isEmpty {
+                        Text(holders.map { "\($0.name) \(fmt($0.gb)) GB" }
+                                .joined(separator: " · "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.inkFaint)
+                            .lineLimit(1)
+                            .help("The biggest things holding memory right now. eki never "
+                                  + "stops these — only its own servers.")
+                    }
                 }
             }
+        }
+    }
+
+    private func legend(_ colour: Color, _ text: String) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(colour).frame(width: 7, height: 7)
+            Text(text).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
         }
     }
 
@@ -155,18 +180,24 @@ struct LocalModelCard: View {
                     .foregroundStyle(Palette.inkMuted)
                 }
                 Spacer()
+                if row.busy == true {
+                    Tag(text: "answering", color: Palette.ok)
+                }
                 if model.busyModel == row.key {
                     ProgressView().controlSize(.small)
                 } else if row.running {
                     Button("Stop") { Task { await model.setModel(row.key, running: false) } }
                         .buttonStyle(GhostButton())
+                        .disabled(row.busy == true)
+                        .help(row.busy == true ? "A run is using it right now"
+                              : "Frees its memory; it starts again on demand")
                 } else {
                     Button("Start") { Task { await model.setModel(row.key, running: true) } }
                         .buttonStyle(AccentButton())
                         .disabled(row.blocked_by_memory)
                         .opacity(row.blocked_by_memory ? 0.45 : 1)
                         .help(row.blocked_by_memory
-                              ? "Not enough headroom — stop something first"
+                              ? "Won't fit in what the Mac has free right now"
                               : "Loads the weights and waits for the port")
                 }
             }

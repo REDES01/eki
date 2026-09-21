@@ -280,7 +280,10 @@ class Engine:
                 message = await self.models.start(model.key)
                 if not model.running:
                     raise BackendError(message)
-            self.models.touch(model.key)
+                if "make room" in message:
+                    yield {"backend": choice.backend.key, "reason": reason + "; " +
+                           message[message.index("(") + 1:-1]}
+            self.models.hold(model.key)
 
         # A fresh instance per run. Adapters keep per-call state — the
         # session id to resume, the token usage — on themselves, and two runs
@@ -329,7 +332,7 @@ class Engine:
             except Exception:                       # noqa: BLE001
                 pass
             if model is not None:
-                self.models.touch(model.key)
+                self.models.release(model.key)
 
         # usage is whatever the backend volunteered, normalised only in name:
         # an invented number would be worse than an absent one

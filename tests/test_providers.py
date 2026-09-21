@@ -197,3 +197,64 @@ def test_started_models_survive_an_engine_restart(tmp_path, monkeypatch):
     # a new engine on the same Mac still knows it owns that server
     second = ModelManager([LocalModel(key="a", label="a", port=1, start="x", stop="y")])
     assert second.started == {"a"}
+
+
+def test_memory_ladder_uses_the_os_not_just_the_weights(monkeypatch):
+    from eki import memory
+    from eki.models import LocalModel, ModelManager
+    big = LocalModel(key="big", label="big", port=1, start="x", stop="y", gb=16)
+    small = LocalModel(key="small", label="small", port=2, start="x", stop="y", gb=3)
+    mm = ModelManager([big, small], ceiling_gb=37.4)
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: False))
+    # weights would fit under the ceiling, but Docker took the memory
+    monkeypatch.setattr(memory, "snapshot", lambda: memory.Snapshot(
+        total_gb=48, available_gb=10, used_gb=38, level=20))
+    assert mm.can_start("big") is False           # 10 available − 4 reserve < 16
+    assert mm.can_start("small") is True          # 3 fits in the 6 of headroom
+    ok, why = mm.fits(big)
+    assert not ok and "available" in why
+
+
+def test_make_room_only_unloads_what_eki_started(monkeypatch):
+    from eki import memory
+    from eki.models import LocalModel, ModelManager
+    mine = LocalModel(key="mine", label="mine", port=1, start="x", stop="y", gb=14)
+    theirs = LocalModel(key="theirs", label="theirs", port=2, start="x", stop="y", gb=14)
+    want = LocalModel(key="want", label="want", port=3, start="x", stop="y", gb=12)
+    mm = ModelManager([mine, theirs, want], ceiling_gb=37.4)
+    running = {"mine", "theirs"}
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: self.key in running))
+    mm.started = {"mine"}                          # theirs was started by hand
+    mm.last_used = {"mine": 0, "theirs": 0}
+    stopped = []
+
+    async def fake_stop(key):
+        stopped.append(key); running.discard(key)
+    monkeypatch.setattr(mm, "stop", fake_stop)
+    # 20 GB available; after mine goes, want's 12 fits under headroom and ceiling
+    monkeypatch.setattr(memory, "snapshot", lambda: memory.Snapshot(
+        total_gb=48, available_gb=12 if "mine" in running else 26, used_gb=0, level=50))
+    assert mm.can_start("want") is True            # reclaimable counts
+    asyncio.run(mm.make_room(12))
+    assert stopped == ["mine"] and "theirs" in running
+
+
+def test_pressure_shortens_the_idle_window(monkeypatch):
+    from eki.models import LocalModel, ModelManager
+    m = LocalModel(key="a", label="a", port=1, stop="x", idle_minutes=30)
+    mm = ModelManager([m])
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: True))
+    stopped = []
+
+    async def fake_stop(key):
+        stopped.append(key)
+    monkeypatch.setattr(mm, "stop", fake_stop)
+    mm.started = {"a"}
+    mm.last_used = {"a": 0}
+    asyncio.run(mm.reap_idle(now=5 * 60, pressure="normal"))
+    assert stopped == []                           # five minutes idle: fine normally
+    asyncio.run(mm.reap_idle(now=5 * 60, pressure="warning"))
+    assert stopped == ["a"]                        # under pressure: gone
+    mm.hold("a"); mm.started = {"a"}; stopped.clear()
+    asyncio.run(mm.reap_idle(now=99 * 60, pressure="critical"))
+    assert stopped == []                           # never from under a run

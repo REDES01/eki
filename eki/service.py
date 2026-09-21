@@ -594,10 +594,8 @@ async def refresh_claude() -> Any:
 @app.get("/api/models")
 def models() -> Any:
     eng = engine()
-    memory = eng.models.memory()
-    return {"models": eng.models.describe(),
-            "memory": {"total_gb": memory.total_gb, "ceiling_gb": memory.ceiling_gb,
-                       "committed_gb": memory.committed_gb, "free_gb": memory.free_gb}}
+    from dataclasses import asdict
+    return {"models": eng.models.describe(), "memory": asdict(eng.models.memory())}
 
 
 @app.post("/api/models/{key}/start")

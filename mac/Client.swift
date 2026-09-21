@@ -98,6 +98,7 @@ struct Run: Codable, Identifiable, Hashable {
     var output_len: Int? = nil
     var error: String? = nil
     var reason: String? = nil
+    var kind: String? = "ask"        // ask | deploy
 
     var isLive: Bool { state == "running" || state == "queued" }
     var canRetry: Bool { ["failed", "cancelled", "interrupted"].contains(state) }

@@ -28,9 +28,10 @@ final class AppModel: ObservableObject {
     @Published var usage: UsageReport?
     @Published var providers: [ProviderDTO] = []
     @Published var showArchived = false          // the chat list shows archived threads
-    /// set to move the window to a pane (e.g. Activity after starting a deploy)
+    /// set to move the window to a pane (e.g. Models after starting a download)
     @Published var paneRequest: Pane?
-    @Published var focusRun: String = ""
+    /// downloads in flight, shown on the Models pane while they run
+    @Published var deploys: [String] = []
 
     // the conversation on screen
     @Published var conversationID: String = ""
@@ -221,6 +222,9 @@ final class AppModel: ObservableObject {
         backends = await b ?? []
         conversations = await c ?? []
         runs = await r ?? []
+        for run in runs where run.isLive && run.kind == "deploy" && !deploys.contains(run.id) {
+            deploys.append(run.id)
+        }
         if let report = await m {
             localModels = report.models
             memory = report.memory
@@ -241,7 +245,12 @@ final class AppModel: ObservableObject {
             await refreshAll()
             return
         }
-        if let fresh = try? await client.runs() { runs = fresh }
+        if let fresh = try? await client.runs() {
+            runs = fresh
+            for run in runs where run.isLive && run.kind == "deploy" && !deploys.contains(run.id) {
+                deploys.append(run.id)          // a download started from the CLI, say
+            }
+        }
         if let fresh = try? await client.conversations(matching: search,
                                                        archived: showArchived) {
             conversations = fresh
@@ -313,11 +322,10 @@ final class AppModel: ObservableObject {
         await refreshProviders()
     }
 
-    /// Jump to Activity with this run open.
-    func show(run id: String) {
-        focusRun = id
-        paneRequest = .activity
-        Task { runs = (try? await client.runs()) ?? runs }
+    /// A download just started: show it where models live.
+    func show(deploy id: String) {
+        if !deploys.contains(id) { deploys.append(id) }
+        paneRequest = .models
     }
 
     // ---- the conversation on screen ------------------------------------

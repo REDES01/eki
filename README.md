@@ -58,16 +58,16 @@ Cats Knead Blankets" rather than the first line you typed — and a title you
 set yourself is never replaced. Right-click a chat, or use the dots beside
 it, to pin, rename, archive or delete it, or copy its id.
 
-**Activity** shows everything running and everything that has run, with the
-output and, for a run with a folder, the diff it left behind. **Usage** shows
-what's left of your limits. **Models & routing** is where providers are added,
+A thread being answered moves to the top of the list with a pulse beside it,
+and drops back when the answer lands. **Usage** shows what's left of your
+limits. **Models & routing** is where providers are added,
 switched off, preferred, or downloaded.
 
 From a terminal, the same engine:
 
 ```
 eki ask "summarise this file" --repo ~/code/thing
-eki runs                # what's happening
+eki runs                # every run, including ones that failed
 eki watch <id>          # follow one
 eki history -q kyoto    # search past conversations
 eki models              # what's loaded, what it costs in memory

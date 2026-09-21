@@ -9,7 +9,6 @@ import SwiftUI
 
 enum Pane: Hashable {
     case chat(String)      // "" = a new one
-    case activity
     case usage
     case models
 }
@@ -28,11 +27,6 @@ struct ContentView: View {
             Group {
                 switch pane {
                 case .chat: ChatPane()
-                case .activity:
-                    ActivityPane { cid in
-                        pane = .chat(cid)
-                        model.open(cid)
-                    }
                 case .usage: UsagePane()
                 case .models: ModelsPane()
                 }
@@ -98,11 +92,6 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    RailRow(icon: model.liveCount > 0 ? "circle.fill" : "waveform.path.ecg",
-                            title: "Activity",
-                            trailing: model.liveCount > 0 ? "\(model.liveCount) running" : nil,
-                            iconColor: model.liveCount > 0 ? Palette.ok : nil,
-                            selected: pane == .activity) { choose(.activity) }
                     RailRow(icon: "gauge.with.dots.needle.33percent", title: "Usage",
                             trailing: usageSummary,
                             selected: pane == .usage) { choose(.usage) }
@@ -902,5 +891,53 @@ struct RenameSheet: View {
         let t = title.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return }
         Task { await model.rename(row.id, to: t); dismiss() }
+    }
+}
+
+/// A unified diff, coloured by line — what a repo run left behind.
+struct DiffView: View {
+    let text: String
+
+    var body: some View {
+        if text.isEmpty {
+            Text("No changes")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.inkFaint)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(text.components(separatedBy: .newlines).enumerated()),
+                        id: \.offset) { _, line in
+                    Text(line.isEmpty ? " " : line)
+                        .font(.hubMonoSmall)
+                        .foregroundStyle(color(line))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 1.5)
+                        .background(background(line))
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.vertical, 6)
+            .background(Palette.surface,
+                        in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+            .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
+                .strokeBorder(Palette.hairline, lineWidth: 1))
+        }
+    }
+
+    private func color(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") { return Palette.inkMuted }
+        if line.hasPrefix("+") { return Palette.ok }
+        if line.hasPrefix("-") { return Palette.danger }
+        if line.hasPrefix("@@") { return Palette.accent }
+        if line.hasPrefix("diff ") || line.hasPrefix("index ") { return Palette.inkFaint }
+        return Palette.ink
+    }
+
+    private func background(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") { return .clear }
+        if line.hasPrefix("+") { return Palette.ok.opacity(0.10) }
+        if line.hasPrefix("-") { return Palette.danger.opacity(0.10) }
+        return .clear
     }
 }

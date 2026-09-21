@@ -436,6 +436,9 @@ class Engine:
         job = json.loads(run["payload"] or "{}")
         repo = job["repo"]
         yield {"backend": "eki", "reason": f"setting up {repo}"}
+        for p in self.providers.all():
+            if p.runtime.get("repo") == repo:
+                raise BackendError(f"{repo} is already set up as “{p.label}” ({p.key})")
         yield f"Looking up {repo}…\n"
         d = await deploy_mod.details(repo)
         if d["gated"]:

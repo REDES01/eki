@@ -644,7 +644,7 @@ struct AddModelSheet: View {
                         Task {
                             do {
                                 let run = try await model.client.deploy(selected.repo, label: "")
-                                model.show(run: run)
+                                model.show(deploy: run)
                                 dismiss()
                             } catch { self.error = error.localizedDescription }
                         }
@@ -652,7 +652,7 @@ struct AddModelSheet: View {
                     .buttonStyle(AccentButton())
                     .disabled(fit.gated)
                 }
-                Text("Runs in the background — you can close this and watch it in Activity.")
+                Text("Runs in the background — close this and watch it under Local servers.")
                     .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
             }
         } else {

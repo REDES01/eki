@@ -40,8 +40,15 @@ def parse(payload: Dict[str, Any], now: int) -> Reading:
         windows.append(Window(key=key, label=label,
                               used=float(pct) / 100.0,      # documented as 0..100
                               resets_at=resets, window_seconds=seconds, kind=kind))
-    return Reading("claude", windows=windows,
-                   observed_at=int(payload.get("observed_at") or 0) or None)
+    observed = int(payload.get("observed_at") or 0) or None
+    note = ""
+    if not windows:
+        # Claude Code ran and said nothing about limits. That is what an API-key
+        # login looks like, and what a subscription looks like before its first
+        # reply of the session.
+        note = ("Claude Code ran but reported no limits — subscription accounts "
+                "report them after the first reply in an interactive session")
+    return Reading("claude", windows=windows, observed_at=observed, note=note)
 
 
 class ClaudeStatusLine(QuotaProvider):

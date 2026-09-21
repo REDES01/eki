@@ -155,9 +155,14 @@ def test_bridge_records_limits_and_prints_a_line(isolated, monkeypatch, capsys):
     assert abs(saved["observed_at"] - time.time()) < 5
 
 
-def test_bridge_without_limits_writes_nothing(isolated, monkeypatch, capsys):
+def test_bridge_records_that_it_ran_even_without_limits(isolated, monkeypatch, capsys):
+    # the reading exists but is empty, which is how "Claude Code ran and told
+    # us nothing" is told apart from "Claude Code hasn't run"
     run_bridge(monkeypatch, capsys, {"model": {"display_name": "Opus"}})
-    assert claude_bridge.reading() is None
+    saved = claude_bridge.reading()
+    assert saved is not None and saved["rate_limits"] == {}
+    reading = claude_quota.parse(saved, int(time.time()))
+    assert reading.windows == [] and "reported no limits" in reading.note
 
 
 def test_install_keeps_other_settings_and_uninstall_restores(isolated):

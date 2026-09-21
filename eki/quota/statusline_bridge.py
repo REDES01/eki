@@ -32,10 +32,16 @@ CHAIN = QUOTA_DIR / "statusline-chain.json"
 
 
 def record(data: dict) -> None:
-    """Keep the last reading. Atomic, so a reader never sees half a file."""
+    """Keep the last reading. Atomic, so a reader never sees half a file.
+
+    Written on every call, even when Claude Code reported no limits — the
+    difference between "you haven't used Claude Code since turning this on"
+    and "it ran and told us nothing" is the whole diagnosis, and a file that
+    only appears on success can't tell them apart.
+    """
     limits = data.get("rate_limits")
-    if not isinstance(limits, dict) or not limits:
-        return                         # API-key users, or before the first reply
+    if not isinstance(limits, dict):
+        limits = {}
     QUOTA_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"observed_at": int(time.time()), "rate_limits": limits,
                "model": (data.get("model") or {}).get("id")}

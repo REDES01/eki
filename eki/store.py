@@ -62,6 +62,9 @@ class Store:
             self._conn.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         if "archived" not in cols:
             self._conn.execute("ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        # who chose the title: '' (the first line, a placeholder), 'model', 'user'
+        if "title_source" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT ''")
         self._conn.commit()
 
     # --- conversations ------------------------------------------------------
@@ -71,7 +74,9 @@ class Store:
                          archived: Optional[bool] = None) -> bool:
         fields, values = [], []
         if title is not None:
-            fields.append("title = ?"); values.append(title.strip()[:120])
+            # a title the user typed is theirs; the model never replaces it
+            fields += ["title = ?", "title_source = 'user'"]
+            values.append(title.strip()[:120])
         if pinned is not None:
             fields.append("pinned = ?"); values.append(int(pinned))
         if archived is not None:
@@ -84,6 +89,32 @@ class Store:
                 (*values, conversation_id))
             self._conn.commit()
         return cur.rowcount > 0
+
+    def suggest_title(self, conversation_id: str, title: str) -> bool:
+        """A model's title — only over a placeholder or an older suggestion."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE conversations SET title = ?, title_source = 'model'"
+                " WHERE id = ? AND title_source != 'user'",
+                (title.strip()[:120], conversation_id))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def untitled(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Threads still titled by their first line, that have an answer."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT c.id FROM conversations c WHERE c.title_source = ''"
+                " AND EXISTS (SELECT 1 FROM turns t WHERE t.conversation_id = c.id"
+                "             AND t.role = 'assistant')"
+                " ORDER BY c.updated_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def title_source(self, conversation_id: str) -> str:
+        with self._lock:
+            row = self._conn.execute("SELECT title_source FROM conversations WHERE id = ?",
+                                     (conversation_id,)).fetchone()
+        return row["title_source"] if row else ""
 
     def delete_conversation(self, conversation_id: str) -> bool:
         """Gone for good: the thread, its turns and its resumable sessions."""

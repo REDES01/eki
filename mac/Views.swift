@@ -268,7 +268,19 @@ struct ChatRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if row.live == true {
+                if hovering || selected {
+                    Menu { menuItems } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.inkMuted)
+                            .frame(width: 20, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .tint(Palette.inkMuted)
+                    .fixedSize()
+                } else if row.live == true {
                     // something in this thread is still being answered
                     Dot(color: Palette.ok, size: 6, pulsing: true)
                 } else if row.isPinned {
@@ -288,21 +300,7 @@ struct ChatRow: View {
         .buttonStyle(.plain)
         .foregroundStyle(Palette.ink)
         .onHover { hovering = $0 }
-        .contextMenu {
-            Button(row.isPinned ? "Unpin" : "Pin") {
-                Task { await model.pin(row.id, !row.isPinned) }
-            }
-            Button("Rename…", action: rename)
-            Button("Copy conversation ID") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(row.id, forType: .string)
-            }
-            Divider()
-            Button(row.isArchived ? "Unarchive" : "Archive") {
-                Task { await model.archive(row.id, !row.isArchived) }
-            }
-            Button("Delete…", role: .destructive) { confirmDelete = true }
-        }
+        .contextMenu { menuItems }
         .confirmationDialog("Delete “\(title)”?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) {
                 Task { if let why = await model.delete(row.id) { problem = why } }
@@ -314,6 +312,23 @@ struct ChatRow: View {
                                                        set: { if !$0 { problem = "" } })) {
             Button("OK") { problem = "" }
         } message: { Text(problem) }
+    }
+
+    /// One menu, two ways in: right-click anywhere, or the dots on hover.
+    @ViewBuilder private var menuItems: some View {
+        Button(row.isPinned ? "Unpin" : "Pin") {
+            Task { await model.pin(row.id, !row.isPinned) }
+        }
+        Button("Rename…", action: rename)
+        Button("Copy conversation ID") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(row.id, forType: .string)
+        }
+        Divider()
+        Button(row.isArchived ? "Unarchive" : "Archive") {
+            Task { await model.archive(row.id, !row.isArchived) }
+        }
+        Button("Delete…", role: .destructive) { confirmDelete = true }
     }
 
     private var title: String {

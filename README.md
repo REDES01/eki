@@ -53,7 +53,10 @@ of chips. Give a request a **folder** and only backends that can edit files are
 considered — that's how a request becomes a code change rather than advice
 about one.
 
-Right-click a chat to pin, rename, archive or delete it, or copy its id.
+Chats are named by a local model once they have an answer in them — "Why
+Cats Knead Blankets" rather than the first line you typed — and a title you
+set yourself is never replaced. Right-click a chat, or use the dots beside
+it, to pin, rename, archive or delete it, or copy its id.
 
 **Activity** shows everything running and everything that has run, with the
 output and, for a run with a folder, the diff it left behind. **Usage** shows

@@ -96,9 +96,20 @@ async def lifespan(app: FastAPI):
             except Exception as e:                  # noqa: BLE001
                 log.info("claude probe: %s", e)
 
+    async def name_old_threads() -> None:
+        await asyncio.sleep(20)                     # let the local servers settle
+        try:
+            named = await eng.backfill_titles()
+            if named:
+                log.info("named %d older threads", named)
+        except Exception:                           # noqa: BLE001
+            log.exception("titles")
+
     reaper = asyncio.create_task(reap())
     fresh = asyncio.create_task(keep_claude_fresh())
+    naming = asyncio.create_task(name_old_threads())
     yield
+    naming.cancel()
     fresh.cancel()
     reaper.cancel()
     await eng.quota.stop()

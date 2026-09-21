@@ -28,6 +28,7 @@ from . import deploy as deploy_mod
 from . import classify
 from . import secrets
 from . import settings as settings_mod
+from . import titles
 from .models import LocalModel, ModelManager
 from .providers import Provider, ProviderStore, seed_from_config
 from .quota import QuotaBoard, QuotaProvider
@@ -57,6 +58,7 @@ class Engine:
         self._build()
         self.runner = Runner(self.runs, self._dispatch)
         self._health: Dict[str, Tuple[float, Any]] = {}
+        self._side_tasks: set = set()               # titles and the like
 
     # ---- backends ----------------------------------------------------
 
@@ -343,6 +345,58 @@ class Engine:
             session = getattr(backend, "last_session", None)
             if session:
                 self.store.set_session(cid, backend.key, session)
+            # name the thread now that it has an answer in it; not on the
+            # run's clock, and never a reason for the run to fail
+            task = asyncio.create_task(self._entitle(cid))
+            self._side_tasks.add(task)
+            task.add_done_callback(self._side_tasks.discard)
+
+    def _titler(self) -> Optional[Backend]:
+        """A local model that's up and answers in words, cheapest first —
+        the router model if it's loaded, else whatever local server is."""
+        wanted = []
+        router = self.settings.get("router_model") or ""
+        if router:
+            wanted.append(router)
+        wanted += [b.key for b in sorted(self.backends, key=lambda b: b.info.cost.tier)
+                   if b.info.cost.tier == 0 and b.info.capabilities.text]
+        for key in wanted:
+            backend = self.get(key)
+            if backend is None:
+                continue
+            if self._is_up(key) is not True:
+                continue
+            return adapters.build(backend.info, self.options.get(key, {}))
+        return None
+
+    async def _entitle(self, cid: str, force: bool = False) -> bool:
+        if self.store.title_source(cid) == "user":
+            return False
+        turns = self.store.turns(cid)
+        answers = sum(1 for t in turns if t["role"] == "assistant")
+        # once when the thread gets its first answer, again after it's grown
+        if not answers or (not force and answers not in (1, 4)):
+            return False
+        backend = self._titler()
+        if backend is None:
+            return False
+        try:
+            title = await titles.suggest(backend, turns)
+        except Exception:                           # noqa: BLE001
+            return False
+        return bool(title) and self.store.suggest_title(cid, title)
+
+    async def backfill_titles(self) -> int:
+        """Name the threads that still carry their first line — one at a
+        time, in the background, only while a local model is up."""
+        named = 0
+        for row in self.store.untitled():
+            if self._titler() is None:
+                break
+            if await self._entitle(row["id"], force=True):
+                named += 1
+            await asyncio.sleep(0.5)                # never a burst
+        return named
 
     async def _label(self, run: Dict[str, Any]) -> classify.Label:
         """What kind of request this is. Never allowed to fail a run."""

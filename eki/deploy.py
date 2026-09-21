@@ -59,8 +59,14 @@ def _env() -> Dict[str, str]:
 
 # ---- catalog ---------------------------------------------------------------
 
-async def search(query: str = "", limit: int = 30) -> List[Dict[str, Any]]:
-    params = {"author": "mlx-community", "sort": "downloads", "limit": str(limit * 2)}
+async def search(query: str = "", limit: int = 30, min_b: float = 0.0,
+                 max_b: float = 0.0) -> List[Dict[str, Any]]:
+    """mlx-community builds by popularity, narrowed by a parameter range
+    (billions; 0 = no bound) the way Hugging Face's own filter does."""
+    from .profile import params_from_name
+    bounded = bool(min_b or max_b)
+    params = {"author": "mlx-community", "sort": "downloads",
+              "limit": str(limit * (6 if bounded else 2))}
     if query:
         params["search"] = query
     async with httpx.AsyncClient(timeout=15) as c:
@@ -72,8 +78,11 @@ async def search(query: str = "", limit: int = 30) -> List[Dict[str, Any]]:
         # eki serves chat models; speech, embedding and image repos don't belong here
         if task in NOT_CHAT or re.search(r"whisper|parakeet|-asr|tts|embedding|bge-|e5-", m["id"], re.I):
             continue
+        size = params_from_name(m["id"])
+        if bounded and (not size or (min_b and size < min_b) or (max_b and size > max_b)):
+            continue
         out.append({"repo": m["id"], "downloads": m.get("downloads", 0),
-                    "likes": m.get("likes", 0), "task": task})
+                    "likes": m.get("likes", 0), "task": task, "params_b": size})
     return out[:limit]
 
 

@@ -74,6 +74,7 @@ struct CatalogModel: Codable, Identifiable, Hashable {
     let downloads: Int
     let likes: Int
     let task: String
+    var params_b: Double? = 0
     var id: String { repo }
 }
 
@@ -130,20 +131,24 @@ struct Suggestion: Codable, Identifiable, Hashable {
     }
 }
 
-/// A parameter-count band to narrow the lists by; what a person means by
-/// "a small one" or "the biggest that fits".
-enum SizeBand: String, CaseIterable, Identifiable {
-    case all = "Any size", small = "Up to 4B", medium = "4–15B", large = "15–40B", huge = "40B+"
-    var id: String { rawValue }
+/// A parameter range to narrow the lists by — Hugging Face's own stops,
+/// so the two thumbs land where people already expect them.
+struct SizeRange: Equatable {
+    static let stops: [Double] = [0, 1, 6, 12, 32, 128, 500]      // billions; last means "and up"
+    static let labels = ["< 1B", "1B", "6B", "12B", "32B", "128B", "> 500B"]
+    var lo = 0                                   // indexes into `stops`
+    var hi = SizeRange.stops.count - 1
+
+    static let all = SizeRange()
+    var isAll: Bool { self == .all }
+    /// bounds in billions; 0 for none
+    var minB: Double { lo == 0 ? 0 : SizeRange.stops[lo] }
+    var maxB: Double { hi == SizeRange.stops.count - 1 ? 0 : SizeRange.stops[hi] }
 
     func admits(_ params: Double) -> Bool {
-        switch self {
-        case .all: return true
-        case .small: return params > 0 && params <= 4
-        case .medium: return params > 4 && params <= 15
-        case .large: return params > 15 && params <= 40
-        case .huge: return params > 40
-        }
+        if isAll { return true }
+        guard params > 0 else { return false }
+        return (minB == 0 || params >= minB) && (maxB == 0 || params <= maxB)
     }
 
     /// Billions of parameters from a repo name ("Qwen3.8-27B-4bit" → 27,
@@ -155,6 +160,73 @@ enum SizeBand: String, CaseIterable, Identifiable {
             .compactMap { Range($0.range(at: 1), in: name) }.compactMap { Double(name[$0]) }
         return found.max() ?? 0                     // "35B-A3B": the total is what memory sees
     }
+}
+
+/// Two thumbs on a track with fixed stops; the chosen ends are highlighted.
+struct SizeSlider: View {
+    @Binding var range: SizeRange
+    private let count = SizeRange.stops.count
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text("Parameters").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.inkMuted)
+                Spacer()
+                if !range.isAll {
+                    Button {
+                        range = .all
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Palette.inkMuted)
+                }
+            }
+            GeometryReader { geo in
+                let w = geo.size.width
+                let x: (Int) -> CGFloat = { CGFloat($0) / CGFloat(count - 1) * w }
+                ZStack(alignment: .leading) {
+                    ForEach(0..<count, id: \.self) { i in
+                        let chosen = i == range.lo || i == range.hi
+                        Text(SizeRange.labels[i])
+                            .font(.system(size: 10.5, weight: chosen ? .semibold : .regular))
+                            .foregroundStyle(chosen ? Palette.ink : Palette.inkFaint)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(chosen ? Palette.fill : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+                            .position(x: min(max(x(i), 18), w - 18), y: 8)
+                    }
+                    Capsule().fill(Palette.hairline).frame(height: 3).offset(y: 22)
+                    Capsule().fill(Palette.accent)
+                        .frame(width: max(0, x(range.hi) - x(range.lo)), height: 3)
+                        .offset(x: x(range.lo), y: 22)
+                    ForEach(0..<count, id: \.self) { i in
+                        Rectangle().fill(Palette.hairline).frame(width: 1, height: 7).position(x: x(i), y: 23)
+                    }
+                    thumb(at: x(range.lo)) { range.lo = min(nearest($0, w), range.hi) }
+                    thumb(at: x(range.hi)) { range.hi = max(nearest($0, w), range.lo) }
+                }
+            }
+            .frame(height: 34)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func nearest(_ px: CGFloat, _ w: CGFloat) -> Int {
+        Int((px / w * CGFloat(count - 1)).rounded()).clamped(to: 0...(count - 1))
+    }
+
+    private func thumb(at px: CGFloat, move: @escaping (CGFloat) -> Void) -> some View {
+        Circle()
+            .fill(Palette.surface)
+            .overlay(Circle().strokeBorder(Palette.inkMuted, lineWidth: 1.5))
+            .frame(width: 14, height: 14)
+            .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+            .position(x: px, y: 23)
+            .gesture(DragGesture(minimumDistance: 0).onChanged { move($0.location.x) })
+    }
+}
+
+private extension Comparable {
+    func clamped(to r: ClosedRange<Self>) -> Self { min(max(self, r.lowerBound), r.upperBound) }
 }
 
 struct Suggestions: Codable {
@@ -256,10 +328,10 @@ extension EngineClient {
         try await decode(ProbeResult.self, "GET", "api/providers/\(key)/models")
     }
 
-    func catalog(_ query: String) async throws -> [CatalogModel] {
+    func catalog(_ query: String, minB: Double = 0, maxB: Double = 0) async throws -> [CatalogModel] {
         struct W: Codable { let models: [CatalogModel] }
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return try await decode(W.self, "GET", "api/catalog?q=\(q)").models
+        return try await decode(W.self, "GET", "api/catalog?q=\(q)&min_b=\(minB)&max_b=\(maxB)").models
     }
 
     func suggestions(fresh: Bool = false) async throws -> Suggestions {
@@ -670,10 +742,10 @@ struct AddModelSheet: View {
     @State private var error = ""
     @State private var suggested: Suggestions?
     @State private var suggesting = true
-    @State private var band: SizeBand = .all
+    @State private var range = SizeRange.all
 
     private func admitted(_ s: Suggestion) -> Bool {
-        band.admits(s.params_b ?? SizeBand.params(in: s.repo))
+        range.admits(s.params_b ?? SizeRange.params(in: s.repo))
     }
 
     var body: some View {
@@ -690,17 +762,8 @@ struct AddModelSheet: View {
             TextField("Search, e.g. Qwen3.5 4B", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { Task { await search() } }
-            HStack(spacing: 6) {
-                ForEach(SizeBand.allCases) { b in
-                    Button(b.rawValue) { band = b }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: band == b ? .semibold : .regular))
-                        .foregroundStyle(band == b ? Palette.ink : Palette.inkMuted)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(band == b ? Palette.fill : Color.clear, in: Capsule())
-                }
-                Spacer()
-            }
+            SizeSlider(range: $range)
+                .onChange(of: range) { Task { await search() } }
             HStack(alignment: .top, spacing: 12) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -708,7 +771,7 @@ struct AddModelSheet: View {
                             recommended
                             heading(results.isEmpty ? "" : "Popular", top: 10)
                         }
-                        ForEach(results.filter { band.admits(SizeBand.params(in: $0.repo)) || band == .all }) { m in
+                        ForEach(results) { m in
                             Button {
                                 selected = m
                                 Task { await loadFit() }
@@ -740,7 +803,7 @@ struct AddModelSheet: View {
             if !error.isEmpty { Text(error).font(.system(size: 12)).foregroundStyle(Palette.danger) }
         }
         .padding(22)
-        .frame(width: 680, height: 560)
+        .frame(width: 680, height: 600)
         .task { await search() }
         .task { await loadSuggestions() }
     }
@@ -772,7 +835,7 @@ struct AddModelSheet: View {
             let picks = suggested.suggestions.filter(admitted)
             ForEach(picks) { s in suggestionRow(s) }
             if picks.isEmpty && !suggesting {
-                Text(band == .all
+                Text(range.isAll
                      ? "Nothing on the boards fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB."
                      : "Nothing on the boards in this size fits in \(String(format: "%.0f", suggested.ceiling_gb)) GB.")
                     .font(.system(size: 11)).foregroundStyle(Palette.inkFaint)
@@ -903,7 +966,7 @@ struct AddModelSheet: View {
 
     private func search() async {
         error = ""
-        do { results = try await model.client.catalog(query) }
+        do { results = try await model.client.catalog(query, minB: range.minB, maxB: range.maxB) }
         catch { self.error = error.localizedDescription }
     }
 

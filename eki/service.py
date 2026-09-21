@@ -583,9 +583,9 @@ class DeployBody(BaseModel):
 
 
 @app.get("/api/catalog")
-async def catalog_search(q: str = "", limit: int = 30) -> Any:
+async def catalog_search(q: str = "", limit: int = 30, min_b: float = 0.0, max_b: float = 0.0) -> Any:
     try:
-        return {"models": await deploy_mod.search(q, limit)}
+        return {"models": await deploy_mod.search(q, limit, min_b=min_b, max_b=max_b)}
     except Exception as e:                          # noqa: BLE001
         raise HTTPException(502, f"Hugging Face: {e}")
 

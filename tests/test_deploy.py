@@ -62,3 +62,30 @@ def test_kv_gb_counts_only_full_attention_layers_in_hybrids():
               "head_dim": 256, "layer_types": ["linear_attention"] * 48 + ["full_attention"] * 16}
     # 16 layers × 4 heads × 256 × K+V × fp16 = 64 KB per token → 8 GB at 128k
     assert deploy.kv_gb(config, 131072) == 8.0
+
+
+def test_search_narrows_by_parameter_range(monkeypatch):
+    import asyncio
+    import httpx
+
+    rows = [{"id": "mlx-community/Qwen3.5-4B-4bit", "downloads": 5, "pipeline_tag": "text-generation"},
+            {"id": "mlx-community/Qwen3.8-27B-4bit", "downloads": 4, "pipeline_tag": "text-generation"},
+            {"id": "mlx-community/Qwen3.6-35B-A3B-4bit", "downloads": 3, "pipeline_tag": "text-generation"},
+            {"id": "mlx-community/mystery-4bit", "downloads": 2, "pipeline_tag": "text-generation"}]
+
+    class FakeClient:
+        def __init__(self, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, params=None):
+            return httpx.Response(200, json=rows, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    every = asyncio.run(deploy.search())
+    assert [m["repo"].split("/")[-1] for m in every] == ["Qwen3.5-4B-4bit", "Qwen3.8-27B-4bit",
+                                                         "Qwen3.6-35B-A3B-4bit", "mystery-4bit"]
+    mid = asyncio.run(deploy.search(min_b=12, max_b=32))
+    assert [m["repo"].split("/")[-1] for m in mid] == ["Qwen3.8-27B-4bit"]     # a name without a size can't qualify
+    assert mid[0]["params_b"] == 27.0
+    big = asyncio.run(deploy.search(min_b=32))
+    assert [m["repo"].split("/")[-1] for m in big] == ["Qwen3.6-35B-A3B-4bit"]

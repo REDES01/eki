@@ -44,8 +44,18 @@ QUALITY: Dict[str, Dict[str, float]] = {
     # under 7B: short, easy things
     "small_open": {"chat": 0.6, "writing": 0.55, "translate": 0.55, "code": 0.45,
                    "repo": 0.0, "math": 0.4, "research": 0.3, "image": 0.0},
+    # a large or mid open model given Codex's hands (eki/gateway.py): the
+    # model's own numbers, plus repo work at the easy end — a 4-bit 27B
+    # follows a harness through small changes, not a refactor; measuring
+    # it says where the line really is
+    "large_agent": {"chat": 0.85, "writing": 0.82, "translate": 0.85, "code": 0.75,
+                    "repo": 0.62, "math": 0.72, "research": 0.55, "image": 0.0},
+    "mid_agent": {"chat": 0.75, "writing": 0.7, "translate": 0.72, "code": 0.6,
+                  "repo": 0.5, "math": 0.55, "research": 0.4, "image": 0.0},
     "image": {"image": 0.9},
 }
+#: the class a local model's Codex companion takes
+AGENT_OF = {"large_open": "large_agent", "mid_open": "mid_agent"}
 
 #: what a request of each difficulty needs before eki will spend a cheap
 #: provider on it rather than a better one

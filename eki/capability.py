@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS models (
 #: the top tier at 5× the fast tier follows the vendors' own API price ratio
 #: (Opus to Sonnet); a per-model cost_weight overrides it
 COST_WEIGHT = {"small_open": 0.05, "mid_open": 0.1, "large_open": 0.2, "image": 0.2,
+               "mid_agent": 0.15, "large_agent": 0.3,
                "frontier_agent_fast": 1.0, "frontier_api": 3.0, "frontier_agent": 5.0}
 #: a flagship that is metered on its own window (Claude Code shows "Current
 #: week (Fable)") costs more than the tier's other models. Used only when no
@@ -264,6 +265,13 @@ class Registry:
         rec.measured = {}
         self.upsert(rec)
         return True
+
+    def remove(self, provider: str, model: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM models WHERE provider = ? AND model = ?",
+                                     (provider, model))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def remove_provider(self, provider: str) -> None:
         with self._lock:

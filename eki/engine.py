@@ -149,8 +149,9 @@ class Engine:
                     or p.runtime.get("kind", "llm") != "llm" or not p.options.get("model")
                     or p.key == reserved):
                 continue
-            klass = priors.class_of_model(p.kind, str(p.options["model"]), p.options)
-            if klass == "small_open":
+            klass = priors.AGENT_OF.get(
+                priors.class_of_model(p.kind, str(p.options["model"]), p.options), "")
+            if not klass:
                 continue                            # a 2B can't carry a harness
             key = f"codex-{p.key}"
             if self.get(key) or self.providers.get(key):
@@ -170,6 +171,11 @@ class Engine:
                 self.failed[key] = str(e)
                 continue
             self.options[key] = options
+            # one model behind it — the local one; anything else listed under
+            # this key (Codex's own models, from an earlier discovery) goes
+            for rec in self.registry.for_provider(key, enabled_only=False):
+                if rec.model:
+                    self.registry.remove(key, rec.model)
             self.registry.seen(key, "", label=info.label, context_tokens=context, klass=klass,
                                source="derived",
                                public=public_scores.lookup(p.kind, str(p.options["model"])))

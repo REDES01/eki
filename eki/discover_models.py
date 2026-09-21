@@ -76,6 +76,11 @@ async def discover(backend: Backend, registry: Registry,
     info, key, kind = backend.info, backend.key, backend.info.kind
     options = getattr(backend, "options", {}) or {}
     caps = info.capabilities
+    if options.get("local_model"):
+        # Codex on a local model: one model, classed by what it is, and
+        # registered by the engine when the companion is built
+        have = registry.get(key, "")
+        return [""] if have else []
     found: List[Tuple[str, str, int]] = [("", f"{info.label} (default)", caps.context_tokens)]
     if kind == "claude_code":
         found += [(a, a.capitalize(), caps.context_tokens)

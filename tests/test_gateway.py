@@ -167,5 +167,8 @@ def test_every_local_model_gets_a_codex_companion(tmp_path, monkeypatch):
     # its runs start the local model it drives
     assert eng._local_for("codex-qwen").key == "qwen"
     rec = eng.registry.get("codex-qwen", "")
-    assert rec is not None and rec.klass == "large_open"
+    assert rec is not None and rec.klass == "large_agent"
+    # easy repo work is within reach on its own class; a refactor is not
+    assert rec.quality("repo", "easy") >= 0.5 > 0.0
+    assert rec.quality("repo", "hard") < 0.88
     asyncio.run(eng.quota.stop())

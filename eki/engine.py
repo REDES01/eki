@@ -35,6 +35,7 @@ from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
 from . import engines as engines_mod
 from . import gguf as gguf_mod
+from . import identify as identify_mod
 from . import bench
 from . import classify
 from . import codex_live
@@ -1194,9 +1195,10 @@ class Engine:
             n += 1
         return f"{key}-{n}"
 
-    async def deploy(self, repo: str, label: str = "", quant: str = "") -> Dict[str, str]:
-        rid = self.runs.create(f"Set up {repo}", requested="eki", kind="deploy",
-                               payload=json.dumps({"repo": repo, "label": label, "quant": quant}))
+    async def deploy(self, repo: str, label: str = "", quant: str = "", path: str = "") -> Dict[str, str]:
+        what = path or repo
+        rid = self.runs.create(f"Set up {Path(what).name if path else what}", requested="eki", kind="deploy",
+                               payload=json.dumps({"repo": repo, "label": label, "quant": quant, "path": path}))
         await self.runner.submit(rid)
         return {"run": rid}
 
@@ -1226,17 +1228,25 @@ class Engine:
         first model of that kind), size it, download it, write its start
         script, register it, and prove it answers."""
         job = json.loads(run["payload"] or "{}")
-        repo = job["repo"]
+        repo = job.get("repo") or job.get("path") or ""
+        local_path = Path(os.path.expanduser(job["path"])) if job.get("path") else None
         yield {"backend": "eki", "reason": f"setting up {repo}"}
         for p in self.providers.all():
             if p.runtime.get("repo") == repo and (not job.get("quant") or p.runtime.get("quant") == job.get("quant")):
                 raise BackendError(f"{repo} is already set up as “{p.label}” ({p.key})")
-        yield f"Looking up {repo}…\n"
-        d = await deploy_mod.details(repo, quant=job.get("quant") or "")
-        if d["gated"]:
-            raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
-        if not d["weights_gb"]:
-            raise BackendError(f"{repo} has no weights eki can serve (safetensors or GGUF)")
+        if local_path is not None:
+            yield f"Reading {local_path.name}…\n"
+            try:
+                d, _ = identify_mod.local_details(local_path)
+            except (OSError, ValueError) as e:
+                raise BackendError(str(e))
+        else:
+            yield f"Looking up {repo}…\n"
+            d = await deploy_mod.details(repo, quant=job.get("quant") or "")
+            if d["gated"]:
+                raise BackendError(f"{repo} is gated on Hugging Face; accept its terms there first")
+            if not d["weights_gb"]:
+                raise BackendError(f"{repo} has no weights eki can serve (safetensors or GGUF)")
         fmt = d["format"]
         engine = engines_mod.for_format(fmt)
         if engine is None:
@@ -1261,28 +1271,34 @@ class Engine:
             async for line in engine.install():
                 yield line
 
-        if fmt == "gguf":
+        if local_path is not None:
+            served = str(local_path)                # already here: served from where it is
+        elif fmt == "gguf":
             yield f"Downloading {d['quant']} ({d['download_gb']} GB)…\n"
             async for line in deploy_mod.download_gguf(repo, d["chosen"]):
                 yield line
             served = str(gguf_mod.local_path(repo, gguf_mod.first_shard(d["chosen"])))
+            yield "Downloaded.\n"
         else:
             yield f"Downloading {d['download_gb']} GB…\n"
             async for line in deploy_mod.download(repo, int(d["download_gb"] * 1024**3)):
                 yield line
             served = repo
-        yield "Downloaded.\n"
+            yield "Downloaded.\n"
 
-        key = self.free_key(deploy_mod.slug(repo) + (f"-{d['quant'].lower()}" if fmt == "gguf" else ""))
+        stem = local_path.stem if local_path is not None else repo
+        key = self.free_key(deploy_mod.slug(stem) + (f"-{d['quant'].lower()}" if fmt == "gguf" and d.get("quant")
+                                                     and not (local_path and d["quant"].lower() in stem.lower()) else ""))
         taken = [m.port for m in self.models.models.values()]
         port = deploy_mod.free_port(taken)
         samp = d["sampling"]
-        switch = prof.thinking_switch if fmt == "gguf" else deploy_mod.has_thinking_switch(repo)
+        switch = prof.thinking_switch if (fmt == "gguf" or local_path is not None) else deploy_mod.has_thinking_switch(repo)
         thinking = False if switch else None
         scripts = deploy_mod.write_scripts(key, served, port, samp, thinking=thinking,
                                            engine_name=engine.info.name,
                                            context=room["context"] if fmt == "gguf" else 0)
-        label = job.get("label") or (repo.split("/")[-1] + (f" {d['quant']}" if fmt == "gguf" else ""))
+        label = job.get("label") or (local_path.stem if local_path is not None
+                                     else repo.split("/")[-1] + (f" {d['quant']}" if fmt == "gguf" else ""))
         options: Dict[str, Any] = {"base_url": f"http://127.0.0.1:{port}", "model": served}
         if "temperature" in samp:
             options["temperature"] = samp["temperature"]

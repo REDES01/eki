@@ -68,6 +68,9 @@ struct ModelsPane: View {
         .task { await model.refreshProviders() }
         .sheet(isPresented: $addingProvider) { AddProviderSheet() }
         .sheet(isPresented: $addingModel) { AddModelSheet() }
+        .onChange(of: model.addProviderRequest) { _, req in
+            if req != nil { addingModel = false; addingProvider = true }
+        }
         .sheet(isPresented: $showingAll) { ModelsSheet(provider: nil) }
     }
 }

@@ -34,6 +34,7 @@ from . import config as config_mod
 from . import providers as providers_mod
 from . import deploy as deploy_mod
 from . import engines as engines_mod
+from . import identify as identify_mod
 from . import workflow as workflow_mod
 from . import profile as profile_mod
 from . import suggest as suggest_mod
@@ -643,9 +644,14 @@ async def provider_models(key: str) -> Any:
 # ---- catalog and deploy ---------------------------------------------------
 
 class DeployBody(BaseModel):
-    repo: str
+    repo: str = ""
     label: str = ""
     quant: str = ""                                 # a GGUF quantisation, e.g. Q4_K_M
+    path: str = ""                                  # a .gguf or MLX folder already on disk
+
+
+class IdentifyBody(BaseModel):
+    text: str
 
 
 @app.get("/api/catalog")
@@ -710,9 +716,19 @@ async def catalog_fit(repo: str, quant: str = "") -> Any:
 
 @app.post("/api/deploy")
 async def deploy_model(body: DeployBody) -> Any:
+    if body.path:
+        return await engine().deploy("", body.label, path=body.path)
     if "/" not in body.repo:
         raise HTTPException(400, "a Hugging Face repo looks like org/name")
     return await engine().deploy(body.repo, body.label, body.quant)
+
+
+@app.post("/api/identify")
+async def identify_anything(body: IdentifyBody) -> Any:
+    """A link, a repo id, a file, a folder or a server address → what it
+    is and what eki would do with it (see eki/identify.py)."""
+    mem = engine().models.memory()
+    return await identify_mod.identify(body.text, mem.free_gb, mem.ceiling_gb)
 
 
 # ---- models behind providers ---------------------------------------------

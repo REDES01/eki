@@ -92,6 +92,20 @@ struct WorkflowCheck: Codable {
     let ok: Bool
 }
 
+/// What eki made of something pasted (see eki/identify.py).
+struct Identified: Codable {
+    let kind: String                // hub | gguf_file | mlx_dir | server | unsupported | unknown | empty
+    var repo: String? = nil
+    var path: String? = nil
+    var format: String? = nil
+    var next: String? = nil         // deploy | provider
+    var fit: ModelFit? = nil
+    var url: String? = nil
+    var template: String? = nil
+    var models: [String]? = nil
+    var message: String? = nil
+}
+
 struct CatalogModel: Codable, Identifiable, Hashable {
     let repo: String
     let downloads: Int
@@ -395,6 +409,15 @@ extension EngineClient {
                                 "api/catalog?q=\(q)&min_b=\(minB)&max_b=\(maxB)&format=\(format)").models
     }
 
+    func identify(_ text: String) async throws -> Identified {
+        try await decode(Identified.self, "POST", "api/identify", body: ["text": text])
+    }
+
+    func deployPath(_ path: String, label: String) async throws -> String {
+        struct W: Codable { let run: String }
+        return try await decode(W.self, "POST", "api/deploy", body: ["path": path, "label": label]).run
+    }
+
     func engines() async throws -> [EngineStatus] {
         struct W: Codable { let engines: [EngineStatus] }
         return try await decode(W.self, "GET", "api/engines").engines
@@ -590,6 +613,12 @@ struct ReplaceKeySheet: View {
 
 // MARK: - adding a provider
 
+/// Opened from Add Model with a server address already known.
+struct AddProviderRequest: Equatable {
+    let template: String
+    let url: String
+}
+
 struct AddProviderSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -611,6 +640,13 @@ struct AddProviderSheet: View {
             async let f = try? await model.client.discover()
             templates = await t ?? []
             found = await f ?? []
+            // opened for a server someone pasted: straight to its form
+            if let req = model.addProviderRequest,
+               var t = (found + templates).first(where: { $0.id == req.template }) {
+                t.found = req.url
+                picked = t
+                model.addProviderRequest = nil
+            }
         }
     }
 
@@ -931,6 +967,9 @@ struct AddModelSheet: View {
     @State private var range = SizeRange.all
     @State private var format = "mlx"
     @State private var quant = ""
+    @State private var pasted = ""
+    @State private var identified: Identified?
+    @State private var identifying = false
 
     private func admitted(_ s: Suggestion) -> Bool {
         range.admits(s.params_b ?? SizeRange.params(in: s.repo))
@@ -943,10 +982,19 @@ struct AddModelSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
             }
-            Text("MLX builds from Hugging Face's mlx-community. eki downloads it, "
-                 + "writes a start script, measures it and adds it as a provider.")
+            Text("Paste anything — a Hugging Face link, a .gguf file, a folder of weights, "
+                 + "a server's address — or pick from what fits this Mac. eki works out the rest.")
                 .font(.system(size: 12)).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                TextField("Paste a link, org/name, file, folder or http://…", text: $pasted)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await identifyPasted() } }
+                if identifying { ProgressView().controlSize(.small) }
+                Button("Look up") { Task { await identifyPasted() } }
+                    .buttonStyle(GhostButton()).disabled(pasted.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if let identified { identifiedCard(identified) }
             HStack(spacing: 8) {
                 TextField("Search, e.g. Qwen3.5 4B", text: $query)
                     .textFieldStyle(.roundedBorder)
@@ -1087,6 +1135,77 @@ struct AddModelSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// What the pasted thing is, and the one button that does the right
+    /// thing with it: set it up, or add the server it points at.
+    @ViewBuilder private func identifiedCard(_ id: Identified) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            switch id.kind {
+            case "hub", "gguf_file", "mlx_dir":
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(id.kind == "hub" ? (id.repo ?? "") : ((id.path ?? "") as NSString).lastPathComponent)
+                        .font(.system(size: 12.5, weight: .medium))
+                    if let fit = id.fit {
+                        if let summary = fit.profile?.summary {
+                            Text(summary).font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text(String(format: "Needs %.1f GB with a %dk context · ", fit.need_gb, fit.context / 1024)
+                             + (!fit.fits ? "too big for this Mac"
+                                : fit.fits_now == false ? "fits; starts once other models unload" : "fits")
+                             + (id.kind == "hub" ? String(format: " · %.1f GB download", fit.download_gb) : " · already on disk"))
+                            .font(.system(size: 11.5)).foregroundStyle(fit.fits ? Palette.inkMuted : Palette.warn)
+                    }
+                }
+                Spacer()
+                Button(id.kind == "hub" ? "Download and set up" : "Set up") {
+                    Task {
+                        do {
+                            let run = id.kind == "hub"
+                                ? try await model.client.deploy(id.repo ?? "", label: "", quant: id.fit?.quant ?? "")
+                                : try await model.client.deployPath(id.path ?? "", label: "")
+                            model.show(deploy: run)
+                            dismiss()
+                        } catch { self.error = error.localizedDescription }
+                    }
+                }
+                .buttonStyle(AccentButton()).disabled(!(id.fit?.fits ?? false) || (id.fit?.gated ?? false))
+            case "server":
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(id.message ?? "A server").font(.system(size: 12.5, weight: .medium))
+                    if let models = id.models, !models.isEmpty {
+                        Text("Serving: " + models.prefix(4).joined(separator: ", ") + (models.count > 4 ? "…" : ""))
+                            .font(.system(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    }
+                    Text("Add it as a provider — eki routes to it and measures it; you keep running it.")
+                        .font(.system(size: 11.5)).foregroundStyle(Palette.inkFaint)
+                }
+                Spacer()
+                Button("Add provider…") {
+                    model.addProviderRequest = AddProviderRequest(template: id.template ?? "custom", url: id.url ?? "")
+                    dismiss()
+                }
+                .buttonStyle(AccentButton())
+            default:
+                Image(systemName: "questionmark.circle").foregroundStyle(Palette.inkMuted)
+                Text(id.message ?? "eki didn't recognise that.").font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+        }
+        .padding(10)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
+        .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.hairline, lineWidth: 1))
+    }
+
+    private func identifyPasted() async {
+        let text = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { identified = nil; return }
+        identifying = true; error = ""
+        defer { identifying = false }
+        do { identified = try await model.client.identify(text) }
+        catch { self.error = error.localizedDescription }
     }
 
     private func loadSuggestions() async {

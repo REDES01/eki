@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
     private var commandsKey = "\u{0}"
     @Published var chatError: String = ""
     @Published var cost: CostReport?
+    /// Add Model found a server: open Add provider on its form
+    @Published var addProviderRequest: AddProviderRequest?
     /// the context meter while a harness answers; the stored turn has it after
     @Published var liveContext: ContextUse?
     var contextUse: ContextUse? {

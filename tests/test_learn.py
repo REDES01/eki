@@ -3,6 +3,7 @@
 change, and that everything it learns is a commit that says why."""
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -177,6 +178,9 @@ class Tutor(Backend):
 
 def school(tmp_path, monkeypatch, answer) -> Engine:
     eng = Engine(echo_config(tmp_path), owner=True)
+    # the echo backend stands in for Claude Code, working in eki's scratch folder
+    monkeypatch.setattr(eng, "SCRATCH", Path("/Users/me/web"))
+    monkeypatch.setattr(eng, "_kind_of", lambda key: "claude_code")
     eng.settings = {**eng.settings, "skills_learn": "apply", "notify_learned": False,
                     "skills_learn_backend": "", "skills_learn_daily": 8}
     Tutor.answer, Tutor.prompts, Tutor.kws = answer, [], []
@@ -287,11 +291,15 @@ def test_notes_claude_saved_during_the_run_are_found(tmp_path):
     os.utime(old, (t.time() - 3600, t.time() - 3600))
     since = t.time() - 5
     _memory()
+    # your own Claude Code session, in another project, at the same time
+    _memory(project="-Users-me-other", name="theirs.md", text="not eki's")
     # the reviewer's own folder is never read
-    _memory(project=str(learn.WORKDIR).replace("/", "-").replace(".", "-"), name="x.md")
-    notes = learn.saved_notes(since)
+    _memory(project=learn.project_slug(str(learn.WORKDIR)), name="x.md")
+    notes = learn.saved_notes(since, ["/Users/me/web", str(learn.WORKDIR)])
     assert [n["file"] for n in notes] == ["-Users-me-web/feedback_pm.md"]
     assert "pnpm" in notes[0]["text"]
+    assert learn.saved_notes(since, []) == []
+    assert learn.project_slug("/Users/me/.eki/scratch") == "-Users-me--eki-scratch"
 
 
 def test_an_absorbed_note_leaves_claudes_memory_but_is_kept():
@@ -317,13 +325,15 @@ def test_a_skill_folder_an_agent_wrote_is_taken_in():
     folder = skills.VIEWS["codex"] / "use-pnpm"
     folder.mkdir(parents=True)
     (folder / "SKILL.md").write_text("---\nname: use-pnpm\ndescription: JS installs use pnpm here\n---\n\nUse pnpm.\n")
-    assert learn.adopt_new_folders(since, "codex", "r1") == ["use-pnpm"]
+    # only the folder of the program that ran
+    assert learn.adopt_new_folders(since, "claude", "claude_code", "r1") == []
+    assert learn.adopt_new_folders(since, "codex", "codex", "r1") == ["use-pnpm"]
     s = skills.get("use-pnpm")
-    assert s["learned"]["by"] == "codex" and skills.learnable("use-pnpm")
+    assert s["origin"] == "agent:codex" and not skills.learnable("use-pnpm")   # yours
     assert (skills.VIEWS["codex"] / "use-pnpm").is_symlink()          # one copy, linked back
     assert (skills.VIEWS["claude"] / "use-pnpm").is_symlink()         # and every backend has it
     assert skills.history(1)[0]["message"] == "take in use-pnpm, written by codex"
-    assert learn.adopt_new_folders(since, "codex") == []
+    assert learn.adopt_new_folders(since, "codex", "codex") == []
 
 
 def test_the_review_is_shown_the_notes_and_asked_what_they_cover():
@@ -397,9 +407,15 @@ def test_the_clis_are_run_with_remembering_left_to_eki(monkeypatch):
     cc = ClaudeCodeBackend(BI(key="cc", kind="claude_code", label="cc"), {"binary": "/bin/echo"})
     argv = cc._argv("hi", None, None)
     assert argv[argv.index("--append-system-prompt") + 1] == learn.AGENT_NOTE
+    from eki.adapters import codex as codex_mod
     cx = CodexBackend(BI(key="cx", kind="codex", label="cx"), {"binary": "/bin/echo"})
+    monkeypatch.setitem(codex_mod._FEATURES, cx.bin, {"memories", "apps"})
     live = cx.live_argv()
     assert live[live.index("--disable") + 1] == "memories"
+    # an older Codex has no such feature, and --disable with an unknown name is fatal
+    monkeypatch.setitem(codex_mod._FEATURES, cx.bin, {"apps"})
+    assert "memories" not in cx.live_argv()
+    monkeypatch.setitem(codex_mod._FEATURES, cx.bin, {"memories", "apps"})
     off = {**on, "skills_learn": "off"}
     monkeypatch.setattr(settings_mod, "load", lambda: off)
     assert "--append-system-prompt" not in cc._argv("hi", None, None)

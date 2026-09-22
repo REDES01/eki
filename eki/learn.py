@@ -40,7 +40,10 @@ eki is learning:
   note whose lesson is now a skill is moved out of Claude's memory into
   ~/.eki/learn/absorbed. Notes that are facts about one project stay;
 - a skill folder an agent made directly in ~/.claude/skills or
-  ~/.agents/skills during a run is taken into the store as eki's own.
+  ~/.agents/skills during a run is taken into the store (linked back, so
+  nothing changes for the program) as written for you: eki won't rewrite
+  it. Only the folders of the program that ran, and only notes in the
+  projects eki's run worked in — your own sessions elsewhere are left alone.
 
 Setting `skills_learn`: "apply" (default — a learned skill is on at once),
 "propose" (it arrives turned off, for you to turn on), or "off".
@@ -90,15 +93,22 @@ def agent_note(settings: Dict[str, Any]) -> str:
 
 # ---- what the agents saved anyway ---------------------------------------------
 
-def saved_notes(since: float, limit: int = 6) -> List[Dict[str, Any]]:
-    """Notes Claude Code wrote to its auto-memory since `since` — the index
-    (MEMORY.md) aside, and never the reviewer's own folder."""
+def project_slug(folder: str) -> str:
+    """The name Claude Code gives a folder under ~/.claude/projects."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(folder))
+
+
+def saved_notes(since: float, folders: List[str], limit: int = 6) -> List[Dict[str, Any]]:
+    """Notes Claude Code wrote to its auto-memory since `since`, in the
+    folders eki's run worked in and nowhere else — a note your own Claude
+    Code session wrote in another project at the same time is not eki's to
+    look at. The index (MEMORY.md) aside."""
     out: List[Dict[str, Any]] = []
-    if not CLAUDE_PROJECTS.is_dir():
+    if not CLAUDE_PROJECTS.is_dir() or not folders:
         return out
-    work = str(WORKDIR).replace("/", "-").replace(".", "-")
+    mine = {project_slug(f) for f in folders if f} - {project_slug(str(WORKDIR))}
     for p in sorted(CLAUDE_PROJECTS.glob("*/memory/*.md")):
-        if p.name == "MEMORY.md" or p.parent.parent.name == work:
+        if p.name == "MEMORY.md" or p.parent.parent.name not in mine:
             continue
         try:
             if p.stat().st_mtime < since:
@@ -149,12 +159,17 @@ def absorbs(answer: Dict[str, Any], notes: List[Dict[str, Any]]) -> List[Dict[st
     return [n for n in notes if n["file"] in names or n["file"].split("/", 1)[-1] in names]
 
 
-def adopt_new_folders(since: float, by: str = "", run: str = "") -> List[str]:
-    """Skill folders an agent made itself in a CLI's own folder during a
-    run: taken into the store (one copy, every backend) as eki's own."""
+def adopt_new_folders(since: float, view: str, by: str = "", run: str = "") -> List[str]:
+    """Skill folders the agent made itself in its own CLI's folder (`view`:
+    "claude" or "codex") during a run: taken into the store — one copy,
+    linked back, every backend — and treated as written for you, so eki
+    never rewrites them."""
+    if view not in skills.VIEWS:
+        return []
+    root = skills.VIEWS[view]
     fresh = []
     for u in skills.unmanaged():
-        if u["held"] or u["link"]:
+        if u["held"] or u["link"] or Path(u["path"]).parent != root:
             continue
         try:
             if (Path(u["path"]) / "SKILL.md").stat().st_mtime < since:

@@ -36,6 +36,26 @@ def _find_binary(name: str) -> Optional[str]:
     return None
 
 
+_FEATURES: Dict[str, set] = {}
+
+
+def features(binary: str) -> set:
+    """The feature names this Codex knows (`codex features list`), once per
+    binary. Empty when it can't say — then eki disables nothing optional."""
+    if not binary:
+        return set()
+    if binary not in _FEATURES:
+        import subprocess
+        try:
+            out = subprocess.run([binary, "features", "list"], capture_output=True, text=True,
+                                 timeout=15, stdin=subprocess.DEVNULL).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _FEATURES[binary] = {line.split()[0] for line in out.splitlines()
+                             if line.strip() and not line.startswith(" ")}
+    return _FEATURES[binary]
+
+
 @register("codex")
 class CodexBackend(Backend):
     def __init__(self, info, options: Dict[str, Any]):
@@ -78,9 +98,12 @@ class CodexBackend(Backend):
     def _disabled(self) -> List[str]:
         """Features turned off for runs under eki: what the provider's options
         say, and Codex's own memories while eki is learning — one lesson is
-        kept in one place, the skill store every backend reads (eki/learn.py)."""
+        kept in one place, the skill store every backend reads (eki/learn.py).
+        Only a feature this Codex has: `--disable` with a name it doesn't
+        know is a hard error, and an older Codex has no `memories`."""
         off = list(self.disabled_features)
-        if learn.learning(settings_mod.load()) and "memories" not in off:
+        if (learn.learning(settings_mod.load()) and "memories" not in off
+                and "memories" in features(self.bin or "")):
             off.append("memories")
         return off
 

@@ -721,6 +721,10 @@ class Engine:
             return None
         return adapters.build(b.info, self.options.get(key, {}))
 
+    def _kind_of(self, key: str) -> str:
+        b = self.get(key)
+        return b.info.kind if b is not None else ""
+
     async def _learn(self, run: Dict[str, Any], cid: str, did: str,
                      manual: bool = False) -> Dict[str, Any]:
         """Review a finished run for a lesson and, if there is one, commit it
@@ -745,8 +749,14 @@ class Engine:
         # remembering is eki's: skill folders it wrote are taken in, and
         # notes in Claude Code's memory are looked at below
         since = float(run.get("created_at") or time.time()) - 2
-        adopted = await asyncio.to_thread(learn_mod.adopt_new_folders, since, did, rid)
-        notes = await asyncio.to_thread(learn_mod.saved_notes, since)
+        kind = self._kind_of(did)
+        view = {"claude_code": "claude", "codex": "codex"}.get(kind, "")
+        adopted = await asyncio.to_thread(learn_mod.adopt_new_folders, since, view, did, rid) \
+            if view else []
+        # Claude Code's memory, only in the folder this run worked in
+        notes = await asyncio.to_thread(
+            learn_mod.saved_notes, since,
+            [run.get("cwd") or str(self.SCRATCH)]) if kind == "claude_code" else []
         turns = self.store.turns(cid)
         upto = int(run.get("user_turn") or 0)
         before = [t for t in turns if t["id"] < upto] if upto else turns[:-2]

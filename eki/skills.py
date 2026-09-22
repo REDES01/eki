@@ -359,8 +359,8 @@ def learn(name: str, description: str, body: str, *, why: str, run: str = "",
 
 def adopt(names: List[str], by: str = "", run: str = "") -> List[str]:
     """Take skill folders an agent wrote straight into a CLI's folder into
-    the store, linked back, as skills eki learned (so it may improve them
-    and you may take them back like any other)."""
+    the store, linked back. Written at your request, so they are yours:
+    eki reads them and never rewrites them."""
     report = import_existing(names, message=f"take in {', '.join(names)}"
                              + (f", written by {by}" if by else "")
                              + (f"\n\nRun: {run}" if run else ""))
@@ -369,10 +369,8 @@ def adopt(names: List[str], by: str = "", run: str = "") -> List[str]:
         meta = _meta()
         for name in done:
             e = _entry(meta, name)
-            e["origin"] = "learned"
-            e["learned"] = {"why": f"written by {by or 'an agent'} during a run", "run": run,
-                            "conversation": "", "at": int(time.time()), "times": 1,
-                            "first": int(time.time()), "by": by}
+            e["origin"] = f"agent:{by or 'unknown'}"
+            e["adopted"] = {"by": by, "run": run, "at": int(time.time())}
         _save_meta(meta)
     return done
 

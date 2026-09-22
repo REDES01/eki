@@ -15,6 +15,7 @@ import os
 import plistlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Tuple
 
@@ -88,11 +89,20 @@ def install(root: Path) -> str:
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     if loaded():
         _launchctl("bootout", f"{_domain()}/{LABEL}")
+        # bootout returns before the job is gone; bootstrapping over it
+        # fails with "5: Input/output error"
+        for _ in range(50):
+            if not loaded():
+                break
+            time.sleep(0.1)
     with PLIST.open("wb") as f:
         plistlib.dump(plist_for(root), f)
     from . import builds
     builds.install_supervisor()             # a person's command: the only way it changes
     code, out = _launchctl("bootstrap", _domain(), str(PLIST))
+    if code != 0:
+        time.sleep(1.0)
+        code, out = _launchctl("bootstrap", _domain(), str(PLIST))
     if code != 0:
         return f"wrote {PLIST}, but launchd refused it: {out}"
     return f"installed — the engine now starts at login ({PLIST})"

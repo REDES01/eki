@@ -223,3 +223,37 @@ def test_the_screen_is_a_task_of_its_own_that_needs_a_program_with_tools():
     for text in ("screenshot tools in Playwright, how?", "take a picture of a fox", "open the file config.yaml",
                  "type hints in python"):
         assert not wants_screen(text), text
+
+
+def test_anything_that_has_to_be_done_goes_to_a_harness():
+    from eki.classify import needs_hands
+    doing = ("run the tests", "install ffmpeg with brew", "list the files in my downloads folder",
+             "what's taking up disk space on my mac", "fetch https://example.com and summarise it",
+             "open Safari", "delete the old logs", "check config.yaml for the port", "git status",
+             "take screenshot", "restart the engine", "运行测试", "ファイルを消して")
+    asking = ("how do I run the tests in pytest", "what does git rebase do", "explain docker layers",
+              "write a script that lists files", "should I install ffmpeg via brew or conda",
+              "a haiku about autumn", "translate hello into japanese", "what is 17 * 23")
+    for text in doing:
+        assert needs_hands(text), text
+    for text in asking:
+        assert not needs_hands(text), text
+
+
+def test_the_model_can_say_hands_and_the_words_can_too():
+    from eki import classify
+    class Says:
+        misses = 0
+        async def label(self, prompt):
+            return classify.Label(task="chat", difficulty="easy", source="model", hands=True)
+    c = classify.Classifier(Says(), use_model=True)
+    got = run(c.label("tidy up whatever is cluttering things"))     # the model saw hands; the rules didn't
+    assert got.hands and got.task == "chat"
+    class Silent:
+        misses = 0
+        async def label(self, prompt):
+            return classify.Label(task="chat", difficulty="easy", source="model")
+    got = run(classify.Classifier(Silent(), use_model=True).label("run the tests"))
+    assert got.hands                                                  # the words alone are enough
+    assert classify.rules("what is 17 * 23").hands is False
+    assert classify.rules("run the tests").to_json()["hands"] is True

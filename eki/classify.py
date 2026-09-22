@@ -38,10 +38,13 @@ class Label:
     source: str = "rules"           # rules | model
     confidence: float = 0.0
     ms: int = 0
+    #: has to be done, not answered: goes to a harness whatever the task
+    hands: bool = False
 
     def to_json(self) -> Dict[str, Any]:
         return {"task": self.task, "difficulty": self.difficulty,
-                "source": self.source, "confidence": self.confidence, "ms": self.ms}
+                "source": self.source, "confidence": self.confidence, "ms": self.ms,
+                "hands": self.hands}
 
     @property
     def short(self) -> str:
@@ -202,6 +205,49 @@ def wants_screen(text: str) -> bool:
     return bool(_SCREEN.search(text))
 
 
+#: Anything that has to *act* rather than answer: run or install something,
+#: read or change files here, fetch a page, send something, drive an app.
+#: A bare model would describe the steps; a harness does them.
+_ACT = re.compile(
+    r"\b(run|execute|install|uninstall|build|compile|deploy|restart|start|stop|kill|launch)\b"
+    r"\s+(the |my |a |this |that |it\b|`|[\w./-]+)"
+    r"|\b(ls|cat|grep|find|curl|wget|git|npm|pip|brew|docker|make|pytest|node|python3?)\s+[\w./-]"
+    r"|\b(list|show|read|open|check|look at|inspect|delete|remove|rename|move|copy|create|"
+    r"write|save|edit|change|update)\s+(the |my |this |that |a |all )?(old |new |stale |big |large )?"
+    r"(files?|folders?|directory|directories|logs?|config|downloads|desktop|documents|"
+    r"\w+\.(py|ts|js|json|ya?ml|md|txt|swift|toml|log|csv|sh))\b"
+    r"|\b(in|from|on) (my|the|this) (mac|computer|machine|laptop|disk|home (folder|directory)|"
+    r"desktop|downloads folder)\b"
+    r"|\b(fetch|download|scrape|crawl|browse to|go to|visit|load) (the |this |that )?"
+    r"(url|page|site|website|link|https?://)"
+    r"|https?://\S+"
+    r"|\b(send|post|email|message|tweet|upload|publish) (it|this|that|the|an?|my)\b"
+    r"|\b(what('s| is) (running|listening|using|taking)|which process|disk (space|usage)|"
+    r"free space|how much (memory|ram|disk))\b"
+    r"|\b(my|the) (clipboard|calendar|mail|inbox|notes|reminders)\b"
+    r"|\bcommit\b.*\b(changes?|this|it)\b|\bpush (it|this|the branch|to (origin|main|github))\b"
+    r"|运行|执行|安装|打开.{0,6}(文件|文件夹|应用)|读取|删除|下载|实行|実行|インストール|ファイルを", re.I)
+#: Asking *about* doing, not to do: "how do I", "what does … do", "explain",
+#: "should I", "write a script that…" (the script is the answer).
+_ABOUT = re.compile(r"^\s*(how (do|would|can|should) (i|you|we)|what (does|is|are|would)|why|"
+                    r"explain|describe|should (i|we)|is it (safe|ok|possible)|can you explain|"
+                    r"tell me (about|how)|when (should|do))\b"
+                    r"|\b(write|give me|show me) (a|an|the|some) (script|command|snippet|example|"
+                    r"one-?liner|function|regex)\b", re.I)
+
+
+def needs_hands(text: str) -> bool:
+    """True when the request has to be *done* on this Mac or the network,
+    not answered — it then goes to a harness (Claude Code, Codex, a local
+    model with Codex's hands), whatever else it is labelled."""
+    t = text.strip()
+    if wants_screen(t):
+        return True
+    if _ABOUT.search(t):
+        return False
+    return bool(_ACT.search(t))
+
+
 def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> Label:
     """The obvious cases, for free. Order is the whole design: a request that
     names a folder is a repo change whatever else it says.
@@ -231,7 +277,8 @@ def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> L
         task = "writing"
     else:
         task = "chat"
-    return Label(task=task, difficulty=_difficulty(text), source="rules")
+    return Label(task=task, difficulty=_difficulty(text), source="rules",
+                 hands=task in ("repo", "screen") or (task != "image" and needs_hands(text)))
 
 
 def _difficulty(text: str) -> str:
@@ -263,11 +310,16 @@ SYSTEM = (
     "math - calculate, solve or prove\n"
     "research - needs current facts, prices, news or sources looked up\n"
     "image - make a picture\n"
+    "screen - look at or drive this computer's screen\n"
     "difficulty is easy (a small model can do it well), medium, or hard (needs the "
     "strongest model available)."
 )
 SHOTS = [
-    ("say hi in three words", '{"task": "chat", "difficulty": "easy"}'),
+    ("say hi in three words", '{"task": "chat", "difficulty": "easy", "hands": false}'),
+    ("what's taking up space in my downloads folder",
+     '{"task": "chat", "difficulty": "easy", "hands": true}'),
+    ("how do I list the biggest files in a folder with du",
+     '{"task": "code", "difficulty": "easy", "hands": false}'),
     ("add a --dry-run flag to the CLI in this project",
      '{"task": "repo", "difficulty": "medium"}'),
     ("write a python function that reverses a string",
@@ -339,7 +391,8 @@ def parse(content: str) -> Optional[Label]:
     except (TypeError, ValueError):
         confidence = 0.0
     return Label(task=task, difficulty=difficulty, source="model",
-                 confidence=max(0.0, min(1.0, confidence)))
+                 confidence=max(0.0, min(1.0, confidence)),
+                 hands=bool(data.get("hands")) or task in ("repo", "screen"))
 
 
 class Classifier:
@@ -365,4 +418,6 @@ class Classifier:
             got.task = "image"          # so is "generate an image of…"
         elif after_image and image_followup(prompt):
             got.task = "image"          # and "make it bluer", said to a picture
+        if got.task in ("repo", "screen") or (got.task != "image" and needs_hands(prompt)):
+            got.hands = True            # the words ask for doing; the model may add cases
         return got

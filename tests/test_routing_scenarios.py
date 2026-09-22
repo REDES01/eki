@@ -1,3 +1,4 @@
+import asyncio
 # SPDX-License-Identifier: Apache-2.0
 """The router, end to end, on a setup like a real one.
 
@@ -233,3 +234,32 @@ def test_a_model_asked_for_by_name_overrides_the_routers_pick():
         choice.model = wanted
         choice.reason = f"{choice.backend.key} ({wanted}): asked for by name"
     assert choice.model == "fable" and choice.reason == "claude (fable): asked for by name"
+
+
+def test_under_auto_nothing_goes_to_a_bare_text_model_while_a_harness_can_take_it(tmp_path, monkeypatch):
+    """A bare model would describe what it can't do; a harness does it. Only
+    when no harness can serve does Auto fall back to a bare model — and says so."""
+    from eki import secrets, settings
+    from eki.adapters.base import BackendInfo, Capabilities, Cost
+    from eki.config import Config
+    from eki.engine import Engine
+    from tests.test_runs import settle
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    cfg = Config(db_path=str(tmp_path / "eki.db"), quota_url="http://127.0.0.1:1")
+    cfg.backends = [BackendInfo(key="bare", kind="echo", label="bare", cost=Cost(tier=0),
+                                capabilities=Capabilities(context_tokens=8000)),
+                    BackendInfo(key="hands", kind="echo", label="hands", cost=Cost(tier=10),
+                                capabilities=Capabilities(context_tokens=8000, tools=True, repo=True))]
+    cfg.options = {"bare": {}, "hands": {}}
+    eng = Engine(cfg, owner=True)
+
+    async def go():
+        for prompt, picked, expect in (("take screenshot", "", "hands"),   # the cheaper bare one passed over
+                                       ("hello there", "", "hands"),       # small talk too: no bare model under Auto
+                                       ("hello there", "bare", "bare")):   # picked by name, it answers
+            started = await eng.ask(prompt, backend_key=picked)
+            await settle(eng.runs, started["run"])
+            assert eng.runs.get(started["run"])["backend"] == expect, (prompt, picked)
+        await eng.runner.stop()
+    asyncio.run(go())

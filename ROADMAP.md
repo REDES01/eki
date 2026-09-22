@@ -31,6 +31,10 @@ do, what it costs right now, and how to hand work from one to the next.
 - **Local first, nothing hidden.** Every answer says what produced it and why.
 - **Work outlives the window.** Everything is a run, written down before it
   starts, executed by the engine.
+- **Nothing raw under Auto.** A request that isn't for a picture goes to a
+  harness — Claude Code, Codex, a local model with Codex's hands — never
+  to a bare model, which would describe what it can't do. A bare model
+  answers only when picked by name, or when no harness can take the work.
 - **The command line is the agents' interface.** Any agent with a shell can
   call `eki`. No second protocol until something without a shell needs one.
 - **Files are the handoff.** A backend's output lands in the project folder

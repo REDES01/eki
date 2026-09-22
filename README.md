@@ -283,6 +283,13 @@ Claude Code is not driven this way: it speaks only Anthropic's API, and
 pointing it at another model would mean running Anthropic's program outside
 what it supports.
 
+Under Auto, nothing that isn't a picture goes to a bare text model: the
+answer comes from a harness — Claude Code, Codex, or a local model given
+Codex's hands — so "take a screenshot" or "what's filling my disk" gets
+done rather than explained. A bare model answers when you pick it by
+name, or when no harness can take the request (none set up, all out of
+quota), and the thread says so.
+
 ## Claude Code under eki
 
 A Claude Code thread in eki is the real program, kept open in its streaming

@@ -520,11 +520,26 @@ class Engine:
         label = await self._label(run, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
         requested, _, wanted_model = (run["requested"] or "").partition(":")
-        need = Need(repo=bool(run["cwd"]), tools=bool(run["cwd"]) or label.task == "screen",
+        # Under Auto nothing goes to a bare text model: every answer comes
+        # from a harness (Claude Code, Codex, a local model with Codex's
+        # hands) or, for a picture, an image model. A bare model would
+        # describe what it can't do; a harness does it. Picked by name, a
+        # bare model still answers — that's the picker's business.
+        wants_harness = not requested and label.task != "image" and not run["images"]
+        need = Need(repo=bool(run["cwd"]),
+                    tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
                     backend=requested or None,
                     task=label.task, difficulty=label.difficulty)
         choice = self.router.choose(need)
+        if choice.backend is None and wants_harness and not run["cwd"]:
+            # no harness can take it (none set up, or all out of quota): a
+            # bare model is better than no answer, and says so in the reason
+            choice = self.router.choose(Need(repo=False, tools=False, images_out=need.images_out,
+                                             backend=None, task=label.task,
+                                             difficulty=label.difficulty))
+            if choice.backend is not None:
+                choice.reason += " — no harness could take it"
         if choice.backend is not None and wanted_model:
             choice.model = wanted_model
             choice.reason = f"{choice.backend.key} ({wanted_model}): asked for by name"

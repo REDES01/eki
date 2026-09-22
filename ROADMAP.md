@@ -86,8 +86,9 @@ loop. An engine restart marks every live run *interrupted*, so the swap is
 never done from inside a run: the self-work run ends, then a supervisor waits
 for `running == 0` and swaps (see `docs/self-build.md`).
 
-- [ ] **eki is its own first project.** It knows where its source is, which
-      checkout it is running from, and what version that is
+- [x] **eki is its own first project.** It knows where its source is, which
+      checkout it is running from, and what version that is (78ed50a:
+      `EKI_SOURCE`, `builds.running()`, `/api/health` → `build`)
 - [ ] **"Change yourself" is a request.** (From the terminal it is: `eki self "…"`,
       dfccbdd on `self-build` — worktree, base check, routed run, commit, candidate
       check, propose only — on main since 70eb734. First real one: `self/4dab965b`,
@@ -105,19 +106,28 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       candidate engine starts on a spare port against a copy of the database,
       answers health, completes a run on a local model, and migrates the
       schema both ways
-- [ ] **Swap without dropping work.** The old engine drains or hands over:
+- [x] **Swap without dropping work.** The old engine drains or hands over:
       runs either finish first or are resumable across a restart — which
       means fixing *interrupted* so a run can be picked up, not just declared
       dead. The self-work run itself is recorded as finished by the new engine
-- [ ] **Going back is automatic.** The previous build is kept. A supervisor
+      (78ed50a, 11da108, 8a301ee: the supervisor waits for no runs; a run cut
+      off anyway is carried on in its session and folder copy — checked live
+      with Claude Code and Codex)
+- [x] **Going back is automatic.** The previous build is kept. A supervisor
       small enough not to need changing watches the new engine; if it isn't
       healthy within minutes, the old one comes back and the thread says why
+      (78ed50a: `eki/supervisor.sh`, `eki swap`; a broken build rolled back
+      live in 72s. It says so in a notification — no thread line yet)
 - [ ] **How far it goes alone is a setting.** *Propose* (a branch and a diff
       to read), *apply here* (swap this Mac's install after the checks), and
-      per-area overrides. Default is propose
-- [ ] **Two things it can't change on its own at any setting:** the supervisor
+      per-area overrides. Default is propose (78ed50a: `self_autonomy` and
+      `eki self --apply` — checked live end to end, f906934; per-area
+      overrides not built)
+- [x] **Two things it can't change on its own at any setting:** the supervisor
       and rollback path, because a bad change there can't be undone by them;
-      and the credentials rule. Those need a person
+      and the credentials rule. Those need a person (78ed50a: `builds.py`,
+      `supervisor.sh`, `agent.py`, secrets and quota are protected — never
+      applied; the supervisor is only installed by `eki agent install`)
 - [ ] **This Mac and the public repo are different.** What eki changes here is
       a local branch on top of the last release, rebased when a release
       lands. Offering a change upstream is a pull request; merging to `main`

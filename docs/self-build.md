@@ -88,7 +88,7 @@ python -m eki.candidate . --skip tests               # just the boot checks
 
 Exit code 0 means fit.
 
-## The swap  (not built)
+## The swap  (built: `eki/builds.py`, `eki swap`)
 
 What runs is decided by one symlink, not by where the launch agent points:
 
@@ -100,29 +100,46 @@ What runs is decided by one symlink, not by where the launch agent points:
     previous -> 0.2.0-58fd719
 ```
 
-The launch agent runs `~/.eki/builds/current/.venv/bin/python -m eki.cli
-serve`. Swapping is: build the new directory, check it (above), wait for
-`running == 0`, repoint `previous` and `current`, `launchctl kickstart -k`.
-Rolling back is the same two symlinks the other way. Builds older than
-`previous` are removed after a week.
+As built: a build is a `git archive` export of one commit plus
+`.eki-build.json`, and shares your checkout's venv (eki isn't installed into
+it; it runs from its folder), so it is a few MB and no reinstall. The launch
+agent runs your venv's python with `WorkingDirectory` and `PYTHONPATH` at
+`builds/current`, `EKI_SOURCE` and `EKI_CONFIG` pointing at your checkout.
+At install `current` *is* your checkout ("dev"), so editing and restarting
+works as before; `eki swap <ref>` moves to a build, `eki swap --back` to the
+previous one, `eki swap --dev` back to the checkout. `/api/health` says
+which build is running. Builds that are neither current nor previous are
+removed after a week.
 
-`agent.py` today points launchd at the development checkout's venv; moving it
-to `builds/current` is the one change to existing code this stage needs, and
-it waits until the Add Model work has landed.
+```
+eki builds                      # → current, ↩ previous, the last swap
+eki swap HEAD                   # candidate check, then the supervisor swaps
+eki swap swap-test --no-check   # (how the rollback was tested)
+```
 
 The app bundle is swapped the same way when a change touches `mac/`, and only
 while the app isn't frontmost.
 
-## The supervisor  (not built)
+## The supervisor  (built: `eki/supervisor.sh`)
 
-Small on purpose — a few dozen lines of shell, no imports from eki, so that
-no change to eki can break it:
+Small on purpose — a hundred lines of shell, no imports from eki, so that
+no change to eki can break it. `eki agent install` copies it to
+`~/.eki/bin/eki-supervisor`; nothing else does.
 
-1. swap (above)
-2. poll the new engine's `/api/health` for three minutes
-3. not healthy → swap back, kickstart, write why into `~/.eki/self/log`
-4. healthy → tell the engine, which writes the result into the thread that
-   asked for the change
+1. wait (default 10 min) for `/api/health` to show no runs
+2. `previous` → what ran, `current` → the new build, `launchctl kickstart -k`
+3. the engine must answer `/api/health` *as that build* within a minute,
+   and be the same process after the watch window (default 3 min)
+4. otherwise swap back and restart; the outcome is `~/.eki/self/swap.json`,
+   the story `~/.eki/self/swap.log`. The engine reads the outcome once, says
+   it (a notification), and — for a healthy `eki self` change —
+   fast-forwards it into your checkout if nothing there is uncommitted or
+   newer.
+
+Runs cut off by a swap (or any restart) aren't cancelled: the next engine
+marks them interrupted and carries on those in Claude Code or Codex in
+their session and in the copy of the folder they were working in
+(`resume_interrupted`, once — never a loop).
 
 It lives outside `builds/`, is installed once, and eki's self-work is refused
 any diff that touches it, `agent.py`'s plist writer, or `secrets.py` and the
@@ -147,7 +164,14 @@ whatever the autonomy setting says.
 ## Order of building
 
 1. ~~candidate check~~ — done
-2. `builds/` layout + supervisor + `agent.py` pointing at `current`
-3. `self` runs, *propose* only
-4. *apply here*, the Self pane, protected paths
+2. ~~`builds/` layout + supervisor + `agent.py` pointing at `current`~~ — done
+3. ~~`self` runs, *propose* only~~ — done (`eki self`)
+4. ~~*apply here*~~, ~~protected paths~~ — done (`eki self --apply`,
+   `self_autonomy`); the Self pane is not built
 5. faults as requests; roadmap items as requests
+
+Checked live on 2026-09-22: a healthy swap; a build that can't start rolled
+back within a minute; Claude Code and Codex runs cut off by a restart
+carried on in their sessions; and `eki self --apply` end to end — a change
+written by Claude Code, 484 tests and the candidate check, swapped in,
+healthy after 3 minutes, fast-forwarded into the checkout (f906934).

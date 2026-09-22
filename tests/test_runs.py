@@ -221,7 +221,9 @@ async def test_output_events_carry_a_running_offset(store):
 
 
 @pytest.mark.asyncio
-async def test_stop_leaves_nothing_running(store):
+async def test_stop_leaves_nothing_running(store, tmp_path):
+    """Shutdown kills every task — and a run it cut off is the next engine's
+    to call interrupted (and carry on), not a run someone cancelled."""
     async def dispatch(run):
         await asyncio.sleep(10)
         yield "never"
@@ -231,8 +233,28 @@ async def test_stop_leaves_nothing_running(store):
     await runner.submit(rid)
     await asyncio.sleep(0.02)
     await runner.stop()
-    assert store.get(rid)["state"] == "cancelled"
     assert runner.running == []
+    assert store.get(rid)["state"] == "running"
+    store.close()
+    after = RunStore(tmp_path / "runs.db", owner=True)          # the next engine
+    assert after.get(rid)["state"] == "interrupted"
+    assert [r["id"] for r in after.just_interrupted] == [rid]
+    after.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_still_cancel(store):
+    async def dispatch(run):
+        await asyncio.sleep(10)
+        yield "never"
+
+    runner = Runner(store, dispatch)
+    rid = store.create("x")
+    await runner.submit(rid)
+    await asyncio.sleep(0.02)
+    runner.cancel(rid)
+    await asyncio.sleep(0.05)
+    assert store.get(rid)["state"] == "cancelled"
 
 
 # ---- the engine: work happens whether anyone is watching or not ----------

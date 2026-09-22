@@ -735,6 +735,10 @@ class Engine:
                                     meta={**meta, "failed": True})
             raise
         except (asyncio.CancelledError, GeneratorExit):
+            if self.runner.stopping:
+                # the engine is going away, not you stopping it: the copy is
+                # left as it is and the next engine carries the run on
+                raise
             # stopped on purpose: keep what arrived, and say it was cut short
             line = self._keep_workspace(ws, run)
             if cid and parts:

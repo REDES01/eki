@@ -93,3 +93,57 @@ def test_carrying_on_takes_the_copy_as_the_run_left_it(repo):
     assert (repo / "README.md").read_text() == "you, meanwhile\n"
     fresh = workspace.open(str(repo), "c1", keep=True)                # closed: a normal sync
     assert (Path(fresh.path) / "README.md").read_text() == "you, meanwhile\n"
+
+
+# ---- a restart is not you pressing stop ------------------------------------------
+
+from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health, register  # noqa: E402
+
+
+@register("sloth")
+class Sloth(Backend):
+    async def health(self):
+        return Health(True)
+
+    async def stream(self, messages, **kw):
+        yield "working…"
+        import asyncio
+        await asyncio.sleep(30)
+        yield "done"
+
+
+@pytest.mark.asyncio
+async def test_a_run_cut_off_by_a_restart_is_carried_on_not_cancelled(tmp_path, repo):
+    import asyncio
+    cfg = echo_config(tmp_path)
+    cfg.backends.append(BackendInfo(key="sloth", kind="sloth", label="sloth",
+                                    capabilities=Capabilities(repo=True, tools=True), cost=Cost(tier=0)))
+    cfg.options["sloth"] = {}
+    first = Engine(cfg, owner=True)
+    first.settings = {**first.settings, "skills_learn": "off", "resume_interrupted": True}
+    started = await first.ask("a long job", repo=str(repo), backend_key="sloth")
+    cid, rid = started["conversation"], started["run"]
+    for _ in range(100):
+        if (first.runs.get(rid) or {}).get("output"):
+            break
+        await asyncio.sleep(0.02)
+    first.store.set_session(cid, "sloth", "sess-9")
+    copy = Path(json.loads(json.dumps(first._in_copy and list(first._in_copy)[0])))
+    (copy / "partial.txt").write_text("made before the restart\n")
+    await first.runner.stop()                           # the engine going away
+    assert first.runs.get(rid)["state"] == "running"    # not "cancelled"
+    assert not any("[stopped]" in t["content"] for t in first.store.turns(cid))
+    assert not (repo / "partial.txt").exists()          # nothing forced back, nothing kept yet
+
+    second = Engine(cfg, owner=True)
+    second.settings = {**second.settings, "skills_learn": "off", "resume_interrupted": True}
+    assert second.runs.get(rid)["state"] == "interrupted"
+    second.note_interruptions()
+    assert await second.resume_interrupted() == 1
+    new = [r for r in second.runs.recent() if r["conversation_id"] == cid and r["id"] != rid][0]
+    for _ in range(100):                                 # it's working in the same copy
+        if second._in_copy:
+            break
+        await asyncio.sleep(0.02)
+    assert str(copy) in second._in_copy and (copy / "partial.txt").exists()
+    await second.runner.stop()

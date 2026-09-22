@@ -199,6 +199,10 @@ class Runner:
         self._listeners: Dict[str, List[asyncio.Queue]] = {}
         #: activity and prompts of live runs, replayed to a watcher who joins late
         self.activity: Dict[str, List[Dict[str, Any]]] = {}
+        #: the engine is going away (a restart, a swap): runs cut off now
+        #: aren't cancelled by anyone — the next engine finds them still
+        #: "running", marks them interrupted, and carries them on
+        self.stopping = False
 
     @property
     def running(self) -> List[str]:
@@ -280,7 +284,8 @@ class Runner:
                 await stream.aclose()
             except Exception:                     # noqa: BLE001
                 pass                              # cancellation is the outcome
-            self._state(rid, "cancelled", ended_at=int(time.time()))
+            if not self.stopping:
+                self._state(rid, "cancelled", ended_at=int(time.time()))
             raise
         except Exception as e:                    # noqa: BLE001
             self.store.update(rid, error=str(e)[:500])
@@ -293,7 +298,9 @@ class Runner:
             self.activity.pop(rid, None)
 
     async def stop(self) -> None:
-        """Shutdown: nothing is left orphaned, and nothing claims to run."""
+        """Shutdown: nothing is left orphaned. Runs cut off here stay
+        "running" in the store for the next engine to pick up."""
+        self.stopping = True
         for task in list(self.tasks.values()):
             task.cancel()
         if self.tasks:

@@ -18,3 +18,13 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(learn, "ABSORBED", root / "eki" / "learn" / "absorbed")
     # Claude Code's own memory: a test must never read or move your notes
     monkeypatch.setattr(learn, "CLAUDE_PROJECTS", root / "claude" / "projects")
+
+
+@pytest.fixture(autouse=True)
+def private_models(tmp_path, monkeypatch, request):
+    """eki's record of which servers it started, and the check of a live
+    process, never reach this Mac's real servers from a test."""
+    from eki import models
+    monkeypatch.setattr(models.ModelManager, "STARTED_FILE", tmp_path / "_home" / "started.json")
+    if "real_processes" not in request.keywords:
+        monkeypatch.setattr(models, "started_by_eki", lambda port: False)

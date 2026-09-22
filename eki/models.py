@@ -88,6 +88,35 @@ def port_open(port: int, host: str = "127.0.0.1") -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+def listener_pid(port: int) -> Optional[int]:
+    """The process listening on a local port, if the OS will say."""
+    try:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.split():
+        if line.strip().isdigit():
+            return int(line)
+    return None
+
+
+def started_by_eki(port: int) -> bool:
+    """Whether the server on `port` is one eki launched. eki starts every
+    server with EKI_STARTED=1 in its environment, which the server's
+    processes inherit — so this is read off the process, not remembered,
+    and can't be forgotten by a restart, a reload or a stale file."""
+    pid = listener_pid(port)
+    if pid is None:
+        return False
+    try:
+        out = subprocess.run(["ps", "eww", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "EKI_STARTED=1" in out.split()
+
+
 def default_ceiling_gb() -> float:
     """What this Mac can hold in weights, from what it has installed."""
     total = total_memory_gb()
@@ -132,6 +161,23 @@ class ModelManager:
                 self.started.add(key)
                 self.last_used[key] = float(when)
 
+    def claim_own(self, now: Optional[float] = None) -> List[str]:
+        """Running servers eki launched but has no record of (see
+        `started_by_eki`): take them back, with a fresh idle window so
+        nothing is stopped the moment it is found."""
+        now = now or time.time()
+        found = []
+        for key, m in self.models.items():
+            if key in self.started or not m.port or not m.stop or not m.running:
+                continue
+            if started_by_eki(m.port):
+                self.started.add(key)
+                self.last_used.setdefault(key, now)
+                found.append(key)
+        if found:
+            self._save_started()
+        return found
+
     def _save_started(self) -> None:
         try:
             self.STARTED_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -141,8 +187,14 @@ class ModelManager:
             pass
 
     def adopt(self, previous: "ModelManager") -> None:
-        self.started = {k for k in previous.started if k in self.models}
-        self.last_used = {k: v for k, v in previous.last_used.items() if k in self.models}
+        # the same set and clock, not copies: a start still in flight on the
+        # previous manager lands where this one looks (a copy lost it, and
+        # the model then ran forever as if you had started it)
+        previous.started |= self.started
+        for k, v in self.last_used.items():
+            previous.last_used.setdefault(k, v)
+        self.started = previous.started
+        self.last_used = previous.last_used
         # runs in flight keep their hold: a settings change mid-answer must
         # not leave the server they're using looking free to unload
         self._busy = {k: v for k, v in previous._busy.items() if k in self.models}
@@ -239,6 +291,7 @@ class ModelManager:
         now = now or time.time()
         if pressure is None:
             pressure = memory.snapshot().pressure
+        self.claim_own(now)
         stopped = []
         for key in list(self.started):
             m = self.models.get(key)

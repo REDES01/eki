@@ -123,6 +123,63 @@ def test_idle_reaper_only_touches_what_hub_started(monkeypatch):
     assert stopped == ["a"]                 # b was started by the user
 
 
+def test_a_server_eki_launched_but_forgot_is_taken_back(monkeypatch):
+    """The record said nothing (a reload lost it); the process says eki."""
+    from eki import models
+    stopped = []
+    mm = ModelManager([LocalModel(key="a", label="a", port=1, stop="x", idle_minutes=30),
+                       LocalModel(key="b", label="b", port=2, stop="x", idle_minutes=30)])
+    monkeypatch.setattr(LocalModel, "running", property(lambda self: True))
+    monkeypatch.setattr(models, "started_by_eki", lambda port: port == 1)
+
+    async def fake_stop(key):
+        stopped.append(key)
+    monkeypatch.setattr(mm, "stop", fake_stop)
+    assert mm.started == set()
+    run(mm.reap_idle(now=1000))
+    assert stopped == [] and mm.started == {"a"}        # found, with a fresh window
+    run(mm.reap_idle(now=1000 + 31 * 60))
+    assert stopped == ["a"]                             # b is yours: never
+
+
+def test_a_reload_shares_who_started_what_with_the_old_manager():
+    old = ModelManager([LocalModel(key="a", label="a", port=1, stop="x")])
+    new = ModelManager([LocalModel(key="a", label="a", port=1, stop="x")])
+    new.adopt(old)
+    old.started.add("a")                    # a start that was still in flight on the old one
+    old.last_used["a"] = 5.0
+    assert new.started == {"a"} and new.last_used["a"] == 5.0
+
+
+@pytest.mark.real_processes
+def test_eki_knows_its_own_server_by_the_process(tmp_path):
+    import os, shutil, socket, subprocess, sys, time
+    from eki import models
+    if not shutil.which("lsof"):
+        pytest.skip("no lsof")
+    ports, procs = [], []
+    for env in ({**os.environ, "EKI_STARTED": "1"}, {k: v for k, v in os.environ.items()
+                                                     if k != "EKI_STARTED"}):
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        procs.append(subprocess.Popen([sys.executable, "-m", "http.server", str(port),
+                                       "--bind", "127.0.0.1"], env=env, cwd=tmp_path,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        ports.append(port)
+    try:
+        for _ in range(50):
+            if all(models.port_open(p) for p in ports):
+                break
+            time.sleep(0.1)
+        assert models.started_by_eki(ports[0]) is True
+        assert models.started_by_eki(ports[1]) is False
+        assert models.started_by_eki(1) is False        # nothing there
+    finally:
+        for p in procs:
+            p.terminate()
+
+
 def test_openai_compat_streams_and_sends_key(mock_http):
     seen = {}
 

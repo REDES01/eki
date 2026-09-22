@@ -27,11 +27,11 @@ from typing import Any, Dict, Optional
 QUALITY: Dict[str, Dict[str, float]] = {
     # a frontier model driven as an agent: can also change files
     "frontier_agent": {"chat": 0.95, "writing": 0.93, "translate": 0.92, "code": 0.95,
-                       "repo": 0.95, "math": 0.92, "research": 0.9, "image": 0.0},
+                       "repo": 0.95, "math": 0.92, "research": 0.9, "image": 0.0, "screen": 0.9},
     # the same vendors' faster, cheaper tier as an agent: sonnet, haiku, the
     # smaller Codex models — very good, a step behind on the hardest work
     "frontier_agent_fast": {"chat": 0.9, "writing": 0.88, "translate": 0.9, "code": 0.9,
-                            "repo": 0.9, "math": 0.82, "research": 0.85, "image": 0.0},
+                            "repo": 0.9, "math": 0.82, "research": 0.85, "image": 0.0, "screen": 0.85},
     # the same class of model over an API, no tools of its own
     "frontier_api": {"chat": 0.95, "writing": 0.93, "translate": 0.92, "code": 0.92,
                      "repo": 0.0, "math": 0.9, "research": 0.7, "image": 0.0},
@@ -49,9 +49,9 @@ QUALITY: Dict[str, Dict[str, float]] = {
     # follows a harness through small changes, not a refactor; measuring
     # it says where the line really is
     "large_agent": {"chat": 0.85, "writing": 0.82, "translate": 0.85, "code": 0.75,
-                    "repo": 0.62, "math": 0.72, "research": 0.55, "image": 0.0},
+                    "repo": 0.62, "math": 0.72, "research": 0.55, "image": 0.0, "screen": 0.4},
     "mid_agent": {"chat": 0.75, "writing": 0.7, "translate": 0.72, "code": 0.6,
-                  "repo": 0.5, "math": 0.55, "research": 0.4, "image": 0.0},
+                  "repo": 0.5, "math": 0.55, "research": 0.4, "image": 0.0, "screen": 0.3},
     "image": {"image": 0.9},
 }
 #: the class a local model's Codex companion takes

@@ -213,3 +213,13 @@ def test_the_model_cannot_talk_a_picture_edit_into_chat():
     c = classify.Classifier(Wrong(), use_model=True)
     assert run(c.label("make it bluer", after_image=True)).task == "image"
     assert run(c.label("make it bluer")).task == "chat"
+
+
+def test_the_screen_is_a_task_of_its_own_that_needs_a_program_with_tools():
+    from eki.classify import rules, wants_screen
+    for text in ("take screenshot", "Take a screenshot of my screen", "what's on my screen right now",
+                 "click the Save button in Xcode", "open Finder", "截图", "control my mac and open Safari"):
+        assert rules(text).task == "screen", text
+    for text in ("screenshot tools in Playwright, how?", "take a picture of a fox", "open the file config.yaml",
+                 "type hints in python"):
+        assert not wants_screen(text), text

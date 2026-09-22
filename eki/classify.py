@@ -25,7 +25,7 @@ import httpx
 
 from . import imagespec
 
-TASKS = ("chat", "writing", "translate", "code", "repo", "math", "research", "image")
+TASKS = ("chat", "writing", "translate", "code", "repo", "math", "research", "image", "screen")
 DIFFICULTIES = ("easy", "medium", "hard")
 #: past this, the rules' answer is used instead — a label is not worth a wait
 DEADLINE = 0.9
@@ -182,6 +182,24 @@ _HARD = re.compile(r"\b(design|architecture|migrat\w*|refactor|upgrade|split|end
 _SIMPLE = re.compile(r"\b(explain|compare|why|walk me through|plan|design|help me|"
                      r"what are the|how does|critique)\b", re.I)
 _EASY = re.compile(r"^(hi|hey|hello|thanks|thank you|yes|no|ok(ay)?)\b", re.I)
+#: The screen of this Mac: looking at it or driving it. Needs a program with
+#: tools (Claude Code, Codex with eki's screen tools), never a bare model —
+#: which would answer that it has no hands, and did.
+_SCREEN = re.compile(
+    r"\b(take|grab|capture|get|make) (a |me a |the )?(screen ?shot|screen capture|screengrab)\b"
+    r"|\bscreen ?shot\b.*\b(this|my|the) (screen|display|window|mac)\b"
+    r"|^\s*(take )?screen ?shot\s*$"
+    r"|\b(what('s| is) (on|in) (my|the) (screen|display|window)|see my screen|look at (my|the) screen)\b"
+    r"|\b(click|double.?click|right.?click|press|type|scroll)\b.*\b(button|window|app|screen|menu|"
+    r"field|tab|dialog|finder|safari|chrome|xcode|simulator)\b"
+    r"|\b(open|launch|switch to|bring up|quit) (the app |the )?(finder|safari|chrome|xcode|"
+    r"simulator|terminal|notes|mail|calendar|music|photos|system settings)\b"
+    r"|\b(control|use|drive|operate) (my|the) (mac|computer|desktop|screen)\b"
+    r"|截图|截屏|スクリーンショット|画面を(撮|見)", re.I)
+
+
+def wants_screen(text: str) -> bool:
+    return bool(_SCREEN.search(text))
 
 
 def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> Label:
@@ -193,6 +211,8 @@ def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> L
     text = prompt.strip()
     if has_folder:
         task = "repo"
+    elif wants_screen(text):
+        task = "screen"
     elif _REPO.search(text) or (_FILE.search(text) and _REPO_VERB.search(text)):
         task = "repo"
     elif asks_for_image(text) or (_IMAGE.search(text) and not _CODE.search(text)):
@@ -339,6 +359,8 @@ class Classifier:
             return fallback
         if has_folder:
             got.task = "repo"           # the folder is a fact, not an opinion
+        elif wants_screen(prompt):
+            got.task = "screen"         # and so is "take a screenshot"
         elif asks_for_image(prompt):
             got.task = "image"          # so is "generate an image of…"
         elif after_image and image_followup(prompt):

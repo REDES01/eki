@@ -520,7 +520,7 @@ class Engine:
         label = await self._label(run, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
         requested, _, wanted_model = (run["requested"] or "").partition(":")
-        need = Need(repo=bool(run["cwd"]), tools=bool(run["cwd"]),
+        need = Need(repo=bool(run["cwd"]), tools=bool(run["cwd"]) or label.task == "screen",
                     images_out=bool(run["images"]) or label.task == "image",
                     backend=requested or None,
                     task=label.task, difficulty=label.difficulty)

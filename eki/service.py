@@ -82,8 +82,19 @@ async def lifespan(app: FastAPI):
 
     async def reap() -> None:
         # unload local models eki started once they've sat unused a while
+        ticks = 0
         while True:
             await asyncio.sleep(60)
+            ticks += 1
+            if ticks % 60 == 1:
+                # once an hour: threads' folder copies nobody has used in a week
+                try:
+                    from . import workspace as workspace_mod
+                    gone = await asyncio.to_thread(workspace_mod.sweep)
+                    if gone:
+                        log.info("removed %d unused worktree(s)", len(gone))
+                except Exception:                   # noqa: BLE001
+                    log.exception("worktree sweep")
             try:
                 stopped = await eng.models.reap_idle()
                 if stopped:

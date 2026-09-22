@@ -90,16 +90,16 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       checkout it is running from, and what version that is
 - [ ] **"Change yourself" is a request.** (From the terminal it is: `eki self "…"`,
       dfccbdd on `self-build` — worktree, base check, routed run, commit, candidate
-      check, propose only. First real one: `self/4dab965b`, by Codex, fit. Still to
-      do: saying it in a chat.) Say it in a chat — "eki, make the
+      check, propose only — on main since 70eb734. First real one: `self/4dab965b`,
+      by Codex, fit. Still to do: saying it in a chat.) Say it in a chat — "eki, make the
       chat list show the project name" — and it is labelled as self-work and
       routed to a repo-capable agent on eki's own source, in a git worktree,
       never the checkout that's running
 - [ ] **Faults become requests too.** A run that failed inside eki's own code
       (a traceback, an adapter that stopped parsing a CLI's output after that
       CLI updated) opens a self-work run with the evidence attached
-- [x] **A candidate has to prove itself.** (`eki/candidate.py`, 57e7209 on
-      branch `self-build` in `~/eki-self`; design in `docs/self-build.md` there.
+- [x] **A candidate has to prove itself.** (`eki/candidate.py`, 57e7209,
+      merged into main in 70eb734; design in `docs/self-build.md`.
       The schema check is forwards-and-readable-by-the-old-build; the Swift app
       build isn't checked yet.) Tests pass; the app builds; the
       candidate engine starts on a spare port against a copy of the database,
@@ -134,11 +134,13 @@ Runs are fully parallel and more of them are unattended — schedules, agents
 calling eki, eki working on itself. Three things have to hold before that is
 safe to widen.
 
-- [ ] **A run that touches a repo gets its own worktree.** Today only Stage
-      1's self-work does. Two agents sent to the same folder otherwise
-      overwrite each other. Merge-back is an explicit step with a visible
-      result: merged, conflicted, or left as a branch. Folders that aren't
-      git get a per-folder lock instead
+- [x] **A run that touches a repo gets its own worktree.** Two agents sent
+      to the same folder otherwise overwrite each other. Merge-back is an
+      explicit step with a visible result: merged, conflicted, or left as a
+      branch. Folders that aren't git get a per-folder lock instead
+      (`eki/workspace.py`, `docs/worktrees.md`: one copy per thread, synced
+      from your folder each run; checked live with Claude Code and Codex in
+      one repo at once)
 - [ ] **The top of the tree can do anything.** A run the person started — in
       a chat, from the command line, or by a schedule they set up — has every
       permission: any file, the network, push, install. It is their Mac and

@@ -18,6 +18,9 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(learn, "ABSORBED", root / "eki" / "learn" / "absorbed")
     # Claude Code's own memory: a test must never read or move your notes
     monkeypatch.setattr(learn, "CLAUDE_PROJECTS", root / "claude" / "projects")
+    from eki import workspace
+    monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
+    monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")
 
 
 @pytest.fixture(autouse=True)

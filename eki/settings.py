@@ -49,6 +49,10 @@ DEFAULTS: Dict[str, Any] = {
     "skills_learn_daily": 8,
     #: who reviews: "" is the backend that did the work
     "skills_learn_backend": "",
+    #: a folder run works in its thread's own git worktree of the folder and
+    #: its changes are brought back when it ends, so parallel runs never
+    #: collide (eki/workspace.py); off: runs work in the folder, taking turns
+    "worktrees": True,
     #: a macOS notification when eki learns or improves a skill
     "notify_learned": True,
     #: appended to Claude Code's own system prompt

@@ -43,6 +43,7 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import workspace as workspace_mod
 from . import live
 from . import mcpbridge
 from . import mcpregistry
@@ -86,6 +87,8 @@ class Engine:
         self.runner = Runner(self.runs, self._dispatch)
         self._health: Dict[str, Tuple[float, Any]] = {}
         self._side_tasks: set = set()               # titles and the like
+        self._folder_locks: Dict[str, asyncio.Lock] = {}
+        self._in_copy: set = set()                  # worktrees a run is working in
         #: Claude Code kept open per conversation (see eki/live.py)
         self.live: Dict[str, Any] = {}
         #: a question or permission prompt a run is waiting on: run id → event
@@ -595,8 +598,22 @@ class Engine:
             history = [Message("user", run["prompt"])]
 
         kw: Dict[str, Any] = {}
+        # A folder run works in its thread's own copy of the folder (a git
+        # worktree), or takes its turn with the folder's lock — never two
+        # agents editing the same files at once (eki/workspace.py).
+        ws: Optional[workspace_mod.Workspace] = None
+        held: Optional[asyncio.Lock] = None
+        work_run = run
         if run["cwd"]:
-            kw["cwd"] = run["cwd"]
+            if self._folder_lock(run["cwd"]).locked():
+                yield {"backend": choice.backend.key,
+                       "reason": reason + "; waiting for another run in this folder"}
+            ws, held = await self._open_workspace(run, cid)
+            kw["cwd"] = ws.path
+            brief = workspace_mod.brief(ws)
+            work_run = {**run, "cwd": ws.path, "prompt": brief + run["prompt"]}
+            if brief and history and history[-1].role == "user":
+                history = history[:-1] + [Message("user", brief + history[-1].content)]
         # "make it bluer", said to a picture: the image model is handed the
         # picture to change. "try again" repeats whatever made it, anew.
         drawn: Dict[str, Any] = {}
@@ -642,11 +659,13 @@ class Engine:
         meta: Dict[str, Any] = {"run": run["id"], "label": meta_label}
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
+        if ws is not None and ws.mode == "worktree":
+            meta["worktree"] = {"path": ws.path, "branch": ws.branch}
         if drawn:
             meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
         if self._lives(backend):
-            stream = self._live_turn(run, cid, backend, choice.model)
+            stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
             stream = self._skilled(backend, history, kw, meta)
         else:
@@ -657,15 +676,17 @@ class Engine:
                     parts.append(chunk)
                 yield chunk
         except BackendError as e:
+            line = self._keep_workspace(ws, run)
             if cid:
-                self.store.add_turn(cid, "assistant", "".join(parts) or f"[failed: {e}]",
+                self.store.add_turn(cid, "assistant", ("".join(parts) or f"[failed: {e}]") + line,
                                     backend.key, choice.reason,
                                     meta={**meta, "failed": True})
             raise
         except (asyncio.CancelledError, GeneratorExit):
             # stopped on purpose: keep what arrived, and say it was cut short
+            line = self._keep_workspace(ws, run)
             if cid and parts:
-                self.store.add_turn(cid, "assistant", "".join(parts) + "\n\n*[stopped]*",
+                self.store.add_turn(cid, "assistant", "".join(parts) + "\n\n*[stopped]*" + line,
                                     backend.key, choice.reason,
                                     meta={**meta, "stopped": True})
             raise
@@ -676,6 +697,26 @@ class Engine:
                 pass
             if model is not None:
                 self.models.release(model.key)
+            if held is not None:
+                held.release()
+            if ws is not None:
+                self._in_copy.discard(ws.tree)
+
+        # the run's changes, from its copy back to the folder
+        if ws is not None and ws.mode == "worktree":
+            async with self._folder_lock(ws.folder):
+                try:
+                    result = await asyncio.to_thread(workspace_mod.close, ws, run["id"],
+                                                     run["prompt"], True)
+                except workspace_mod.WorkspaceError as e:
+                    result = {"state": "error", "why": str(e)[:200]}
+            meta["worktree"].update(result)
+            line = workspace_mod.summary(ws, result) if result.get("state") != "error" else \
+                f"eki: couldn't bring the changes back from `{ws.path}`: {result['why']}"
+            if line:
+                chunk = f"\n\n*{line}*"
+                parts.append(chunk)
+                yield chunk
 
         # usage is whatever the backend volunteered, normalised only in name:
         # an invented number would be worse than an absent one
@@ -690,7 +731,10 @@ class Engine:
             meta["checkpoint"] = checkpoint     # what /rewind needs to undo this turn's edits
             backend.last_checkpoint = ""                                    # type: ignore[attr-defined]
         if cid:
-            self.store.add_turn(cid, "assistant", "".join(parts), backend.key,
+            text = "".join(parts)
+            if ws is not None:
+                text = workspace_mod.home_paths(ws, text)   # links point at your files
+            self.store.add_turn(cid, "assistant", text, backend.key,
                                 choice.reason, meta=meta)
             session = getattr(backend, "last_session", None)
             if session:
@@ -703,9 +747,55 @@ class Engine:
             # and see whether the run taught something worth keeping as a
             # skill — also off the run's clock, and never its failure
             if backend.info.capabilities.text:
-                task = asyncio.create_task(self._learn(run, cid, backend.key))
+                seen = {**run, "_copy": ws.path} if ws is not None and ws.mode == "worktree" else run
+                task = asyncio.create_task(self._learn(seen, cid, backend.key))
                 self._side_tasks.add(task)
                 task.add_done_callback(self._side_tasks.discard)
+
+    # ---- a folder per thread (eki/workspace.py) ------------------------------
+
+    def _folder_lock(self, folder: str) -> asyncio.Lock:
+        return self._folder_locks.setdefault(os.path.realpath(folder), asyncio.Lock())
+
+    async def _open_workspace(self, run: Dict[str, Any], cid: str
+                              ) -> Tuple[workspace_mod.Workspace, Optional[asyncio.Lock]]:
+        """The run's place to work, and the lock it holds (lock mode only).
+
+        The thread's copy is synced under the folder's lock, so it never reads
+        the folder while another run is bringing changes back into it. A
+        second run in the same thread at once gets a copy of its own."""
+        folder = run["cwd"]
+        lock = self._folder_lock(folder)
+        if not self.settings.get("worktrees", True):
+            await lock.acquire()
+            return workspace_mod.Workspace(folder=folder, mode="lock", path=folder), lock
+        key = cid or run["id"]
+        async with lock:
+            try:
+                ws = await asyncio.to_thread(workspace_mod.open, folder, key)
+                if ws.mode == "worktree" and ws.tree in self._in_copy:
+                    ws = await asyncio.to_thread(workspace_mod.open, folder, f"{key}-{run['id']}")
+            except workspace_mod.WorkspaceError as e:
+                ws = workspace_mod.Workspace(folder=folder, mode="lock", path=folder,
+                                             note=f"no copy: {e}"[:200])
+        if ws.mode == "lock":
+            await lock.acquire()
+            return ws, lock
+        self._in_copy.add(ws.tree)
+        return ws, None
+
+    def _keep_workspace(self, ws: Optional[workspace_mod.Workspace], run: Dict[str, Any]) -> str:
+        """A run that failed or was stopped: what it changed stays on a
+        branch, not in your folder. Sync on purpose — this runs while the
+        run is being torn down."""
+        if ws is None or ws.mode != "worktree":
+            return ""
+        try:
+            result = workspace_mod.close(ws, run["id"], run["prompt"], ok=False)
+        except workspace_mod.WorkspaceError:
+            return ""
+        line = workspace_mod.summary(ws, result)
+        return f"\n\n*{line}*" if line else ""
 
     # ---- learning from runs (eki/learn.py) --------------------------------
 
@@ -756,7 +846,8 @@ class Engine:
         # Claude Code's memory, only in the folder this run worked in
         notes = await asyncio.to_thread(
             learn_mod.saved_notes, since,
-            [run.get("cwd") or str(self.SCRATCH)]) if kind == "claude_code" else []
+            [run.get("cwd") or str(self.SCRATCH), run.get("_copy") or ""]) \
+            if kind == "claude_code" else []
         turns = self.store.turns(cid)
         upto = int(run.get("user_turn") or 0)
         before = [t for t in turns if t["id"] < upto] if upto else turns[:-2]

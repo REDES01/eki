@@ -42,6 +42,7 @@ from . import classify
 from . import codex_live
 from . import discover_models
 from . import imagespec
+from . import learn as learn_mod
 from . import live
 from . import mcpbridge
 from . import mcpregistry
@@ -699,6 +700,120 @@ class Engine:
             task = asyncio.create_task(self._entitle(cid))
             self._side_tasks.add(task)
             task.add_done_callback(self._side_tasks.discard)
+            # and see whether the run taught something worth keeping as a
+            # skill — also off the run's clock, and never its failure
+            if backend.info.capabilities.text:
+                task = asyncio.create_task(self._learn(run, cid, backend.key))
+                self._side_tasks.add(task)
+                task.add_done_callback(self._side_tasks.discard)
+
+    # ---- learning from runs (eki/learn.py) --------------------------------
+
+    def _reviewer(self, did: str) -> Optional[Backend]:
+        """Who reviews a run: the backend that did the work (it knows the
+        domain), or the one setting `skills_learn_backend` names. A fresh
+        one-shot — never the thread's own session."""
+        key = str(self.settings.get("skills_learn_backend") or "") or did
+        b = self.get(key)
+        if b is None or not b.info.capabilities.text:
+            return None
+        if b.info.kind not in ("claude_code", "codex") and self._is_up(key) is not True:
+            return None
+        return adapters.build(b.info, self.options.get(key, {}))
+
+    async def _learn(self, run: Dict[str, Any], cid: str, did: str,
+                     manual: bool = False) -> Dict[str, Any]:
+        """Review a finished run for a lesson and, if there is one, commit it
+        to the skill store. Returns what happened; never raises."""
+        try:
+            return await self._learn_inner(run, cid, did, manual)
+        except Exception as e:                      # noqa: BLE001
+            learn_mod.record({"run": run.get("id"), "conversation": cid, "backend": did,
+                              "result": "error", "note": str(e)[:200]})
+            return {"result": "error", "note": str(e)[:200]}
+
+    async def _learn_inner(self, run: Dict[str, Any], cid: str, did: str,
+                           manual: bool) -> Dict[str, Any]:
+        # an agent may have edited a skill through its link during the run:
+        # that is its own commit, before anything eki learns lands on top
+        await asyncio.to_thread(skills_mod.settle_stray, did, run.get("id") or "")
+        mode = str(self.settings.get("skills_learn", "apply"))
+        if mode not in learn_mod.MODES or mode == "off":
+            return {"result": "off"}
+        turns = self.store.turns(cid)
+        upto = int(run.get("user_turn") or 0)
+        before = [t for t in turns if t["id"] < upto] if upto else turns[:-2]
+        why = learn_mod.signals(run.get("prompt") or "", before)
+        if manual and "asked" not in why:
+            why = ["asked", *why]
+        if not why:
+            return {"result": "nothing to learn"}
+        entry: Dict[str, Any] = {"run": run.get("id"), "conversation": cid, "signals": why,
+                                 "manual": manual}
+        daily = int(self.settings.get("skills_learn_daily", learn_mod.DAILY) or 0)
+        if "asked" not in why and learn_mod.budget_left(daily) <= 0:
+            return {"result": "over today's budget"}
+        reviewer = self._reviewer(did)
+        if reviewer is None:
+            learn_mod.record({**entry, "backend": did, "result": "skipped",
+                              "note": "no backend up to review it"})
+            return {"result": "skipped", "note": "no backend up to review it"}
+        entry["backend"] = reviewer.info.key
+        prompt = await asyncio.to_thread(learn_mod.build_prompt, turns, why)
+        kw: Dict[str, Any] = {"max_tokens": 1500, "temperature": 0.3}
+        if reviewer.info.kind in ("claude_code", "codex"):
+            learn_mod.WORKDIR.mkdir(parents=True, exist_ok=True)
+            kw["cwd"] = str(learn_mod.WORKDIR)
+        parts: List[str] = []
+
+        async def collect() -> None:
+            async for chunk in reviewer.stream([Message("user", prompt)], **kw):
+                if isinstance(chunk, str):
+                    parts.append(chunk)
+
+        try:
+            await asyncio.wait_for(collect(), timeout=learn_mod.TIMEOUT)
+        except (asyncio.TimeoutError, BackendError) as e:
+            learn_mod.record({**entry, "result": "error", "note": str(e)[:200] or "timed out"})
+            return {"result": "error", "note": str(e)[:200] or "timed out"}
+        finally:
+            try:
+                await reviewer.close()
+            except Exception:                       # noqa: BLE001
+                pass
+        answer = learn_mod.parse("".join(parts))
+        if answer is None:
+            learn_mod.record({**entry, "result": "unreadable", "note": "".join(parts)[:200]})
+            return {"result": "unreadable"}
+        change, reason = await asyncio.to_thread(learn_mod.check, answer)
+        if change is None:
+            learn_mod.record({**entry, "result": "none", "note": reason})
+            return {"result": "none", "note": reason}
+        done = await asyncio.to_thread(learn_mod.apply, change, mode, run.get("id") or "", cid)
+        learn_mod.record({**entry, "result": change["action"] if done.get("applied") else "proposed",
+                          "skill": change["name"], "note": change["why"]})
+        if done.get("applied") and self.settings.get("notify_learned", True):
+            verb = "improved" if change["action"] == "edit" else "learned"
+            off = "" if done.get("enabled") else " (off until you turn it on)"
+            await self._notify(f"{verb} a skill: {change['name']}{off}", change["why"])
+        return {"result": change["action"], **done, "why": change["why"]}
+
+    async def learn_now(self, cid: str) -> Dict[str, Any]:
+        """Review the latest finished run in a thread because you asked."""
+        run = self.runs.last_done(cid)
+        if run is None:
+            raise KeyError(cid)
+        return await self._learn(run, cid, run.get("backend") or "", manual=True)
+
+    async def _notify(self, title: str, body: str) -> None:
+        clean = lambda t: t.replace(chr(34), chr(39)).replace("\\", "/")[:200]   # noqa: E731
+        try:
+            await asyncio.create_subprocess_exec(
+                "osascript", "-e",
+                f'display notification "{clean(body)}" with title "eki" subtitle "{clean(title)}"',
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        except OSError:
+            pass
 
     # ---- Claude Code and Codex, kept open --------------------------------
 

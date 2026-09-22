@@ -46,7 +46,46 @@ eki skills on NAME [--for local]
 eki skills import [NAME]            # take skills from the CLIs' folders in
 eki skills rm NAME                  # out of the store (still in git history)
 eki skills log [NAME]
+eki skills learned                  # what eki learned, and its latest reviews
+eki skills learn CONVERSATION       # review a thread for a skill now
 ```
+
+## Skills eki learns
+
+After a run that taught something, eki writes the lesson down as a skill —
+or improves one it wrote before — and commits it to the store
+(`eki/learn.py`). It only looks when there's a sign:
+
+| Signal | What it looks like |
+|---|---|
+| asked | "remember this as a skill", "from now on…", "next time…", 记住, 次から |
+| corrected | the message opens by correcting the answer before it: "no, use pnpm", "don't…" |
+| recovered | the answer before failed or was stopped, and this one went through |
+
+The backend that did the work reviews it in a fresh one-shot (Claude Code
+and Codex from `~/.eki/learn`, never a repo); a local model reviews only
+while it is up. The review usually answers *none*: a lesson has to be
+reusable, concrete and earned in that run, with no secrets and nothing
+one-off. What passes is a commit — `learn NAME: why` or `improve NAME: why`,
+with the run and conversation in the message — and a notification.
+
+- **What eki may change:** skills it learned itself and nobody has edited
+  since. Edit one (`eki skills edit`, the panel) and it's yours; eki reads
+  it but never rewrites it. `eki` (the built-in) is off limits.
+- **Edits made outside eki** — an agent that changed a skill through its
+  link in `~/.claude/skills`, you in an editor — are committed as their
+  own change (`edit NAME by claude_code, outside eki`) when the run ends,
+  so nothing is swept into eki's next commit.
+- **Seeing and undoing:** `eki skills learned` lists what it learned and its
+  latest reviews; `eki skills rm NAME` or `git -C ~/.eki/skills revert <c>`
+  takes one back. `eki skills learn <conversation>` asks for a review of a
+  thread now.
+
+Settings: `skills_learn` — `apply` (default: on at once), `propose` (arrives
+off, and a skill that is on isn't changed under you), `off`;
+`skills_learn_daily` — reviews eki starts on its own per day (8; the ones you
+ask for don't count); `skills_learn_backend` — who reviews ("" = whoever did
+the work); `notify_learned`.
 
 ## Rules
 

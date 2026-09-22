@@ -40,6 +40,17 @@ DEFAULTS: Dict[str, Any] = {
     #: the same for Codex, through its app-server (eki/codex_live.py)
     "live_codex": True,
     "skills_local": True,        # eki loads skills for models with no loader of their own
+    #: after a run that taught something (you asked it be remembered, you
+    #: corrected an answer, a failed attempt then worked), eki drafts a
+    #: skill or improves one it learned before (eki/learn.py): "apply" —
+    #: on at once; "propose" — it arrives off; "off"
+    "skills_learn": "apply",
+    #: reviews eki starts on its own per day (ones you ask for don't count)
+    "skills_learn_daily": 8,
+    #: who reviews: "" is the backend that did the work
+    "skills_learn_backend": "",
+    #: a macOS notification when eki learns or improves a skill
+    "notify_learned": True,
     #: appended to Claude Code's own system prompt
     "claude_system_prompt": "",
     #: serve eki's own tools to Claude Code in-process (eki/mcpbridge.py):

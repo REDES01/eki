@@ -499,6 +499,23 @@ def skills_import(body: SkillImportBody) -> Any:
     return {**_skills_state(), "report": skills_mod.import_existing(body.names or None)}
 
 
+@app.get("/api/skills-learned")
+def skills_learned(limit: int = 30) -> Any:
+    """Skills eki learned from runs, and its latest reviews (eki/learn.py)."""
+    from . import learn as learn_mod
+    return {"skills": [s for s in skills_mod.list_skills() if s.get("learned")],
+            "reviews": learn_mod.reviews(limit)}
+
+
+@app.post("/api/conversations/{cid}/learn")
+async def learn_from(cid: str) -> Any:
+    """Review this thread's latest finished run for a skill, because you asked."""
+    try:
+        return await engine().learn_now(cid)
+    except KeyError:
+        raise HTTPException(404, "no finished run in that conversation")
+
+
 @app.post("/api/skills/sync")
 def skills_sync() -> Any:
     return {**_skills_state(), "report": skills_mod.sync()}

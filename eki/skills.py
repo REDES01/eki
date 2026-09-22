@@ -164,6 +164,26 @@ def _commit(message: str) -> None:
         _git("commit", "-q", "-m", message)
 
 
+def settle_stray(by: str = "", run: str = "") -> List[str]:
+    """Commit what someone changed in the store without eki — an agent
+    that edited a skill through its link, you in an editor — so every
+    change stays a commit of its own, not swept into eki's next one.
+    Returns the skills that changed."""
+    if not (STORE / ".git").exists():
+        return []
+    status = _git("status", "--porcelain")
+    changed = sorted({line[3:].strip().strip('"').split("/", 1)[0]
+                      for line in status.splitlines() if len(line) > 3})
+    if not changed:
+        return []
+    who = f" by {by}" if by else ""
+    subject = f"edit {', '.join(changed)}{who}, outside eki"
+    if len(subject) > 72:
+        subject = f"edit {len(changed)} skills{who}, outside eki"
+    _commit(subject + (f"\n\nRun: {run}" if run else ""))
+    return changed
+
+
 def history(limit: int = 30, name: str = "") -> List[Dict[str, str]]:
     args = ["log", f"-n{limit}", "--format=%h%x09%ad%x09%s", "--date=short"]
     if name:
@@ -223,6 +243,7 @@ def list_skills() -> List[Dict[str, Any]]:
         s.update({"backends": [b for b in BACKENDS if b in (e.get("backends") or [])],
                   "enabled": bool(e.get("enabled", True)), "origin": e.get("origin", "store"),
                   "generated": bool(e.get("generated")), "uses": int(e.get("uses") or 0),
+                  "learned": e.get("learned") if isinstance(e.get("learned"), dict) else None,
                   "views": _view_state(folder.name)})
         out.append(s)
     return out
@@ -277,10 +298,61 @@ def put(name: str, text: str = "", description: str = "", body: str = "",
     meta = _meta()
     e = _entry(meta, name)
     e["generated"] = False
+    if isinstance(e.get("learned"), dict):
+        e["learned"]["edited_by_you"] = True    # yours now: eki won't rewrite it
     if backends is not None:
         e["backends"] = [b for b in BACKENDS if b in backends]
     _save_meta(meta)
     _commit(message or (f"edit {name}" if existed else f"add {name}"))
+    sync()
+    return get(name) or {}
+
+
+def learnable(name: str) -> bool:
+    """Whether eki may rewrite this skill: it learned it, and nobody has
+    edited it since (eki/learn.py)."""
+    e = _meta().get(name) or {}
+    learned = e.get("learned")
+    return (name != EKI_SKILL and e.get("origin") == "learned" and isinstance(learned, dict)
+            and not learned.get("edited_by_you"))
+
+
+def learn(name: str, description: str, body: str, *, why: str, run: str = "",
+          conversation: str = "", backends: Optional[List[str]] = None,
+          enabled: bool = True) -> Dict[str, Any]:
+    """Write a skill eki learned from a run, or improve one it learned before.
+    The commit says why and which run taught it. A skill someone else wrote
+    or edited is refused."""
+    _check_name(name)
+    _ensure_store()
+    folder = STORE / name
+    existed = (folder / "SKILL.md").is_file()
+    if existed and not learnable(name):
+        raise ValueError(f"{name} isn't eki's to rewrite")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "SKILL.md").write_text(render(name, description, body))
+    meta = _meta()
+    e = _entry(meta, name)
+    e["origin"] = "learned"
+    e["generated"] = False
+    if not existed:
+        e["enabled"] = bool(enabled)
+    if backends:
+        e["backends"] = [b for b in BACKENDS if b in backends]
+    before = e.get("learned") if isinstance(e.get("learned"), dict) else {}
+    e["learned"] = {"why": why, "run": run, "conversation": conversation,
+                    "at": int(time.time()), "times": int(before.get("times") or 0) + 1,
+                    "first": before.get("first") or int(time.time())}
+    _save_meta(meta)
+    verb = "improve" if existed else "learn"
+    subject = f"{verb} {name}"
+    head = re.split(r"(?<=[.;:!?])\s", why.strip(), maxsplit=1)[0].rstrip(".")
+    if head and len(subject) + 2 + len(head) <= 72:
+        subject += f": {head}"
+    body = "\n".join(x for x in (why.strip(), "",
+                                  f"Run: {run}" if run else "",
+                                  f"Conversation: {conversation}" if conversation else "") if x is not None)
+    _commit(subject + "\n\n" + body.strip())
     sync()
     return get(name) or {}
 
@@ -480,6 +552,7 @@ def ensure_builtin() -> None:
 def boot() -> Dict[str, Any]:
     """At engine start: the store exists, eki's skill is current, the views match."""
     try:
+        settle_stray()
         ensure_builtin()
         return sync()
     except OSError as e:

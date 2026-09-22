@@ -164,6 +164,14 @@ class RunStore:
                 " ORDER BY created_at DESC LIMIT 1", (conversation,)).fetchone()
         return dict(row) if row else None
 
+    def last_done(self, conversation: str) -> Optional[Dict[str, Any]]:
+        """The newest run in a conversation that finished."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM runs WHERE conversation_id = ? AND state = 'done'"
+                " ORDER BY created_at DESC, rowid DESC LIMIT 1", (conversation,)).fetchone()
+        return dict(row) if row else None
+
     def live(self) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(

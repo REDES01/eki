@@ -365,6 +365,31 @@ def cmd_skills(args) -> int:
         if act == "sync":
             print(json.dumps(skills.sync(), indent=2))
             return 0
+        if act == "learned":
+            data = call("GET", "/api/skills-learned", args.service)
+            rows = data.get("skills") or []
+            for sk in rows:
+                l = sk["learned"] or {}
+                state = ("on" if sk["enabled"] else "off") + (", edited by you" if l.get("edited_by_you") else "")
+                when = time.strftime("%Y-%m-%d", time.localtime(l.get("at") or 0))
+                print(f"{sk['name']:24} [{state}] {when} ×{l.get('times', 1)}\n    {l.get('why', '')[:110]}")
+            if not rows:
+                print("eki hasn't learned a skill yet")
+            revs = data.get("reviews") or []
+            if revs:
+                print("\nlatest reviews:")
+                for r in revs[:10]:
+                    when = time.strftime("%m-%d %H:%M", time.localtime(r.get("at") or 0))
+                    sig = ",".join(r.get("signals") or [])
+                    what = r.get("skill") or ""
+                    print(f"  {when}  {r.get('result', ''):<10} {sig:<20} {what:<20} {(r.get('note') or '')[:60]}")
+            return 0
+        if act == "learn":
+            if not name:
+                print("eki skills learn <conversation-id>", file=sys.stderr)
+                return 1
+            print(json.dumps(call("POST", f"/api/conversations/{name}/learn", args.service), indent=2))
+            return 0
         if act == "log":
             for h in skills.history(30, name):
                 print(f"{h['commit']}  {h['date']}  {h['message']}")
@@ -443,7 +468,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     k = sub.add_parser("skills", help="one set of skills for Claude Code, Codex and local models")
     k.add_argument("action", nargs="?", default="list",
                    choices=["list", "show", "cat", "new", "edit", "on", "off", "rm",
-                            "import", "sync", "log"])
+                            "import", "sync", "log", "learned", "learn"])
     k.add_argument("name", nargs="?", default="")
     k.add_argument("-d", "--description", default="", help="new: when a model should use it")
     k.add_argument("-f", "--file", default="", help="new: a SKILL.md to take as is")

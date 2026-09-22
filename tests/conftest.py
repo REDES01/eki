@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Nothing a test does reaches your own skill store or eki's learning log."""
+"""Nothing a test does reaches your own skill store, eki's learning log, or
+Claude Code's memory."""
 import pytest
 
 
@@ -14,3 +15,6 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(skills, "LEGACY", [root / "codex" / "skills"])
     monkeypatch.setattr(learn, "LOG", root / "eki" / "learn.json")
     monkeypatch.setattr(learn, "WORKDIR", root / "eki" / "learn")
+    monkeypatch.setattr(learn, "ABSORBED", root / "eki" / "learn" / "absorbed")
+    # Claude Code's own memory: a test must never read or move your notes
+    monkeypatch.setattr(learn, "CLAUDE_PROJECTS", root / "claude" / "projects")

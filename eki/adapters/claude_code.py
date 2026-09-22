@@ -19,6 +19,7 @@ import shutil
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from .. import learn
 from .. import mcpregistry
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
@@ -96,6 +97,9 @@ class ClaudeCodeBackend(Backend):
         if resume:
             argv += ["--resume", resume]
         argv += mcpregistry.claude_argv(claude_bin=self.bin or "")   # the registry + built-ins, this session
+        note = learn.agent_note(settings_mod.load())
+        if note:
+            argv += ["--append-system-prompt", note]    # remembering is eki's (eki/learn.py)
         if self._auto():
             argv.append("--dangerously-skip-permissions")
         if cwd:

@@ -736,22 +736,34 @@ class Engine:
                            manual: bool) -> Dict[str, Any]:
         # an agent may have edited a skill through its link during the run:
         # that is its own commit, before anything eki learns lands on top
-        await asyncio.to_thread(skills_mod.settle_stray, did, run.get("id") or "")
+        rid = run.get("id") or ""
+        await asyncio.to_thread(skills_mod.settle_stray, did, rid)
         mode = str(self.settings.get("skills_learn", "apply"))
         if mode not in learn_mod.MODES or mode == "off":
             return {"result": "off"}
+        # what the agent kept for itself during the run, despite being told
+        # remembering is eki's: skill folders it wrote are taken in, and
+        # notes in Claude Code's memory are looked at below
+        since = float(run.get("created_at") or time.time()) - 2
+        adopted = await asyncio.to_thread(learn_mod.adopt_new_folders, since, did, rid)
+        notes = await asyncio.to_thread(learn_mod.saved_notes, since)
         turns = self.store.turns(cid)
         upto = int(run.get("user_turn") or 0)
         before = [t for t in turns if t["id"] < upto] if upto else turns[:-2]
         why = learn_mod.signals(run.get("prompt") or "", before)
         if manual and "asked" not in why:
             why = ["asked", *why]
+        if notes:
+            why.append("saved")
         if not why:
-            return {"result": "nothing to learn"}
-        entry: Dict[str, Any] = {"run": run.get("id"), "conversation": cid, "signals": why,
+            return {"result": "nothing to learn", "adopted": adopted} if adopted else \
+                {"result": "nothing to learn"}
+        entry: Dict[str, Any] = {"run": rid, "conversation": cid, "signals": why,
                                  "manual": manual}
+        if adopted:
+            entry["adopted"] = adopted
         daily = int(self.settings.get("skills_learn_daily", learn_mod.DAILY) or 0)
-        if "asked" not in why and learn_mod.budget_left(daily) <= 0:
+        if not ({"asked", "saved"} & set(why)) and learn_mod.budget_left(daily) <= 0:
             return {"result": "over today's budget"}
         reviewer = self._reviewer(did)
         if reviewer is None:
@@ -759,7 +771,7 @@ class Engine:
                               "note": "no backend up to review it"})
             return {"result": "skipped", "note": "no backend up to review it"}
         entry["backend"] = reviewer.info.key
-        prompt = await asyncio.to_thread(learn_mod.build_prompt, turns, why)
+        prompt = await asyncio.to_thread(learn_mod.build_prompt, turns, why, notes)
         kw: Dict[str, Any] = {"max_tokens": 1500, "temperature": 0.3}
         if reviewer.info.kind in ("claude_code", "codex"):
             learn_mod.WORKDIR.mkdir(parents=True, exist_ok=True)
@@ -785,13 +797,27 @@ class Engine:
         if answer is None:
             learn_mod.record({**entry, "result": "unreadable", "note": "".join(parts)[:200]})
             return {"result": "unreadable"}
+        covered = learn_mod.absorbs(answer, notes)
         change, reason = await asyncio.to_thread(learn_mod.check, answer)
         if change is None:
-            learn_mod.record({**entry, "result": "none", "note": reason})
-            return {"result": "none", "note": reason}
-        done = await asyncio.to_thread(learn_mod.apply, change, mode, run.get("id") or "", cid)
+            # "none" can still mean "a skill already says this": then the
+            # note's copy goes. A refused change takes nothing with it.
+            absorbed = []
+            if str(answer.get("action") or "").lower() == "none" and covered:
+                absorbed = await asyncio.to_thread(learn_mod.absorb, covered)
+            learn_mod.record({**entry, "result": "none", "note": reason,
+                              **({"absorbed": absorbed} if absorbed else {})})
+            return {"result": "none", "note": reason, "absorbed": absorbed}
+        done = await asyncio.to_thread(learn_mod.apply, change, mode, rid, cid)
+        absorbed = []
+        # only once the lesson is live in the store does the note's copy go;
+        # a proposed (off) skill leaves Claude's note where it is
+        if covered and done.get("applied") and done.get("enabled"):
+            absorbed = await asyncio.to_thread(learn_mod.absorb, covered)
+        done["absorbed"] = absorbed
         learn_mod.record({**entry, "result": change["action"] if done.get("applied") else "proposed",
-                          "skill": change["name"], "note": change["why"]})
+                          "skill": change["name"], "note": change["why"],
+                          **({"absorbed": absorbed} if absorbed else {})})
         if done.get("applied") and self.settings.get("notify_learned", True):
             verb = "improved" if change["action"] == "edit" else "learned"
             off = "" if done.get("enabled") else " (off until you turn it on)"
@@ -987,8 +1013,9 @@ class Engine:
                                       screen=bool(self.settings.get("claude_screen", True)))
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
                            if b.info.kind == "claude_code"), "") or ""
-        return live.LiveSession(argv, cwd, None,
-                                str(self.settings.get("claude_system_prompt", "")),
+        prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
+                                          learn_mod.agent_note(self.settings)) if x)
+        return live.LiveSession(argv, cwd, None, prompt,
                                 bridge=bridge,
                                 extra_servers=mcpregistry.builtin_for_claude(claude_bin))
 
@@ -1349,7 +1376,8 @@ class Engine:
         wanted = model or str(self.options.get(backend.key, {}).get("model") or "")
         permissions = str(self.settings.get("permissions", "auto"))
         local = bool(self.options.get(backend.key, {}).get("local_model"))
-        guidance = codex_live.LOCAL_INSTRUCTIONS if local else ""
+        guidance = "\n\n".join(x for x in (codex_live.LOCAL_INSTRUCTIONS if local else "",
+                                            learn_mod.agent_note(self.settings)) if x)
         session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
                                           permissions=permissions, resume=resume or "",
                                           developer_instructions=guidance)

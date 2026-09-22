@@ -18,6 +18,7 @@ import shutil
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from . import _codex_events as events
+from .. import learn
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 
@@ -74,12 +75,21 @@ class CodexBackend(Backend):
                 "-c", f"model_context_window={int(self.options.get('context_tokens', 32000))}",
                 "-c", "model_reasoning_effort=\"medium\""]
 
+    def _disabled(self) -> List[str]:
+        """Features turned off for runs under eki: what the provider's options
+        say, and Codex's own memories while eki is learning — one lesson is
+        kept in one place, the skill store every backend reads (eki/learn.py)."""
+        off = list(self.disabled_features)
+        if learn.learning(settings_mod.load()) and "memories" not in off:
+            off.append("memories")
+        return off
+
     def live_argv(self) -> List[str]:
         """The app-server (see eki/codex_live.py): the program without its
         screen, questions and approvals over stdio."""
         argv = [self.bin, "--enable", "default_mode_request_user_input",
                 "-c", "suppress_unstable_features_warning=true"]
-        for feature in self.disabled_features:
+        for feature in self._disabled():
             argv += ["--disable", feature]
         argv += self.gateway_flags()
         argv.append("app-server")
@@ -111,10 +121,13 @@ class CodexBackend(Backend):
         # a local model, served through eki's own Responses endpoint
         # (see eki/gateway.py): Codex's harness, the Mac's model
         argv += self.gateway_flags()
-        for feature in self.disabled_features:
+        for feature in self._disabled():
             # a feature whose helper binary isn't installed fails closed and
             # the model then reports it cannot edit anything
             argv += ["--disable", feature]
+        note = learn.agent_note(settings_mod.load())
+        if note:
+            argv += ["-c", f"developer_instructions={json.dumps(note)}"]
         argv.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(

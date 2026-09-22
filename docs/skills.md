@@ -76,6 +76,20 @@ with the run and conversation in the message — and a notification.
   link in `~/.claude/skills`, you in an editor — are committed as their
   own change (`edit NAME by claude_code, outside eki`) when the run ends,
   so nothing is swept into eki's next commit.
+- **One lesson, one place.** Claude Code and Codex each have a memory of
+  their own, which would keep a second copy only that program sees. While
+  eki is learning, both are told to leave remembering to eki (an added
+  system prompt / developer instruction), and Codex runs with its
+  `memories` feature off. If Claude Code saves a note to its auto-memory
+  anyway, that is a signal of its own: the review is shown the note, and a
+  note whose lesson is now a skill (new, or one that already said it) is
+  moved out of Claude's memory to `~/.eki/learn/absorbed/` and dropped from
+  its `MEMORY.md`. Notes that are facts about one project stay. A skill
+  folder an agent writes straight into `~/.claude/skills` or
+  `~/.agents/skills` is taken into the store (`take in NAME, written by
+  codex`). In `propose` mode nothing is moved out of Claude's memory, since
+  the skill is still off; with `skills_learn` off, both programs' own
+  memory is theirs again.
 - **Seeing and undoing:** `eki skills learned` lists what it learned and its
   latest reviews; `eki skills rm NAME` or `git -C ~/.eki/skills revert <c>`
   takes one back. `eki skills learn <conversation>` asks for a review of a

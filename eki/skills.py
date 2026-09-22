@@ -346,7 +346,7 @@ def learn(name: str, description: str, body: str, *, why: str, run: str = "",
     _save_meta(meta)
     verb = "improve" if existed else "learn"
     subject = f"{verb} {name}"
-    head = re.split(r"(?<=[.;:!?])\s", why.strip(), maxsplit=1)[0].rstrip(".")
+    head = re.split(r"(?<=[.;!?])\s", why.strip(), maxsplit=1)[0].rstrip(".")
     if head and len(subject) + 2 + len(head) <= 72:
         subject += f": {head}"
     body = "\n".join(x for x in (why.strip(), "",
@@ -355,6 +355,26 @@ def learn(name: str, description: str, body: str, *, why: str, run: str = "",
     _commit(subject + "\n\n" + body.strip())
     sync()
     return get(name) or {}
+
+
+def adopt(names: List[str], by: str = "", run: str = "") -> List[str]:
+    """Take skill folders an agent wrote straight into a CLI's folder into
+    the store, linked back, as skills eki learned (so it may improve them
+    and you may take them back like any other)."""
+    report = import_existing(names, message=f"take in {', '.join(names)}"
+                             + (f", written by {by}" if by else "")
+                             + (f"\n\nRun: {run}" if run else ""))
+    done = report.get("imported") or []
+    if done:
+        meta = _meta()
+        for name in done:
+            e = _entry(meta, name)
+            e["origin"] = "learned"
+            e["learned"] = {"why": f"written by {by or 'an agent'} during a run", "run": run,
+                            "conversation": "", "at": int(time.time()), "times": 1,
+                            "first": int(time.time()), "by": by}
+        _save_meta(meta)
+    return done
 
 
 def remove(name: str) -> None:
@@ -455,7 +475,7 @@ def unmanaged() -> List[Dict[str, Any]]:
     return out
 
 
-def import_existing(names: Optional[List[str]] = None) -> Dict[str, Any]:
+def import_existing(names: Optional[List[str]] = None, message: str = "") -> Dict[str, Any]:
     """Take skills found in the CLIs' folders into the store, then link them
     back. A real folder is moved; a link someone else made is copied
     through and left where it is. A name the store already has is skipped."""
@@ -479,7 +499,7 @@ def import_existing(names: Optional[List[str]] = None) -> Dict[str, Any]:
         done.append(folder.name)
     _save_meta(meta)
     if done:
-        _commit("import " + ", ".join(done))
+        _commit(message or ("import " + ", ".join(done)))
     report = sync()
     return {"imported": done, "skipped": skipped, **report}
 

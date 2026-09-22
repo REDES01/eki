@@ -28,6 +28,20 @@ A skill you wrote or edited is yours — eki reads it, never rewrites it — and
 message says why and which run taught it; `eki skills learned` lists them and
 `eki skills rm NAME` or `git revert` takes one back.
 
+One lesson, one place. Claude Code and Codex each have a memory of their
+own, which would keep a second copy that only that program sees. So while
+eki is learning:
+
+- both are told (`agent_note`) to leave remembering to eki rather than
+  write their memory, CLAUDE.md / AGENTS.md or a skills folder;
+- Codex runs with its `memories` feature off;
+- a note Claude Code saves to its auto-memory anyway (~/.claude/projects/
+  */memory) during a run is itself a signal: the review sees it, and a
+  note whose lesson is now a skill is moved out of Claude's memory into
+  ~/.eki/learn/absorbed. Notes that are facts about one project stay;
+- a skill folder an agent made directly in ~/.claude/skills or
+  ~/.agents/skills during a run is taken into the store as eki's own.
+
 Setting `skills_learn`: "apply" (default — a learned skill is on at once),
 "propose" (it arrives turned off, for you to turn on), or "off".
 """
@@ -42,12 +56,116 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import skills
 
 LOG = Path("~/.eki/learn.json").expanduser()
+#: Claude Code's auto-memory: ~/.claude/projects/<project>/memory/*.md
+CLAUDE_PROJECTS = Path("~/.claude/projects").expanduser()
+#: where a note whose lesson became a skill is moved to (never deleted)
+ABSORBED = Path("~/.eki/learn/absorbed").expanduser()
 #: where a CLI reviewing a run is started: never a repo, nothing to touch
 WORKDIR = Path("~/.eki/learn").expanduser()
 #: reviews eki starts on its own in a day (the ones you ask for don't count)
 DAILY = 8
 TIMEOUT = 240.0
 MODES = ("apply", "propose", "off")
+
+# ---- what the agents are told ------------------------------------------------
+
+AGENT_NOTE = (
+    "Remembering is eki's job on this Mac. When the person asks you to remember "
+    "something, or corrects how you work, don't save it to your own memory, to "
+    "CLAUDE.md or AGENTS.md, or to a skills folder (unless they name that file) — "
+    "say it's noted and follow it for the rest of this conversation. After each "
+    "turn eki reviews the work and keeps lasting lessons as skills that every "
+    "agent here (Claude Code, Codex, local models) is given.")
+
+
+def learning(settings: Dict[str, Any]) -> bool:
+    return str(settings.get("skills_learn", "apply")) in ("apply", "propose")
+
+
+def agent_note(settings: Dict[str, Any]) -> str:
+    """The standing instruction for Claude Code and Codex — none when eki
+    isn't learning, so their own memory is theirs again."""
+    return AGENT_NOTE if learning(settings) else ""
+
+
+# ---- what the agents saved anyway ---------------------------------------------
+
+def saved_notes(since: float, limit: int = 6) -> List[Dict[str, Any]]:
+    """Notes Claude Code wrote to its auto-memory since `since` — the index
+    (MEMORY.md) aside, and never the reviewer's own folder."""
+    out: List[Dict[str, Any]] = []
+    if not CLAUDE_PROJECTS.is_dir():
+        return out
+    work = str(WORKDIR).replace("/", "-").replace(".", "-")
+    for p in sorted(CLAUDE_PROJECTS.glob("*/memory/*.md")):
+        if p.name == "MEMORY.md" or p.parent.parent.name == work:
+            continue
+        try:
+            if p.stat().st_mtime < since:
+                continue
+            text = p.read_text(errors="replace")
+        except OSError:
+            continue
+        out.append({"file": f"{p.parent.parent.name}/{p.name}", "path": str(p),
+                    "text": text[:3000]})
+    return out[-limit:]
+
+
+def absorb(notes: List[Dict[str, Any]]) -> List[str]:
+    """Move notes out of Claude Code's memory (their lesson is a skill now)
+    and take their lines out of that project's MEMORY.md index."""
+    moved: List[str] = []
+    for n in notes:
+        src = Path(n["path"])
+        if not src.is_file():
+            continue
+        project = src.parent.parent.name
+        dest_dir = ABSORBED / project
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        i = 1
+        while dest.exists():
+            dest = dest_dir / f"{src.stem}.{i}{src.suffix}"
+            i += 1
+        src.replace(dest)
+        index = src.parent / "MEMORY.md"
+        try:
+            lines = index.read_text().splitlines(keepends=True)
+            kept = [l for l in lines if f"({src.name})" not in l and f"/{src.name})" not in l]
+            if kept != lines:
+                index.write_text("".join(kept))
+        except OSError:
+            pass
+        moved.append(n["file"])
+    return moved
+
+
+def absorbs(answer: Dict[str, Any], notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The notes the review says its answer (or an existing skill) covers."""
+    said = answer.get("absorbs")
+    if not isinstance(said, list):
+        return []
+    names = {str(x).strip() for x in said}
+    return [n for n in notes if n["file"] in names or n["file"].split("/", 1)[-1] in names]
+
+
+def adopt_new_folders(since: float, by: str = "", run: str = "") -> List[str]:
+    """Skill folders an agent made itself in a CLI's own folder during a
+    run: taken into the store (one copy, every backend) as eki's own."""
+    fresh = []
+    for u in skills.unmanaged():
+        if u["held"] or u["link"]:
+            continue
+        try:
+            if (Path(u["path"]) / "SKILL.md").stat().st_mtime < since:
+                continue
+        except OSError:
+            continue
+        fresh.append(Path(u["path"]).name)
+    if not fresh:
+        return []
+    return skills.adopt(fresh, by=by, run=run)
+
 
 # ---- is there anything to learn? ----------------------------------------------
 
@@ -96,6 +214,7 @@ WHY = {
     "asked": "The person asked for this to be remembered.",
     "corrected": "The person corrected the answer before this one.",
     "recovered": "The attempt before this one failed or was stopped; this one went through.",
+    "saved": "The agent saved a note to its own memory during this work.",
 }
 
 PROMPT = """\
@@ -122,11 +241,26 @@ Skills that already exist (name: when to use it) — do not duplicate them:
 The work, oldest first:
 {transcript}
 
+{notes}
 Reply with ONE JSON object and nothing else. One of:
 {{"action": "none", "why": "…"}}
 {{"action": "new", "name": "short-kebab-name", "description": "One sentence: which kind of task this is for and what it makes the agent do.", "body": "Markdown instructions, under 300 words.", "why": "what in this work taught it"}}
 {{"action": "edit", "name": "<an editable skill>", "description": "…", "body": "the full new body", "why": "…"}}
-Prefer "edit" when an editable skill already covers this kind of task."""
+Prefer "edit" when an editable skill already covers this kind of task.{absorbs}
+Only answer; don't save anything to memory or to files."""
+
+NOTES = """
+The agent also saved these notes to its own memory during the work. eki keeps
+lessons as shared skills instead, so that every agent gets them — one lesson,
+one place:
+{blocks}
+"""
+
+ABSORBS = """
+Add "absorbs": ["<note file>", …] to your answer, listing each note above whose
+lesson your answer — or a skill that already exists — now fully covers. Leave
+out notes that are facts about one project or task (where something lives, a
+local patch, a status): those stay in the agent's memory."""
 
 
 def transcript(turns: List[Dict[str, Any]], limit: int = 9000, per: int = 1800) -> str:
@@ -154,7 +288,8 @@ def editable() -> List[Dict[str, Any]]:
     return [s for s in skills.list_skills() if skills.learnable(s["folder"])]
 
 
-def build_prompt(turns: List[Dict[str, Any]], why: List[str]) -> str:
+def build_prompt(turns: List[Dict[str, Any]], why: List[str],
+                 notes: Optional[List[Dict[str, Any]]] = None) -> str:
     mine = editable()
     mine_names = {s["folder"] for s in mine}
     others = [s for s in skills.list_skills() if s["folder"] not in mine_names]
@@ -167,8 +302,11 @@ def build_prompt(turns: List[Dict[str, Any]], why: List[str]) -> str:
             blocks.append(f"### {s['name']}: {s['description']}\n{body.strip()[:2500]}")
         ed = ("\nSkills you wrote before and may edit (full text):\n"
               + "\n\n".join(blocks) + "\n")
+    blocks = "\n".join(f"### note: {n['file']}\n{n['text'].strip()}" for n in notes or [])
     return PROMPT.format(why=" ".join(WHY.get(w, w) for w in why),
-                         existing=existing, editable=ed, transcript=transcript(turns))
+                         existing=existing, editable=ed, transcript=transcript(turns),
+                         notes=NOTES.format(blocks=blocks) if notes else "",
+                         absorbs=ABSORBS if notes else "")
 
 
 def parse(text: str) -> Optional[Dict[str, Any]]:

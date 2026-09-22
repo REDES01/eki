@@ -21,6 +21,10 @@ Every ask is a run in the engine, not in this terminal: Ctrl-C stops
     eki cost <conversation>              who answered, and what they reported
     eki backends | models | policy       what exists, what's loaded, the rules
     eki agent install|uninstall|status   run the engine from login, always
+
+    eki self "change yourself so…"       eki works on its own source: a branch,
+                                         a diff and a verdict — never a merge
+    eki self                             what it has proposed so far
     eki serve                            run the engine in the foreground
 """
 from __future__ import annotations
@@ -418,6 +422,32 @@ def cmd_agent(args) -> int:
     return 0
 
 
+def cmd_self(args) -> int:
+    """eki, working on eki (see eki/selfwork.py). Proposes; never merges."""
+    from . import selfwork
+    if not args.request:
+        rows = selfwork.history()
+        if not rows:
+            print("nothing proposed yet — try: eki self \"…\"")
+        for e in rows[-args.limit:]:
+            when = time.strftime("%m-%d %H:%M", time.localtime(e.get("at") or 0))
+            mark = "fit " if e.get("fit") else "    "
+            print(f"{when}  {mark} self/{e['id']}  {e['request'][:60]}  — {e['verdict'][:70]}")
+        return 0
+    ensure_engine(args.service)
+    say = lambda line: print(f"· {line}", file=sys.stderr, flush=True)   # noqa: E731
+    try:
+        p = selfwork.propose(args.request, root=ROOT, base=args.base,
+                             check_base=not args.anyway,
+                             ask=selfwork.ask_engine(args.service, args.backend or "", say),
+                             say=say)
+    except selfwork.SelfWorkError as e:
+        print(f"! {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(p.to_json(), indent=2) if args.json else "\n".join(p.lines()))
+    return 0 if p.fit else 1
+
+
 # ---- the parser ------------------------------------------------------
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -480,6 +510,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     g.add_argument("action", nargs="?", default="status",
                    choices=["install", "uninstall", "restart", "status"])
 
+    sw = sub.add_parser("self", help="have eki change its own source, as a proposal")
+    sw.add_argument("request", nargs="?", default="")
+    sw.add_argument("-b", "--backend", help="the agent to use (default: routed)")
+    sw.add_argument("--base", default="HEAD", help="commit or branch to start from")
+    sw.add_argument("--anyway", action="store_true",
+                    help="go ahead even if the base fails its own tests")
+    sw.add_argument("--limit", type=int, default=20)
+    sw.add_argument("--json", action="store_true")
+
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
@@ -503,6 +542,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_skills(args)
     if args.cmd == "agent":
         return cmd_agent(args)
+    if args.cmd == "self":
+        return cmd_self(args)
     if args.cmd == "runs":
         return cmd_runs(args)
     if args.cmd == "watch":

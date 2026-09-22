@@ -51,6 +51,14 @@ final class AppModel: ObservableObject {
     @Published var notice: String = ""
     /// text a panel wants in the composer (a skill to use): picked up once
     @Published var draftRequest: String = ""
+    /// the screen tools were kept out by macOS: which permission, for which program
+    @Published var permissionNeed: PermissionNeed? = nil
+
+    struct PermissionNeed: Equatable {
+        let what: String            // "accessibility" | "screen"
+        let program: String         // the binary macOS wants in its list
+        let text: String
+    }
     /// slash commands for the composer, by thread (or folder, before a thread)
     @Published var commands: [SlashCommand] = []
     private var commandsKey = "\u{0}"
@@ -527,6 +535,10 @@ final class AppModel: ObservableObject {
                         self.prompt = PendingPrompt(run: run, event: event)
                     case "thinking":
                         self.thinking += event.text ?? ""
+                    case "needs_permission":
+                        self.permissionNeed = PermissionNeed(what: event.what ?? "accessibility",
+                                                             program: event.program ?? "",
+                                                             text: event.text ?? "")
                     case "cancel", "answered":
                         if self.prompt?.requestID == event.request_id { self.prompt = nil }
                     default:

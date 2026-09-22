@@ -151,7 +151,8 @@ def builtin_for_claude(claude_bin: str) -> Dict[str, Any]:
     from . import settings as settings_mod
     if sys.platform != "darwin" or not claude_bin:
         return {}
-    if not settings_mod.load().get("claude_screen", True):
+    cfg = settings_mod.load()
+    if not cfg.get("claude_screen", True) or not cfg.get("claude_builtin_computer_use", False):
         return {}
     return {"computer-use": {"type": "stdio", "command": claude_bin, "args": ["--computer-use-mcp"]}}
 

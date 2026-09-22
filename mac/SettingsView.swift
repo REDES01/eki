@@ -226,13 +226,40 @@ struct RoutingSettings: View {
                     set: { settings.claude_screen = $0; save() }))
                     .toggleStyle(AccentSwitch())
                     .disabled(!settings.claude_tools)
-                Text("Claude Code gets its own built-in computer-use server (the terminal's 24 tools: "
-                     + "screenshot, click, type, key, scroll, open app…), started by eki for each "
-                     + "session; Codex gets eki's screen tools through `eki mcp`. macOS asks for "
-                     + "Accessibility and Screen Recording the first time it acts. Takes effect for "
+                Text("eki's screen tools — eki_screenshot, eki_click, eki_type, eki_key, eki_scroll, "
+                     + "eki_open_app — for Claude Code and, through `eki mcp`, Codex. Takes effect for "
                      + "new sessions; a thread already open keeps what it had.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if settings.claude_tools && settings.claude_screen {
+                    Text("macOS has to let eki's input helper in, once: System Settings › Privacy & "
+                         + "Security › Accessibility and Screen Recording, “eki-hid” (or “Python”) on. "
+                         + "The first screen tool a thread uses puts up macOS's own prompt; if it's "
+                         + "refused, eki shows a card in the thread with these buttons.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button("Accessibility…") {
+                            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(u) }
+                        }
+                        Button("Screen Recording…") {
+                            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(u) }
+                        }
+                        Button("Show the helper") {
+                            let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/eki-hid")
+                            NSWorkspace.shared.activateFileViewerSelecting([helper])
+                        }
+                    }
+                    Toggle("Also Claude Code's own built-in computer-use server", isOn: Binding(
+                        get: { settings.claude_builtin_computer_use },
+                        set: { settings.claude_builtin_computer_use = $0; save() }))
+                        .toggleStyle(AccentSwitch())
+                    Text("The terminal's 24 tools, started from Claude Code's binary. Off by default: its "
+                         + "per-app approval is a dialog only Claude Code's own front ends show, so under "
+                         + "eki it grants nothing on the current build (2.1.278). Kept for a build that does.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Measuring") {

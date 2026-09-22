@@ -271,6 +271,8 @@ def test_claude_codes_own_computer_use_server_is_declared_on_a_mac(tmp_path, mon
     monkeypatch.setattr(mcpregistry, "PATH", tmp_path / "mcp.json")
     monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
     monkeypatch.setattr(mcpregistry.sys, "platform", "darwin")
+    assert mcpregistry.builtin_for_claude("/usr/local/bin/claude") == {}          # opt-in: off by default
+    settings.save({"claude_builtin_computer_use": True})
     assert mcpregistry.builtin_for_claude("/usr/local/bin/claude") == {
         "computer-use": {"type": "stdio", "command": "/usr/local/bin/claude", "args": ["--computer-use-mcp"]}}
     settings.save({"claude_screen": False})
@@ -327,3 +329,10 @@ def test_a_picture_attached_to_the_question_reaches_the_program(tmp_path, monkey
         await eng.quota.stop()
         await eng.close()
     run(go())
+
+
+def test_the_screen_tools_being_kept_out_by_macos_is_a_card_not_a_line():
+    assert live.permission_needed("The user saw the permission prompt but macOS Accessibility "
+                                  "permission(s) are still not granted.") == "accessibility"
+    assert live.permission_needed("Screen Recording permission is required to capture") == "screen"
+    assert live.permission_needed("read 12 lines") == ""

@@ -47,6 +47,10 @@ DEFAULTS: Dict[str, Any] = {
     "claude_tools": True,
     #: the screen among them — computer use: eki_screenshot, eki_click, eki_type…
     "claude_screen": True,
+    #: also start Claude Code's own built-in computer-use server for each
+    #: session. Off: its per-app approval is a dialog only Claude Code's own
+    #: interactive front ends show, so headless it grants nothing (2.1.278)
+    "claude_builtin_computer_use": False,
     #: "auto": Claude Code and Codex run commands and edit files without
     #: asking (their own "skip permissions" modes); "ask": each one that
     #: needs a say becomes a card in the thread. Questions they ask *you*

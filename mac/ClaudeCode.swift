@@ -173,8 +173,9 @@ struct McpPanel: View {
                     .font(.zoomed(size: 11.5)).foregroundStyle(s.status == "failed" ? Palette.danger : Palette.inkMuted)
                     .lineLimit(2)
                 if s.name == "computer-use" {
-                    Text("Claude Code's own screen control. On/off in Settings → Routing → Computer use. "
-                         + "macOS asks for Accessibility and Screen Recording the first time it acts.")
+                    Text("Claude Code's own screen control (opt-in in Settings → Routing). Its per-app "
+                         + "approval is a dialog only Claude Code's own front ends show, so it may grant "
+                         + "nothing here; eki's screen tools under “eki” work regardless.")
                         .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
                         .fixedSize(horizontal: false, vertical: true)
                 }

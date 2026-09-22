@@ -60,7 +60,7 @@ Legend: ✅ works · 🟡 works with a caveat · ⬜ not done · ➖ terminal-on
 | 🟡 | `/mcp` — Authenticate a connector | `mcp_authenticate` | `mcpServer/oauth/login` | the program runs its OAuth flow; not completed that day |
 | ✅ | `/mcp` — eki's registry: Add, backends, Enable, Remove, Apply to session | `PUT/POST/DELETE /api/mcp`, `mcp_apply` → `mcp_set_servers` | managed block in config.toml + `config/mcpServer/reload`; `eki` (9 tools) seen connected | live |
 | ✅ | `/mcp` — Share with Codex (import) | `mcp_import` | — (Codex → Claude import not needed: the registry already renders to both) | unit-tested |
-| ✅ | `/mcp` — Built-in computer-use, 24 tools | `builtin_for_claude` → `mcp_set_servers` after the handshake | Codex has its own `computer-use` (pending until used) | live |
+| 🟡 | `/mcp` — Built-in computer-use, 24 tools | opt-in (`claude_builtin_computer_use`); connects, but its per-app approval is a dialog only Claude Code's own front ends show, so headless `request_access` grants nothing on 2.1.278 | Codex has its own `computer-use` (pending until used) | live: connected, then `granted: []` |
 | ➖ | `/model` — pick a model | `models`, `set_model` | — removed: eki's picker owns the model | app |
 | ✅ | `/model` — effort | `update_settings {effort}` | `effort` on `turn/start` | live (Settings panel) |
 | ✅ | `/model` — thinking on/off | `thinking` → `set_max_thinking_tokens` | — (Codex: reasoning effort instead) | request accepted |
@@ -86,8 +86,9 @@ Legend: ✅ works · 🟡 works with a caveat · ⬜ not done · ➖ terminal-on
 |---|---|---|
 | ✅ | `eki` served in-process (`mcp_message`): `eki_capabilities`, `eki_ask`, `eki_image` | live: a turn called `eki_capabilities` and listed 9 backends |
 | ✅ | Settings → *Give Claude Code eki's tools* on/off | live: `eki` disappears/returns |
-| ✅ | Settings → *Computer use* on/off | live: `computer-use` declared or not; idle sessions reopened |
-| 🟡 | Computer use acting (screenshot, click…) | server connected; the first `request_access` needs macOS Accessibility granted for the process that runs it — the prompt appeared, not yet granted |
+| ✅ | Settings → *Computer use* on/off | live: the screen tools present or not; idle sessions reopened |
+| ✅ | Computer use acting (screenshot, open app, keypress) | eki's own tools through `eki-hid`: a Claude thread took a screenshot and described it, opened Finder, pressed Escape — all under the engine |
+| ✅ | macOS permission guidance | `eki-hid check`/`ask`: the helper refuses with a clear line when Accessibility or Screen Recording is missing and puts up the system prompt; eki turns that line into a card with the settings one click away, and the same buttons sit beside the switch in Settings (unit-tested; not triggered live since both were granted) |
 | ✅ | Codex gets the same tools through `eki mcp` (with eki's own screen tools on a Mac) | managed block in `~/.codex/config.toml`; stdio server unit-tested |
 | ✅ | `eki-hid` input helper builds and answers `screen` | 1728×1117 |
 

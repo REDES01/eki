@@ -315,6 +315,9 @@ struct RunEvent: Codable {
     var schema: JSONValue?
     var dialog: String?
     var payload: JSONValue?
+    // the screen tools kept out by macOS: which permission, and the program to grant it to
+    var what: String?
+    var program: String?
 }
 
 struct AskQuestion: Codable, Hashable {

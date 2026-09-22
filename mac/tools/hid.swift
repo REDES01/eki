@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // eki-hid — the input half of eki's screen tools (see eki/mcpbridge.py).
 //
+//   eki-hid check                        → "ax=1 screen=0": what macOS has let this helper do
+//   eki-hid ask ax|screen                → put up macOS's own prompt for that permission
 //   eki-hid screen                       → "W H" of the main display, in points
 //   eki-hid click X Y [left|right] [single|double]
 //   eki-hid move X Y
@@ -22,7 +24,17 @@ func fail(_ msg: String) -> Never {
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let cmd = args.first else { fail("usage: eki-hid screen|click|move|type|key|scroll …") }
+guard let cmd = args.first else { fail("usage: eki-hid check|ask|screen|click|move|type|key|scroll …") }
+
+/// Input needs Accessibility; without it CGEvent posting is silently dropped,
+/// so say so instead — and put up the system prompt the first time.
+func needAccessibility() {
+    if AXIsProcessTrusted() { return }
+    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    _ = AXIsProcessTrustedWithOptions(opts)
+    fail("Accessibility permission not granted for eki-hid (eki's input helper): System Settings › "
+         + "Privacy & Security › Accessibility")
+}
 
 func point(_ i: Int) -> CGPoint {
     guard args.count > i + 1, let x = Double(args[i]), let y = Double(args[i + 1]) else { fail("need X Y") }
@@ -35,14 +47,27 @@ func post(_ e: CGEvent?) {
 }
 
 switch cmd {
+case "check":
+    print("ax=\(AXIsProcessTrusted() ? 1 : 0) screen=\(CGPreflightScreenCaptureAccess() ? 1 : 0)")
+
+case "ask":
+    if args.count > 1, args[1] == "screen" {
+        print(CGRequestScreenCaptureAccess() ? "granted" : "asked")
+    } else {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        print(AXIsProcessTrustedWithOptions(opts) ? "granted" : "asked")
+    }
+
 case "screen":
     let f = CGDisplayBounds(CGMainDisplayID())
     print("\(Int(f.width)) \(Int(f.height))")
 
 case "move":
+    needAccessibility()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point(1), mouseButton: .left))
 
 case "click":
+    needAccessibility()
     let p = point(1)
     let right = args.count > 3 && args[3] == "right"
     let double = args.count > 4 && args[4] == "double"
@@ -59,12 +84,14 @@ case "click":
     }
 
 case "scroll":
+    needAccessibility()
     let p = point(1)
     guard args.count > 4, let dx = Int32(args[3]), let dy = Int32(args[4]) else { fail("need X Y DX DY") }
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left))
     post(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0))
 
 case "type":
+    needAccessibility()
     let text = args.dropFirst().joined(separator: " ")
     for scalar in text.unicodeScalars {
         var chars = Array(String(scalar).utf16)
@@ -76,6 +103,7 @@ case "type":
     }
 
 case "key":
+    needAccessibility()
     guard args.count > 1 else { fail("need a key") }
     let codes: [String: CGKeyCode] = [
         "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51, "backspace": 51,

@@ -500,14 +500,23 @@ class LiveSession:
             return
         if t == "user":
             blocks = (event.get("message") or {}).get("content") or []
-            # tool results coming back: only errors are worth a line
+            # tool results coming back: only errors are worth a line — and
+            # the screen tools saying macOS hasn't let them in, which is a
+            # card with the settings a click away, not a line to scroll past
             for block in blocks:
-                if block.get("type") == "tool_result" and block.get("is_error"):
-                    text = block.get("content")
-                    if isinstance(text, list):
-                        text = " ".join(str(b.get("text", "")) for b in text if isinstance(b, dict))
+                if block.get("type") != "tool_result":
+                    continue
+                text = block.get("content")
+                if isinstance(text, list):
+                    text = " ".join(str(b.get("text", "")) for b in text if isinstance(b, dict))
+                text = str(text or "")
+                need = permission_needed(text)
+                if need:
+                    self._events.put_nowait({"kind": "needs_permission", "what": need,
+                                             "text": text[:300]})
+                if block.get("is_error"):
                     self._events.put_nowait({"kind": "activity", "tool": "error",
-                                             "input": {"text": str(text)[:300]}})
+                                             "input": {"text": text[:300]}})
             return
         if t == "result":
             for info in (event.get("modelUsage") or {}).values():
@@ -564,6 +573,19 @@ class LiveSession:
                     return
         finally:
             self.busy = False
+
+
+_PERMISSION = re.compile(r"(accessibility|screen recording|screen capture)[^.]{0,80}"
+                         r"(not granted|not been granted|is required|permission)", re.I)
+
+
+def permission_needed(text: str) -> str:
+    """"accessibility" or "screen" when a tool result says macOS hasn't
+    let the screen tools in; "" otherwise."""
+    m = _PERMISSION.search(text or "")
+    if not m:
+        return ""
+    return "screen" if "screen" in m.group(1).lower() else "accessibility"
 
 
 def image_source(path: str) -> Optional[Dict[str, Any]]:

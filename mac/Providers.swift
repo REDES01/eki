@@ -335,6 +335,7 @@ struct HubSettings: Codable, Hashable {
     var claude_system_prompt: String = ""
     var claude_tools: Bool = true
     var claude_screen: Bool = true
+    var claude_builtin_computer_use: Bool = false
 }
 
 extension EngineClient {
@@ -357,6 +358,7 @@ extension EngineClient {
             "claude_system_prompt": settings.claude_system_prompt,
             "claude_tools": settings.claude_tools,
             "claude_screen": settings.claude_screen,
+            "claude_builtin_computer_use": settings.claude_builtin_computer_use,
         ])
     }
 

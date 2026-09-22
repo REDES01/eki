@@ -450,6 +450,9 @@ struct ChatPane: View {
                 }
             }
             transcript
+            if let need = model.permissionNeed {
+                PermissionNeedCard(need: need)
+            }
             if !model.notice.isEmpty {
                 Text(model.notice)
                     .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
@@ -1002,6 +1005,64 @@ struct FileMenu: View {
             .frame(maxHeight: 220)
             .onChange(of: picked) { _, now in proxy.scrollTo(now) }
         }
+    }
+}
+
+/// macOS kept the screen tools out: the switch to flip, one click away,
+/// and the program to add if it isn't listed yet.
+struct PermissionNeedCard: View {
+    @EnvironmentObject var model: AppModel
+    let need: AppModel.PermissionNeed
+
+    private var pane: (title: String, url: String) {
+        need.what == "screen"
+            ? ("Screen Recording", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            : ("Accessibility", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised.circle").font(.zoomed(size: 13)).foregroundStyle(Palette.warn)
+                Text("macOS hasn't let the screen tools in").font(.zoomed(size: 13, weight: .medium))
+                Spacer()
+                Button { model.permissionNeed = nil } label: {
+                    Image(systemName: "xmark").font(.zoomed(size: 10, weight: .semibold)).foregroundStyle(Palette.inkFaint)
+                }
+                .buttonStyle(.plain)
+            }
+            Text("Open System Settings › Privacy & Security › \(pane.title), turn on "
+                 + "“\(need.program.hasSuffix("eki-hid") ? "eki-hid" : "claude")” (or “Python”) — or add the "
+                 + "program with “+” if it isn't listed — then ask again.")
+                .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Open \(pane.title) settings") {
+                    if let url = URL(string: pane.url) { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(AccentButton())
+                if !need.program.isEmpty {
+                    Button("Show the program in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: need.program)])
+                    }
+                    .buttonStyle(GhostButton())
+                    .help(need.program)
+                    Button("Copy its path") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(need.program, forType: .string)
+                        model.say("Path copied — paste it with ⌘⇧G in the settings' file dialog")
+                    }
+                    .buttonStyle(GhostButton())
+                }
+            }
+        }
+        .padding(.all, 14)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
+        .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.warn.opacity(0.45), lineWidth: 1))
+        .column()
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, Metric.gutter)
+        .padding(.bottom, 8)
     }
 }
 

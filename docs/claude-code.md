@@ -122,7 +122,7 @@ with their scope and can be imported with *Share with Codex*.
 | Background tasks finishing on their own | the thread stirs and shows the turn |
 | Resume a session | a thread reopens its session by id |
 | MCP servers asking (elicitation) | `ElicitationCard`: a form or a link |
-| Built-in `computer-use` server | declared by eki in every session (`claude --computer-use-mcp` as a stdio server, added after the handshake under its own name), same 24 tools; on/off in Settings → Routing → Computer use |
+| Built-in `computer-use` server | opt-in (Settings → Routing): started from the binary (`claude --computer-use-mcp`) and added after the handshake; connects, but its per-app approval dialog never reaches a headless host on 2.1.278, so it grants nothing. eki's own screen tools (`eki_screenshot`…) are the computer use that works |
 | `/login`, `/logout`, `/theme`, `/vim`, `/terminal-setup`, `/doctor`, `/color` | terminal-only; sign in once in a terminal |
 | Images pasted into the prompt, `@file` completion | not yet |
 

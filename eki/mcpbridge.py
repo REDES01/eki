@@ -269,6 +269,15 @@ class Bridge:
     # ---- the screen (macOS) --------------------------------------------------
 
     async def screenshot(self, display: int = 1) -> List[Dict[str, Any]]:
+        helper = _helper()
+        if helper:
+            # without Screen Recording, screencapture quietly gives the
+            # wallpaper alone; ask first, and put up macOS's prompt once
+            state = await _exec([helper, "check"], quiet=True)
+            if "screen=0" in state:
+                await _exec([helper, "ask", "screen"], quiet=True)
+                raise RuntimeError("Screen Recording permission not granted for eki-hid (eki's input "
+                                   "helper): System Settings › Privacy & Security › Screen Recording")
         path = os.path.join(tempfile.gettempdir(), f"eki-shot-{int(time.time() * 1000)}.png")
         args = ["screencapture", "-x", "-t", "png"]
         if display and display > 1:

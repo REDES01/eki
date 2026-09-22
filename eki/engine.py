@@ -845,18 +845,25 @@ class Engine:
         bridge = None
         if self.settings.get("claude_tools", True):
             depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
-            # the screen: on a Mac Claude Code brings its own computer-use
-            # server (mcpregistry.builtin_for_claude), so eki's screen tools
-            # go to Codex only and don't double up here
+            # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
+            # built-in server needs an approval dialog only its own front
+            # ends show, so it is opt-in beside these (claude_builtin_computer_use)
             bridge = mcpbridge.Bridge(self, cid, depth=depth + 1,
-                                      screen=bool(self.settings.get("claude_screen", True))
-                                      and sys.platform != "darwin")
+                                      screen=bool(self.settings.get("claude_screen", True)))
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
                            if b.info.kind == "claude_code"), "") or ""
         return live.LiveSession(argv, cwd, None,
                                 str(self.settings.get("claude_system_prompt", "")),
                                 bridge=bridge,
                                 extra_servers=mcpregistry.builtin_for_claude(claude_bin))
+
+    def claude_binary(self) -> str:
+        """Where Claude Code really is — the path macOS wants in its
+        Accessibility and Screen Recording lists for the screen tools."""
+        for b in self.backends:
+            if b.info.kind == "claude_code" and getattr(b, "bin", None):
+                return os.path.realpath(b.bin)                                 # type: ignore[arg-type]
+        return ""
 
     async def claude_session(self, cid: str = "", cwd: str = "") -> live.LiveSession:
         """The Claude Code session for a thread — or, with no thread, the
@@ -935,6 +942,7 @@ class Engine:
                 return {"model": session.model}
             if op == "account":
                 return {"account": session.account, "version": session.version,
+                        "program": self.claude_binary(),
                         "capabilities": session.capabilities, "tools": session.tools,
                         "agents": session.agents, "output_style": session.output_style,
                         "output_styles": session.output_styles}
@@ -1331,6 +1339,10 @@ class Engine:
                         yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
                     elif kind in ("thinking", "mcp"):
                         yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
+                    elif kind == "needs_permission":
+                        yield {"kind": kind, "what": ev["what"], "text": ev.get("text", ""),
+                               "program": (mcpbridge._helper() or "") if "eki-hid" in ev.get("text", "")
+                               else self.claude_binary()}
                     elif kind == "checkpoint":
                         checkpoint = ev["uuid"]
                     elif kind == "cancel":

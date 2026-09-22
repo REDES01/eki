@@ -125,13 +125,21 @@ def _where(repo: str, key: str) -> Path:
 
 # ---- opening ------------------------------------------------------------------------
 
-def open(folder: str, key: str) -> Workspace:     # noqa: A001  (the verb is the point)
+def open(folder: str, key: str, keep: bool = False) -> Workspace:     # noqa: A001
     """The thread's copy of `folder`, made to match it as it is right now.
-    A folder that can't be copied gets a lock-mode workspace instead."""
+    A folder that can't be copied gets a lock-mode workspace instead.
+
+    `keep`: a run carrying on after the engine restarted — its copy is taken
+    as the interrupted run left it, not synced over."""
     repo = repo_of(folder)
     if repo is None:
         return Workspace(folder=folder, mode="lock", path=folder)
     tree = _where(repo, key)
+    if keep:
+        left = _left_open(tree)
+        if left is not None:
+            _touch(left, "open")
+            return left
     # detached: the copy puts no branch of its own in your repo — the only
     # branches eki leaves are the eki/kept/<run> ones it tells you about
     branch = ""
@@ -297,10 +305,25 @@ def _state_file(tree: str) -> Path:
 def _touch(ws: Workspace, last: str) -> None:
     try:
         _state_file(ws.tree).write_text(json.dumps(
-            {"repo": ws.repo, "folder": ws.folder, "branch": ws.branch, "used": int(time.time()),
-             "last": last}))
+            {**ws.to_json(), "used": int(time.time()), "last": last}))
     except OSError:
         pass
+
+
+def _left_open(tree: Path) -> Optional[Workspace]:
+    """The workspace a run was in when it stopped without closing it."""
+    try:
+        state = json.loads(_state_file(str(tree)).read_text())
+    except (OSError, ValueError):
+        return None
+    if state.get("last") != "open" or not tree.exists():
+        return None
+    fields = {k: state[k] for k in Workspace.__dataclass_fields__ if k in state}
+    try:
+        ws = Workspace(**fields)
+    except TypeError:
+        return None
+    return ws if ws.mode == "worktree" and ws.start else None
 
 
 def sweep(days: float = IDLE_DAYS, now: Optional[float] = None) -> List[str]:

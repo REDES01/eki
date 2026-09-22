@@ -33,11 +33,21 @@ def _launchctl(*args: str) -> Tuple[int, str]:
 
 
 def plist_for(root: Path) -> dict:
+    """launchd runs ~/.eki/builds/current — your checkout until a swap
+    points it at a build (eki/builds.py) — with your checkout's venv and
+    config either way."""
+    from . import builds
     python = root / ".venv" / "bin" / "python"
+    current = builds.ensure_layout(root)
+    env = {"PYTHONPATH": str(current), "EKI_SOURCE": str(root),
+           "EKI_CONFIG": str(root / "config.yaml")}
+    hid = root / "Eki.app" / "Contents" / "Helpers" / "eki-hid"
+    if hid.exists():
+        env["EKI_HID"] = str(hid)           # a build has no app beside it
     return {
         "Label": LABEL,
         "ProgramArguments": [str(python), "-m", "eki.cli", "serve"],
-        "WorkingDirectory": str(root),
+        "WorkingDirectory": str(current),
         "RunAtLoad": True,
         # restart if it exits for any reason — but not in a tight loop if it
         # can't start at all (a port someone else holds, say)
@@ -54,6 +64,7 @@ def plist_for(root: Path) -> dict:
                 "/usr/bin", "/bin", "/usr/sbin", "/sbin",
             ]),
             "PYTHONUNBUFFERED": "1",
+            **env,
         },
         # an engine answering a chat should not be throttled like a daemon
         "ProcessType": "Interactive",
@@ -79,6 +90,8 @@ def install(root: Path) -> str:
         _launchctl("bootout", f"{_domain()}/{LABEL}")
     with PLIST.open("wb") as f:
         plistlib.dump(plist_for(root), f)
+    from . import builds
+    builds.install_supervisor()             # a person's command: the only way it changes
     code, out = _launchctl("bootstrap", _domain(), str(PLIST))
     if code != 0:
         return f"wrote {PLIST}, but launchd refused it: {out}"

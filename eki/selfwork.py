@@ -43,6 +43,7 @@ HOME = Path("~/.eki/self").expanduser()
 PROTECTED = (
     "eki/candidate.py", "eki/selfwork.py",       # who judges, and who asks
     "eki/agent.py",                              # what launchd runs
+    "eki/builds.py", "eki/supervisor.sh",        # the swap and the way back
     "eki/secrets.py", "eki/quota/",              # the credentials rule
     "mac/sign.sh", "mac/hub.entitlements",
     "LICENSE", "NOTICE",

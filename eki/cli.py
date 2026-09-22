@@ -412,7 +412,8 @@ def cmd_agent(args) -> int:
         # a hand-started engine holds the port; the agent's would fail to bind
         subprocess.run(["pkill", "-f", "eki.cli serve"], capture_output=True)
         time.sleep(0.5)
-        print(agent.install(ROOT))
+        from . import builds
+        print(agent.install(builds.source()))
     elif args.action == "uninstall":
         print(agent.uninstall())
     elif args.action == "restart":
@@ -437,7 +438,8 @@ def cmd_self(args) -> int:
     ensure_engine(args.service)
     say = lambda line: print(f"· {line}", file=sys.stderr, flush=True)   # noqa: E731
     try:
-        p = selfwork.propose(args.request, root=ROOT, base=args.base,
+        from . import builds
+        p = selfwork.propose(args.request, root=builds.source(), base=args.base,
                              check_base=not args.anyway,
                              ask=selfwork.ask_engine(args.service, args.backend or "", say),
                              say=say)
@@ -445,7 +447,68 @@ def cmd_self(args) -> int:
         print(f"! {e}", file=sys.stderr)
         return 1
     print(json.dumps(p.to_json(), indent=2) if args.json else "\n".join(p.lines()))
+    from . import settings as settings_mod
+    apply = args.apply or settings_mod.load().get("self_autonomy") == "apply"
+    if apply and p.fit and not p.protected and p.commit:
+        # apply here: the proposal's commit becomes a build, and the
+        # supervisor swaps it in, watches it, and rolls back if it's unhealthy
+        from . import builds
+        build = builds.make(builds.source(), p.commit, note=f"self/{p.id}")
+        builds.swap(build, self_id=p.id)
+        print(f"\napplying: {build} — the supervisor swaps it in once runs finish, "
+              f"watches it, and swaps back if it isn't healthy (eki builds)")
+    elif apply and p.protected:
+        print("\nnot applied: it touches what eki may not change alone — for a person to merge")
     return 0 if p.fit else 1
+
+
+def cmd_builds(args) -> int:
+    """What the engine runs, what it ran before, and how the last swap went."""
+    from . import builds
+    rows = builds.listing()
+    for r in rows:
+        mark = "→" if r["current"] else ("↩" if r["previous"] else " ")
+        what = "your checkout" if r.get("dev") else (r.get("note") or r.get("ref") or "")
+        print(f"{mark} {r['id']:<11} {(r.get('commit') or '')[:10]:<11} {what:<24} {r['path']}")
+    if not rows:
+        print("no builds — the engine runs from your checkout (`eki agent install` sets this up)")
+    s = builds.last_swap()
+    if s:
+        when = time.strftime("%m-%d %H:%M", time.localtime(s.get("at") or 0))
+        print(f"\nlast swap {when}: {s.get('state')} — {s.get('target')}"
+              + (f" ({s['why']})" if s.get("why") else ""))
+    return 0
+
+
+def cmd_swap(args) -> int:
+    """Move the engine onto another build, through the supervisor."""
+    from . import builds, candidate
+    src = builds.source()
+    if args.back:
+        target = builds.BUILDS / "previous"
+        if not target.is_symlink():
+            print("nothing to go back to", file=sys.stderr)
+            return 1
+        target = target.resolve()
+    elif args.dev:
+        target = src
+    else:
+        try:
+            target = builds.make(src, args.ref)
+        except (ValueError, RuntimeError) as e:
+            print(f"! {e}", file=sys.stderr)
+            return 1
+        if not args.no_check:
+            say = lambda line: print(f"· {line}", file=sys.stderr, flush=True)   # noqa: E731
+            report = candidate.check(target, python=sys.executable, say=say,
+                                     skip=("tests",) if args.skip_tests else ())
+            if not report.fit:
+                print(f"! {target.name} isn't fit to run — not swapping", file=sys.stderr)
+                return 1
+    got = builds.swap(target, wait=args.wait, watch=args.watch)
+    print(f"swapping to {target} — once runs finish; watched {args.watch}s, rolled back if "
+          f"unhealthy. Follow it: tail -f {got['log']}")
+    return 0
 
 
 # ---- the parser ------------------------------------------------------
@@ -517,7 +580,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw.add_argument("--anyway", action="store_true",
                     help="go ahead even if the base fails its own tests")
     sw.add_argument("--limit", type=int, default=20)
+    sw.add_argument("--apply", action="store_true",
+                    help="if it's fit and touches nothing protected, swap it in (watched, rolled back if unhealthy)")
     sw.add_argument("--json", action="store_true")
+
+    sub.add_parser("builds", help="what the engine runs, what it ran before, the last swap")
+    sp = sub.add_parser("swap", help="move the engine onto another build, watched, with a way back")
+    sp.add_argument("ref", nargs="?", default="HEAD", help="a commit or branch in your checkout")
+    sp.add_argument("--back", action="store_true", help="to the previous build")
+    sp.add_argument("--dev", action="store_true", help="back to running your checkout itself")
+    sp.add_argument("--no-check", action="store_true", help="skip the candidate check")
+    sp.add_argument("--skip-tests", action="store_true", help="candidate check without the test suite")
+    sp.add_argument("--wait", type=int, default=600, help="seconds to wait for runs to finish")
+    sp.add_argument("--watch", type=int, default=180, help="seconds it must stay healthy")
 
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")
@@ -540,6 +615,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                            "--port", str(args.port)])
     if args.cmd == "skills":
         return cmd_skills(args)
+    if args.cmd == "builds":
+        return cmd_builds(args)
+    if args.cmd == "swap":
+        return cmd_swap(args)
     if args.cmd == "agent":
         return cmd_agent(args)
     if args.cmd == "self":

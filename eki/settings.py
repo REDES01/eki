@@ -53,6 +53,13 @@ DEFAULTS: Dict[str, Any] = {
     #: its changes are brought back when it ends, so parallel runs never
     #: collide (eki/workspace.py); off: runs work in the folder, taking turns
     "worktrees": True,
+    #: after a restart (a crash, a swap), a run in Claude Code or Codex that
+    #: was cut off carries on by itself in the same session — once
+    "resume_interrupted": True,
+    #: `eki self`: "propose" (a branch, a diff, a verdict) or "apply" (a fit
+    #: change that touches nothing protected is swapped in, watched, and
+    #: rolled back if unhealthy — docs/self-build.md)
+    "self_autonomy": "propose",
     #: a macOS notification when eki learns or improves a skill
     "notify_learned": True,
     #: appended to Claude Code's own system prompt

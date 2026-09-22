@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -87,14 +88,22 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(60)
             ticks += 1
             if ticks % 60 == 1:
-                # once an hour: threads' folder copies nobody has used in a week
+                # once an hour: threads' folder copies nobody has used in a
+                # week, and builds that are neither current nor previous
                 try:
                     from . import workspace as workspace_mod
+                    from . import builds as builds_mod
                     gone = await asyncio.to_thread(workspace_mod.sweep)
+                    gone += await asyncio.to_thread(builds_mod.prune)
                     if gone:
-                        log.info("removed %d unused worktree(s)", len(gone))
+                        log.info("removed %d unused worktree(s)/build(s)", len(gone))
                 except Exception:                   # noqa: BLE001
-                    log.exception("worktree sweep")
+                    log.exception("sweep")
+            try:
+                # a swap that has finished: say how it went, once
+                await eng.settle_swap()
+            except Exception:                       # noqa: BLE001
+                log.exception("swap outcome")
             try:
                 stopped = await eng.models.reap_idle()
                 if stopped:
@@ -136,6 +145,9 @@ async def lifespan(app: FastAPI):
         noted = eng.note_interruptions()
         if noted:
             log.info("noted %d interrupted run(s)", noted)
+        resumed = await eng.resume_interrupted()
+        if resumed:
+            log.info("carried on with %d interrupted run(s)", resumed)
     except Exception:                               # noqa: BLE001
         log.exception("interruptions")
 
@@ -1388,7 +1400,9 @@ def put_policy(body: PolicyBody) -> Any:
 @app.get("/api/health")
 def health() -> Any:
     eng = engine()
-    return {"ok": True, "backends": len(eng.backends), "running": eng.runner.running}
+    from . import builds
+    return {"ok": True, "backends": len(eng.backends), "running": eng.runner.running,
+            "build": builds.running().get("id", "dev"), "pid": os.getpid()}
 
 
 def main(argv: Optional[list] = None) -> int:

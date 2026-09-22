@@ -447,21 +447,71 @@ class Engine:
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
+    def _resumable(self, run: Dict[str, Any]) -> bool:
+        """Carried on by itself after a restart: a run in a program that keeps
+        its own session (Claude Code, Codex), once — a run that was itself a
+        resumption isn't resumed again, so a crash can't loop."""
+        cid, backend = run.get("conversation_id"), run.get("backend") or ""
+        if not self.settings.get("resume_interrupted", True) or not cid or not backend:
+            return False
+        try:
+            if (json.loads(run.get("payload") or "{}") or {}).get("resume_of"):
+                return False
+        except (TypeError, ValueError):
+            return False
+        return bool(self.store.session(cid, backend))
+
     def note_interruptions(self) -> int:
         """A line in each thread whose run the previous engine took with it,
-        so the thread says what happened and offers to carry on."""
+        so the thread says what happened — and, where the program kept its
+        session, that it is carrying on (`resume_interrupted`)."""
         noted = 0
+        self._to_resume: List[str] = []
         for run in self.runs.just_interrupted:
             cid = run.get("conversation_id")
             if not cid or run.get("kind") != "ask":
                 continue
-            self.store.add_turn(cid, "assistant", "*[interrupted — the engine restarted]*",
+            carry = self._resumable(run)
+            if carry:
+                self._to_resume.append(run["id"])
+            self.store.add_turn(cid, "assistant", "*[interrupted — the engine restarted"
+                                + ("; carrying on]*" if carry else "]*"),
                                 run.get("backend") or "", run.get("reason") or "",
                                 meta={"run": run["id"], "interrupted": True,
                                       **({"cwd": run["cwd"]} if run.get("cwd") else {})})
             noted += 1
         self.runs.just_interrupted = []
         return noted
+
+    async def resume_interrupted(self) -> int:
+        """Start the carrying-on runs `note_interruptions` decided on."""
+        started = 0
+        for rid in getattr(self, "_to_resume", []):
+            try:
+                if await self.resume(rid):
+                    started += 1
+            except Exception:                       # noqa: BLE001
+                continue
+        self._to_resume = []
+        return started
+
+    async def settle_swap(self) -> Dict[str, Any]:
+        """A swap the supervisor finished: bring a healthy self-change into
+        your checkout if it goes in cleanly, and say how it went — once."""
+        from . import builds as builds_mod
+        done = await asyncio.to_thread(builds_mod.settle_swap)
+        if not done:
+            return {}
+        what = f"self/{done['self']}" if done.get("self") else Path(done.get("target") or "").name
+        if done["state"] == "healthy":
+            title = f"now running {what}"
+            body = done.get("merged") or "the new build is healthy"
+        else:
+            title = f"{what} was rolled back"
+            body = done.get("why") or done["state"]
+        if self.settings.get("notify_learned", True):
+            await self._notify(title, body)
+        return done
 
     async def resume(self, rid: str) -> Optional[Dict[str, str]]:
         """Carry on after an interruption. A thread whose program keeps its
@@ -475,8 +525,10 @@ class Engine:
         if cid and backend and self.store.session(cid, backend):
             prompt = "Carry on where you left off."
             turn = self.store.add_turn(cid, "user", prompt)
+            # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
-                                   requested=backend, images=False, user_turn=turn)
+                                   requested=backend, images=False, user_turn=turn,
+                                   payload=json.dumps({"resume_of": rid}))
             await self.runner.submit(new)
             return {"run": new, "conversation": cid, "resumed": "session"}
         got = await self.retry(rid)
@@ -770,9 +822,14 @@ class Engine:
             await lock.acquire()
             return workspace_mod.Workspace(folder=folder, mode="lock", path=folder), lock
         key = cid or run["id"]
+        try:
+            carrying_on = bool((json.loads(run.get("payload") or "{}") or {}).get("resume_of"))
+        except (TypeError, ValueError):
+            carrying_on = False
         async with lock:
             try:
-                ws = await asyncio.to_thread(workspace_mod.open, folder, key)
+                # carrying on after a restart: the copy as the run left it
+                ws = await asyncio.to_thread(workspace_mod.open, folder, key, carrying_on)
                 if ws.mode == "worktree" and ws.tree in self._in_copy:
                     ws = await asyncio.to_thread(workspace_mod.open, folder, f"{key}-{run['id']}")
             except workspace_mod.WorkspaceError as e:

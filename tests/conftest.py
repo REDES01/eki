@@ -21,6 +21,10 @@ def private_skills(tmp_path, monkeypatch):
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")
+    from eki import builds
+    monkeypatch.setattr(builds, "BUILDS", root / "eki" / "builds")
+    monkeypatch.setattr(builds, "SELF_HOME", root / "eki" / "self")
+    monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
 
 
 @pytest.fixture(autouse=True)

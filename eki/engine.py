@@ -1623,9 +1623,11 @@ class Engine:
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
         session = await self._live_session(cid, backend, run["cwd"] or "", model)
+        saved_session = ""
         if cid and session.session_id:
             # known from the handshake: a turn cut short can still be resumed
             self.store.set_session(cid, backend.key, session.session_id)
+            saved_session = session.session_id
         if model and (not session.model or model not in session.model):
             try:
                 await session.set_model(model)
@@ -1649,6 +1651,11 @@ class Engine:
                 send = True                         # a nudge, if one follows, is sent
                 tail: List[str] = []                # words since the last tool call
                 async for ev in session.turn(until_quiet=until_quiet):
+                    if cid and session.session_id and session.session_id != saved_session:
+                        # as soon as it's known, not when the turn ends: a
+                        # turn cut off by a restart is carried on by this id
+                        saved_session = session.session_id
+                        self.store.set_session(cid, backend.key, saved_session)
                     kind = ev["kind"]
                     if kind == "text":
                         tail.append(ev["text"])

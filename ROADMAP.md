@@ -235,8 +235,10 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       sees there (plugins, project, synced). `eki skills` on the command line
 - *Evolve:* a skill is the safest thing eki can change about itself. After a
   run it drafts a new skill or an edit as a commit in the skills repo —
-  readable, revertible, no engine swap. This is where the "writes down what
-  it learned" item below lands, and it can ship before Stage 1 is finished.
+  readable, revertible, no engine swap. (Landed in 035ecd6, `eki/learn.py`:
+  reviewed on a sign — asked, corrected, recovered — by the backend that did
+  the work; see `docs/skills.md`. Checked live with Claude Code, Codex and
+  Qwen3.8.)
 
 ## Stage 5 — Projects
 
@@ -290,10 +292,11 @@ Stage 1 is eki changing its code. This is the other half — what it knows:
       each as a reviewable change
 - [ ] The app updates itself from GitHub releases, through Stage 1's swap and
       rollback, keeping local changes on top
-- [ ] After a run, eki writes down what it learned about using a backend
+- [x] After a run, eki writes down what it learned about using a backend
       (a skill, an instruction) and uses it next time; every such note is
-      listed in the app and can be deleted — as commits in
-      Stage 4's skill store
+      listed and can be deleted — as commits in Stage 4's skill store
+      (035ecd6: `eki skills learned`, `eki skills rm`; the /skills panel
+      lists them as skills, without a "learned" mark yet)
 - [ ] eki takes the next unchecked item in this file as self-work (Stage 1),
       at whatever autonomy is set
 - [ ] eki keeps this file current: ticks what landed, with the commit

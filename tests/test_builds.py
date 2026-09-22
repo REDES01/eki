@@ -104,6 +104,13 @@ def test_old_builds_go_but_never_current_or_previous(src):
     assert gone == [str(a)] and b.exists() and c.exists()
 
 
+def test_cmd_builds_says_so_before_any_swap_has_happened(src, capsys):
+    from eki import cli
+    builds.ensure_layout(src)
+    assert cli.cmd_builds(None) == 0
+    assert "no swap yet" in capsys.readouterr().out.strip().splitlines()[-1]
+
+
 def test_swap_needs_the_supervisor_a_person_installed(src):
     with pytest.raises(RuntimeError, match="eki agent install"):
         builds.swap(builds.make(src))

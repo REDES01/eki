@@ -477,6 +477,8 @@ def cmd_builds(args) -> int:
         when = time.strftime("%m-%d %H:%M", time.localtime(s.get("at") or 0))
         print(f"\nlast swap {when}: {s.get('state')} — {s.get('target')}"
               + (f" ({s['why']})" if s.get("why") else ""))
+    else:
+        print("\nno swap yet")
     return 0
 
 

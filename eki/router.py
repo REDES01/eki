@@ -25,6 +25,7 @@ class Need:
     tools: bool = False
     vision: bool = False
     images_out: bool = False
+    web: bool = False            # needs to look things up on the web
     context_tokens: int = 0
     backend: Optional[str] = None       # explicit override, wins over everything
     #: what the request is and how demanding it is, from eki.classify
@@ -128,6 +129,7 @@ class Router:
                     ("repo", need.repo, caps.repo),
                     ("tools", need.tools, caps.tools),
                     ("vision", need.vision, caps.vision),
+                    ("web", need.web, caps.web),
                     ("images", need.images_out, caps.images_out),
                 ) if wanted and not have
             ]

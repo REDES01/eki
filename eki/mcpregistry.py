@@ -30,6 +30,52 @@ END = "# --- eki: end ---"
 BACKENDS = ("claude", "codex")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
+#: Servers eki knows how to add in one step: the command, the key it needs,
+#: and what having it gives a backend (a capability the router filters on).
+#: eki adds them; it doesn't write them — that's the whole point.
+CATALOG: List[Dict[str, Any]] = [
+    {"id": "brave-search", "title": "Brave Search", "provides": ["web"],
+     "command": "npx -y @brave/brave-search-mcp-server", "key_env": "BRAVE_API_KEY",
+     "blurb": "Web search through Brave's API (free tier available)."},
+    {"id": "exa", "title": "Exa", "provides": ["web"],
+     "command": "npx -y exa-mcp-server", "key_env": "EXA_API_KEY",
+     "blurb": "Neural web search with full-page content."},
+    {"id": "tavily", "title": "Tavily", "provides": ["web"],
+     "command": "npx -y tavily-mcp", "key_env": "TAVILY_API_KEY",
+     "blurb": "Search and extract, built for agents."},
+    {"id": "perplexity", "title": "Perplexity Ask", "provides": ["web"],
+     "command": "npx -y server-perplexity-ask", "key_env": "PERPLEXITY_API_KEY",
+     "blurb": "Searched, sourced answers from Sonar."},
+    {"id": "fetch", "title": "Fetch", "provides": ["fetch"],
+     "command": "uvx mcp-server-fetch", "key_env": "",
+     "blurb": "Read a web page as text (no search)."},
+    {"id": "playwright", "title": "Playwright", "provides": ["browser"],
+     "command": "npx -y @playwright/mcp@latest", "key_env": "",
+     "blurb": "Drive a real browser: pages, forms, screenshots."},
+    {"id": "github", "title": "GitHub", "provides": ["github"],
+     "command": "npx -y @modelcontextprotocol/server-github", "key_env": "GITHUB_PERSONAL_ACCESS_TOKEN",
+     "blurb": "Issues, pull requests, repositories."},
+    {"id": "filesystem", "title": "Filesystem", "provides": ["files"],
+     "command": "npx -y @modelcontextprotocol/server-filesystem ~", "key_env": "",
+     "blurb": "Read and write files under a folder."},
+]
+
+
+def catalog_entry(entry_id: str) -> Optional[Dict[str, Any]]:
+    return next((dict(e) for e in CATALOG if e["id"] == entry_id), None)
+
+
+def provides(backend: str, what: str) -> bool:
+    """Whether a backend side (claude / codex) has an enabled server that
+    provides a capability — the web, say. The router reads this so a local
+    model with Codex's hands and a search server counts as one that can
+    research; without one it doesn't, and research goes elsewhere."""
+    for spec in load().values():
+        if spec.get("enabled", True) and backend in (spec.get("backends") or []) \
+                and what in (spec.get("provides") or []):
+            return True
+    return False
+
 
 def load() -> Dict[str, Dict[str, Any]]:
     try:
@@ -81,6 +127,9 @@ def normalize(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
             out["headers"] = {str(k): str(v) for k, v in headers.items()}
     if spec.get("origin"):
         out["origin"] = str(spec["origin"])
+    given = [str(p) for p in (spec.get("provides") or []) if p]
+    if given:
+        out["provides"] = given
     return out
 
 
@@ -206,13 +255,16 @@ def codex_block(servers: Optional[Dict[str, Dict[str, Any]]] = None,
 def render_codex(servers: Optional[Dict[str, Dict[str, Any]]] = None,
                  path: Optional[Path] = None, eki_command: Optional[List[str]] = None) -> str:
     """Write the managed block into Codex's config, replacing the previous
-    one; everything outside the markers is kept byte for byte."""
+    one; everything outside the markers is kept byte for byte — except one
+    top-level key, `web_search`, which turns on Codex's own hosted search
+    and has to sit above the first table to be top-level at all."""
     path = path or CODEX_CONFIG
     block = codex_block(servers, eki_command)
     try:
-        current = path.read_text()
+        original = path.read_text()
     except OSError:
-        current = ""
+        original = ""
+    current = _ensure_web_search(original)
     if BEGIN in current and END in current:
         head, _, rest = current.partition(BEGIN)
         _, _, tail = rest.partition(END + "\n")
@@ -221,10 +273,29 @@ def render_codex(servers: Optional[Dict[str, Dict[str, Any]]] = None,
         new = head + block + tail
     else:
         new = current + ("\n" if current and not current.endswith("\n") else "") + "\n" + block
-    if new != current:
+    if new != original:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new)
     return new
+
+
+_TOP_KEY = re.compile(r"^\s*web_search\s*=", re.M)
+_FIRST_TABLE = re.compile(r"^\s*\[", re.M)
+
+
+def _ensure_web_search(text: str) -> str:
+    """`web_search = "live"` at the top of Codex's config unless the file
+    already sets it (whatever it says stands). Codex's search is a hosted
+    tool: the model gets it only when this is on."""
+    from . import settings as settings_mod
+    if not settings_mod.load().get("codex_web_search", True):
+        return text
+    head_end = _FIRST_TABLE.search(text)
+    head = text[:head_end.start()] if head_end else text
+    if _TOP_KEY.search(head):
+        return text
+    line = '# set by eki: Codex\'s hosted web search (Settings → Routing)\nweb_search = "live"\n'
+    return line + text
 
 
 def eki_stdio_command() -> List[str]:

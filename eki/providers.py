@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS providers (
 """
 
 CAPABILITY_FIELDS = ("context_tokens", "text", "vision", "tools", "repo",
-                     "images_out", "streaming")
+                     "images_out", "web", "streaming")
 
 
 @dataclass
@@ -60,6 +60,14 @@ class Provider:
 
     def info(self) -> BackendInfo:
         caps = {k: v for k, v in self.capabilities.items() if k in CAPABILITY_FIELDS}
+        # what a kind has by nature, whatever the row says: the CLIs bring
+        # their own hosted search (Codex's once eki turns it on), and a
+        # search server from eki's registry gives it to whichever side has it
+        if self.kind in ("claude_code", "codex") and "web" not in self.capabilities:
+            from . import mcpregistry, settings as settings_mod
+            side = "claude" if self.kind == "claude_code" else "codex"
+            hosted = self.kind == "claude_code" or bool(settings_mod.load().get("codex_web_search", True))
+            caps["web"] = hosted or mcpregistry.provides(side, "web")
         return BackendInfo(key=self.key, kind=self.kind, label=self.label,
                            capabilities=Capabilities(**caps),
                            cost=Cost(tier=self.tier, note=self.note),

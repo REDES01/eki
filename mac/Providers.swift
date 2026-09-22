@@ -336,6 +336,7 @@ struct HubSettings: Codable, Hashable {
     var claude_tools: Bool = true
     var claude_screen: Bool = true
     var claude_builtin_computer_use: Bool = false
+    var codex_web_search: Bool = true
 }
 
 extension EngineClient {
@@ -359,6 +360,7 @@ extension EngineClient {
             "claude_tools": settings.claude_tools,
             "claude_screen": settings.claude_screen,
             "claude_builtin_computer_use": settings.claude_builtin_computer_use,
+            "codex_web_search": settings.codex_web_search,
         ])
     }
 

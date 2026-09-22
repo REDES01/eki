@@ -213,6 +213,16 @@ struct RoutingSettings: View {
                         .lineLimit(1...4)
                         .onSubmit(save)
                 }
+                Toggle("Turn on Codex's web search", isOn: Binding(
+                    get: { settings.codex_web_search },
+                    set: { settings.codex_web_search = $0; save() }))
+                    .toggleStyle(AccentSwitch())
+                Text("Sets `web_search = \"live\"` at the top of ~/.codex/config.toml, so Codex's own "
+                     + "hosted search is there for research. A value already in the file is left alone. "
+                     + "A local model under Codex has no hosted search: give it a search server from "
+                     + "the catalog in /mcp instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Give Claude Code eki's tools", isOn: Binding(
                     get: { settings.claude_tools },
                     set: { settings.claude_tools = $0; save() }))

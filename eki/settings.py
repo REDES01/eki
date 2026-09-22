@@ -51,6 +51,9 @@ DEFAULTS: Dict[str, Any] = {
     #: session. Off: its per-app approval is a dialog only Claude Code's own
     #: interactive front ends show, so headless it grants nothing (2.1.278)
     "claude_builtin_computer_use": False,
+    #: turn on Codex's own hosted web search (`web_search = "live"` in its
+    #: config); off leaves the file as it is
+    "codex_web_search": True,
     #: "auto": Claude Code and Codex run commands and edit files without
     #: asking (their own "skip permissions" modes); "ask": each one that
     #: needs a say becomes a card in the thread. Questions they ask *you*

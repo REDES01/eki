@@ -263,3 +263,33 @@ def test_under_auto_nothing_goes_to_a_bare_text_model_while_a_harness_can_take_i
             assert eng.runs.get(started["run"])["backend"] == expect, (prompt, picked)
         await eng.runner.stop()
     asyncio.run(go())
+
+
+def test_research_needs_a_provider_with_the_web(tmp_path, monkeypatch):
+    """"What's the latest…" is research: a harness without search can't
+    do it, so it goes to one that has the web — and says why."""
+    from eki import secrets, settings
+    from eki.adapters.base import BackendInfo, Capabilities, Cost
+    from eki.config import Config
+    from eki.engine import Engine
+    from tests.test_runs import settle
+    monkeypatch.setattr(secrets, "get", lambda k: None)
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    cfg = Config(db_path=str(tmp_path / "eki.db"), quota_url="http://127.0.0.1:1")
+    cfg.backends = [BackendInfo(key="local-hands", kind="echo", label="local", cost=Cost(tier=0),
+                                capabilities=Capabilities(context_tokens=8000, tools=True, repo=True)),
+                    BackendInfo(key="webbed", kind="echo", label="webbed", cost=Cost(tier=50),
+                                capabilities=Capabilities(context_tokens=8000, tools=True, repo=True, web=True))]
+    cfg.options = {"local-hands": {}, "webbed": {}}
+    eng = Engine(cfg, owner=True)
+
+    async def go():
+        started = await eng.ask("what's the latest news on the DeepSeek harness")
+        await settle(eng.runs, started["run"])
+        run = eng.runs.get(started["run"])
+        assert run["backend"] == "webbed", run["reason"]
+        started = await eng.ask("hello")
+        await settle(eng.runs, started["run"])
+        assert eng.runs.get(started["run"])["backend"] == "local-hands"     # no web needed: cheapest
+        await eng.runner.stop()
+    asyncio.run(go())

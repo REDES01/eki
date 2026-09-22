@@ -30,6 +30,9 @@ class Capabilities:
     tools: bool = False          # can call tools / edit files on its own
     repo: bool = False           # can be pointed at a working directory
     images_out: bool = False
+    #: can look things up on the web by itself (a hosted search, a native
+    #: one, or an MCP search server it has been given) — research needs it
+    web: bool = False
     streaming: bool = True
 
 

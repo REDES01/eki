@@ -26,6 +26,17 @@ do, what it costs right now, and how to hand work from one to the next.
   This is not a feature beside the others; it is how the others get built.
   Stage 1 makes the loop; every stage after it is work eki should be doing
   on itself, and carries an *evolve* line saying what it learns to keep up.
+- **eki integrates; it doesn't build the parts.** Models come from
+  providers, tools come from MCP servers, instructions come from skills.
+  eki is the registry of all three, the router between them, and the one
+  interface — never a harness of its own and never the maker of a tool a
+  provider or a server should supply. A capability a request needs (the
+  web, the screen, a repo, a picture) is something a provider *has*, and
+  routing finds one that has it; a gap is filled by adding a provider or
+  a server, not by code in eki. The only tools eki serves are the ones
+  that *are* integration: reaching another provider through eki
+  (`eki_ask`, `eki_image`, `eki_capabilities`). Its screen tools are a
+  stopgap until a program's own computer use works under it, and go then.
 - **Your credentials stay yours.** Subscriptions are reached only by running
   the official CLIs as you. No token is read, copied or re-exposed. Ever.
 - **Local first, nothing hidden.** Every answer says what produced it and why.

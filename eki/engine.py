@@ -251,7 +251,10 @@ class Engine:
             info = adapters.BackendInfo(
                 key=key, kind="codex", label=f"Codex on {p.label}",
                 capabilities=adapters.Capabilities(context_tokens=context, text=True,
-                                                   tools=True, repo=True),
+                                                   tools=True, repo=True,
+                                                   # the web only through a search server
+                                                   # eki's registry gives Codex
+                                                   web=mcpregistry.provides("codex", "web")),
                 cost=adapters.Cost(tier=0, note="local, through Codex"))
             options = {**self.options.get(codex.key, {}), "model": p.key, "local_model": p.key,
                        "gateway": f"http://127.0.0.1:{self.port}/v1", "context_tokens": context}
@@ -397,7 +400,7 @@ class Engine:
                 "role": "router" if b.key == self.settings.get("router_model") else "",
                 "capabilities": {
                     "repo": caps.repo, "tools": caps.tools, "vision": caps.vision,
-                    "images_out": caps.images_out, "text": caps.text,
+                    "images_out": caps.images_out, "text": caps.text, "web": caps.web,
                     "context_tokens": caps.context_tokens,
                 },
                 "ok": bool(h and h.ok),
@@ -529,6 +532,8 @@ class Engine:
         need = Need(repo=bool(run["cwd"]),
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
+                    # research means looking things up: a provider with the web
+                    web=label.task == "research" and not requested,
                     backend=requested or None,
                     task=label.task, difficulty=label.difficulty)
         choice = self.router.choose(need)
@@ -536,7 +541,7 @@ class Engine:
             # no harness can take it (none set up, or all out of quota): a
             # bare model is better than no answer, and says so in the reason
             choice = self.router.choose(Need(repo=False, tools=False, images_out=need.images_out,
-                                             backend=None, task=label.task,
+                                             web=need.web, backend=None, task=label.task,
                                              difficulty=label.difficulty))
             if choice.backend is not None:
                 choice.reason += " — no harness could take it"

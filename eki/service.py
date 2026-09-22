@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI):
     report = await asyncio.to_thread(skills_mod.boot)
     if report.get("linked") or report.get("conflicts") or report.get("error"):
         log.info("skills: %s", report)
+    # one tool registry, rendered into Codex's config at start (its web
+    # search switch included); Claude Code gets it per session
+    try:
+        await asyncio.to_thread(mcpregistry.render_codex)
+    except OSError as e:
+        log.warning("codex config: %s", e)
 
     async def reap() -> None:
         # unload local models eki started once they've sat unused a while
@@ -358,6 +364,16 @@ class McpServerBody(BaseModel):
     headers: Dict[str, str] = {}
     backends: List[str] = ["claude", "codex"]
     enabled: bool = True
+    provides: List[str] = []
+    #: from the catalog: its id, and the key it asks for
+    catalog: str = ""
+    key: str = ""
+
+
+@app.get("/api/mcp/catalog")
+def mcp_catalog() -> Any:
+    """Servers eki knows how to add in one step, and what each gives a backend."""
+    return {"catalog": mcpregistry.CATALOG}
 
 
 class McpToggleBody(BaseModel):
@@ -373,24 +389,40 @@ def mcp_registry() -> Any:
 
 
 @app.put("/api/mcp/{name}")
-def mcp_put(name: str, body: McpServerBody) -> Any:
+async def mcp_put(name: str, body: McpServerBody) -> Any:
+    spec = body.model_dump()
+    if body.catalog:
+        entry = mcpregistry.catalog_entry(body.catalog)
+        if entry is None:
+            raise HTTPException(404, "no such catalog entry")
+        spec = {**spec, "command": entry["command"], "provides": entry["provides"]}
+        if entry["key_env"]:
+            if not body.key:
+                raise HTTPException(400, f"{entry['title']} needs a key ({entry['key_env']})")
+            spec["env"] = {**spec.get("env", {}), entry["key_env"]: body.key}
     try:
-        return {"servers": mcpregistry.put(name, body.model_dump())}
+        servers = mcpregistry.put(name, spec)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    await engine().reload()            # a backend may have gained a capability
+    return {"servers": servers}
 
 
 @app.post("/api/mcp/{name}/enabled")
-def mcp_enabled(name: str, body: McpToggleBody) -> Any:
+async def mcp_enabled(name: str, body: McpToggleBody) -> Any:
     try:
-        return {"servers": mcpregistry.set_enabled(name, body.enabled, body.backend)}
+        servers = mcpregistry.set_enabled(name, body.enabled, body.backend)
     except KeyError:
         raise HTTPException(404, "no such server in eki's registry")
+    await engine().reload()
+    return {"servers": servers}
 
 
 @app.delete("/api/mcp/{name}")
-def mcp_delete(name: str) -> Any:
-    return {"servers": mcpregistry.remove(name)}
+async def mcp_delete(name: str) -> Any:
+    servers = mcpregistry.remove(name)
+    await engine().reload()
+    return {"servers": servers}
 
 
 # ---- skills: one store, a view per backend (eki/skills.py) --------------------
@@ -1103,6 +1135,8 @@ async def put_settings(body: Dict[str, Any]) -> Any:
     saved = settings_mod.save(body)
     eng = engine()
     await eng.reload()                  # the router model may have changed
+    if before.get("codex_web_search") != saved.get("codex_web_search"):
+        await asyncio.to_thread(mcpregistry.render_codex)
     if any(before.get(k) != saved.get(k) for k in ("claude_tools", "claude_screen", "claude_system_prompt")):
         # what a session is given is decided at its start: idle ones are
         # closed so the next turn opens with the new tools (resumed by id)

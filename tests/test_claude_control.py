@@ -156,7 +156,10 @@ def test_the_registry_renders_into_both_clis(tmp_path, monkeypatch):
     argv = mcpregistry.claude_argv()
     assert argv[0] == "--mcp-config" and json.loads(argv[1]) == doc
     toml = codex.read_text()
-    assert toml.startswith('model = "gpt-5"\n[mcp_servers.mine]\ncommand = "mine"\n')   # untouched
+    # what was there is untouched; Codex's own hosted search is switched on above it
+    assert 'model = "gpt-5"\n[mcp_servers.mine]\ncommand = "mine"\n' in toml
+    assert toml.startswith("# set by eki") and 'web_search = "live"\n' in toml.split("[")[0]
+    assert toml.count("web_search =") == 1
     assert '[mcp_servers.eki]\ncommand = "/py"' in toml
     assert '[mcp_servers.fs]' in toml and 'url = "https://mcp.example/x"' in toml
     assert toml.count(mcpregistry.BEGIN) == 1
@@ -336,3 +339,26 @@ def test_the_screen_tools_being_kept_out_by_macos_is_a_card_not_a_line():
                                   "permission(s) are still not granted.") == "accessibility"
     assert live.permission_needed("Screen Recording permission is required to capture") == "screen"
     assert live.permission_needed("read 12 lines") == ""
+
+
+def test_the_catalog_adds_a_server_and_the_registry_says_what_it_provides(tmp_path, monkeypatch):
+    from eki import settings
+    monkeypatch.setattr(mcpregistry, "PATH", tmp_path / "mcp.json")
+    monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", tmp_path / "config.toml")
+    monkeypatch.setattr(settings, "PATH", tmp_path / "settings.json")
+    entry = mcpregistry.catalog_entry("brave-search")
+    assert entry["provides"] == ["web"] and entry["key_env"] == "BRAVE_API_KEY"
+    assert mcpregistry.provides("codex", "web") is False
+    mcpregistry.put("brave", {"command": entry["command"], "provides": entry["provides"],
+                              "env": {entry["key_env"]: "k"}, "backends": ["codex"]})
+    assert mcpregistry.provides("codex", "web") is True and mcpregistry.provides("claude", "web") is False
+    mcpregistry.set_enabled("brave", False)
+    assert mcpregistry.provides("codex", "web") is False
+    # a config that already sets web_search keeps its own say
+    (tmp_path / "config.toml").write_text('web_search = "off"\n')
+    mcpregistry.render_codex()
+    assert (tmp_path / "config.toml").read_text().count("web_search =") == 1
+    settings.save({"codex_web_search": False})
+    (tmp_path / "config.toml").write_text("")
+    mcpregistry.render_codex()
+    assert "web_search" not in (tmp_path / "config.toml").read_text()

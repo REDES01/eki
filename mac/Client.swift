@@ -687,6 +687,10 @@ extension EngineClient {
         try await decode(JSONValue.self, "GET", "api/mcp")
     }
 
+    func mcpCatalog() async throws -> [JSONValue] {
+        (try await decode(JSONValue.self, "GET", "api/mcp/catalog"))["catalog"]?.arrayValue ?? []
+    }
+
     func mcpPut(_ name: String, spec: [String: Any]) async throws -> JSONValue {
         try await decode(JSONValue.self, "PUT", "api/mcp/\(name)", body: spec)
     }

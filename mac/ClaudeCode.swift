@@ -130,6 +130,8 @@ struct McpPanel: View {
     @State private var error = ""
     @State private var working = ""
     @State private var adding = false
+    @State private var catalog: [JSONValue] = []
+    @State private var picking: JSONValue? = nil
 
     var body: some View {
         PanelState(loading: loading, error: error) {
@@ -145,12 +147,49 @@ struct McpPanel: View {
                         }
                     }
                     registrySection
+                    catalogSection
                 }
                 .padding(.all, 16)
             }
         }
-        .task { await load() }
+        .task { await load(); catalog = (try? await model.client.mcpCatalog()) ?? [] }
         .sheet(isPresented: $adding) { AddMcpServerSheet { await load() } }
+        .sheet(item: $picking) { entry in
+            AddFromCatalogSheet(entry: entry) { await load(); await reloadRegistry() }
+        }
+    }
+
+    /// Servers eki knows how to add in one step — a search, a browser, GitHub —
+    /// with what each gives a backend. A local model under Codex can research
+    /// once it has a search server; eki adds servers, it doesn't write them.
+    private var catalogSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ADD FROM THE CATALOG").font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
+                .foregroundStyle(Palette.inkFaint).padding(.top, 6)
+            ForEach(Array(catalog.enumerated()), id: \.offset) { _, e in
+                let id: String = e["id"]?.text ?? ""
+                let have: Bool = alreadyAdded(e)
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(e["title"]?.text ?? id).font(.zoomed(size: 13, weight: .medium))
+                            ForEach(e["provides"]?.arrayValue.map(\.text) ?? [], id: \.self) { p in
+                                Text(p).font(.zoomed(size: 10, weight: .semibold)).tracking(0.4)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Palette.accent.opacity(0.15), in: Capsule())
+                            }
+                        }
+                        Text(e["blurb"]?.text ?? "").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    }
+                    Spacer()
+                    Button(have ? "Added" : "Add…") { picking = e }
+                        .buttonStyle(GhostButton())
+                        .disabled(have)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+            }
+        }
     }
 
     private var groups: [String] {
@@ -266,6 +305,19 @@ struct McpPanel: View {
         }
     }
 
+    /// Whether a registry entry runs this catalog server (same command word).
+    private func alreadyAdded(_ e: JSONValue) -> Bool {
+        let line: String = e["command"]?.text ?? ""
+        let words = line.split(separator: " ").map(String.init)
+        guard words.count >= 2 else { return false }
+        let marker = words[words.count - 1]            // the package name is the last word
+        for spec in registry.values {
+            let args: [String] = spec["args"]?.arrayValue.map(\.text) ?? []
+            if args.contains(marker) { return true }
+        }
+        return false
+    }
+
     private func commandLine(_ spec: JSONValue) -> String {
         if let url = spec["url"]?.stringValue, !url.isEmpty { return url }
         let command: String = spec["command"]?.text ?? ""
@@ -340,6 +392,67 @@ struct McpPanel: View {
 
     private func registryRemove(_ name: String) async {
         if let reg = try? await model.client.mcpDelete(name)["servers"]?.objectValue { registry = reg }
+    }
+}
+
+extension JSONValue: Identifiable {
+    public var id: String { self["id"]?.text ?? self.text }
+}
+
+/// One catalog entry: a name, the key it asks for, which backends.
+struct AddFromCatalogSheet: View {
+    @EnvironmentObject var model: AppModel
+    let entry: JSONValue
+    let done: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var key = ""
+    @State private var claude = true
+    @State private var codex = true
+    @State private var error = ""
+
+    private var keyEnv: String { entry["key_env"]?.text ?? "" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add \(entry["title"]?.text ?? "")").font(.hubTitle)
+            Text(entry["blurb"]?.text ?? "").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+            Text(entry["command"]?.text ?? "").font(.hubMonoSmall).foregroundStyle(Palette.inkFaint)
+            TextField("Name in eki", text: $name).textFieldStyle(.roundedBorder)
+            if !keyEnv.isEmpty {
+                SecureField("\(keyEnv) — kept in the server's environment", text: $key).textFieldStyle(.roundedBorder)
+            }
+            HStack(spacing: 16) {
+                Toggle("Claude Code", isOn: $claude).toggleStyle(.checkbox)
+                Toggle("Codex (and local models under it)", isOn: $codex).toggleStyle(.checkbox)
+            }
+            if !error.isEmpty { Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
+                Button("Add") { Task { await add() } }.buttonStyle(AccentButton())
+                    .disabled(name.isEmpty || (!keyEnv.isEmpty && key.isEmpty))
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(.all, 20)
+        .frame(width: 520)
+        .background(Palette.canvas)
+        .onAppear { name = entry["id"]?.text ?? "" }
+    }
+
+    private func add() async {
+        var backends: [String] = []
+        if claude { backends.append("claude") }
+        if codex { backends.append("codex") }
+        do {
+            _ = try await model.client.mcpPut(name, spec: ["name": name, "catalog": entry["id"]?.text ?? "",
+                                                          "key": key, "backends": backends])
+            await done()
+            dismiss()
+        } catch {
+            self.error = model.plainError(error)
+        }
     }
 }
 

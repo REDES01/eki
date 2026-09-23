@@ -46,6 +46,15 @@ VIEWS: Dict[str, Path] = {
     "codex": Path("~/.agents/skills").expanduser(),
     "gemini": Path("~/.gemini/skills").expanduser(),
 }
+#: each program's own home and binary: a view is kept only for a program
+#: that is here — installed, or with a home of its own already — so eki
+#: never makes ~/.gemini on a Mac that has never had Gemini CLI
+HOMES: Dict[str, Path] = {
+    "claude": Path("~/.claude").expanduser(),
+    "codex": Path("~/.codex").expanduser(),
+    "gemini": Path("~/.gemini").expanduser(),
+}
+BINARIES = {"claude": "claude", "codex": "codex", "gemini": "gemini"}
 #: where Codex looked before ~/.agents/skills; only read, for import
 LEGACY = [Path("~/.codex/skills").expanduser()]
 BACKENDS = ("claude", "codex", "gemini", "local")
@@ -444,14 +453,27 @@ def enabled_for(backend: str) -> List[Dict[str, Any]]:
 
 # ---- the views -------------------------------------------------------------------
 
+def present(backend: str) -> bool:
+    """Whether this Mac has the program: its home folder exists (it has run
+    here), or its binary is where CLIs live. Both, not just the binary: an
+    engine started from the GUI may not find a binary a shell would, and
+    that mustn't take a working view away."""
+    home = HOMES.get(backend)
+    if home is not None and home.is_dir():
+        return True
+    from .adapters.claude_code import _find_binary
+    return bool(_find_binary(BINARIES.get(backend, backend)))
+
+
 def sync() -> Dict[str, Any]:
     """Make each CLI's folder show exactly the enabled skills: a link per
-    skill that is on for it, none for one that isn't. Only links into the
-    store are ever made or removed."""
+    skill that is on for it, none for one that isn't, and none at all for
+    a program that isn't here. Only links into the store are ever made or
+    removed."""
     report: Dict[str, Any] = {"linked": [], "unlinked": [], "conflicts": []}
     if not STORE.is_dir():
         return report
-    wanted = {b: {s["folder"] for s in enabled_for(b)} for b in VIEWS}
+    wanted = {b: {s["folder"] for s in enabled_for(b)} if present(b) else set() for b in VIEWS}
     for backend, root in VIEWS.items():
         # links into the store that should no longer be there, or point at nothing
         if root.is_dir():

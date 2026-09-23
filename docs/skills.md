@@ -114,6 +114,10 @@ the work); `notify_learned`.
   `~/.claude/skills`, `~/.agents/skills` or `~/.gemini/skills` that eki
   didn't make is left alone; if it has the same name as one of eki's, the
   panel says so.
+- A program's folder is only linked into when the program is here: its
+  home (`~/.claude`, `~/.codex`, `~/.gemini`) exists or its binary is
+  installed. eki doesn't make `~/.gemini` on a Mac that has never had
+  Gemini CLI, and when a program goes away its links go too.
 - Import moves a real folder into the store and links it back, so the
   program sees no difference.
 - `eki` — eki's own skill ("how to call eki") — is written at engine start

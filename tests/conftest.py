@@ -14,6 +14,9 @@ def private_skills(tmp_path, monkeypatch):
                                           "codex": root / "agents" / "skills",
                                           "gemini": root / "gemini" / "skills"})
     monkeypatch.setattr(skills, "LEGACY", [root / "codex" / "skills"])
+    # every CLI counts as installed unless a test says otherwise; none of
+    # this Mac's own programs decide what a test sees
+    monkeypatch.setattr(skills, "present", lambda backend: True)
     monkeypatch.setattr(learn, "LOG", root / "eki" / "learn.json")
     monkeypatch.setattr(learn, "WORKDIR", root / "eki" / "learn")
     monkeypatch.setattr(learn, "ABSORBED", root / "eki" / "learn" / "absorbed")

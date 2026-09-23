@@ -8,6 +8,9 @@ import pytest
 from eki import skills
 from eki.adapters.base import Message
 
+#: the real check, before conftest makes every program count as installed
+REAL_PRESENT = skills.present
+
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
@@ -99,6 +102,27 @@ def test_a_skill_gemini_wrote_itself_is_taken_in(home):
     assert learn.adopt_new_folders(0, "gemini", "gemini", "r1") == ["notes"]
     assert (skills.VIEWS["gemini"] / "notes").is_symlink()
     assert skills.get("notes")["origin"] == "agent:gemini"
+
+
+def test_a_program_that_is_not_here_gets_no_folder(home, monkeypatch):
+    from eki.adapters import claude_code
+    monkeypatch.setattr(skills, "present", REAL_PRESENT)
+    monkeypatch.setattr(skills, "HOMES", {"claude": home / "claude", "codex": home / "codex",
+                                          "gemini": home / "gemini"})
+    monkeypatch.setattr(claude_code, "_find_binary", lambda name: "/bin/codex" if name == "codex" else None)
+    (home / "claude").mkdir()                   # Claude Code has run here; Codex is installed
+    skills.put("haiku", description="poems", body="x")
+    assert (skills.VIEWS["claude"] / "haiku").is_symlink()
+    assert (skills.VIEWS["codex"] / "haiku").is_symlink()
+    assert not (home / "gemini").exists()       # never made for a program that isn't here
+    # a view made before the program went away loses eki's links, and only those
+    _write(skills.VIEWS["claude"] / "theirs", "theirs", "someone else's")
+    monkeypatch.setattr(skills, "HOMES", {**skills.HOMES, "claude": home / "nowhere"})
+    report = skills.sync()
+    assert "claude:haiku" in report["unlinked"]
+    assert not (skills.VIEWS["claude"] / "haiku").exists()
+    assert (skills.VIEWS["claude"] / "theirs" / "SKILL.md").is_file()
+    assert (skills.VIEWS["codex"] / "haiku").is_symlink()
 
 
 def test_every_change_is_a_commit(home):

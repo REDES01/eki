@@ -14,16 +14,24 @@ to build a game around it, it answers
 and eki moves the thread to Claude Code with that brief, so it starts from
 what was said instead of from nothing.
 
-The marker, not the local server's tool calling: the same way a local model
-asks eki for a skill (`[[skill:name]]`), and it works on any server.
+A real tool call first: a server that speaks OpenAI's `tools` (mlx_lm.server)
+is offered one function, `hand_off(target, brief)`, and the model calls it the
+way it was trained to — structured, and wherever it lands in the answer, even
+after a sentence ("I'll look at the project first…"). A server without tool
+calling gets the marker instead, the same way a local model asks eki for a
+skill (`[[skill:name]]`); it is caught anywhere in the answer too, not only
+at its start (a sentence before it hid three goal runs, 2026-09-24).
 """
 from __future__ import annotations
 
 import re
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
+from .adapters.base import ToolCall
+
 PREFIX = "[[handoff:"
-MARK = re.compile(r"^\s*\[\[handoff:\s*([A-Za-z0-9_.-]*)\s*(?:\|\s*(.*?))?\]\]", re.S)
+TOOL = "hand_off"
+MARK = re.compile(r"\[\[handoff:\s*([A-Za-z0-9_.-]*)\s*(?:\|\s*(.*?))?\]\]", re.S)
 
 
 class HandOff(Exception):
@@ -34,89 +42,138 @@ class HandOff(Exception):
         self.target, self.brief = target, brief
 
 
-def instructions(targets: List[Tuple[str, str]]) -> str:
+def tool(targets: List[Tuple[str, str]]) -> Dict[str, Any]:
+    """The one function a model without tools is given, in OpenAI's shape."""
+    names = [key for key, _ in targets]
+    return {"type": "function", "function": {
+        "name": TOOL,
+        "description": ("Hand this request to one that has tools — files, commands, the screen, the "
+                        "web, building software. Call it instead of saying what you would do."),
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string", "enum": names,
+                       "description": "; ".join(f"{k}: {what}" for k, what in targets)},
+            "brief": {"type": "string",
+                      "description": ("A few sentences in the person's language: what they want, "
+                                      "and anything already agreed in this conversation.")}},
+            "required": ["target", "brief"]}}}
+
+
+def instructions(targets: List[Tuple[str, str]], as_tool: bool = False) -> str:
     """The system prompt a model without tools gets: what it can't do, and
     the one thing it can do about that."""
     rows = "\n".join(f"- {key}: {what}" for key, what in targets)
-    return (
+    head = (
         "You are answering on this Mac without any tools: you cannot read or change files, run "
         "commands, look at the screen, use the web, or build and run software. Answer whatever "
         "you can answer well yourself — questions, explanations, writing, translation, rewrites "
         "of what you wrote.\n\n"
         "When the request needs any of those tools, or is more than you can do well (a real "
         "program, an app or game, a change to someone's project, current facts), don't attempt "
-        "it and don't pretend to have done it. Hand it over instead: reply with exactly\n"
+        "it and don't pretend to have done it. ")
+    if as_tool:
+        return head + (
+            f"Hand it over instead: call {TOOL} right away, without writing anything first and "
+            "without asking whether you should. The brief is a few sentences in the person's "
+            "language: what they want, and anything already agreed in this conversation that "
+            f"they'll need.\n\nWho can take it:\n{rows}")
+    return head + (
+        "Hand it over instead: reply with exactly\n"
         "[[handoff: <one of the names below> | <a brief for them>]]\n"
         "and nothing else. The brief is a few sentences in the person's language: what they "
         "want, and anything already agreed in this conversation that they'll need.\n\n"
         f"Who can take it:\n{rows}")
 
 
-def could_be(text: str) -> bool:
-    """Whether the start of an answer may still turn into the marker."""
-    t = (text or "").lstrip()
-    if not t:
-        return True
-    if len(t) < len(PREFIX):
-        return PREFIX.startswith(t)
-    return t.startswith(PREFIX) and "]]" not in t
+def called(call: ToolCall) -> Optional[HandOff]:
+    """The hand_off call, as a HandOff; any other call is not ours."""
+    if call.name != TOOL:
+        return None
+    args = call.arguments or {}
+    brief = args.get("brief") or call.raw or ""
+    return HandOff(str(args.get("target") or ""), " ".join(str(brief).split()))
 
 
 def parse(text: str) -> Optional[HandOff]:
-    m = MARK.match(text or "")
+    """The marker, wherever it is in `text`."""
+    m = MARK.search(text or "")
     if not m:
         return None
     return HandOff(m.group(1) or "", " ".join((m.group(2) or "").split()))
 
 
-async def watch(stream: AsyncIterator[Any]) -> AsyncIterator[Any]:
-    """Pass a model's answer through, holding back its start until it's
-    clearly not a handoff; raise HandOff when it is. Thinking (<think>…)
-    and events pass untouched."""
-    held = ""
-    deciding = True
-    in_think = False
-    async for chunk in stream:
-        if not deciding or not isinstance(chunk, str):
-            yield chunk
-            continue
+def _partial(text: str, word: str) -> int:
+    """How much of the end of `text` could still become `word`."""
+    for n in range(min(len(text), len(word) - 1), 0, -1):
+        if word.startswith(text[-n:]):
+            return n
+    return 0
+
+
+def _scan(buf: str, in_think: bool, final: bool) -> Tuple[str, str, bool, Optional[HandOff]]:
+    """Pass on what can't be part of a marker; keep back what might be.
+    Returns (text to pass on, text kept back, inside <think>?, a handoff)."""
+    out: List[str] = []
+    while buf:
         if in_think:
-            yield chunk
-            if "</think>" in chunk:
-                in_think = False
-                rest = chunk.split("</think>", 1)[1]
-                # what followed the tag in this chunk was already passed on
-                if rest.strip():
-                    deciding = False
+            i = buf.find("</think>")
+            if i < 0:
+                keep = 0 if final else _partial(buf, "</think>")
+                out.append(buf[:len(buf) - keep])
+                buf = buf[len(buf) - keep:]
+                break
+            out.append(buf[:i + 8])
+            buf, in_think = buf[i + 8:], False
             continue
-        held += chunk
-        t = held.lstrip()
-        if t.startswith("<think>"):
-            if "</think>" not in t:
-                yield held
-                held, in_think = "", True
-                continue
-            head, _, after = held.partition("</think>")
-            yield head + "</think>"
-            held = after
-            if not held.strip():
-                held = ""
-                continue
-        elif t and "<think>".startswith(t):
+        t, m = buf.find("<think>"), buf.find(PREFIX)
+        if t >= 0 and (m < 0 or t < m):
+            out.append(buf[:t + 7])
+            buf, in_think = buf[t + 7:], True
             continue
-        if could_be(held):
-            got = parse(held)
+        if m >= 0:
+            out.append(buf[:m])
+            rest = buf[m:]
+            if "]]" in rest or final:
+                got = parse(rest if "]]" in rest else rest + "]]")
+                if got is not None:
+                    return "".join(out), "", in_think, got
+                # "[[handoff:" that isn't one: pass it on and look further
+                out.append(rest[:len(PREFIX)])
+                buf = rest[len(PREFIX):]
+                continue
+            return "".join(out), rest, in_think, None
+        keep = 0 if final else max(_partial(buf, PREFIX), _partial(buf, "<think>"))
+        out.append(buf[:len(buf) - keep])
+        buf = buf[len(buf) - keep:]
+        break
+    return "".join(out), buf, in_think, None
+
+
+async def watch(stream: AsyncIterator[Any]) -> AsyncIterator[Any]:
+    """Pass a model's answer through, and raise HandOff when it hands over:
+    by calling hand_off, or by the marker anywhere outside its thinking —
+    only a possible marker's first characters are ever held back. What it
+    said before handing over has been passed on; the harness's answer
+    follows it."""
+    buf, in_think = "", False
+    async for chunk in stream:
+        if isinstance(chunk, ToolCall):
+            got = called(chunk)
             if got is not None:
+                if buf:
+                    yield buf
                 raise got
+            yield chunk
             continue
-        got = parse(held)
+        if not isinstance(chunk, str):
+            yield chunk
+            continue
+        out, buf, in_think, got = _scan(buf + chunk, in_think, final=False)
+        if out:
+            yield out
         if got is not None:
             raise got
-        deciding = False
-        yield held
-        held = ""
-    if held:
-        got = parse(held)
-        if got is not None:
-            raise got
-        yield held
+    out, buf, in_think, got = _scan(buf, in_think, final=True)
+    if out:
+        yield out
+    if got is not None:
+        raise got

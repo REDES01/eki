@@ -21,6 +21,16 @@ class Message:
 
 
 @dataclass
+class ToolCall:
+    """A function the model called, from a server that speaks OpenAI's
+    `tools` (mlx_lm.server does). Yielded into the answer's stream once the
+    call is complete; whoever offered the tool picks it out."""
+    name: str
+    arguments: Dict[str, Any] = field(default_factory=dict)
+    raw: str = ""                # the arguments as sent, when they weren't JSON
+
+
+@dataclass
 class Capabilities:
     """Facts the router filters on. Conservative defaults: a backend opts in."""
 

@@ -11,11 +11,15 @@ from typing import Any, AsyncIterator, Dict, List
 
 import httpx
 
-from .base import Backend, BackendError, Health, Message, register
+from .base import Backend, BackendError, Health, Message, ToolCall, register
 
 
 @register("mlx")
 class MLXBackend(Backend):
+    #: takes OpenAI's `tools` and streams `tool_calls` back — mlx_lm.server
+    #: parses the model's own call format (Qwen's <tool_call>) into them
+    accepts_tools = True
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.base = self.options.get("base_url", "http://127.0.0.1:8080").rstrip("/")
@@ -47,6 +51,10 @@ class MLXBackend(Backend):
             body["model"] = self.model
         if kw.get("max_tokens") or self.options.get("max_tokens"):
             body["max_tokens"] = kw.get("max_tokens") or self.options["max_tokens"]
+        if kw.get("tools") and self.accepts_tools:
+            body["tools"] = kw["tools"]
+        # a call may arrive in pieces (by index), and is only whole at the end
+        calls: Dict[int, Dict[str, str]] = {}
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as c:
@@ -75,11 +83,27 @@ class MLXBackend(Backend):
                         text = delta.get("content")
                         if text:
                             yield text
+                        for tc in delta.get("tool_calls") or []:
+                            at = calls.setdefault(int(tc.get("index") or 0), {"name": "", "args": ""})
+                            fn = tc.get("function") or {}
+                            at["name"] += fn.get("name") or ""
+                            at["args"] += fn.get("arguments") or ""
         except httpx.HTTPError as e:
             raise BackendError(f"mlx request failed: {e}") from e
+        for _, c in sorted(calls.items()):
+            if not c["name"]:
+                continue
+            try:
+                args = json.loads(c["args"]) if c["args"].strip() else {}
+                yield ToolCall(c["name"], args if isinstance(args, dict) else {}, "")
+            except json.JSONDecodeError:
+                yield ToolCall(c["name"], {}, c["args"])
 
 
 @register("llamacpp")
 class LlamaCppBackend(MLXBackend):
     """llama.cpp's server speaks the same OpenAI-shaped endpoint: a GGUF
     model set up by eki (see eki/engines/llamacpp.py) is served through it."""
+    # its server only parses tool calls when started with --jinja, which
+    # eki's llama.cpp setup doesn't promise: these models hand over by marker
+    accepts_tools = False

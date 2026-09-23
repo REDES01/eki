@@ -869,7 +869,12 @@ class Engine(SelfLoop):
         may_hand_off = self._bare(backend.key) and not requested and bool(cid) \
             and self.settings.get("handoff", True) and bool(hand_to)
         if may_hand_off:
-            history = [Message("system", handoff_mod.instructions(hand_to))] + history
+            # a real tool call where the server takes `tools`; the marker elsewhere
+            as_tool = bool(getattr(backend, "accepts_tools", False)) \
+                and self.settings.get("handoff_tool", True)
+            if as_tool:
+                kw["tools"] = [handoff_mod.tool(hand_to)]
+            history = [Message("system", handoff_mod.instructions(hand_to, as_tool))] + history
         if self._lives(backend):
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):

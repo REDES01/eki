@@ -644,6 +644,10 @@ def _goal_line(g: Dict[str, Any]) -> str:
     spare = " · may use subscriptions" if g.get("spare") else ""
     if g.get("screen"):
         spare = " · uses the screen when you're away, and subscriptions"
+    if g.get("repeats") and g.get("on_time"):
+        spare += " · on time"
+    if g.get("repeats") and g.get("fresh"):
+        spare += " · fresh each time"
     return f"{g['id'][:6]}  {g['status']:<10} {g['text'][:70]}\n        {g['when_text']}{folder}{spare}" + \
         (f"\n        {g['note']}" if g.get("note") else "")
 
@@ -659,7 +663,8 @@ def cmd_goals(args) -> int:
         folder = os.path.abspath(os.path.expanduser(args.folder)) if args.folder else ""
         g = call("POST", "/api/goals", args.service,
                  json={"text": args.arg, "when": _when_of(args.every, args.at), "folder": folder,
-                       "spare": args.spare, "screen": args.screen})
+                       "spare": args.spare, "screen": args.screen, "on_time": args.on_time,
+                       "fresh": args.fresh})
         print(f"added {g['id'][:6]} — {g['when_text']}; its first turn comes when the machine has room")
         return 0
     if a in ("rm", "pause", "resume", "run"):
@@ -853,6 +858,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     g.add_argument("--screen", action="store_true",
                    help="add: may look at and use the screen — its turns run only while you're away "
                         "(and it may use your subscriptions' spare room)")
+    g.add_argument("--on-time", action="store_true",
+                   help="add, repeating: run at the time, not when the machine has room")
+    g.add_argument("--fresh", action="store_true",
+                   help="add, repeating: each time in a new thread, not carrying on the last")
 
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")

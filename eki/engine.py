@@ -31,7 +31,6 @@ from . import profile as profile_mod
 from . import policy as policy_mod
 from . import priors
 from . import public_scores
-from . import schedules as schedules_mod
 from .adapters import base as adapters
 from .adapters.base import Backend, BackendError, Health, Message
 from . import deploy as deploy_mod
@@ -144,6 +143,7 @@ class Engine:
         self._awake = shift_mod.Awake()
         #: the turn in progress uses the screen, since when; and who's at the keyboard
         self._shift_screen = False
+        self._shift_on_time = False                # …runs on time: it doesn't step aside
         self._shift_started = 0.0
         self._presence = shift_mod.Presence()
         #: set when a piece ends, so the next one starts at once, not on the next tick
@@ -202,7 +202,10 @@ class Engine:
         self.classifier = self._classifier()
         if not hasattr(self, "registry"):
             self.registry = Registry(self.cfg.db)
-            self.schedules = schedules_mod.Schedules(self.cfg.db)
+            # schedules were the other way to repeat a request: goals now (eki/goals.py)
+            adopted = goals_mod.adopt_schedules(self.cfg.db)
+            if adopted:
+                observe_mod.note("history", what="schedules became goals", goals=[g.id for g in adopted])
         self._companions()
         self.router = Router(self.backends, self.quota, policy=self.policy,
                              is_up=self._is_up,
@@ -3067,7 +3070,7 @@ class Engine:
         run = self._goal_run()
         gid = self._shift_goal
         self._shift_run, self._shift_goal, self._shift_local = "", "", False
-        self._shift_screen = False
+        self._shift_screen = self._shift_on_time = False
         if not run or not gid:
             return
         try:
@@ -3090,11 +3093,36 @@ class Engine:
             if g.conversation:
                 last = [t for t in self.store.turns(g.conversation) if t["role"] == "assistant"]
                 answer = (last[-1].get("content") if last else "") or answer
+            before = g
             g = goals_mod.after_turn(g, answer, ok)
             entry["outcome"] = goals_mod.outcome(answer) if ok else "failed"
             if not ok:
                 entry["error"] = (run.get("error") or "")[:200]
+            self._tell(before, g, entry["outcome"], answer)
         goals_mod.note(entry)
+
+    def _tell(self, before: "goals_mod.Goal", g: "goals_mod.Goal", said: str, answer: str) -> None:
+        """A notification when a goal needs you, is done, or this time's run is:
+        not for every turn of a goal that's carrying on."""
+        if not self.settings.get("notify_goals", True):
+            return
+        lines = [x.strip() for x in (answer or "").splitlines()
+                 if x.strip() and not goals_mod.MARK.match(x)]
+        if said == "waiting":
+            body = lines[-1] if lines else "it asked you something"
+            title = "Needs you: "
+        elif g.state == "stuck" and before.state != "stuck":
+            body, title = g.note, "Stuck: "
+        elif said == "done" or (g.repeats and said != "failed"):
+            body, title = (lines[-1] if lines else "done"), ("" if g.repeats else "Done: ")
+        else:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(self._notify(title + g.text[:60], body))
+        except RuntimeError:
+            return
+        self._side_tasks.add(task)
+        task.add_done_callback(self._side_tasks.discard)
 
     async def shift_tick(self) -> Dict[str, Any]:
         """Give the next goal that's due a turn, if the machine has room; step out if not."""
@@ -3105,6 +3133,10 @@ class Engine:
             if self._shift_screen and self._presence.since(self._shift_started):
                 self._shift_step_out("you're back — it was using the screen")
                 self._awake.hold()                  # the screen may sleep again
+            elif self._shift_on_time:
+                pass                                # its time: it carries on (only the screen gives way)
+            elif any(g.on_time and goals_mod.due(g, now) and not g.note for g in goals_mod.all_goals()):
+                self._shift_step_out("a goal's time came")   # taken up again after it
             elif self._shift_local and self._asks_running():
                 self._shift_step_out("your request comes first")
             else:
@@ -3128,11 +3160,18 @@ class Engine:
         for g in goals:                             # a reply lets a waiting goal carry on
             if g.state == "waiting" and g.conversation and goals_mod.replied(g, self.store.turns(g.conversation)):
                 goals_mod.update(g.id, state="active", next_at=0, note="")
-        if self._asks_running():
-            self._shift_state = {"state": "waiting", "why": "your request is running", "at": now}
-            return self._shift_state
+            elif goals_mod.stale(g, now):           # an on-time goal the Mac slept through: next time
+                goals_mod.note({"at": now, "goal": g.id, "state": "skipped",
+                                "why": "its time passed hours ago (the Mac was asleep or off)"})
+                goals_mod.update(g.id, next_at=goals_mod._next(g, now))
+        # on-time goals first; they don't wait for your request to finish
         due = sorted((g for g in goals_mod.all_goals() if goals_mod.due(g, now)),
-                     key=lambda g: (g.next_at, g.created_at))
+                     key=lambda g: (not g.on_time, g.next_at, g.created_at))
+        if self._asks_running():
+            due = [g for g in due if g.on_time]
+            if not due:
+                self._shift_state = {"state": "waiting", "why": "your request is running", "at": now}
+                return self._shift_state
         if not due:
             self._awake.let_go()
             self._shift_state = {"state": "idle", "at": now,
@@ -3148,11 +3187,14 @@ class Engine:
                     continue
             text = goals_mod.prompt(g, now)
             allowed = self._goal_allowed(g)
+            # a fresh one starts this time's run in a new thread — unless you've just answered it
+            new_thread = not g.conversation or (g.fresh and g.repeats and not goals_mod.replied(
+                g, self.store.turns(g.conversation)))
             # routed on the goal's own words, inside its budget — eki's framing isn't the work
-            _, _, need, choice = await self._route(g.text, g.conversation, g.folder, allowed=allowed,
-                                                   screen=g.screen)
+            _, _, need, choice = await self._route(g.text, "" if new_thread else g.conversation, g.folder,
+                                                   allowed=allowed, screen=g.screen)
             if choice.backend is not None:
-                picked = (g, choice.backend.key, allowed, text)
+                picked = (g, choice.backend.key, allowed, text, new_thread)
                 break
             why = self._blocked_why(g, need)
             if g.note != why:
@@ -3162,12 +3204,13 @@ class Engine:
             self._shift_state = {"state": "idle", "why": f"{due[0].text[:60]}: {goals_mod.get(due[0].id).note}",
                                  "at": now}
             return self._shift_state
-        g, key, allowed, text = picked
+        g, key, allowed, text, new_thread = picked
         local = self._local_for(key)
         on_machine = self.get(key).info.cost.tier == 0
         pids = [os.getpid()] + [models_mod.listener_pid(m.port) or 0
                                 for m in self.models.models.values() if m.running and m.port]
-        gate = await asyncio.to_thread(
+        gate = shift_mod.power(bool(self.settings.get("background_on_battery", False))) if g.on_time \
+            else await asyncio.to_thread(
             shift_mod.check, model_gb=local.gb if local else 0.0,
             model_loaded=bool(local and local.running),
             when=str(self.settings.get("background_when", "resources")), exclude_pids=pids,
@@ -3184,7 +3227,14 @@ class Engine:
         self._awake.hold(display=g.screen)          # the screen stays on for a goal that uses it
         if local is not None and not local.running:
             self._shift_loaded.add(local.key)
-        cid = g.conversation or self.store.new_conversation()
+        if not new_thread:
+            cid = g.conversation
+        elif g.fresh and g.repeats:
+            title = f"{g.text[:48]} · {time.strftime('%b %-d, %H:%M')}"
+            cid = self.store.new_conversation(title)
+            self.store.set_conversation(cid, title=title)
+        else:
+            cid = self.store.new_conversation()
         turn = self.store.add_turn(cid, "user", text, meta={"goal": g.id})
         # not pinned to a model: routed as usual, inside the goal's budget — so a
         # model without tools can still hand it to a harness the goal may use
@@ -3196,7 +3246,7 @@ class Engine:
         goals_mod.update(g.id, conversation=cid, turns=g.turns + 1, last_turn=turn,
                          last_turn_at=now, note="")
         self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine
-        self._shift_screen, self._shift_started = g.screen, time.time()
+        self._shift_screen, self._shift_on_time, self._shift_started = g.screen, g.on_time, time.time()
         self._shift_state = {"state": "working", "why": f"{g.text[:60]} — on {key}", "at": now,
                              "run": rid, "goal": g.id}
         await self.runner.submit(rid)
@@ -3239,8 +3289,9 @@ class Engine:
                 "shift": self._shift_state, "goals": rows}
 
     def goals_create(self, text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
-                     spare: bool = False, screen: bool = False) -> Dict[str, Any]:
-        g = goals_mod.create(text, when, folder, spare, screen=screen)
+                     spare: bool = False, screen: bool = False, on_time: bool = False,
+                     fresh: bool = False) -> Dict[str, Any]:
+        g = goals_mod.create(text, when, folder, spare, screen=screen, on_time=on_time, fresh=fresh)
         observe_mod.note("history", what="goal added", goal=g.id, text=text[:200])
         self.shift_wake.set()
         return g.to_json()
@@ -3376,60 +3427,6 @@ class Engine:
         speed = f" at {final['tok_s']} tokens/s" if final.get("tok_s") else ""
         shown = results or {slot: {"score": r["score"], "n": r["n"]} for slot, r in recorded.items()}
         yield f"\nMeasured{speed}: {measure.summary(shown)}{note}\n"
-
-    # ---- on a timetable -------------------------------------------------
-
-    async def fire(self, schedule: schedules_mod.Schedule) -> Dict[str, str]:
-        """One firing: a fresh thread named after the schedule and the time,
-        the request routed like anything typed (or pinned to its provider)."""
-        stamp = time.strftime("%b %-d, %H:%M")
-        cid = self.store.new_conversation(f"{schedule.name} · {stamp}")
-        self.store.set_conversation(cid, title=f"{schedule.name} · {stamp}")
-        started = await self.ask(schedule.prompt, conversation=cid,
-                                 backend_key=schedule.backend, repo=schedule.cwd)
-        self.schedules.advance(schedule.id, ran=True, conversation=cid, run=started["run"])
-        if self.settings.get("notify_scheduled", True):
-            task = asyncio.create_task(self._notify_when_done(started["run"], schedule.name))
-            self._side_tasks.add(task)
-            task.add_done_callback(self._side_tasks.discard)
-        return started
-
-    async def fire_due(self) -> List[str]:
-        """Every schedule whose time has come, one run each."""
-        fired = []
-        for s in self.schedules.due():
-            try:
-                started = await self.fire(s)
-                fired.append(started["run"])
-            except Exception as e:                  # noqa: BLE001
-                self.schedules.advance(s.id, ran=True, run=f"failed: {e}"[:120])
-        return fired
-
-    async def _notify_when_done(self, rid: str, name: str) -> None:
-        """A macOS notification when a scheduled run ends, app open or not."""
-        queue = self.runner.subscribe(rid)
-        state = ""
-        try:
-            while True:
-                event = await asyncio.wait_for(queue.get(), timeout=6 * 3600)
-                if event.get("event") == "state" and event.get("state") in ("done", "failed", "cancelled"):
-                    state = event["state"]
-                    break
-        except asyncio.TimeoutError:
-            return
-        finally:
-            self.runner.unsubscribe(rid, queue)
-        run = self.runs.get(rid) or {}
-        text = (run.get("output") or "").strip().splitlines()
-        body = (text[-1][:120] if text else "finished") if state == "done" else f"{state}: {run.get('error') or ''}"[:120]
-        try:
-            await asyncio.create_subprocess_exec(
-                "osascript", "-e",
-                f'display notification "{body.replace(chr(34), chr(39))}" with title "eki" '
-                f'subtitle "{name.replace(chr(34), chr(39))}"',
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        except OSError:
-            pass
 
     # ---- measuring on its own ----------------------------------------
 

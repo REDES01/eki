@@ -109,7 +109,7 @@ def eng(tmp_path, monkeypatch):
     monkeypatch.setattr(adapters, "build", lambda info, opts: Local(info, opts))
     e = Engine(cfg, owner=True)
     e.settings = {**e.settings, "skills_learn": "off", "notify_learned": False, "skills_local": False,
-                  "worktrees": False}
+                  "worktrees": False, "notify_goals": False}
     monkeypatch.setattr(e, "_lives", lambda b: False)
     e.router.is_up = lambda k: True
     monkeypatch.setattr(shift, "check", lambda **kw: shift.Gate(True))
@@ -442,3 +442,120 @@ def test_eki_ask_from_inside_an_agent_says_so(monkeypatch):
                           "service": "x", "detach": True})()
     cli.cmd_ask(None, args)
     assert sent["via"] == "agent"
+
+
+# ---- goals are eki's timetable: on time, fresh each time -----------------------------------------
+
+@pytest.mark.asyncio
+async def test_an_on_time_goal_doesnt_wait_for_room_or_for_you(eng, monkeypatch):
+    monkeypatch.setattr(shift, "check", lambda **kw: shift.Gate(False, "the GPU is 80% busy"))
+    monkeypatch.setattr(shift, "on_battery", lambda: False)
+    loose = goals.create("Tidy my notes")
+    await turn(eng)
+    assert not Local.seen                                                   # no room: it waits
+    goals.remove(loose.id)
+    report = goals.create("Summarise yesterday's commits", when={"kind": "daily", "at": "08:00"},
+                          on_time=True)
+    await turn(eng)
+    assert len(Local.seen) == 1                                             # its time: it runs
+    g = goals.get(report.id)
+    assert g.next_at > time.time() and g.state == "active"
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_on_time_goal_goes_first(eng, monkeypatch):
+    monkeypatch.setattr(shift, "on_battery", lambda: False)
+    slow = goals.create("Make 20 NPCs")
+    Local.delay = 3.0
+    await eng.shift_tick()
+    rid = eng._shift_run
+    goals.create("The 8:00 report", when={"kind": "daily", "at": "08:00"}, on_time=True)
+    await eng.shift_tick()                                                  # its time: the other steps aside
+    await settle(eng.runs, rid, timeout=5)
+    assert eng.runs.get(rid)["state"] == "cancelled"
+    Local.delay = 0.0
+    await turn(eng)
+    assert goals.get(slow.id).turns == 0                                    # not held against it
+    assert "8:00 report" in Local.seen[-1][1]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_fresh_each_time_but_your_answer_stays_in_its_thread(eng):
+    g = goals.create("Propose 3 posts", when={"kind": "interval", "minutes": 60}, fresh=True)
+    Local.script = ["Here are three.\nGOAL: done"]
+    await turn(eng)
+    first = goals.get(g.id).conversation
+    goals.update(g.id, next_at=0)                                           # its next time
+    Local.script = ["Which tone?\nGOAL: waiting"]
+    await turn(eng)
+    second = goals.get(g.id).conversation
+    assert second and second != first
+    titles = {c["id"]: c.get("title") or "" for c in eng.store.conversations(limit=50)}
+    assert "Propose 3 posts" in titles.get(second, "")
+    eng.store.add_turn(second, "user", "dry")                               # you answer…
+    Local.script = ["Dry it is.\nGOAL: done"]
+    await turn(eng)
+    assert goals.get(g.id).conversation == second                           # …in the same thread
+    await eng.runner.stop()
+
+
+def test_an_on_time_goal_the_mac_slept_through_is_skipped(eng):
+    g = goals.create("The 8:00 report", when={"kind": "daily", "at": "08:00"}, on_time=True)
+    g = goals.update(g.id, next_at=int(time.time()) - 10 * 3600)
+    assert goals.stale(g, time.time())
+    assert not goals.stale(goals.update(g.id, on_time=False), time.time())   # one that waits for room just runs late
+
+
+@pytest.mark.asyncio
+async def test_skipped_then_its_next_time(eng):
+    g = goals.create("The 8:00 report", when={"kind": "daily", "at": "08:00"}, on_time=True)
+    goals.update(g.id, next_at=int(time.time()) - 10 * 3600)
+    await turn(eng)
+    assert not Local.seen and goals.get(g.id).next_at > time.time()
+    assert goals.history(0)[-1]["state"] == "skipped"
+    await eng.runner.stop()
+
+
+def test_schedules_become_goals(tmp_path):
+    import json
+    import sqlite3
+    db = tmp_path / "eki.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE schedules (id TEXT, name TEXT, prompt TEXT, cwd TEXT, backend TEXT, spec TEXT,"
+              " enabled INTEGER, created_at INTEGER)")
+    c.execute("INSERT INTO schedules VALUES ('a', 'Morning', 'Summarise my inbox', '', 'claude_code', ?, 1, 1)",
+              (json.dumps({"kind": "daily", "at": "08:00", "days": [0, 1, 2, 3, 4]}),))
+    c.execute("INSERT INTO schedules VALUES ('b', 'Often', 'Check the build', ?, '', ?, 0, 2)",
+              (str(tmp_path), json.dumps({"kind": "interval", "minutes": 5})))
+    c.commit()
+    c.close()
+    made = goals.adopt_schedules(db)
+    assert [g.text for g in made] == ["Summarise my inbox", "Check the build"]
+    inbox, build = made
+    assert inbox.on_time and inbox.fresh and inbox.spare and inbox.when["days"] == [0, 1, 2, 3, 4]
+    assert inbox.next_at > time.time()                                      # at its time, not now
+    assert build.state == "paused" and build.when["minutes"] == 15 and build.folder == str(tmp_path)
+    assert goals.adopt_schedules(db) == []                                  # once
+    tables = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master")}
+    assert "schedules_moved_to_goals" in tables and "schedules" not in tables
+
+
+@pytest.mark.asyncio
+async def test_it_tells_you_when_a_goal_needs_you(eng, monkeypatch):
+    told = []
+
+    async def notify(title, body):
+        told.append((title, body))
+    monkeypatch.setattr(eng, "_notify", notify)
+    eng.settings["notify_goals"] = True
+    goals.create("Make 20 NPCs")
+    Local.script = ["Made 5.\nGOAL: continue"]
+    await turn(eng)
+    Local.script = ["Painterly or pixel?\nGOAL: waiting"]
+    await turn(eng)
+    await asyncio.sleep(0.05)
+    assert told == [("Needs you: Make 20 NPCs", "Painterly or pixel?")]    # not for carrying on
+    await eng.runner.stop()
+

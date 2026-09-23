@@ -222,6 +222,13 @@ def check(*, model_gb: float = 0.0, model_loaded: bool = True, when: str = "reso
     return Gate(True)
 
 
+def power(on_battery_ok: bool = False) -> Gate:
+    """All an on-time goal waits for: power, like everything in the background."""
+    if not on_battery_ok and on_battery():
+        return Gate(False, "on battery — waiting for power")
+    return Gate(True)
+
+
 def must_stop(on_battery_ok: bool = False) -> Gate:
     """Checked while a piece is running: memory can't wait, nor a battery."""
     if not on_battery_ok and on_battery():

@@ -10,7 +10,10 @@ A goal is what you'd type in a chat, left running:
 Plus, optionally, when (once until it's done, every day, every week, every few
 hours), a folder to work in, whether it may use your subscriptions, and
 whether it may use the screen — a goal that does waits until you're away, and
-steps out the moment you're back. That's all. eki doesn't plan the work — the agent that gets it does, the same way it
+steps out the moment you're back. A repeating one can also run *on time*
+rather than when there's room (a report at 8:00), and start each time *fresh*
+in a new thread rather than carrying on the last. That's all — goals are
+also eki's timetable: what used to be a schedule is a repeating goal. eki doesn't plan the work — the agent that gets it does, the same way it
 would in a chat: the routing table picks it (a harness when tools are needed,
 Qwen with Codex's hands for local work), and it writes files, draws through
 eki, and says where things stand.
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -33,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import schedules as schedules_mod
+from . import timetable
 
 PATH = Path("~/.eki/goals/goals.json").expanduser()
 LOG = Path("~/.eki/goals/log.jsonl").expanduser()
@@ -44,6 +48,8 @@ RETRY_SECONDS = 1800
 MAX_FAILURES = 3
 #: after stepping aside, a goal waits this long before its next try — no thrashing
 STEP_OUT_PAUSE = 60
+#: an on-time goal whose time passed this long ago (the Mac asleep) skips to its next
+CATCH_UP_SECONDS = 6 * 3600
 STATES = ("active", "waiting", "paused", "done", "stuck")
 MARK = re.compile(r"^\s*\**\s*GOAL\s*:\s*(done|continue|waiting)\b", re.I | re.M)
 
@@ -62,6 +68,11 @@ class Goal:
     #: may look at and drive the screen: only while you're away, and — the
     #: screen wants a model that can see and act — with your subscriptions' spare room too
     screen: bool = False
+    #: repeating: its turn at the time — not waiting for the machine to have room, nor
+    #: stepping aside for you — still within its budget; one missed by hours is skipped
+    on_time: bool = False
+    #: repeating: each time in a new thread, rather than carrying on the last one
+    fresh: bool = False
     state: str = "active"
     conversation: str = ""
     created_at: int = field(default_factory=lambda: int(time.time()))
@@ -86,7 +97,7 @@ class Goal:
 def describe(when: Dict[str, Any]) -> str:
     if when.get("kind") == "once":
         return "once, until it's done"
-    return schedules_mod.describe(when)
+    return timetable.describe(when)
 
 
 def check_when(when: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -147,7 +158,8 @@ def get(gid: str) -> Goal:
 
 
 def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
-           spare: bool = False, now: Optional[float] = None, screen: bool = False) -> Goal:
+           spare: bool = False, now: Optional[float] = None, screen: bool = False,
+           on_time: bool = False, fresh: bool = False) -> Goal:
     text = text.strip()
     if not text:
         raise GoalError("say what eki should keep doing")
@@ -156,7 +168,7 @@ def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
         raise GoalError(f"no folder {folder}")
     # its first turn as soon as there's room, so you see it work; then on its schedule
     g = Goal(id=uuid.uuid4().hex[:10], text=text, when=check_when(when), folder=folder, spare=bool(spare),
-             screen=bool(screen))
+             screen=bool(screen), on_time=bool(on_time), fresh=bool(fresh))
     goals = all_goals()
     goals.append(g)
     _save(goals)
@@ -204,7 +216,7 @@ def remove(gid: str) -> Goal:
 def _next(g: Goal, after: float) -> int:
     if not g.repeats:
         return 0
-    t = schedules_mod.next_time(g.when, after, None)
+    t = timetable.next_time(g.when, after, None)
     return int(t) if t else 0
 
 
@@ -279,6 +291,45 @@ def replied(g: Goal, turns: List[Dict[str, Any]]) -> bool:
     return any(t["role"] == "user" and t["id"] > g.last_turn
                and not str(t.get("content") or "").startswith("[eki · goal")
                for t in turns)
+
+
+def stale(g: Goal, now: float) -> bool:
+    """An on-time goal's time went by long ago — run now, it would run stale."""
+    return g.on_time and g.repeats and g.next_at > 0 and now - g.next_at > CATCH_UP_SECONDS
+
+
+def adopt_schedules(db: Any) -> List[Goal]:
+    """Schedules were eki's other way of repeating a request; goals do that
+    now. Each one becomes a repeating goal that runs on time in a fresh
+    thread, as it did, and may use your subscriptions (spare room only).
+    The old table stays in the database, renamed, so nothing is lost."""
+    try:
+        conn = sqlite3.connect(str(Path(str(db)).expanduser()))
+    except sqlite3.Error:
+        return []
+    made: List[Goal] = []
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedules'").fetchone():
+            return []
+        rows = conn.execute("SELECT prompt, cwd, spec, enabled FROM schedules ORDER BY created_at").fetchall()
+        now = time.time()
+        for text, cwd, spec, enabled in rows:
+            try:
+                when = json.loads(spec or "{}")
+                if when.get("kind") == "interval":
+                    when["minutes"] = max(15, int(when.get("minutes") or 60))
+                folder = cwd if cwd and Path(cwd).is_dir() else ""
+                g = create(text, when, folder, spare=True, on_time=True, fresh=True)
+            except (GoalError, ValueError, TypeError):
+                continue
+            made.append(update(g.id, next_at=_next(g, now), state="active" if enabled else "paused"))
+        conn.execute("ALTER TABLE schedules RENAME TO schedules_moved_to_goals")
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+    return made
 
 
 # ---- what the shift did -------------------------------------------------------------------

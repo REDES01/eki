@@ -196,19 +196,6 @@ async def lifespan(app: FastAPI):
             except Exception:                       # noqa: BLE001
                 log.exception("following live sessions")
 
-    async def keep_time() -> None:
-        """Fire schedules whose time has come; a time missed while the Mac
-        slept fires once on waking (within six hours of it)."""
-        await asyncio.sleep(20)
-        while True:
-            try:
-                fired = await eng.fire_due()
-                if fired:
-                    log.info("scheduled: started %s", ", ".join(fired))
-            except Exception:                       # noqa: BLE001
-                log.exception("schedules")
-            await asyncio.sleep(30)
-
     async def measure_on_its_own() -> None:
         """Every so often, when nothing else is running, measure one
         provider that has no solid numbers yet (see Engine.auto_measure_due)."""
@@ -244,12 +231,10 @@ async def lifespan(app: FastAPI):
     fresh = asyncio.create_task(keep_claude_fresh())
     naming = asyncio.create_task(name_old_threads())
     auto = asyncio.create_task(measure_on_its_own())
-    clock = asyncio.create_task(keep_time())
     follower = asyncio.create_task(follow())
     yield
     shift_task.cancel()
     eng._awake.let_go()
-    clock.cancel()
     follower.cancel()
     auto.cancel()
     naming.cancel()
@@ -626,14 +611,16 @@ def _goal_call(fn, *args, **kw) -> Any:
 @app.post("/api/goals")
 def goals_create(body: Dict[str, Any]) -> Any:
     """A goal: what to keep doing, in words; when; a folder; may it use
-    subscriptions; may it use the screen (then only while you're away)."""
+    subscriptions; may it use the screen (then only while you're away); a
+    repeating one: on time rather than when there's room, fresh each time."""
     return _goal_call(engine().goals_create, str(body.get("text") or ""), body.get("when"),
-                      str(body.get("folder") or ""), bool(body.get("spare")), bool(body.get("screen")))
+                      str(body.get("folder") or ""), bool(body.get("spare")), bool(body.get("screen")),
+                      bool(body.get("on_time")), bool(body.get("fresh")))
 
 
 @app.patch("/api/goals/{gid}")
 def goals_update(gid: str, body: Dict[str, Any]) -> Any:
-    fields = {k: body[k] for k in ("text", "when", "folder", "spare", "screen", "state") if k in body}
+    fields = {k: body[k] for k in ("text", "when", "folder", "spare", "screen", "on_time", "fresh", "state") if k in body}
     if "state" in fields and fields["state"] not in ("active", "paused"):
         raise HTTPException(400, "a goal can be paused or made active")
     return _goal_call(engine().goals_update, gid, **fields)
@@ -1254,66 +1241,6 @@ async def registry_measure(provider: str, body: MeasureBody) -> Any:
         return await engine().measure(provider, body.model)
     except KeyError as e:
         raise HTTPException(404, f"unknown model {e}")
-
-
-# ---- schedules -------------------------------------------------------------
-
-class ScheduleBody(BaseModel):
-    name: str = ""
-    prompt: str = ""
-    cwd: str = ""
-    backend: str = ""
-    spec: Dict[str, Any] = {}
-    enabled: bool = True
-
-
-class SchedulePatch(BaseModel):
-    name: Optional[str] = None
-    prompt: Optional[str] = None
-    cwd: Optional[str] = None
-    backend: Optional[str] = None
-    spec: Optional[Dict[str, Any]] = None
-    enabled: Optional[bool] = None
-
-
-@app.get("/api/schedules")
-def schedules_list() -> Any:
-    return {"schedules": [s.to_json() for s in engine().schedules.all()]}
-
-
-@app.post("/api/schedules")
-def schedules_create(body: ScheduleBody) -> Any:
-    if not body.prompt.strip():
-        raise HTTPException(400, "a schedule needs something to ask")
-    if body.spec.get("kind") not in ("interval", "daily"):
-        raise HTTPException(400, "schedule kind must be interval or daily")
-    return engine().schedules.create(body.name, body.prompt.strip(), body.spec, body.cwd,
-                                     body.backend, body.enabled).to_json()
-
-
-@app.patch("/api/schedules/{sid}")
-def schedules_update(sid: str, body: SchedulePatch) -> Any:
-    got = engine().schedules.update(sid, **body.model_dump(exclude_none=True))
-    if got is None:
-        raise HTTPException(404, "no such schedule")
-    return got.to_json()
-
-
-@app.delete("/api/schedules/{sid}")
-def schedules_delete(sid: str) -> Any:
-    if not engine().schedules.delete(sid):
-        raise HTTPException(404, "no such schedule")
-    return {"ok": True}
-
-
-@app.post("/api/schedules/{sid}/run")
-async def schedules_run(sid: str) -> Any:
-    """Fire it now, on top of its timetable."""
-    eng = engine()
-    s = eng.schedules.get(sid)
-    if s is None:
-        raise HTTPException(404, "no such schedule")
-    return await eng.fire(s)
 
 
 @app.get("/api/bench")

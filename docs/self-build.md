@@ -69,7 +69,8 @@ the report; the first failure stops it.
    store, stream.
 4. **takes your data** — a second boot, sandbox home again, this time on a
    *copy* of the real database (SQLite's backup API, so a live db is safe to
-   copy), schedules switched off in the copy so nothing fires twice. It must
+   copy); nothing fires twice — goals live in the home the candidate doesn't
+   share, and an old database's schedules are switched off in the copy. It must
    come up healthy and list the same conversations the running engine has.
 5. **can be left** — the running code opens that same copy afterwards. If
    the candidate migrated the schema somewhere the old build can't read,
@@ -152,7 +153,7 @@ whatever the autonomy setting says.
   `git worktree` of eki's own repo on a branch `self/<run id>`.
 - Requested by saying so ("eki, change yourself so that…" — a label in
   `classify.py`), by a fault (an exception whose traceback is inside
-  `eki/`, with the traceback as the prompt's evidence), or by a schedule
+  `eki/`, with the traceback as the prompt's evidence), or by a goal
   taking the next unchecked roadmap item.
 - Routed like repo work, with one extra requirement: the agent must be one
   that can edit files. Pace and quota apply as to anything else — eki does

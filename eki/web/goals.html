@@ -137,7 +137,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
 const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
-            draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, touched: false } };
+            draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, on_time: false, fresh: false, touched: false } };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const EXAMPLES = [
   "Every morning, look at my X and propose 3 posts in my voice.",
@@ -264,11 +264,14 @@ function header() {
 // what a goal may use: your subscriptions; the screen — which needs them, and waits for you to be away
 function usesChecks(d, k) {
   return `<label class="check" title="Only when that subscription is under pace for the week, and never its last 30%"><input type="checkbox" id="${k}-spare" ${d.spare || d.screen ? "checked" : ""} ${d.screen ? "disabled" : ""}> May use my subscriptions</label>
+    ${d.kind === "once" ? "" : `<label class="check" title="At the time, whatever else the machine is doing — within its budget. One the Mac slept through by hours is skipped."><input type="checkbox" id="${k}-on_time" ${d.on_time ? "checked" : ""}> On time</label>
+    <label class="check" title="Each time in a new thread, instead of carrying on the last one"><input type="checkbox" id="${k}-fresh" ${d.fresh ? "checked" : ""}> Fresh each time</label>`}
     <label class="check" title="Looking at and using the screen — its turns run only while you're away, and step out when you're back. It uses your subscriptions' spare room: that takes a model that can see."><input type="checkbox" id="${k}-screen" ${d.screen ? "checked" : ""}> May use the screen while I'm away</label>`;
 }
 function usesText(g) {
-  return g.screen ? "uses the screen when you're away · may use your subscriptions (spare room only)"
-       : g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine";
+  const how = g.repeats ? (g.on_time ? " · on time" : "") + (g.fresh ? " · fresh each time" : "") : "";
+  return (g.screen ? "uses the screen when you're away · may use your subscriptions (spare room only)"
+       : g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine") + how;
 }
 
 // ---- the list ----------------------------------------------------------------------------------
@@ -397,6 +400,10 @@ document.addEventListener("change", e => {
   if (t.id === "edit-spare") S.editDraft.spare = t.checked;
   if (t.id === "new-screen") { S.draft.screen = t.checked; return draw(); }
   if (t.id === "edit-screen") { S.editDraft.screen = t.checked; return draw(); }
+  for (const f of ["on_time", "fresh"]) {
+    if (t.id === "new-" + f) S.draft[f] = t.checked;
+    if (t.id === "edit-" + f) S.editDraft[f] = t.checked;
+  }
   if (t.dataset.w === "kind") draw();
 });
 document.addEventListener("click", async e => {
@@ -408,8 +415,8 @@ document.addEventListener("click", async e => {
   if (t.closest("[data-add]")) {
     const d = S.draft;
     return act(async () => {
-      const g = await api("/api/goals", "POST", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen });
-      S.draft = { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, touched: false };
+      const g = await api("/api/goals", "POST", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen, on_time: d.on_time, fresh: d.fresh });
+      S.draft = { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, on_time: false, fresh: false, touched: false };
       location.hash = "#/g/" + enc(g.id);
     });
   }
@@ -424,12 +431,12 @@ document.addEventListener("click", async e => {
   if (rm) { e.stopPropagation(); return act(async () => { await api(`/api/goals/${enc(rm.dataset.rm)}`, "DELETE"); location.hash = "#/"; }); }
   if (t.closest("[data-edit]")) {
     const g = S.view.goals.find(x => x.id === r.id);
-    S.editDraft = { ...draftOf(g.when), text: g.text, folder: g.folder, spare: g.spare, screen: g.screen }; S.editing = true; S.error = ""; return draw();
+    S.editDraft = { ...draftOf(g.when), text: g.text, folder: g.folder, spare: g.spare, screen: g.screen, on_time: g.on_time, fresh: g.fresh }; S.editing = true; S.error = ""; return draw();
   }
   if (t.closest("[data-cancel-edit]")) { S.editing = false; S.error = ""; return draw(); }
   if (t.closest("[data-save]")) {
     const d = S.editDraft;
-    try { await api(`/api/goals/${enc(r.id)}`, "PATCH", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen });
+    try { await api(`/api/goals/${enc(r.id)}`, "PATCH", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen, on_time: d.on_time, fresh: d.fresh });
           S.editing = false; S.error = ""; }
     catch (err) { S.error = err.message; }
     return refresh(true);

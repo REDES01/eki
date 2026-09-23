@@ -40,6 +40,16 @@ agent that gets each turn does, the way it would in a chat.
   the moment you touch anything (its own clicks and keys are told from
   yours). The screen needs a model that can see and act, so such a goal may
   use your subscriptions' spare room, and is routed to one that can see.
+- **On time, or when there's room.** A repeating goal normally waits for the
+  machine to have room, like any goal. Tick *On time* and its turn starts at
+  the time instead (a report at 8:00) — not waiting for room or for your
+  request, and a goal already working steps aside for it — still within its
+  budget and only on power. A time the Mac slept through by more than six
+  hours is skipped, not run stale.
+- **One thread, or fresh each time.** A goal keeps one thread, so it
+  remembers what it did last time. Tick *Fresh each time* and each time
+  starts a new thread named after the goal and the time; your answer to one
+  still carries on in that thread.
 - **Until it says where it stands.** A turn ends with one line: `GOAL: done`
   (a one-off goal stops; a repeating one waits for its next time), `GOAL:
   continue` (another turn when there's room), or `GOAL: waiting` (it asked you
@@ -47,6 +57,15 @@ agent that gets each turn does, the way it would in a chat.
   it's done after 30 turns, or fails three turns in a row, stops as *stuck*.
 - **Never on its own behalf.** A goal proposes; it doesn't post, send or buy.
   Anything that acts in the world is yours to do from its thread.
+
+Goals are also eki's timetable: what used to be a *schedule* — a request at
+set times — is a repeating goal, on time and fresh each time. Schedules you
+had become goals like that when the engine starts (paused ones stay paused).
+
+eki sends a notification when a goal needs you (`GOAL: waiting`), when one is
+done, when a repeating goal's run for this time ends, and when one gets
+stuck — not for every turn of a goal that's carrying on (Settings:
+`notify_goals`).
 
 ## The board
 
@@ -61,6 +80,7 @@ a reply box.
 ```
 eki goals add "Every morning, look at my X and propose 3 posts" --every day --at 08:00 --screen
 eki goals add "Make 20 NPCs for Ashfall" -f ~/games/ashfall
+eki goals add "Summarise yesterday's commits in ~/eki" --every weekdays --at 08:00 --on-time --fresh
 eki goals                    # each goal, its status, and what the shift is doing
 eki goals run|pause|resume|rm <id>
 eki goals mode on|off|resources|away

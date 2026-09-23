@@ -2,33 +2,37 @@
 
 # eki
 
-One place to ask, whatever ends up answering.
+Your Mac, working for you around the clock.
 
-eki is a small Mac app and a local engine. You type a question; it works out
-what the question *is* — a quick lookup, a translation, a change to your code,
-a picture — and sends it to the cheapest thing on hand that can actually do it:
-a model running on your own Mac, the Claude Code or Codex CLI you already pay
-for, or an API you brought a key for.
+eki keeps the machine you own busy with your work — writing, code, pictures —
+on the models that run on it, and brings in the Claude Code and Codex you
+already pay for only for what those can't do. Think of a station: your Mac is
+always open, the local models are the local lines, the frontier agents are the
+express.
 
-Everything runs as a **run**: written down before it starts, executed by an
-engine outside the window, streamed to whoever is watching. Close the app
-mid-answer and the answer still finishes. Open it again and you are looking at
-the same run, replayed from the first word.
-
-- **Local first.** A model on your Mac costs nothing and leaves nothing
-  behind. eki reaches for it whenever it's good enough, starts it on demand,
-  and unloads it when you haven't used it for a while.
-- **Nothing is hidden.** Every answer says which backend produced it and why
-  that one. Usage against your Claude and Codex limits lives in the app and,
-  if you want, in the menu bar.
+- **The right model on your hardware.** eki knows what fits in memory, starts
+  a local model when work arrives and unloads it when it's idle, and checks
+  every day whether a better one has come out (`eki lineup`).
+- **The right place for each request.** A haiku stays on your Mac; a change
+  across your repo goes to Claude Code. A model without tools hands the thread
+  over when it needs them, and a subscription that runs out mid-task carries
+  on in the next choice. Every answer says what did it and why
+  (`eki routing`).
+- **Work that doesn't need you watching.** Everything is a run, written down
+  before it starts and executed by an engine outside any window. Close the
+  terminal and it still finishes; restart the Mac and it carries on where it
+  stopped, in its own copy of your repo.
+- **Your setup, once.** Skills, MCP servers and the corrections you make live
+  in `~/.eki` and reach every agent, so switching agents loses nothing.
 - **Your credentials stay yours.** eki runs *your* installed CLIs as you. It
   never reads, copies or reuses their logins, and it stores no login of its
   own for them. API keys you paste go into the macOS Keychain, never into
   eki's database or config.
 
-macOS on Apple silicon, for now.
+macOS on Apple silicon; Linux through Homebrew is untested.
 
-Where it's going: [ROADMAP.md](ROADMAP.md).
+Where it's going — filling the idle hours with work worth doing, from goals
+you declare: [ROADMAP.md](ROADMAP.md).
 
 ## Install
 

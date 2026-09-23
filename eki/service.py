@@ -595,6 +595,40 @@ def access_request() -> Any:
     return {"asked": True, "app": str(launcher.APP)}
 
 
+@app.post("/api/pick-folder")
+async def pick_folder(body: Dict[str, Any]) -> Any:
+    """A folder chosen in macOS's own dialog — the board's Choose… button. The
+    engine is on this Mac, so the dialog is too, in a browser or in the app.
+    {"path": ""} when cancelled."""
+    return {"path": await choose_folder(str(body.get("from") or ""), str(body.get("prompt") or ""))}
+
+
+async def choose_folder(start: str = "", prompt: str = "") -> str:
+    start = os.path.expanduser(start.strip() or "~")
+    if not os.path.isdir(start):
+        start = os.path.dirname(start) if os.path.isdir(os.path.dirname(start)) else os.path.expanduser("~")
+    words = prompt.strip() or "Choose a folder for eki to work in"
+    # AppleScript strings take the same escapes JSON's do for quotes and backslashes
+    script = ["activate",
+              f"POSIX path of (choose folder with prompt {json.dumps(words)} "
+              f"default location (POSIX file {json.dumps(start)}))"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", *[x for line in script for x in ("-e", line)],
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    except OSError:
+        raise HTTPException(501, "this needs macOS")
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return ""
+    if proc.returncode != 0:                        # cancelled
+        return ""
+    path = out.decode("utf-8", "replace").strip()
+    return path.rstrip("/") if path != "/" else path
+
+
 @app.get("/api/goals")
 def goals_view() -> Any:
     return engine().goals_view()

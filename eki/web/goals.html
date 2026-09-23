@@ -59,6 +59,9 @@
   textarea.big { width: 100%; border: 0; padding: 4px 2px; font-size: 16px; min-height: 64px; background: transparent;
                  outline: none; resize: vertical; color: var(--ink); }
   .composer { padding: 14px 16px; margin-bottom: 22px; }
+  .folder { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .folder .input { flex: 1; min-width: 0; }
+  .folder .btn { flex: none; }
   .composer .opts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;
                     padding-top: 10px; border-top: 1px solid var(--line); }
   .composer .opts .grow { flex: 1 1 200px; }
@@ -281,7 +284,7 @@ function home() {
     <textarea class="big" id="new-text" rows="2" placeholder="What should eki keep doing?">${esc(d.text)}</textarea>
     ${d.text ? "" : `<div class="examples">${EXAMPLES.map(e => `<button class="chip" data-example="${esc(e)}">${esc(e)}</button>`).join("")}</div>`}
     <div class="opts">${whenControls(d, "new")}
-      <input class="input grow" id="new-folder" placeholder="Folder to work in (optional) — e.g. ~/games/ashfall" value="${esc(d.folder)}">
+      <span class="folder grow"><input class="input" id="new-folder" placeholder="Folder to work in (optional) — e.g. ~/games/ashfall" value="${esc(d.folder)}"><button class="btn" data-pick="new" title="Choose a folder">Choose…</button></span>
       ${usesChecks(d, "new")}
       <button class="btn primary" data-add ${d.text.trim() ? "" : "disabled"}>Add goal</button></div>
     ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
@@ -314,7 +317,7 @@ function goalPage(r) {
     const d = S.editDraft;
     h += `<div class="card edit"><textarea class="input" id="edit-text" rows="3">${esc(d.text)}</textarea>
       <div class="row">${whenControls(d, "edit")}</div>
-      <div class="row"><input class="input" style="flex:1" id="edit-folder" placeholder="Folder to work in (optional)" value="${esc(d.folder)}">
+      <div class="row"><span class="folder" style="flex:1"><input class="input" id="edit-folder" placeholder="Folder to work in (optional)" value="${esc(d.folder)}"><button class="btn" data-pick="edit" title="Choose a folder">Choose…</button></span>
         ${usesChecks(d, "edit")}</div>
       <div class="row"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel-edit>Cancel</button>
         ${S.error ? `<span class="err">${esc(S.error)}</span>` : ""}</div></div>`;
@@ -410,6 +413,15 @@ document.addEventListener("click", async e => {
   const t = e.target, r = route();
   const on = t.closest("[data-on]");
   if (on) return act(() => api("/api/goals/mode", "POST", { on: on.dataset.on === "1" }));
+  const pick = t.closest("[data-pick]");
+  if (pick) {
+    const d = pick.dataset.pick === "new" ? S.draft : S.editDraft;
+    pick.disabled = true;
+    try { const r = await api("/api/pick-folder", "POST", { from: d.folder || "" });
+          if (r.path) { d.folder = r.path; S.error = ""; } }
+    catch (err) { S.error = err.message; }
+    return draw();
+  }
   const ex = t.closest("[data-example]");
   if (ex) { S.draft.text = ex.dataset.example; S.draft.touched = false; guessWhen(S.draft.text, S.draft); draw(); $("#new-text").focus(); return; }
   if (t.closest("[data-add]")) {

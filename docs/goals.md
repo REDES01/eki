@@ -71,7 +71,8 @@ stuck — not for every turn of a goal that's carrying on (Settings:
 
 `http://127.0.0.1:8787/goals`, and **Goals** in the Mac app — the same page.
 Write a goal at the top (the *when* is guessed from your words — "every
-morning at 8" — and stays yours to change); each goal shows its status, its
+morning at 8" — and stays yours to change; *Choose…* picks its folder in
+macOS's own dialog); each goal shows its status, its
 last answer, *Run now*, *Pause*, *Delete*. Open one for its thread, *Edit*, and
 a reply box.
 

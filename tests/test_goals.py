@@ -559,3 +559,26 @@ async def test_it_tells_you_when_a_goal_needs_you(eng, monkeypatch):
     assert told == [("Needs you: Make 20 NPCs", "Painterly or pixel?")]    # not for carrying on
     await eng.runner.stop()
 
+
+
+@pytest.mark.asyncio
+async def test_choose_a_folder_in_macos_own_dialog(tmp_path, monkeypatch):
+    from eki import service
+    seen = []
+
+    class Proc:
+        def __init__(self, code, out):
+            self.returncode, self.out = code, out
+
+        async def communicate(self):
+            return self.out, b""
+
+    answers = [Proc(0, f"{tmp_path}/\n".encode()), Proc(1, b"")]
+
+    async def fake(*argv, **kw):
+        seen.append(argv)
+        return answers.pop(0)
+    monkeypatch.setattr(service.asyncio, "create_subprocess_exec", fake)
+    assert await service.choose_folder(str(tmp_path / "nope")) == str(tmp_path)   # starts from what exists
+    assert f'POSIX file "{tmp_path}"' in " ".join(seen[0])
+    assert await service.choose_folder() == ""                                   # cancelled

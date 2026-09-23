@@ -331,7 +331,16 @@ class LiveSession:
                     event = json.loads(line)
                 except ValueError:
                     continue
-                self._handle(event)
+                if not isinstance(event, dict):
+                    continue
+                try:
+                    self._handle(event)
+                except Exception as e:              # noqa: BLE001
+                    # one event in a shape eki doesn't know must not end the
+                    # session: the turn would hang until it timed out. It is
+                    # a fault (eki/observe.py) and reading carries on.
+                    log.exception("live reader: %s in a %r event: %s", type(e).__name__,
+                                  event.get("type"), json.dumps(event)[:400])
         except asyncio.CancelledError:
             raise
         except Exception as e:                      # noqa: BLE001
@@ -500,11 +509,15 @@ class LiveSession:
             return
         if t == "user":
             blocks = (event.get("message") or {}).get("content") or []
+            if not isinstance(blocks, list):
+                # a plain string: a local command's echo ("Set model to opus"
+                # after a model switch mid-thread) — nothing to show
+                return
             # tool results coming back: only errors are worth a line — and
             # the screen tools saying macOS hasn't let them in, which is a
             # card with the settings a click away, not a line to scroll past
             for block in blocks:
-                if block.get("type") != "tool_result":
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
                     continue
                 text = block.get("content")
                 if isinstance(text, list):

@@ -359,3 +359,17 @@ def test_background_task_events_read_as_lines():
 def test_a_program_that_announces_the_next_step_sounds_unfinished():
     assert live.sounds_unfinished("Patched. Restarting ComfyUI to pick up the loader change, then re-running the test.")
     assert not live.sounds_unfinished("The test passed; the model is up and running on port 8188.")
+
+
+
+def test_a_string_message_after_a_model_switch_doesnt_end_the_session():
+    """Switching model mid-thread (fable → opus), Claude Code echoes
+    "Set model to …" as a user message whose content is a string. Reading it
+    as blocks killed the reader, and the turn hung until it timed out."""
+    from eki import live
+    s = live.LiveSession(["claude"], None, None, "")
+    s._handle({"type": "user", "message": {"role": "user",
+               "content": "<local-command-stdout>Set model to `opus (claude-opus-5)`</local-command-stdout>"},
+               "isReplay": True})
+    s._handle({"type": "user", "message": {"content": ["odd", {"type": "tool_result", "content": "ok"}]}})
+    assert s._events.empty()

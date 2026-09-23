@@ -29,14 +29,15 @@ express.
   own for them. API keys you paste go into the macOS Keychain, never into
   eki's database or config.
 
-macOS on Apple silicon; Linux through Homebrew is untested.
+macOS on Apple silicon — on purpose: unified memory makes one quiet box that
+runs big models all day, and that's the machine eki is for.
 
 Where it's going — filling the idle hours with work worth doing, from goals
 you declare: [ROADMAP.md](ROADMAP.md).
 
 ## Install
 
-With Homebrew, on macOS or Linux — no app needed:
+With Homebrew — no app needed:
 
 ```sh
 brew install REDES01/eki/eki

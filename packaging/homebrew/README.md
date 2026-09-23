@@ -10,8 +10,8 @@ git tag v0.3.0 && git push origin v0.3.0
 # then commit and push the tap
 ```
 
-It needs `uv` (to resolve `requirements.txt` for macOS and Linux, Intel and
-Arm) and reads each wheel's SHA-256 from PyPI, so the install downloads
+It needs `uv` (to resolve `requirements.txt` for macOS on Apple silicon and
+Intel) and reads each wheel's SHA-256 from PyPI, so the install downloads
 exactly what was pinned and builds nothing. To try a formula before tagging,
 pass `--url file:///path/to/eki-X.Y.Z.tar.gz` and install it from a local
 tap (`brew tap-new`).

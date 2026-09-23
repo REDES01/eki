@@ -8,7 +8,7 @@ The formula installs eki's own source beside a virtualenv holding exactly the
 dependencies of requirements.txt, resolved for each platform Homebrew runs
 on (uv pip compile), each as a wheel pinned by its SHA-256 from PyPI. So a
 `brew install` builds nothing and resolves nothing: what was tested is what
-lands. Linux pulls a few more (keyring's Secret Service backend).
+lands. macOS only — eki is a Mac tool (ROADMAP, the vision).
 
 Without --url the release tarball on GitHub is used, and its SHA-256 is read
 from it; --url file:///… lets a formula be tried before anything is pushed.
@@ -33,8 +33,6 @@ REPO = "https://github.com/REDES01/eki"
 PLATFORMS = [
     ("macos_arm", "aarch64-apple-darwin", ("macosx", ("arm64", "universal2"))),
     ("macos_intel", "x86_64-apple-darwin", ("macosx", ("x86_64", "universal2"))),
-    ("linux_intel", "x86_64-unknown-linux-gnu", ("manylinux", ("x86_64",))),
-    ("linux_arm", "aarch64-unknown-linux-gnu", ("manylinux", ("aarch64",))),
 ]
 
 
@@ -132,7 +130,7 @@ def formula(version: str, url: str, sha: str) -> str:
         return f"  {outer} do\n{body}  end\n" if body else ""
 
     platform_blocks = (section("on_macos", {"on_arm": "macos_arm", "on_intel": "macos_intel"})
-                       + section("on_linux", {"on_arm": "linux_arm", "on_intel": "linux_intel"}))
+)
     return TEMPLATE.format(version=version, url=url, sha=sha, py=PY,
                            resources="".join(common) + ("\n" + platform_blocks if platform_blocks else ""))
 
@@ -149,6 +147,7 @@ class Eki < Formula
   license "Apache-2.0"
   head "https://github.com/REDES01/eki.git", branch: "main"
 
+  depends_on :macos
   depends_on "python@{py}"
 
 {resources}

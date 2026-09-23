@@ -71,8 +71,7 @@ def test_the_formula_picks_the_right_wheel_per_platform():
     plat = {tag: want for tag, _, want in mf.PLATFORMS}
     assert mf.pick(files, plat["macos_arm"])["filename"].endswith("cp312-cp312-macosx_11_0_arm64.whl")
     assert "x86_64" in mf.pick(files, plat["macos_intel"])["filename"]
-    assert "manylinux_2_17_x86_64" in mf.pick(files, plat["linux_intel"])["filename"]
-    assert "aarch64" in mf.pick(files, plat["linux_arm"])["filename"]
+    assert set(plat) == {"macos_arm", "macos_intel"}                     # a Mac tool
     assert mf.pick(files, None) is None                              # nothing pure
     abi3 = [w("cryptography-50.0.1-cp311-abi3-macosx_10_9_universal2.whl")]
     assert mf.pick(abi3, plat["macos_arm"]) is not None               # abi3 from 3.11 runs on 3.12

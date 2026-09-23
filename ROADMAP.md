@@ -49,7 +49,10 @@ better the more you use it.
    agrees with you (Stages 1, 7).
 
 **The first public release** is Stages 1–3: an engine and a command line that
-run without the app, on macOS (Linux through Homebrew, untested).
+run without the app, on macOS. Mac-only on purpose: unified memory makes one
+quiet box that runs big models all day, and every part of the idle shift (MLX,
+memory pressure, per-app GPU time, power, launchd) is the Mac's. The engine
+stays plain Python, so a port stays possible if people ask for it.
 
 **Later**, one piece of work split across providers — an RPG with a frontier
 agent writing the code, a story model writing the lore, an image model making
@@ -147,12 +150,10 @@ MCP config, and the local models have none. eki owns one copy of each and
 gives every backend a view of it. Nothing is authored inside `~/.claude` or
 `~/.codex` by hand. This is the heart of the first public release.
 
-- [x] **No app needed.** `brew install REDES01/eki/eki` on macOS and
-      Linux; `eki agent install` hands the engine to `brew services`
-      (launchd or systemd). The formula is generated per release with every
+- [x] **No app needed.** `brew install REDES01/eki/eki` on macOS;
+      `eki agent install` hands the engine to `brew services`. The formula is generated per release with every
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
-      doesn't change its own code. *Still open:* the screen helper on Linux,
-      and `brew install eki` in homebrew/core once eki has the users for it
+      doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
 - [ ] **The harnesses people already use.** Claude Code and Codex now;
       Gemini CLI and other agent CLIs next, each through its official

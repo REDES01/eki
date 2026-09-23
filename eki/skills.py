@@ -386,7 +386,11 @@ def remove(name: str) -> None:
     if folder.exists():
         shutil.rmtree(folder)
     meta = _meta()
-    meta.pop(name, None)
+    gone = meta.pop(name, None) or {}
+    if isinstance(gone.get("learned"), dict):
+        from . import observe
+        observe.note("history", what="a learned skill was removed", skill=name,
+                     why=gone["learned"].get("why"))
     _save_meta(meta)
     _commit(f"remove {name}")
 

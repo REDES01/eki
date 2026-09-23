@@ -43,6 +43,7 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import observe as observe_mod
 from . import workspace as workspace_mod
 from . import live
 from . import mcpbridge
@@ -85,6 +86,8 @@ class Engine:
         self.policy = policy_mod.load()
         self._build()
         self.runner = Runner(self.runs, self._dispatch)
+        self.runner.on_error = self._on_run_error
+        self._fixing = asyncio.Lock()
         self._health: Dict[str, Tuple[float, Any]] = {}
         self._side_tasks: set = set()               # titles and the like
         self._folder_locks: Dict[str, asyncio.Lock] = {}
@@ -507,6 +510,8 @@ class Engine:
             title = f"now running {what}"
             body = done.get("merged") or "the new build is healthy"
         else:
+            observe_mod.note("history", what=f"swap {done['state']}", target=done.get("target"),
+                             why=done.get("why"), self=done.get("self"))
             title = f"{what} was rolled back"
             body = done.get("why") or done["state"]
         if self.settings.get("notify_learned", True):
@@ -608,6 +613,8 @@ class Engine:
             why = choice.reason
             if choice.rejected:
                 why += " — " + "; ".join(choice.rejected)
+            observe_mod.note("gap", what="nothing could take the request", why=why[:300],
+                             task=label.task, run=run["id"], request=run["prompt"][:200])
             if cid:
                 self.store.add_turn(cid, "assistant", f"[{why}]", "", choice.reason,
                                     meta={"run": run["id"], "failed": True})
@@ -739,6 +746,8 @@ class Engine:
                 # the engine is going away, not you stopping it: the copy is
                 # left as it is and the next engine carries the run on
                 raise
+            observe_mod.note("friction", signal="stopped", backend=backend.key, run=run["id"],
+                             task=label.task, request=run["prompt"][:200])
             # stopped on purpose: keep what arrived, and say it was cut short
             line = self._keep_workspace(ws, run)
             if cid and parts:
@@ -800,6 +809,7 @@ class Engine:
             task = asyncio.create_task(self._entitle(cid))
             self._side_tasks.add(task)
             task.add_done_callback(self._side_tasks.discard)
+            self._observe_turn(run, cid, backend.key, choice.reason, label.task)
             # and see whether the run taught something worth keeping as a
             # skill — also off the run's clock, and never its failure
             if backend.info.capabilities.text:
@@ -807,6 +817,90 @@ class Engine:
                 task = asyncio.create_task(self._learn(seen, cid, backend.key))
                 self._side_tasks.add(task)
                 task.add_done_callback(self._side_tasks.discard)
+
+    # ---- eki watching itself (eki/observe.py) -------------------------------
+
+    def _observe_turn(self, run: Dict[str, Any], cid: str, backend: str, reason: str,
+                      task: str) -> None:
+        """What a finished turn says about how eki is doing — cheap, no model."""
+        try:
+            turns = self.store.turns(cid)
+            upto = int(run.get("user_turn") or 0)
+            before = [t for t in turns if t["id"] < upto] if upto else turns[:-2]
+            said = [s for s in learn_mod.signals(run.get("prompt") or "", before) if s != "asked"]
+            if said:
+                last = next((t for t in reversed(before) if t["role"] == "assistant"), None)
+                observe_mod.note("friction", signal=",".join(said), backend=backend, task=task,
+                                 before=(last or {}).get("backend") or "", run=run["id"],
+                                 conversation=cid, request=(run.get("prompt") or "")[:200])
+            if "no harness could take it" in reason:
+                observe_mod.note("gap", what="a bare model stood in for a harness", backend=backend,
+                                 task=task, run=run["id"], request=(run.get("prompt") or "")[:200])
+        except Exception:                           # noqa: BLE001
+            pass
+
+    def _on_run_error(self, run: Dict[str, Any], exc: BaseException) -> None:
+        """A run ended in an error: a provider saying no is journalled as
+        such; an error in eki's own code is a fault, and may get a fix."""
+        fresh = self.runs.get(run["id"]) or run
+        if not observe_mod.is_fault(exc):
+            observe_mod.note("failed", backend=fresh.get("backend") or "", error=str(exc)[:300],
+                             run=run["id"], request=(run.get("prompt") or "")[:200])
+            return
+        entry = observe_mod.fault(exc, source="run", run=run["id"],
+                                  conversation=run.get("conversation_id") or "",
+                                  backend=fresh.get("backend") or "", request=run.get("prompt") or "")
+        if entry:
+            self.fault_seen(entry)
+
+    def fault_seen(self, entry: Dict[str, Any]) -> None:
+        """Called on the engine's loop for every fault, from a run or the log."""
+        task = asyncio.create_task(self.consider_fix(entry))
+        self._side_tasks.add(task)
+        task.add_done_callback(self._side_tasks.discard)
+
+    async def consider_fix(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Propose a fix for a fault if it's due (observe.due), one at a time.
+        Never applies it: the result is a self/ branch and a verdict."""
+        if str(self.settings.get("self_fix", "propose")) != "propose":
+            return {"skipped": "self_fix is off"}
+        why = observe_mod.due(entry, daily=int(self.settings.get("self_fix_daily", observe_mod.DAILY)))
+        if why:
+            return {"skipped": why}
+        if self._fixing.locked():
+            return {"skipped": "another fix is being written"}
+        async with self._fixing:
+            return await self._propose_fix(entry)
+
+    async def _propose_fix(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        from . import builds as builds_mod
+        from . import selfwork
+        sig = entry["signature"]
+        observe_mod.mark(sig, state="working", at=int(time.time()), error=entry.get("error"))
+        root = builds_mod.source()
+        running = builds_mod.running()
+        # fix the code that is actually running: a build's commit, or your checkout's HEAD
+        base = running.get("commit") if not running.get("dev") and running.get("commit") else "HEAD"
+        seen = [e for e in observe_mod.entries(time.time() - observe_mod.QUIET_DAYS * 86400, "fault")
+                if e.get("signature") == sig]
+        request = observe_mod.brief(entry, seen, observe_mod.recent_commits(root, entry.get("file") or ""))
+        service = f"http://127.0.0.1:{self.port}"
+        try:
+            # no base check: code with a fault in it may well fail its own tests,
+            # and that is the point — the candidate check judges the fix
+            p = await asyncio.to_thread(selfwork.propose, request, root=root, base=base,
+                                        ask=selfwork.ask_engine(service), python=sys.executable,
+                                        check_base=False)
+        except Exception as e:                      # noqa: BLE001
+            observe_mod.mark(sig, state="error", why=str(e)[:300])
+            return {"state": "error", "why": str(e)[:300]}
+        observe_mod.mark(sig, state="proposed" if p.commit else "not proposed", self=p.id,
+                         branch=p.branch, fit=p.fit, verdict=p.verdict, run=p.run, backend=p.backend,
+                         files=p.files)
+        if self.settings.get("notify_learned", True):
+            head = "proposed a fix" if p.fit else "tried to fix"
+            await self._notify(f"{head}: {sig}"[:120], p.verdict)
+        return {"state": "proposed", "self": p.id, "fit": p.fit, "verdict": p.verdict}
 
     # ---- a folder per thread (eki/workspace.py) ------------------------------
 

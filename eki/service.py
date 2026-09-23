@@ -70,6 +70,12 @@ def sse(payload: Dict[str, Any]) -> str:
 async def lifespan(app: FastAPI):
     eng: Engine = STATE["engine"]
     eng.quota.start()
+    # eki watching itself: errors logged by its own loops and request
+    # handlers are faults too (eki/observe.py)
+    from . import observe as observe_mod
+    loop = asyncio.get_running_loop()
+    faults = observe_mod.install_log_handler()
+    faults.on_fault = lambda entry: loop.call_soon_threadsafe(eng.fault_seen, entry)
     # one skill store, linked into both CLIs' folders (eki/skills.py)
     report = await asyncio.to_thread(skills_mod.boot)
     if report.get("linked") or report.get("conflicts") or report.get("error"):
@@ -520,6 +526,13 @@ def skill_delete(name: str) -> Any:
 @app.post("/api/skills/import")
 def skills_import(body: SkillImportBody) -> Any:
     return {**_skills_state(), "report": skills_mod.import_existing(body.names or None)}
+
+
+@app.get("/api/observe")
+def observed(days: float = 7) -> Any:
+    """What eki noticed about itself, and the fixes it proposed."""
+    from . import observe as observe_mod
+    return observe_mod.summary(days)
 
 
 @app.get("/api/skills-learned")

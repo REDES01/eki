@@ -203,6 +203,9 @@ class Runner:
         #: aren't cancelled by anyone — the next engine finds them still
         #: "running", marks them interrupted, and carries them on
         self.stopping = False
+        #: (run, exception) for a run that ended in an error — the engine
+        #: tells eki's faults apart from a provider saying no (eki/observe.py)
+        self.on_error: Optional[Callable[[Dict[str, Any], BaseException], None]] = None
 
     @property
     def running(self) -> List[str]:
@@ -288,6 +291,11 @@ class Runner:
                 self._state(rid, "cancelled", ended_at=int(time.time()))
             raise
         except Exception as e:                    # noqa: BLE001
+            if self.on_error is not None:
+                try:
+                    self.on_error(run, e)
+                except Exception:                 # noqa: BLE001
+                    pass                          # noticing never fails a run twice
             self.store.update(rid, error=str(e)[:500])
             # the reason before the state: a watcher stops at a terminal
             # state, so anything published after it is never read

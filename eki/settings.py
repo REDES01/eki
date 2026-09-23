@@ -60,6 +60,11 @@ DEFAULTS: Dict[str, Any] = {
     #: change that touches nothing protected is swapped in, watched, and
     #: rolled back if unhealthy — docs/self-build.md)
     "self_autonomy": "propose",
+    #: a fault in eki's own code (eki/observe.py): "propose" — eki writes a
+    #: fix as an `eki self` proposal (never applied), or "off"
+    "self_fix": "propose",
+    #: fix proposals eki starts on its own per day
+    "self_fix_daily": 3,
     #: a macOS notification when eki learns or improves a skill
     "notify_learned": True,
     #: appended to Claude Code's own system prompt

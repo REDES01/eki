@@ -657,6 +657,11 @@ class Engine(SelfLoop):
             async for piece in self._continuation(run):
                 yield piece
             return
+        if _payload(run).get("self_resolve") and not run.get("_self_inner"):
+            # a change to eki that conflicts with your checkout: resolved, then applied
+            async for piece in self._self_resolve(run):
+                yield piece
+            return
         if _payload(run).get("self_item") and not run.get("_self_inner"):
             # a change to eki itself: worktree, agent, checks (eki/selfengine.py)
             async for piece in self._self_work(run):

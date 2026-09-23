@@ -366,7 +366,8 @@ async def test_a_change_made_before_your_checkout_moved_is_put_on_top_of_it(eng)
     c = selfwork.change(cid)
     assert got["state"] == "applying" and c["base"] == git(eng.root, "rev-parse", "HEAD")
     assert git(eng.root, "merge-base", "--is-ancestor", "HEAD", c["commit"]) == ""
-    # one that no longer goes on top says so, and waits
+    # with resolving off, one that no longer goes on top says so, and waits
+    eng.settings = {**eng.settings, "self_resolve": False}
     Agent.edits = {"README.md": "eki, the agent's way\n"}
     started = await eng.self_ask("reword the README")
     await settle(eng.runs, started["run"], timeout=20)
@@ -375,6 +376,71 @@ async def test_a_change_made_before_your_checkout_moved_is_put_on_top_of_it(eng)
     git(eng.root, "commit", "-qam", "yours again")
     assert (await eng.self_apply(other))["state"] == "conflicts"
     assert selfwork.change(other)["state"] == "conflicts"
+    await eng.runner.stop()
+
+
+async def _conflicting(eng):
+    """A change to the README, and your own README commit after it."""
+    Agent.edits = {"README.md": "eki, the agent's way\n"}
+    started = await eng.self_ask("reword the README")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    (eng.root / "README.md").write_text("eki, your way\n")
+    git(eng.root, "commit", "-qam", "yours, meanwhile")
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_on_apply_is_resolved_by_an_agent_and_then_applied(eng):
+    cid = await _conflicting(eng)
+    was = selfwork.change(cid)["commit"]
+    Agent.edits = {"README.md": "eki, your way — and the agent's\n"}      # the resolution
+    Agent.answers = ["README.md: kept your wording and added the agent's."]
+    got = await eng.self_apply(cid)
+    assert got["state"] == "conflicts" and got["resolving"]
+    run = await settle(eng.runs, got["resolving"], timeout=20)
+    assert run["state"] == "done" and run["backend"] == "claude_code"   # the program that wrote it
+    who, told, cwd = Agent.seen[-1]
+    assert "README.md" in told and "<<<<<<<" in told and "Don't run `git rebase --continue`" in told
+    assert cwd == selfwork.change(cid)["worktree"]                       # in the change's own worktree
+    c = selfwork.change(cid)
+    assert c["state"] == "applied" and not c.get("resolving")             # documentation: merged
+    assert (eng.root / "README.md").read_text() == "eki, your way — and the agent's\n"
+    assert c["commit"] != was and c["resolved"]["files"] == ["README.md"]
+    said = eng.store.turns(got["conversation"])[-1]["content"]
+    assert "Conflicts in `README.md` were resolved by claude_code" in said and "kept your wording" in said
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_resolution_that_leaves_markers_puts_the_change_back_as_it_was(eng):
+    cid = await _conflicting(eng)
+    was = selfwork.change(cid)["commit"]
+    Agent.edits = {}                                                     # the agent does nothing
+    got = await eng.self_apply(cid)
+    await settle(eng.runs, got["resolving"], timeout=20)
+    c = selfwork.change(cid)
+    assert c["state"] == "conflicts" and "conflict markers are still in README.md" in c["why"]
+    where = Path(c["worktree"])
+    assert not selfwork.rebasing(where) and git(where, "rev-parse", "HEAD") == was
+    assert (eng.root / "README.md").read_text() == "eki, your way\n"     # yours, untouched
+    assert "still conflicts with your checkout" in eng.store.turns(got["conversation"])[-1]["content"]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_change_says_whats_new_in_plain_words(eng):
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    Agent.answers = ["Set VALUE to 2 in eki/thing.py.\n\nSUMMARY:\n- VALUE is two now.\n"
+                     "- Nothing to set up; `eki self apply` takes it."]
+    started = await eng.self_ask("make VALUE two")
+    await settle(eng.runs, started["run"], timeout=20)
+    c = selfwork.changes()[0]
+    assert c["summary"] == "- VALUE is two now.\n- Nothing to set up; `eki self apply` takes it."
+    said = eng.store.turns(started["conversation"])[-1]["content"]
+    assert "**What's new**" in said and "VALUE is two now" in said
+    assert "VALUE is two now" in "\n".join(selfwork.Proposal(**{k: v for k, v in c.items()
+                                                                if k in selfwork.Proposal.__dataclass_fields__}).lines())
     await eng.runner.stop()
 
 

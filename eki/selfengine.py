@@ -36,6 +36,13 @@ from . import selfwork
 from . import settings as settings_mod
 from .adapters.base import BackendError
 
+
+class _NoItem:
+    """What `_self_says` reads from an item, for a change without one."""
+
+    def __init__(self, c: Dict[str, Any]):
+        self.title, self.state, self.note, self.attempts = c.get("title") or "", "", "", 0
+
 Piece = Union[str, Dict[str, str]]
 #: the goal with nothing to take waits this long before looking again (or until woken)
 IDLE_RECHECK = 900
@@ -208,6 +215,7 @@ class SelfLoop:
             fresh = self.runs.get(run["id"]) or run                     # type: ignore[attr-defined]
             prop.run, prop.backend = run["id"], fresh.get("backend") or prop.backend
             prop.said = selfloop.said(answer)
+            prop.summary = selfwork.summary_of(answer)
             it = selfloop.update(it.id, phase="checking", open={
                 **prop.to_json(), "agent_state": state, "reason": selfloop.reason(answer)})
         pending = await asyncio.to_thread(selfwork.changed, Path(prop.worktree)) \
@@ -230,6 +238,8 @@ class SelfLoop:
                                                       check=self.self_check)
                 except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
                     applied = {"state": "proposed", "why": str(e)[:300]}
+                if applied.get("state") == "conflicts":
+                    applied = await self._self_resolve_start(prop.id) or applied
         async for piece in self._self_close(run, it, prop, applied):
             yield piece
 
@@ -258,8 +268,9 @@ class SelfLoop:
         if not watched and self.settings.get("notify_learned", True):   # type: ignore[attr-defined]
             head = {"applying": "Applying", "applied": "Applied", "proposed": "Proposed",
                     "conflicts": "Proposed"}.get(c["state"], "Tried")
+            first = next((x.strip("-• ") for x in str(c.get("summary") or "").splitlines() if x.strip()), "")
             await self._notify(f"eki · {head}: {it.title}"[:120],           # type: ignore[attr-defined]
-                               (c.get("verdict") or c["state"])[:200])
+                               (first or c.get("verdict") or c["state"])[:200])
         self._self_wake()
 
     def _self_says(self, c: Dict[str, Any], it: selfloop.Item, applied: Dict[str, Any]) -> str:
@@ -279,6 +290,15 @@ class SelfLoop:
         if c.get("protected") and state == "proposed":
             head = "passes, but touches what eki may not change alone — for you to read line by line"
         lines.append(f"**eki · change to itself: {head}.**")
+        if c.get("summary"):
+            lines.append("**What's new**\n\n" + str(c["summary"]).strip())
+        if c.get("resolving"):
+            lines.append("It conflicted with your checkout; eki is having the conflicts resolved, "
+                         "then judges it again and applies it — nothing for you to do.")
+        if (c.get("resolved") or {}).get("files"):
+            r = c["resolved"]
+            lines.append(f"Conflicts in {', '.join(f'`{f}`' for f in r['files'])} were resolved by "
+                         f"{r.get('by') or 'an agent'}" + (f": {r['how']}" if r.get("how") else "."))
         if c.get("commit"):
             files = c.get("files") or []
             who = f"written by {c.get('backend')}" if c.get("backend") and c.get("backend") != "eki" else "made by eki"
@@ -524,8 +544,109 @@ class SelfLoop:
 
     async def self_apply(self, cid: str) -> Dict[str, Any]:
         got = await asyncio.to_thread(selfwork.apply, cid, python=sys.executable, check=self.self_check)
+        if got.get("state") == "conflicts":
+            # it no longer goes on top of your checkout: not handed back to
+            # you — an agent resolves it, and eki applies it when that holds
+            got = await self._self_resolve_start(got.get("id") or cid) or got
         self._self_follow(got.get("id") or cid)
         return got
+
+    # ---- conflicts, resolved (eki/selfwork.py begin_rebase / finish_rebase) --------------
+
+    async def _self_resolve_start(self, cid: str) -> Optional[Dict[str, Any]]:
+        """A run that has the change's conflicts resolved and then applies it,
+        in the change's own thread. None when resolving is off."""
+        if not self.settings.get("self_resolve", True):                 # type: ignore[attr-defined]
+            return None
+        c = selfwork.change(cid)
+        convo = c.get("conversation") or ""
+        if not convo:
+            title = f"eki · {c.get('title') or cid}"[:80]
+            convo = self.store.new_conversation(title)                  # type: ignore[attr-defined]
+            self.store.set_conversation(convo, title=title)             # type: ignore[attr-defined]
+        shown = f"[eki · self] Resolving conflicts: {c.get('title') or 'self/' + c['id']}"[:200]
+        turn = self.store.add_turn(convo, "user", shown, meta={"self": c["id"]})  # type: ignore[attr-defined]
+        wrote = c.get("backend") or ""
+        rid = self.runs.create(shown, conversation=convo, user_turn=turn,  # type: ignore[attr-defined]
+                               requested=wrote if self._self_can_resolve(wrote) else "",
+                               payload=json.dumps({"self_resolve": c["id"], "route": "resolve git conflicts"}))
+        selfwork.set_state(c["id"], "conflicts", resolving=rid, resolving_at=int(time.time()),
+                           why="eki is having its conflicts resolved")
+        await self.runner.submit(rid)                                   # type: ignore[attr-defined]
+        return {"state": "conflicts", "id": c["id"], "resolving": rid, "conversation": convo,
+                "why": "it conflicted with your checkout — eki is resolving it, then applies it"}
+
+    def _self_can_resolve(self, key: str) -> bool:
+        """The program that wrote the change resolves it, if it's a harness that's here."""
+        b = self.get(key) if key else None                              # type: ignore[attr-defined]
+        return b is not None and b.info.capabilities.tools and b.info.capabilities.repo
+
+    async def _self_resolve(self, run: Dict[str, Any]) -> AsyncIterator[Piece]:
+        """Put the change on top of your checkout; have an agent resolve what
+        conflicts, in the change's worktree; finish the rebase; apply."""
+        cid = str(_payload(run).get("self_resolve") or "")
+        c = selfwork.change(cid)
+        convo = run["conversation_id"]
+
+        def give_up(why: str) -> str:
+            selfwork.set_state(c["id"], "conflicts", resolving="", why=why[:300])
+            self._self_follow(c["id"])
+            return f"**eki · change to itself: still conflicts with your checkout.**\n\n{why}\n\n" \
+                   f"Read it with `eki self diff {c['id']}`; `eki self retry` has eki make it again."
+        yield "*eki: putting the change on top of your checkout…*\n\n"
+        try:
+            info = await asyncio.to_thread(selfwork.begin_rebase, c["id"])
+        except selfwork.SelfWorkError as e:
+            text = give_up(str(e))
+            self.store.add_turn(convo, "assistant", text, "eki", "self-work",   # type: ignore[attr-defined]
+                                meta={"run": run["id"], "self": c["id"]})
+            yield text
+            return
+        if info["files"]:
+            yield (f"*eki: it conflicts in {', '.join(info['files'])} — having them resolved in its "
+                   "worktree…*\n\n")
+            landed = await asyncio.to_thread(selfwork.landed_since, c["id"], info["onto"], info["files"])
+            ask = selfwork.resolve_brief(c, info["files"], landed, sys.executable, info["where"])
+            inner = {**run, "cwd": info["where"], "_self_inner": True, "_as": ask}
+            parts: List[str] = []
+            failed = ""
+            try:
+                async for piece in self._dispatch(inner):               # type: ignore[attr-defined]
+                    if isinstance(piece, str):
+                        parts.append(piece)
+                    yield piece
+            except BackendError as e:
+                failed = f"the agent couldn't resolve it: {e}"
+            fresh = self.runs.get(run["id"]) or run                     # type: ignore[attr-defined]
+            why = failed or await asyncio.to_thread(
+                selfwork.finish_rebase, c["id"], info, fresh.get("backend") or "",
+                selfloop.reason("".join(parts), 500))
+            if failed:
+                await asyncio.to_thread(selfwork._put_back, Path(info["where"]), info.get("commit") or "")
+            if why:
+                text = give_up(f"eki had its conflicts resolved, but it didn't hold: {why}"
+                               if not failed else why)
+                self.store.add_turn(convo, "assistant", text, "eki", "self-work",  # type: ignore[attr-defined]
+                                    meta={"run": run["id"], "self": c["id"]})
+                yield "\n\n" + text
+                return
+            yield "\n\n*eki: resolved — judging it again on top of your checkout, then applying it…*\n"
+        selfwork.set_state(c["id"], "conflicts", resolving="", why="")
+        try:
+            applied = await asyncio.to_thread(selfwork.apply, c["id"], python=sys.executable,
+                                              check=self.self_check)
+        except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
+            applied = {"state": "proposed", "why": str(e)[:300]}
+        now = self._self_follow(c["id"])
+        it = self._self_item_of(now) or _NoItem(now)
+        text = self._self_says(now, it, applied)                        # type: ignore[arg-type]
+        self.store.add_turn(convo, "assistant", text, "eki", "self-work",   # type: ignore[attr-defined]
+                            meta={"run": run["id"], "self": c["id"]})
+        yield "\n\n" + text
+        if self.settings.get("notify_learned", True):                   # type: ignore[attr-defined]
+            head = {"applying": "Applying", "applied": "Applied"}.get(now["state"], "Still waiting")
+            await self._notify(f"eki · {head}: {now.get('title') or 'self/' + now['id']}"[:120],  # type: ignore[attr-defined]
+                               "its conflicts with your checkout were resolved"[:200])
 
     async def self_discard(self, cid: str) -> Dict[str, Any]:
         await asyncio.to_thread(selfwork.discard, cid)

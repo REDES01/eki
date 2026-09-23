@@ -132,6 +132,10 @@ def clinic(tmp_path, monkeypatch, **settings):
     eng.settings = {**eng.settings, "skills_learn": "off", "notify_learned": False,
                     "self_fix": "propose", **settings}
     monkeypatch.setattr(observe, "versions", lambda: {})
+    # running from your checkout, wherever these tests run — a build's own
+    # candidate check runs them inside the build, whose commit is not HEAD
+    from eki import builds
+    monkeypatch.setattr(builds, "running", lambda: {"dev": True})
     return eng
 
 

@@ -224,12 +224,24 @@ including `selfloop.py` and `selfengine.py`, which decide what eki takes on
 and how far it goes — are never applied by eki at any setting.
 
 **Applying.** If your checkout has moved on since the change was made, it is
-rebased onto your checkout first and judged again; if it no longer fits, it
-says so (*conflicts*) and waits. Documentation goes straight into your
+rebased onto your checkout first and judged again. If the rebase stops on a
+conflict, it isn't handed back to you: eki opens a run in the change's thread
+that asks the program that wrote it (or the router's pick) to resolve the
+conflicted files in the change's own worktree, mid-rebase — told what the
+change does and what your checkout gained in those files since. eki then
+finishes the rebase itself, refuses a result with markers left or not on top
+of your checkout (putting the change back exactly as it was, *conflicts*),
+judges it again and applies it. Apply is refused while that runs.
+`self_resolve: false` turns it off. Documentation goes straight into your
 checkout (fast-forward); code becomes a build the supervisor swaps in once
 nothing is running, watches, and rolls back if it isn't healthy — and a
 healthy one is fast-forwarded into your checkout. Files you never added to git
 don't stop that; edits to tracked files do.
+
+**What's new.** Every change ends with a summary for you, in plain words:
+what's new or different, how to use it, what to check before applying. The
+agent writes it under a `SUMMARY:` line; eki shows it at the top of the
+change's message in its thread, in the notification, and in `eki self show`.
 
 **Undo** is a change of its own: the revert, on top of your checkout as it is
 now, judged like any other, then applied — you asked. **Discard** removes the

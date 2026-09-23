@@ -142,3 +142,13 @@ def test_the_real_base_check_is_the_candidates_test_check(tmp_path):
     p = propose(tmp_path, repo(tmp_path), agent({"eki/thing.py": "VALUE = 2\n"}),
                 check_base=True)
     assert p.fit
+
+
+def test_the_agent_is_asked_for_a_summary_and_it_is_read_back():
+    assert "SUMMARY:" in selfwork.brief("x", "python")
+    answer = ("Changed the list.\n\n**SUMMARY:**\n- The chat list shows project names.\n"
+              "- Click a project to filter.\nITEM: done")
+    assert selfwork.summary_of(answer) == "- The chat list shows project names.\n- Click a project to filter."
+    assert selfwork.summary_of("no summary here") == ""
+    from eki import selfloop
+    assert selfloop.reason(answer) == "Changed the list."

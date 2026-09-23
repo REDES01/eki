@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import roadmap
+from .selfwork import SUMMARY_LINE
 
 HOME = Path("~/.eki/self").expanduser()
 #: an item whose change failed its checks this many times is left for a person
@@ -242,6 +243,10 @@ def said(answer: str) -> str:
 def reason(answer: str, limit: int = 600) -> str:
     """What the agent said above its ITEM line — why it's a person's, what's
     left — cut at the end of a sentence, not in the middle of a word."""
+    # the plain-words summary for you is shown on its own (eki/selfwork.summary_of)
+    found = list(SUMMARY_LINE.finditer(answer or ""))
+    if found:
+        answer = answer[:found[-1].start()]
     lines = [x.strip() for x in (answer or "").splitlines() if x.strip() and not ITEM_LINE.match(x)]
     text = " ".join(lines[-3:])
     if len(text) <= limit:

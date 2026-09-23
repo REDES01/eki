@@ -34,6 +34,7 @@ applied by eki.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -97,6 +98,12 @@ class Proposal:
     said: str = ""                   # the agent's ITEM line (a roadmap item): done|partial|already|person
     ticks: str = ""                  # the ROADMAP item it ticks, by key
     reverts: str = ""                # an undo: the change it takes back
+    #: what's new for you, in plain words — the agent's SUMMARY, for the
+    #: thread, the notification and `eki self show`
+    summary: str = ""
+    #: conflicts eki had resolved when the change was put on top of your
+    #: checkout: {"files": [...], "by": backend, "how": its words}
+    resolved: Optional[Dict[str, Any]] = None
 
     def to_json(self) -> Dict[str, Any]:
         return asdict(self)
@@ -108,6 +115,11 @@ class Proposal:
 
     def lines(self) -> List[str]:
         out = [f"self/{self.id}: {self.headline}"]
+        if self.summary:
+            out += ["", *("  " + x for x in self.summary.splitlines()), ""]
+        if self.resolved:
+            out.append(f"  conflicts resolved by {self.resolved.get('by') or '?'} in "
+                       + ", ".join(self.resolved.get("files") or []))
         if self.run:
             out.append(f"  done by   {self.backend or '?'} (run {self.run})")
         if self.files:
@@ -205,7 +217,29 @@ def brief(request: str, python: str, where: str = "") -> str:
         + ", ".join(PROTECTED) + ".\n"
         "- Finish with two or three sentences: what you changed and anything a "
         "reviewer should look at.\n"
+        "- Then a summary for the person, after a line that says only `SUMMARY:` — three to "
+        "six short lines in plain words, no code: what's new or different for them, how to "
+        "use it (a command, or where to click), and anything to check before applying it.\n"
     )
+
+
+SUMMARY_LINE = re.compile(r"^\s*\**SUMMARY:?\**\s*:?\s*$", re.M | re.I)
+
+
+def summary_of(answer: str, limit: int = 900) -> str:
+    """The agent's plain-words summary: what follows its `SUMMARY:` line, up
+    to an `ITEM:` line. "" when it didn't write one."""
+    found = list(SUMMARY_LINE.finditer(answer or ""))
+    if not found:
+        return ""
+    text = answer[found[-1].end():]
+    lines = []
+    for line in text.strip().splitlines():
+        if re.match(r"^\s*`?ITEM:", line):
+            break
+        lines.append(line.rstrip())
+    out = "\n".join(lines).strip()
+    return out if len(out) <= limit else out[:limit].rsplit("\n", 1)[0].rstrip() + "\n…"
 
 
 def slug(text: str) -> str:
@@ -516,6 +550,146 @@ def fast_forward(root: Path, commit: str) -> str:
         f"not merged: {got.stderr.strip()[:160]}"
 
 
+# ---- when a change no longer goes on top: its conflicts, resolved -----------------
+#
+# Your checkout moves on while a change waits (another change applied, your
+# own commits). Apply puts the change on top first; when that stops at a
+# conflict, eki doesn't hand it back to you — the engine asks an agent to
+# resolve the conflicted files in the change's own worktree, mid-rebase,
+# then eki finishes the rebase, checks nothing is left, judges the change
+# again and applies it (eki/selfengine.py `_self_resolve`).
+
+CONFLICT_MARK = re.compile(r"^(<<<<<<< |>>>>>>> )", re.M)
+
+
+def _git_path(where: Path, name: str) -> Path:
+    p = Path(git(where, "rev-parse", "--git-path", name))
+    return p if p.is_absolute() else Path(where) / p
+
+
+def rebasing(where: Path) -> bool:
+    """A rebase is stopped in this worktree."""
+    return _git_path(where, "rebase-merge").exists() or _git_path(where, "rebase-apply").exists()
+
+
+def unmerged(where: Path) -> List[str]:
+    return [f for f in git(where, "diff", "--name-only", "--diff-filter=U").splitlines() if f]
+
+
+def marked(where: Path, files: List[str]) -> List[str]:
+    """Files that still hold conflict markers."""
+    out = []
+    for f in files:
+        try:
+            if CONFLICT_MARK.search((Path(where) / f).read_text(errors="replace")):
+                out.append(f)
+        except OSError:
+            pass
+    return out
+
+
+def _put_back(where: Path, commit: str) -> None:
+    """The change as it was before the attempt: no rebase, its own commit."""
+    if rebasing(where):
+        subprocess.run(["git", "-C", str(where), "rebase", "--abort"], capture_output=True)
+    if commit:
+        subprocess.run(["git", "-C", str(where), "reset", "-q", "--hard", commit], capture_output=True)
+
+
+def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
+    """Start putting the change on top of your checkout, and stop at its
+    conflicts. {"where", "onto", "files"} — files [] means it went on cleanly."""
+    c = change(cid, home)
+    root = Path(c["root"])
+    where = ensure_worktree(c, home)
+    onto = git(root, "rev-parse", "HEAD")
+    _put_back(where, "")                        # a rebase left stopped by an earlier try
+    got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
+                          "user.email=eki@localhost", "rebase", "-q", onto],
+                         capture_output=True, text=True)
+    files = unmerged(where) if got.returncode else []
+    if got.returncode and not files:
+        _put_back(where, c.get("commit") or "")
+        why = (got.stderr.strip() or got.stdout.strip()).splitlines()
+        raise SelfWorkError("it couldn't be put on top of your checkout: " + (why[-1] if why else "git failed"))
+    return {"where": str(where), "onto": onto, "files": files, "commit": c.get("commit") or ""}
+
+
+def landed_since(cid: str, onto: str, files: List[str], home: Optional[Path] = None) -> str:
+    """What your checkout gained in those files since the change was made."""
+    c = change(cid, home)
+    base = c.get("base") or ""
+    if not base or base == "HEAD":
+        return ""
+    got = subprocess.run(["git", "-C", c["root"], "log", "--oneline", "--no-decorate",
+                          f"{base}..{onto}", "--", *files], capture_output=True, text=True)
+    return got.stdout.strip()[:1500]
+
+
+def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str, where: str) -> str:
+    """What the agent is told when a change stops on conflicts."""
+    what = c.get("summary") or c.get("title") or (c.get("request") or "").strip()[:600]
+    return (
+        f"You are resolving conflicts in eki's own source code, in {where}.\n\n"
+        f"eki's change self/{c['id']} was made on an older checkout. Putting it on top of the "
+        f"current one — a git rebase, stopped now — conflicts in: {', '.join(files)}.\n\n"
+        f"What the change does:\n{what}\n\n"
+        + (f"What the checkout gained in those files since:\n{landed}\n\n" if landed else "")
+        + "How to work here:\n"
+        "- Resolve every <<<<<<< / ======= / >>>>>>> block in those files so both sides' intent "
+        "survives: the checkout's side is what's current; the change's side is what it adds.\n"
+        "- Touch only what the conflicts need. Don't redo or extend the change.\n"
+        "- Don't run `git rebase --continue`, `--abort`, commit, or touch branches — eki "
+        "finishes the rebase itself once the files are clean.\n"
+        f"- Run the tests with `{python} -m pytest -q` and leave them passing.\n"
+        "- Don't ask questions — nobody is watching.\n"
+        "- Finish with one line per file: how you resolved it.\n")
+
+
+def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
+                  home: Optional[Path] = None) -> str:
+    """After the agent: finish the rebase, and make sure it holds. "" when the
+    change now sits cleanly on top of your checkout; otherwise why not — and
+    the change is put back exactly as it was."""
+    where, onto, files = Path(info["where"]), info["onto"], list(info.get("files") or [])
+    why = ""
+    try:
+        still = marked(where, files)
+        if still:
+            why = "conflict markers are still in " + ", ".join(still)
+        elif rebasing(where):
+            subprocess.run(["git", "-C", str(where), "add", "--", *files], capture_output=True)
+            left = unmerged(where)
+            if left:
+                why = "still conflicting: " + ", ".join(left)
+            else:
+                got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
+                                      "user.email=eki@localhost", "-c", "core.editor=true",
+                                      "rebase", "--continue"],
+                                     capture_output=True, text=True, env={**os.environ, "GIT_EDITOR": "true"})
+                if got.returncode != 0 or rebasing(where):
+                    more = unmerged(where)
+                    why = ("another of its commits conflicts too: " + ", ".join(more)) if more else \
+                        "the rebase didn't finish: " + (got.stderr.strip() or got.stdout.strip())[-200:]
+        if not why and not is_in(where, onto, "HEAD"):
+            why = "it still isn't on top of your checkout"
+        if not why:
+            touched = [f for f in git(where, "diff", "--name-only", onto, "HEAD").splitlines() if f]
+            still = marked(where, touched)
+            if still:
+                why = "conflict markers were committed in " + ", ".join(still)
+    except SelfWorkError as e:
+        why = str(e)
+    if why:
+        _put_back(where, info.get("commit") or "")
+        return why
+    c = change(cid, home)
+    p = Proposal(**{k: v for k, v in c.items() if k in Proposal.__dataclass_fields__})
+    p.resolved = {"files": files, "by": by, "how": how[:600], "onto": onto}
+    record(p, home)
+    return ""
+
+
 def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None,
           check: Callable[..., candidate.Report] = candidate.check, say: Say = None,
           swap: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
@@ -529,6 +703,8 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     cid = c["id"]
     if c["state"] not in ("proposed", "conflicts", "rolled back"):
         raise SelfWorkError(f"self/{cid} is {c['state']} — only a proposed change can be applied")
+    if c.get("resolving") and time.time() - float(c.get("resolving_at") or 0) < 3600:
+        raise SelfWorkError("eki is having its conflicts resolved right now — it applies it when that's done")
     if c.get("protected"):
         raise SelfWorkError("it touches what eki may not change alone ("
                             + ", ".join(c["protected"]) + ") — read it and merge it yourself")

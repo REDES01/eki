@@ -141,7 +141,7 @@ Open right now:
       models (`eki/workflow.py`), gallery, picture sorting mode, app icon,
       Claude Code panels + eki's in-process tools + the MCP registry *(eki: self/a92130fc)*
 - [ ] Confirm the hold-then-release swipe fix on a real trackpad
-- [ ] Cut 0.2.0 with the icon in the release
+- [x] Cut 0.2.0 with the icon in the release *(eki: self/5931d470)*
 
 ## Stage 1 — One set of skills, context and tools
 

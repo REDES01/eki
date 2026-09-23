@@ -58,6 +58,11 @@ agent that gets each turn does, the way it would in a chat.
 - **Never on its own behalf.** A goal proposes; it doesn't post, send or buy.
   Anything that acts in the world is yours to do from its thread.
 
+**eki itself** can be a goal too: `eki self on`, or *Start* under Goals →
+Self. Its turns aren't a sentence but the next piece of work on eki's own code
+— a fault, something you asked for, the next item in ROADMAP.md — each in its
+own worktree and checked before you see it (docs/self-build.md).
+
 Goals are also eki's timetable: what used to be a *schedule* — a request at
 set times — is a repeating goal, on time and fresh each time. Schedules you
 had become goals like that when the engine starts (paused ones stay paused).

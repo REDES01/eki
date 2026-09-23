@@ -118,13 +118,44 @@
   .reply textarea { flex: 1; border: 0; background: transparent; resize: none; outline: none; font-size: 14px; min-height: 40px; }
   .edit { padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  nav.tabs { display: inline-flex; gap: 2px; background: var(--sunk); border-radius: 9px; padding: 2px; }
+  nav.tabs a { color: var(--ink-2); text-decoration: none; font-size: 13px; font-weight: 650; padding: 3px 13px; border-radius: 7px; }
+  nav.tabs a[aria-current="page"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .section { margin-top: 24px; }
+  .self-head { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .self-head .line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .self-head .big { font-size: 15px; font-weight: 650; }
+  .chipk { font-size: 11px; font-weight: 650; border-radius: 99px; padding: 1px 8px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
+  .chipk.fault { background: var(--danger-soft); color: var(--danger); } .chipk.roadmap { background: var(--info-soft); color: var(--info); }
+  .chipk.asked { background: var(--accent-soft); color: var(--accent); } .chipk.note { background: var(--ok-soft); color: var(--ok); }
+  .ck { font-size: 11px; border-radius: 6px; padding: 1px 7px; margin-right: 4px; background: var(--sunk); color: var(--ink-3); white-space: nowrap; }
+  .ck.ok { background: var(--ok-soft); color: var(--ok); } .ck.bad { background: var(--danger-soft); color: var(--danger); }
+  .change { padding: 12px 16px; }
+  .change .top { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; }
+  .change .title { font-weight: 600; font-size: 14px; }
+  .change .meta, .goal-head .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .change .meta { color: var(--ink-3); font-size: 12px; margin-top: 4px; }
+  .change .acts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .rows { display: flex; flex-direction: column; }
+  .rowline { display: flex; gap: 10px; align-items: center; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 13px; min-width: 0; }
+  .rowline:last-child { border-bottom: 0; }
+  .rowline .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rowline .when { color: var(--ink-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  pre.diff { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto;
+             font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+  pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--danger); } pre.diff .hunk { color: var(--info); }
+  pre.diff .file { color: var(--ink); font-weight: 650; }
+  .suggestion { padding: 10px 0; border-top: 1px solid var(--line); }
+  .areas { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .area { display: inline-flex; gap: 4px; align-items: center; background: var(--sunk); border-radius: 8px; padding: 2px 4px 2px 9px; font-size: 12px; }
+  .area button { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; line-height: 1; }
   @media (max-width: 640px) { .bar { padding: 10px 16px; } main { padding: 16px 16px 60px; } .msg.you { margin-left: 0; } }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
-    <h1><a href="#/">Goals</a></h1>
+    <h1><nav class="tabs" aria-label="Board"><a href="#/" id="tab-goals">Goals</a><a href="#/self" id="tab-self" title="eki working on itself">Self</a></nav></h1>
     <div class="status"><i class="dot" id="dot"></i><span class="text" id="status">Connecting…</span></div>
     <div class="controls">
       <div class="seg" role="group" aria-label="Background work">
@@ -140,6 +171,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
 const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
+            self: null, change: null, changeThread: null, diff: null, diffFor: "", selfDraft: "", acting: {},
             draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, on_time: false, fresh: false, touched: false } };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const EXAMPLES = [
@@ -156,6 +188,7 @@ async function api(path, method, body) {
 }
 function route() {
   const p = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  if (p[0] === "self") return p[1] ? { page: "change", id: p[1] } : { page: "self" };
   return p[0] === "g" && p[1] ? { page: "goal", id: p[1] } : { page: "home" };
 }
 
@@ -246,7 +279,7 @@ function splitMark(text) {
   return { body: String(text || "").replace(MARK, "").trim(), mark: last };
 }
 const plain = t => splitMark(t).body.replace(/!\[[^\]]*\]\([^)]*\)/g, "[picture]").replace(/[#*`>]/g, "").replace(/\s+/g, " ").trim();
-const STATUS = { working: "Working", queued: "Up next", scheduled: "Scheduled", waiting: "Waiting for you",
+const STATUS = { working: "Working", queued: "Up next", scheduled: "Scheduled", waiting: "Waiting for you", idle: "Nothing to do",
                  paused: "Paused", done: "Done", stuck: "Stuck", blocked: "Can't start", away: "When you're away" };
 const ago = t => { if (!t) return ""; const s = Date.now() / 1000 - t;
   return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
@@ -262,6 +295,9 @@ function header() {
   $("#status").textContent = `${label} — ${sh.why || ""}`; $("#status").title = $("#status").textContent;
   for (const b of document.querySelectorAll("[data-on]")) b.setAttribute("aria-pressed", String((b.dataset.on === "1") === v.on));
   $("#away").checked = v.when === "away";
+  const self = ["self", "change"].includes(route().page);
+  $("#tab-goals").toggleAttribute("aria-current", !self); if (!self) $("#tab-goals").setAttribute("aria-current", "page");
+  $("#tab-self").toggleAttribute("aria-current", self); if (self) $("#tab-self").setAttribute("aria-current", "page");
 }
 
 // what a goal may use: your subscriptions; the screen — which needs them, and waits for you to be away
@@ -292,9 +328,9 @@ function home() {
   h += `<div class="label">Goals</div><div class="goals">` + goals.map(g => {
     const k = "rm:" + g.id;
     const last = plain(g.last);
-    return `<div class="card goal" data-open="${esc(g.id)}">
+    return `<div class="card goal" data-open="${g.kind === "self" ? "self" : esc(g.id)}">
       <div class="top"><div><div class="text">${esc(g.text)}</div>
-        <div class="meta">${esc(g.when_text)}${g.folder ? " · " + esc(g.folder.split("/").pop()) : ""}${g.screen ? " · uses the screen when you're away" : g.spare ? " · may use subscriptions" : ""}${g.last_backend ? " · " + esc(g.last_backend) : ""}${g.last_turn_at ? " · " + ago(g.last_turn_at) : ""}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</div></div>
+        <div class="meta">${g.kind === "self" ? "eki's own code · " : ""}${esc(g.when_text)}${g.folder ? " · " + esc(g.folder.split("/").pop()) : ""}${g.screen ? " · uses the screen when you're away" : g.spare ? " · may use subscriptions" : ""}${g.last_backend ? " · " + esc(g.last_backend) : ""}${g.last_turn_at ? " · " + ago(g.last_turn_at) : ""}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</div></div>
         <span class="badge ${esc(g.status)}">${STATUS[g.status] || esc(g.status)}</span></div>
       ${g.note ? `<div class="meta" style="color:var(--wait)">${esc(g.note)}</div>` : ""}
       ${last ? `<div class="last">${esc(last.slice(0, 400))}</div>` : ""}
@@ -360,12 +396,170 @@ function goalPage(r) {
   return h;
 }
 
+// ---- eki working on itself ------------------------------------------------------------------------
+const SOURCE = { asked: "you asked", fault: "a fault", roadmap: "ROADMAP", note: "weekly note", undo: "undo" };
+const CSTATE = { proposed: "Waiting for you", conflicts: "Doesn't fit on top", applying: "Applying", applied: "Applied",
+  "rolled back": "Rolled back", discarded: "Discarded", unfit: "Didn't pass", stopped: "Didn't finish",
+  "no change": "Nothing changed", "not started": "Not started", undoing: "Undoing", undone: "Taken back", gone: "Gone" };
+const CBADGE = { proposed: "waiting", conflicts: "blocked", applying: "working", undoing: "working", applied: "done",
+  "rolled back": "stuck", unfit: "stuck", stopped: "stuck", discarded: "paused", undone: "paused" };
+const srcChip = s => `<span class="chipk ${esc(s)}">${esc(SOURCE[s] || s)}</span>`;
+const checksOf = c => (c.report?.checks || []).map(k =>
+  `<span class="ck ${k.skipped ? "" : k.ok ? "ok" : "bad"}" title="${esc(k.detail)}">${esc(k.name)}${k.skipped ? " –" : k.ok ? " ✓" : " ✗"}</span>`).join("");
+const filesOf = c => { const n = (c.files || []).length; return n ? `${n} file${n === 1 ? "" : "s"}` : ""; };
+const byWhom = c => c.backend && c.backend !== "eki" ? "by " + esc(c.backend) : "by eki";
+const when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+function changeActs(c, withDiff) {
+  const busy = S.acting[c.id];
+  if (busy) return `<span class="working-line"><span class="spinner"></span>${esc(busy)}…</span>`;
+  const out = [];
+  if (withDiff) out.push(`<a class="btn small" href="#/self/${enc(c.id)}">Read it</a>`);
+  if (["proposed", "conflicts", "rolled back"].includes(c.state) && c.fit && !(c.protected || []).length)
+    out.push(`<button class="btn small primary" data-cact="apply" data-id="${esc(c.id)}">Apply</button>`);
+  if (["proposed", "conflicts", "unfit", "stopped", "rolled back"].includes(c.state))
+    out.push(S.confirm === "dc:" + c.id
+      ? `<span class="confirm">Discard it? Its branch goes too. <button class="btn small danger solid" data-cact="discard" data-id="${esc(c.id)}">Discard</button><button class="btn small" data-cancel>Cancel</button></span>`
+      : `<button class="btn small danger" data-ask="dc:${esc(c.id)}">Discard</button>`);
+  if (c.state === "applied")
+    out.push(S.confirm === "un:" + c.id
+      ? `<span class="confirm">Take it back? eki makes the revert, checks it, applies it. <button class="btn small danger solid" data-cact="undo" data-id="${esc(c.id)}">Undo</button><button class="btn small" data-cancel>Cancel</button></span>`
+      : `<button class="btn small" data-ask="un:${esc(c.id)}">Undo</button>`);
+  return out.join("");
+}
+
+function changeCard(c) {
+  const why = (c.protected || []).length ? "Touches what eki may not change alone (" + c.protected.join(", ") + ") — read it and merge it yourself"
+            : c.why || "";
+  return `<div class="card change">
+    <div class="top"><div style="min-width:0"><div class="title">${esc(c.title)}</div>
+      <div class="meta">${srcChip(c.source || "asked")}<span>${byWhom(c)}</span>${filesOf(c) ? `<span>· ${filesOf(c)}</span>` : ""}<span>· ${ago(c.state_at)}</span></div></div>
+      <span class="badge ${CBADGE[c.state] || ""}">${esc(CSTATE[c.state] || c.state)}</span></div>
+    ${checksOf(c) ? `<div class="meta" style="margin-top:8px">${checksOf(c)}</div>` : ""}
+    ${why ? `<div class="meta" style="color:var(--wait)">${esc(why)}</div>` : ""}
+    <div class="acts">${changeActs(c, true)}</div></div>`;
+}
+
+function selfPage() {
+  const v = S.self;
+  if (!v) return `<div class="empty">Loading…</div>`;
+  if (!v.can) return `<div class="empty">${esc(v.why_not)}</div>`;
+  const g = v.goal, on = !!g && g.state === "active", now = v.working[0];
+  const status = !g ? "Off — eki changes itself only when you ask."
+    : g.state === "paused" ? "Paused — nothing new starts."
+    : g.state === "stuck" ? "Stopped: " + (g.note || "its turns kept failing")
+    : now ? `Working on “${now.title}”` + (now.live ? "" : " — carries on when there's room")
+    : g.note || "Waiting for room on the machine";
+  let h = `<div class="card self-head">
+    <div class="line"><span class="big">eki works on itself</span>
+      <span class="badge ${on ? (now ? "working" : "queued") : "paused"}">${on ? "On" : g ? "Paused" : "Off"}</span>
+      <span class="muted" style="flex:1 1 220px;min-width:0">${esc(status)}</span>
+      <button class="btn ${on ? "" : "primary"}" data-self-on="${on ? 0 : 1}">${on ? "Pause" : g ? "Resume" : "Start"}</button></div>
+    <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the next open item in ROADMAP.md — each change in its own worktree, tested and started on a spare port before you see it.</div>
+    <div class="line"><span class="muted">How far it goes alone</span>
+      <div class="seg" role="group" aria-label="Autonomy"><button data-self-auto="propose" aria-pressed="${v.autonomy === "propose"}" title="A branch, a diff and its checks: you apply it">Propose</button><button data-self-auto="apply" aria-pressed="${v.autonomy === "apply"}" title="A change that passes is swapped in, watched, and rolled back if it isn't healthy">Apply here</button></div>
+      <span class="areas">${Object.entries(v.areas || {}).map(([p, m]) => `<span class="area" title="Changes only to ${esc(p)}: ${esc(m)}">${esc(p)} → ${esc(m)}<button data-area-rm="${esc(p)}" title="Remove">×</button></span>`).join("")}
+        <input class="input" id="area-path" placeholder="e.g. ROADMAP.md or docs/" style="width:170px">
+        <select class="input" id="area-mode"><option value="apply">apply</option><option value="propose">propose</option></select>
+        <button class="btn small" data-area-add>Add</button></span></div>
+    <div class="line">
+      <label class="check" title="Under pace for the week, and never the last 30% of a window"><input type="checkbox" id="self-spare" ${!g || g.spare ? "checked" : ""} ${g ? "" : "disabled"}> Your subscriptions' spare room</label>
+      <label class="check" title="Qwen with Codex's hands may take eki's own code too"><input type="checkbox" id="self-local" ${v.local ? "checked" : ""}> Local models too</label>
+      <label class="check">At most <input class="input" type="number" min="1" max="20" id="self-review" value="${esc(v.review_max)}" style="width:58px"> changes waiting for you</label></div>
+    ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
+  h += `<div class="card composer" style="margin:14px 0 0">
+    <textarea class="big" id="self-text" rows="2" placeholder="What should eki change about itself?">${esc(S.selfDraft)}</textarea>
+    <div class="opts"><span class="grow muted" style="font-size:12.5px">Saying “eki, make …” in any chat does the same, in that chat.</span>
+      <button class="btn" data-self-ask="later" ${S.selfDraft.trim() ? "" : "disabled"}>When there's room</button>
+      <button class="btn primary" data-self-ask="now" ${S.selfDraft.trim() ? "" : "disabled"}>Do it now</button></div></div>`;
+  if (v.waiting.length)
+    h += `<div class="section"><div class="label">Waiting for you · ${v.waiting.length}</div><div class="goals">${v.waiting.map(changeCard).join("")}</div></div>`;
+  const ahead = [...v.working, ...v.queue], nexts = v.roadmap?.next || [];
+  if (ahead.length || nexts.length) {
+    h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}</span>
+      ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
+      ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
+    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted">· ${esc(n.section.split(" — ")[0])}</span></span>
+      <button class="btn small" data-ract="person" data-key="${esc(n.key)}" title="eki won't take this one">Leave for me</button></div>`;
+    h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
+  }
+  if (v.left.length) {
+    h += `<div class="section"><div class="label">Left for you</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    for (const i of v.left) h += `<div class="rowline">${srcChip(i.source)}<span class="grow" title="${esc(i.note)}">${esc(i.title)} <span class="muted">— ${esc(i.note)}</span></span>
+      <button class="btn small" data-iact="retry" data-id="${esc(i.id)}">Let eki try</button></div>`;
+    h += `</div></div></div>`;
+  }
+  const note = v.note;
+  h += `<div class="section"><div class="label">Weekly note</div><div class="card" style="padding:12px 16px">`;
+  if (!note) h += `<div class="muted" style="font-size:13px">A week after eki starts working on itself it writes down what it noticed, with two or three suggestions. <button class="btn small" data-note-now>Write one now</button></div>`;
+  else {
+    h += `<div class="muted" style="font-size:12px;margin-bottom:6px">${esc(note.id)}${note.backend ? " · by " + esc(note.backend) : ""} · <a href="#" data-note-now>write a new one</a></div><div class="body">${md(note.text)}</div>`;
+    (note.suggestions || []).forEach((sg, i) => {
+      h += `<div class="suggestion"><div style="font-weight:600">${esc(sg.title)} <span class="chipk">${esc(sg.kind)}</span></div>
+        <div class="muted" style="font-size:13px;margin-top:3px">${esc(sg.why)}</div>
+        <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">${sg.picked ? `<span class="mark done">${esc({ asked: "asked eki", roadmap: "on the roadmap", dismissed: "dismissed" }[sg.picked] || sg.picked)}</span>` :
+          `<button class="btn small" data-sugg="ask" data-nid="${esc(note.id)}" data-i="${i}">Ask eki to do it</button>
+           <button class="btn small" data-sugg="roadmap" data-nid="${esc(note.id)}" data-i="${i}">Add to ROADMAP</button>
+           <button class="btn small" data-sugg="dismiss" data-nid="${esc(note.id)}" data-i="${i}">Dismiss</button>`}</div></div>`;
+    });
+  }
+  h += `</div></div>`;
+  const did = v.changes.filter(c => !(["proposed", "conflicts"].includes(c.state) && c.fit));
+  if (did.length) {
+    h += `<div class="section"><div class="label">What it did</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    for (const c of did.slice(0, 30)) h += `<div class="rowline"><span class="when">${esc(when(c.state_at))}</span>
+      <span class="badge ${CBADGE[c.state] || ""}">${esc(CSTATE[c.state] || c.state)}</span>${srcChip(c.source || "asked")}
+      <a class="grow" href="#/self/${enc(c.id)}" style="color:inherit;text-decoration:none" title="${esc(c.title)}">${esc(c.title)}</a>
+      ${c.state === "applied" ? changeActs(c, false) : ""}</div>`;
+    h += `</div></div></div>`;
+  }
+  return h;
+}
+
+function diffHtml(text) {
+  return String(text || "").split("\n").map(l => {
+    const cls = /^(diff --git|\+\+\+ |--- )/.test(l) ? "file" : l.startsWith("@@") ? "hunk"
+      : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
+    return cls ? `<span class="${cls}">${esc(l)}</span>` : esc(l);
+  }).join("\n");
+}
+
+function changePage() {
+  const c = S.change;
+  if (!c) return `<a class="back" href="#/self">← Self</a><div class="empty">Loading…</div>`;
+  let h = `<a class="back" href="#/self">← Self</a><div class="goal-head">
+    <div class="text">${esc(c.title)}</div>
+    <div class="meta"><span class="badge ${CBADGE[c.state] || ""}">${esc(CSTATE[c.state] || c.state)}</span>${srcChip(c.source || "asked")}
+      <span>self/${esc(c.id)}</span><span>${c.backend && c.backend !== "eki" ? "written by " + esc(c.backend) : "made by eki"}</span>
+      ${c.base ? `<span>on ${esc(c.base.slice(0, 10))}</span>` : ""}<span>${esc(when(c.at))}</span></div>
+    ${c.verdict ? `<div class="note" style="background:var(--sunk)">${esc(c.verdict)}${c.why && !c.verdict.includes(c.why) ? " — " + esc(c.why) : ""}${c.merged ? " · " + esc(c.merged) : ""}</div>` : ""}
+    ${checksOf(c) ? `<div class="meta" style="margin-top:10px">${checksOf(c)}</div>` : ""}
+    <div class="acts">${changeActs(c, false)}</div>${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
+  for (const k of (c.report?.checks || []).filter(k => !k.ok && !k.skipped))
+    h += `<div class="label">${esc(k.name)} failed</div><pre class="diff" style="margin-bottom:14px">${esc(k.detail)}</pre>`;
+  h += `<div class="label" style="margin-top:18px">The change</div>`;
+  h += S.diff === null ? `<div class="muted">Loading the diff…</div>`
+     : S.diff ? `<pre class="diff">${diffHtml(S.diff)}</pre>` : `<div class="muted">Nothing was committed.</div>`;
+  const turns = S.changeThread?.turns || [];
+  if (turns.length) {
+    h += `<div class="label" style="margin-top:22px">Its thread</div><div class="thread">`;
+    for (const t of turns) {
+      if (t.role === "user") { h += `<div class="turn-goal">${esc((t.content || "").replace(/^\[eki · self\]\s*/, "").slice(0, 90))}</div>`; continue; }
+      if (t.role === "assistant") h += `<div class="card msg"><div class="who">${esc(t.backend || "")}</div><div class="body">${md(t.content)}</div></div>`;
+    }
+    h += `</div>`;
+  }
+  return h;
+}
+
 // ---- drawing and refreshing ------------------------------------------------------------------------
 function busy() { const a = document.activeElement; return a && a.matches("textarea, input:not([type=checkbox])"); }
 function draw() {
   header();
   const r = route();
-  $("#main").innerHTML = r.page === "goal" ? goalPage(r) : home();
+  $("#main").innerHTML = r.page === "goal" ? goalPage(r) : r.page === "self" ? selfPage()
+                       : r.page === "change" ? changePage() : home();
 }
 async function refresh(force) {
   try {
@@ -379,7 +573,18 @@ async function refresh(force) {
       const g = v.goals.find(x => x.id === r.id);
       if (g?.conversation) thread = await api(`/api/conversations/${enc(g.conversation)}`).catch(() => null);
     }
-    const sig = JSON.stringify([v.goals, v.on, v.when, thread, r]);
+    if (r.page === "self" || r.page === "change") S.self = await api("/api/self").catch(() => S.self);
+    if (r.page === "change") {
+      const c = await api(`/api/self/changes/${enc(r.id)}`).catch(() => null);
+      if (c && S.diffFor !== c.id + (c.commit || "")) {          // the diff once per commit
+        S.diffFor = c.id + (c.commit || ""); S.diff = null;
+        api(`/api/self/changes/${enc(c.id)}/diff`).then(d => { S.diff = d.diff || ""; draw(); })
+          .catch(e => { S.diff = ""; S.error = e.message; draw(); });
+      }
+      S.change = c;
+      S.changeThread = c?.conversation ? await api(`/api/conversations/${enc(c.conversation)}`).catch(() => null) : null;
+    }
+    const sig = JSON.stringify([v.goals, v.on, v.when, thread, r, S.self, S.change, S.changeThread, S.acting]);
     S.view = v; S.thread = thread;
     if (force || (sig !== S.sig && !busy() && !S.editing)) { S.sig = sig; draw(); } else header();
   } catch (e) {
@@ -401,6 +606,7 @@ document.addEventListener("input", e => {
       if (before !== S.draft.kind + S.draft.at) { const at = t.selectionStart; draw(); const n = $("#new-text"); n.focus(); n.setSelectionRange(at, at); return; } }
     const b = $("[data-add]"); if (b) b.disabled = !t.value.trim(); return; }
   if (t.id === "new-folder") S.draft.folder = t.value;
+  if (t.id === "self-text") { S.selfDraft = t.value; for (const b of document.querySelectorAll("[data-self-ask]")) b.disabled = !t.value.trim(); return; }
   if (t.id === "edit-text") S.editDraft.text = t.value;
   if (t.id === "edit-folder") S.editDraft.folder = t.value;
   if (t.dataset.w) { const d = t.dataset.for === "new" ? S.draft : S.editDraft; d[t.dataset.w] = t.value; if (t.dataset.for === "new") d.touched = true; }
@@ -408,6 +614,9 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "away") return act(() => api("/api/goals/mode", "POST", { when: t.checked ? "away" : "resources" }));
+  if (t.id === "self-spare") return act(() => api("/api/self/on", "POST", { on: S.self?.goal?.state === "active", spare: t.checked }));
+  if (t.id === "self-local") return act(() => api("/api/self/settings", "PUT", { local: t.checked }));
+  if (t.id === "self-review") return act(() => api("/api/self/settings", "PUT", { review_max: Number(t.value) || 3 }));
   if (t.id === "new-spare") S.draft.spare = t.checked;
   if (t.id === "edit-spare") S.editDraft.spare = t.checked;
   if (t.id === "new-screen") { S.draft.screen = t.checked; return draw(); }
@@ -422,6 +631,41 @@ document.addEventListener("click", async e => {
   const t = e.target, r = route();
   const on = t.closest("[data-on]");
   if (on) return act(() => api("/api/goals/mode", "POST", { on: on.dataset.on === "1" }));
+  // ---- the Self view
+  const sOn = t.closest("[data-self-on]");
+  if (sOn) return act(() => api("/api/self/on", "POST", { on: sOn.dataset.selfOn === "1" }));
+  const auto = t.closest("[data-self-auto]");
+  if (auto) return act(() => api("/api/self/settings", "PUT", { autonomy: auto.dataset.selfAuto }));
+  if (t.closest("[data-area-add]")) {
+    const path = $("#area-path").value.trim();
+    if (!path) return;
+    return act(() => api("/api/self/settings", "PUT", { areas: { ...(S.self?.areas || {}), [path]: $("#area-mode").value } }));
+  }
+  const arm = t.closest("[data-area-rm]");
+  if (arm) { const areas = { ...(S.self?.areas || {}) }; delete areas[arm.dataset.areaRm];
+             return act(() => api("/api/self/settings", "PUT", { areas })); }
+  const sAsk = t.closest("[data-self-ask]");
+  if (sAsk && S.selfDraft.trim()) {
+    const text = S.selfDraft;
+    return act(async () => { await api("/api/self", "POST", { request: text, when: sAsk.dataset.selfAsk }); S.selfDraft = ""; });
+  }
+  const cact = t.closest("[data-cact]");
+  if (cact) {
+    e.stopPropagation();
+    const id = cact.dataset.id, what = cact.dataset.cact;
+    S.acting[id] = { apply: "Applying — judged again if your checkout moved on", discard: "Discarding", undo: "Undoing" }[what];
+    S.confirm = ""; draw();
+    S.error = "";
+    try { await api(`/api/self/changes/${enc(id)}/${what}`, "POST"); } catch (err) { S.error = err.message; }
+    delete S.acting[id]; S.diffFor = ""; return refresh(true);
+  }
+  const iact = t.closest("[data-iact]");
+  if (iact) return act(() => api(`/api/self/items/${enc(iact.dataset.id)}/${iact.dataset.iact}`, "POST"));
+  const ract = t.closest("[data-ract]");
+  if (ract) return act(() => api(`/api/self/roadmap/${enc(ract.dataset.key)}/${ract.dataset.ract}`, "POST"));
+  if (t.closest("[data-note-now]")) { e.preventDefault(); return act(() => api("/api/self/note", "POST")); }
+  const sugg = t.closest("[data-sugg]");
+  if (sugg) return act(() => api(`/api/self/notes/${enc(sugg.dataset.nid)}/${sugg.dataset.i}/${sugg.dataset.sugg}`, "POST"));
   const pick = t.closest("[data-pick]");
   if (pick) {
     const d = pick.dataset.pick === "new" ? S.draft : S.editDraft;
@@ -471,16 +715,17 @@ document.addEventListener("click", async e => {
     S.sending = false; return refresh(true);
   }
   const op = t.closest("[data-open]");
-  if (op && !t.closest("button")) location.hash = "#/g/" + enc(op.dataset.open);
+  if (op && !t.closest("button")) location.hash = op.dataset.open === "self" ? "#/self" : "#/g/" + enc(op.dataset.open);
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (e.target.id === "self-text") $('[data-self-ask="now"]')?.click();
     if (e.target.id === "new-text") $("[data-add]")?.click();
     if (e.target.id === "reply") $("[data-send]")?.click();
   }
   if (e.key === "Escape") { S.confirm = ""; if (S.editing) { S.editing = false; } draw(); }
 });
-window.addEventListener("hashchange", () => { S.confirm = ""; S.editing = false; S.error = ""; refresh(true); });
+window.addEventListener("hashchange", () => { S.confirm = ""; S.editing = false; S.error = ""; S.change = null; S.diff = null; S.diffFor = ""; refresh(true); });
 refresh(true);
 setInterval(() => refresh(false), 3000);
 </script>

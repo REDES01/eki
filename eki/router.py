@@ -83,7 +83,8 @@ class Router:
                  is_up: Optional[Callable[[str], Optional[bool]]] = None,
                  reserved: Optional[set] = None,
                  models_for: Optional[Callable[[str], List[Any]]] = None,
-                 ladder_for: Optional[Callable[[str], Dict[str, str]]] = None):
+                 ladder_for: Optional[Callable[[str], Dict[str, str]]] = None,
+                 with_tools: Optional[Callable[[], Dict[str, str]]] = None):
         self.backends = backends
         self.quota = quota
         #: current preferences; replaced wholesale when the user edits them
@@ -99,6 +100,9 @@ class Router:
         #: the vendor's own guidance for a program, read daily (eki/watch.py):
         #: {"default", "top", "fast": model id, "vendor"}; {} = not read yet
         self.ladder_for = ladder_for or (lambda key: {})
+        #: {a local model: the same model with Codex's hands} — tools decide
+        #: which of the two a row's local choice means for this request
+        self.with_tools = with_tools or (lambda: {})
 
     def _quality(self, backend: Backend, task: str) -> float:
         return priors.quality(backend.info.kind, getattr(backend, "options", {}) or {},
@@ -274,8 +278,11 @@ class Router:
         from .table import parse_target
         by_key = {b.key: b for b in candidates}
         passed: List[str] = []
+        hands = self.with_tools() if need.tools else {}
         for i, target in enumerate(need.targets):
             key, role, only = parse_target(target)
+            if key in hands:
+                key = hands[key]            # this one needs tools: the same model, with Codex's hands
             b = by_key.get(key)
             if b is None:
                 why = next((r.split(": ", 1)[1] for r in rejected if r.startswith(f"{key}: ")), "not set up")

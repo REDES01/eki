@@ -221,7 +221,9 @@ def wants_screen(text: str) -> bool:
 _ACT = re.compile(
     r"\b(run|execute|install|uninstall|build|compile|deploy|restart|start|stop|kill|launch)\b"
     r"\s+(the |my |a |this |that |it\b|`|[\w./-]+)"
-    r"|\b(ls|cat|grep|find|curl|wget|git|npm|pip|brew|docker|make|pytest|node|python3?)\s+[\w./-]"
+    r"|\b(ls|cat|grep|find|curl|wget|git|npm|pip|brew|docker|pytest|node|python3?)\s+[\w./-]"
+    # the command, not the verb: "make test", never "make it shorter"
+    r"|(?:^|`|\$\s?)make\s+(test|tests|build|install|clean|all|run|lint|check|dev|release)\b"
     r"|\b(list|show|read|open|check|look at|inspect|delete|remove|rename|move|copy|create|"
     r"write|save|edit|change|update)\s+(the |my |this |that |a |all )?(old |new |stale |big |large )?"
     r"(files?|folders?|directory|directories|logs?|config|downloads|desktop|documents|"

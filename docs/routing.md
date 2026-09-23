@@ -22,8 +22,8 @@ itself, no model run.
 
 | Kind of work | e.g. | default choices |
 |---|---|---|
-| Quick question | "what is 17×23", "hi" | local model → local with Codex's hands → subscription's fast model |
-| Writing, translation | "short poem", "translate this" | local → local with hands → subscriptions |
+| Quick question | "what is 17×23", "hi" | local model → subscription's fast model |
+| Writing, translation | "a haiku", "translate this" | local model → subscriptions |
 | Explain, reason | "explain Python's GIL" | subscriptions → local |
 | Code change | "fix the failing test" | subscriptions → local with hands (small changes only) |
 | Big or hard code change | "refactor auth, update all callers", "create an RPG game" | subscriptions |
@@ -66,18 +66,20 @@ words). What eki recognises as a message *for it* is narrow on purpose:
 short, not in a folder, an instruction or a question about routing naming a
 model or a kind of work. "use Claude's API in this script" goes to a model.
 
-## Answered, or done
+## Tools decide the harness
 
-A request that only has to be **answered** — a quick question, a poem, a
-translation — may go to a model directly. One that has to be **done** —
-files, commands, the screen, the web, a question about this Mac ("what is
-taking up space in my downloads folder") — goes to a harness: Claude Code,
-Codex, or a local model with Codex's hands. On this Mac that is the
-difference between ~4 s and ~37 s for "hello" from the same local model:
-Codex's instructions are a lot to read before the first word.
+The line between a model directly and a harness (Claude Code, Codex, a local
+model with Codex's hands) is whether the request needs tools — files,
+commands, the screen, the web, a look at this Mac ("what is taking up space
+in my downloads folder"). A greeting, a haiku, an explanation need none, so
+the local model answers them directly: ~4 s for "hello" against ~37 s for
+the same model under Codex's instructions. A code change needs tools, so
+the local model is offered there only with Codex's hands, and only for small
+changes. A request that needs tools when nothing with tools can take it is
+told so, not handed to a model that can't act.
 
 `eki routing` shows each choice's typical time (the median of its recent
-requests); of the two local choices, the faster goes first.
+requests).
 
 ## Order
 

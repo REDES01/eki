@@ -200,9 +200,9 @@ async def test_self_fix_off_still_journals(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_correction_is_friction(tmp_path, monkeypatch):
     eng = clinic(tmp_path, monkeypatch)
-    first = await eng.ask("set up the project")
+    first = await eng.ask("write a haiku about rain")
     await settle(eng.runs, first["run"])
-    second = await eng.ask("no, use pnpm", conversation=first["conversation"])
+    second = await eng.ask("no, make it about snow", conversation=first["conversation"])
     await settle(eng.runs, second["run"])
     rows = observe.entries(kind="friction")
     assert len(rows) == 1 and rows[0]["signal"] == "corrected" and rows[0]["before"] == "echo"

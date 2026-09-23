@@ -94,20 +94,16 @@ def row_for(task: str, difficulty: str, escalate: bool = False, prompt: str = ""
 
 # ---- the default table -------------------------------------------------------------------
 
-def defaults(subs: List[str], local: Optional[str], images: List[str], web: List[str],
-             metered: List[str], raw: Optional[str] = None,
-             seconds: Optional[Dict[str, float]] = None) -> Dict[str, List[str]]:
-    """The table for what this Mac has: `subs` are the subscriptions, the
-    one with the most room first; `local` the local model with a harness
-    (or the model itself, when there's no harness); `raw` the local model
-    answering directly — for requests that only need an answer, faster; a
-    request that needs hands passes it over for the harness; `metered` API
-    keys, last. With `seconds` (typical time per backend) the two local
-    choices go fastest first."""
-    if raw and local and raw != local:
-        pair = sorted([raw, local], key=lambda k: (seconds or {}).get(k, 0 if k == raw else 1e9))
-    else:
-        pair = [local] if local else []
+def defaults(subs: List[str], harness: Optional[str], images: List[str], web: List[str],
+             metered: List[str], raw: Optional[str] = None) -> Dict[str, List[str]]:
+    """The table for what this Mac has. Tools decide the harness: rows whose
+    work needs no tools (a quick question, writing, explaining) take the
+    local model directly (`raw`); rows whose work needs tools (a code
+    change) take it with Codex's hands (`harness`), small changes only.
+    `subs` are the subscriptions, the one with the most room first —
+    Claude Code and Codex are harnesses either way; `metered` API keys, last.
+    A request in a no-tools row that turns out to need tools (the prompt
+    check says so) passes the direct model over for the next choice."""
     s0 = subs[0] if subs else None
     s1 = subs[1] if len(subs) > 1 else None
     m = [f"{k}@default" for k in metered]
@@ -119,11 +115,12 @@ def defaults(subs: List[str], local: Optional[str], images: List[str], web: List
                 out.append(x)
         return out
     at = lambda p, r: f"{p}@{r}" if p else None          # noqa: E731
+    small = f"{harness}!easy" if harness else None
     return {
-        "quick": row(*pair, at(s0, "fast"), at(s1, "fast")),
-        "writing": row(*pair, at(s0, "default"), at(s1, "default"), *m),
-        "explain": row(at(s0, "default"), at(s1, "default"), *pair, *m),
-        "code": row(at(s0, "default"), at(s1, "default"), f"{local}!easy" if local else None, *m),
+        "quick": row(raw, at(s0, "fast"), at(s1, "fast")),
+        "writing": row(raw, at(s0, "default"), at(s1, "default"), *m),
+        "explain": row(at(s0, "default"), at(s1, "default"), raw, *m),
+        "code": row(at(s0, "default"), at(s1, "default"), small, *m),
         "code_hard": row(at(s0, "default"), at(s1, "default"), *m),
         "retry": row(at(s0, "top"), at(s0, "default"), at(s1, "default"), *m),
         "research": row(*[f"{k}@default" for k in subs if k in web], *[f"{k}@default" for k in metered if k in web]),

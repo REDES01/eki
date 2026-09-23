@@ -43,8 +43,10 @@ def test_translate_said_outright_beats_a_word_like_today():
 # ---- the default table ---------------------------------------------------------------------
 
 def test_the_default_table_for_a_claude_first_mac():
-    t = table.defaults(["claude_code", "codex"], "codex-qwen", ["flux"], ["claude_code", "codex"], [])
-    assert t["quick"] == ["codex-qwen", "claude_code@fast", "codex@fast"]
+    t = table.defaults(["claude_code", "codex"], "codex-qwen", ["flux"], ["claude_code", "codex"], [], raw="qwen")
+    # tools decide the harness: no tools needed → the local model directly
+    assert t["quick"] == ["qwen", "claude_code@fast", "codex@fast"]
+    assert t["writing"][0] == "qwen" and "codex-qwen" not in t["writing"]
     assert t["code"] == ["claude_code@default", "codex@default", "codex-qwen!easy"]
     assert t["retry"][0] == "claude_code@top" and t["picture"] == ["flux"]
     assert t["research"] == ["claude_code@default", "codex@default"]
@@ -57,7 +59,7 @@ def test_whoever_has_more_room_comes_first():
 
 # ---- your cells, learned ones ----------------------------------------------------------------
 
-BASE = table.defaults(["claude_code", "codex"], "codex-qwen", ["flux"], ["claude_code", "codex"], [])
+BASE = table.defaults(["claude_code", "codex"], "codex-qwen", ["flux"], ["claude_code", "codex"], [], raw="qwen")
 
 
 def test_a_row_you_set_replaces_the_default_and_says_so():
@@ -71,7 +73,7 @@ def test_never_and_backup_apply_to_every_row():
     rules = {}
     table.add_rule(rules, "backup", "codex", "you", "only use Codex if Claude runs out")
     eff = table.effective(BASE, rules)
-    assert eff["explain"]["targets"] == ["claude_code@default", "codex-qwen", "codex@default"]
+    assert eff["explain"]["targets"] == ["claude_code@default", "qwen", "codex@default"]
     table.add_rule(rules, "never", "codex", "you", "never use Codex")
     assert all(not t.startswith("codex@") for c in table.effective(BASE, rules).values() for t in c["targets"])
 
@@ -324,13 +326,25 @@ def test_putting_a_provider_first_never_says_it_twice_and_keeps_its_roles():
         ["claude_code@default", "claude_code@fast", "codex-qwen"]
     rules = {"threads": {"c1": {"targets": ["claude_code"], "until": None, "said": "use Claude"}}}
     eff = table.effective(BASE, rules, "c1")
-    assert eff["quick"]["targets"] == ["claude_code@fast", "codex-qwen", "codex@fast"]
+    assert eff["quick"]["targets"] == ["claude_code@fast", "qwen", "codex@fast"]
     assert eff["retry"]["targets"][:2] == ["claude_code@top", "claude_code@default"]
 
 
-def test_a_local_model_answers_directly_first_its_harness_for_what_needs_hands():
+def test_tools_decide_the_harness():
     t = table.defaults(["claude_code"], "codex-qwen", [], [], [], raw="qwen")
-    assert t["quick"][:2] == ["qwen", "codex-qwen"] and t["code"][-1] == "codex-qwen!easy"
-    # measured the other way round, the faster goes first
-    t = table.defaults(["claude_code"], "codex-qwen", [], [], [], raw="qwen", seconds={"qwen": 30, "codex-qwen": 5})
-    assert t["quick"][:2] == ["codex-qwen", "qwen"]
+    for row in ("quick", "writing", "explain"):
+        assert "qwen" in t[row] and "codex-qwen" not in t[row]
+    assert "codex-qwen!easy" in t["code"] and "qwen" not in t["code"]
+
+
+def test_a_local_choice_means_the_model_with_hands_when_tools_are_needed():
+    claude, raw, harness = backend("claude_code", "claude_code", 50), \
+        B(BackendInfo(key="qwen", kind="mlx", label="qwen", capabilities=Capabilities(), cost=Cost(tier=0)), {}), \
+        backend("codex-qwen", "codex", 0)
+    r = Router([claude, raw, harness], with_tools=lambda: {"qwen": "codex-qwen"})
+    quick = BASE["quick"]
+    c = r.choose(Need(task="chat", difficulty="easy", row="quick", row_title="Quick question", targets=quick))
+    assert c.backend.key == "qwen"                                  # no tools: the model directly
+    c = r.choose(Need(tools=True, task="chat", difficulty="easy", row="quick", row_title="Quick question",
+                      targets=quick))
+    assert c.backend.key == "codex-qwen" and "1st choice" in c.reason   # tools: the same model with hands

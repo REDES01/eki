@@ -158,7 +158,8 @@ class Engine:
                              reserved={self.settings["router_model"]}
                              if self.settings["router_model"] else set(),
                              models_for=self.registry.for_provider,
-                             ladder_for=watch_mod.ladder)
+                             ladder_for=watch_mod.ladder,
+                             with_tools=self._local_with_tools)
         self._health = {}
 
     def _profile_models(self, providers: List[Provider]) -> None:
@@ -601,12 +602,11 @@ class Engine:
         # hands) or, for a picture, an image model. A bare model would
         # describe what it can't do; a harness does it. Picked by name, a
         # bare model still answers — that's the picker's business.
-        # A request that has to be *done* — files, commands, the screen, the
-        # web — goes to a harness (Claude Code, Codex, a local model with
-        # Codex's hands). One that only has to be answered — a quick
-        # question, a poem, a translation — may go to a model directly: a
-        # local one answers "hello" in 2 s, where the same model under
-        # Codex's instructions took 20–35 s (runs.db, 2026-09-23).
+        # Tools decide the harness: a request that needs tools — files,
+        # commands, the screen, the web — goes to a harness (Claude Code,
+        # Codex, a local model with Codex's hands); one that doesn't goes to
+        # a model directly (a local one says "hello" in ~4 s, ~37 s under
+        # Codex's instructions — runs.db, 2026-09-23).
         wants_harness = self._wants_harness(label, run["cwd"], bool(run["images"]), requested)
         # the answer before this one was corrected, or failed and this is
         # the second try: go up the vendor's ladder (eki/watch.py)
@@ -632,14 +632,11 @@ class Engine:
         choice = self.router.choose(need)
         if requested and cid:
             self._learn_override(need, requested, cid)
-        if choice.backend is None and wants_harness and not run["cwd"]:
-            # no harness can take it (none set up, or all out of quota): a
-            # bare model is better than no answer, and says so in the reason
-            choice = self.router.choose(Need(repo=False, tools=False, images_out=need.images_out,
-                                             web=need.web, backend=None, task=label.task,
-                                             difficulty=label.difficulty))
-            if choice.backend is not None:
-                choice.reason += " — no harness could take it"
+        if choice.backend is None and wants_harness:
+            # it needs tools and nothing with tools can take it now: a model
+            # without them would only describe what it can't do — say so
+            choice.reason = "this needs tools (files, commands, the screen or the web), and nothing " \
+                            "with tools can take it right now"
         if choice.backend is not None and wanted_model:
             choice.model = wanted_model
             choice.reason = f"{choice.backend.key} ({wanted_model}): asked for by name"
@@ -902,9 +899,10 @@ class Engine:
 
     def _base_table(self) -> Dict[str, List[str]]:
         subs = [b.key for b in self._subscriptions()]
+        # the local model with tools (Codex's hands on it), and the local
+        # model itself — the one the harness drives, else the biggest text one
         harness = next((b.key for b in self.backends if b.info.kind == "codex"
                         and self.options.get(b.key, {}).get("local_model")), None)
-        # the local model itself: the one the harness drives, else the biggest text one
         driven = self.options.get(harness, {}).get("local_model") if harness else None
         raw = driven if driven and self.get(driven) is not None else \
             next((b.key for b in sorted(self.backends, key=lambda b: -(watch_mod.params_of(
@@ -915,14 +913,17 @@ class Engine:
         web = [b.key for b in self.backends if b.info.capabilities.web]
         metered = [b.key for b in self.backends if b.info.kind in ("anthropic_api", "openai_compat")
                    and priors.class_of(b.info.kind, self.options.get(b.key, {}), b.info.capabilities) == "frontier_api"]
-        return table_mod.defaults(subs, harness or raw, images, web, metered, raw=raw if harness else None,
-                                  seconds=self._typical_seconds())
+        return table_mod.defaults(subs, harness, images, web, metered, raw=raw)
+
+    def _local_with_tools(self) -> Dict[str, str]:
+        """{local model: the Codex harness driving it}."""
+        return {str(self.options.get(b.key, {}).get("local_model")): b.key for b in self.backends
+                if b.info.kind == "codex" and self.options.get(b.key, {}).get("local_model")}
 
     @staticmethod
     def _wants_harness(label: Any, folder: str, images: bool, requested: str) -> bool:
-        """Has to be *done* (files, commands, the screen, the web) → a harness.
-        Only has to be answered → a model directly may take it. Picked by
-        name → whatever was picked."""
+        """Needs tools (files, commands, the screen, the web) → a harness.
+        Doesn't → a model directly. Picked by name → whatever was picked."""
         return (not requested and label.task != "image" and not images
                 and (label.hands or bool(folder) or label.task in ("repo", "screen", "research")))
 
@@ -1499,9 +1500,6 @@ class Engine:
                 observe_mod.note("friction", signal=",".join(said), backend=backend, task=task,
                                  before=(last or {}).get("backend") or "", run=run["id"],
                                  conversation=cid, request=(run.get("prompt") or "")[:200])
-            if "no harness could take it" in reason:
-                observe_mod.note("gap", what="a bare model stood in for a harness", backend=backend,
-                                 task=task, run=run["id"], request=(run.get("prompt") or "")[:200])
         except Exception:                           # noqa: BLE001
             pass
 

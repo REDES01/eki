@@ -277,7 +277,10 @@ the moment you or another app need it.
 - [x] **The board** at `/goals`, and in the Mac app: goals, their threads, a
       reply box; `eki goals` and `eki goals report`
 - [ ] Measured: hours of useful local work a day, against the 1% baseline
-- [ ] Goals that need the screen (computer use) run only when you're away
+      (the weekly note carries the local models' share of the week since
+      745807a; not yet shown anywhere else)
+- [x] Goals that need the screen (computer use) run only when you're away
+      (9969689)
 - *Evolve:* replies in a goal's thread are the feedback — what you keep asking
   a goal to change becomes a skill its turns get; eki proposes goals it sees
   you working toward.
@@ -340,19 +343,21 @@ eki's commands is the first orchestrator; build a planner when it falls short.
 
 ## Alongside every stage — eki builds eki
 
-The parts exist: `eki ask --repo ~/eki` already puts an agent to work on this
-code, and goals already run unattended, on time or when there's room. What's missing is the closed
-loop. An engine restart marks every live run *interrupted*, so the swap is
+The loop is closed (745807a, 4909625): eki works on itself as a goal —
+whenever the machine has room it fixes what breaks in its own code, then takes
+the next open item in this file, each change in its own worktree and checked
+before anyone sees it (`eki self on`, Goals → Self; `docs/self-build.md`).
+An engine restart marks every live run *interrupted*, so the swap is
 never done from inside a run: the self-work run ends, then a supervisor waits
 for `running == 0` and swaps (see `docs/self-build.md`).
 
 - [x] **eki is its own first project.** It knows where its source is, which
       checkout it is running from, and what version that is (78ed50a:
       `EKI_SOURCE`, `builds.running()`, `/api/health` → `build`)
-- [ ] **"Change yourself" is a request.** (From the terminal it is: `eki self "…"`,
-      dfccbdd on `self-build` — worktree, base check, routed run, commit, candidate
-      check, propose only — on main since 70eb734. First real one: `self/4dab965b`,
-      by Codex, fit. Still to do: saying it in a chat.) Say it in a chat — "eki, make the
+- [x] **"Change yourself" is a request.** (From the terminal: `eki self "…"`,
+      dfccbdd, on main since 70eb734; first real one `self/4dab965b`, by Codex.
+      In a chat since 745807a — the thread becomes the change's thread, "…tonight"
+      queues it for the loop; on the board, Goals → Self.) Say it in a chat — "eki, make the
       chat list show the project name" — and it is labelled as self-work and
       routed to a repo-capable agent on eki's own source, in a git worktree,
       never the checkout that's running
@@ -382,11 +387,12 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       healthy within minutes, the old one comes back and the thread says why
       (78ed50a: `eki/supervisor.sh`, `eki swap`; a broken build rolled back
       live in 72s. It says so in a notification — no thread line yet)
-- [ ] **How far it goes alone is a setting.** *Propose* (a branch and a diff
+- [x] **How far it goes alone is a setting.** *Propose* (a branch and a diff
       to read), *apply here* (swap this Mac's install after the checks), and
       per-area overrides. Default is propose (78ed50a: `self_autonomy` and
       `eki self --apply` — checked live end to end, f906934; per-area
-      overrides not built)
+      overrides since 745807a: `self_autonomy_areas`, the longest match wins,
+      and a change is applied only if every file it touches may be)
 - [x] **Two things it can't change on its own at any setting:** the supervisor
       and rollback path, because a bad change there can't be undone by them;
       and the credentials rule. Those need a person (78ed50a: `builds.py`,
@@ -396,9 +402,13 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       a local branch on top of the last release, rebased when a release
       lands. Offering a change upstream is a pull request; merging to `main`
       and cutting a release stays with a person, because other people
-      install that
-- [ ] **Everything it did to itself is visible.** A Self pane: each change,
-      who asked, which agent, the diff, the checks, and *Undo*
+      install that (745807a: a change made before your checkout moved on is
+      put on top of it and judged again before it's applied. Still open:
+      offering one upstream as a pull request)
+- [x] **Everything it did to itself is visible.** A Self pane: each change,
+      who asked, which agent, the diff, the checks, and *Undo* (4909625:
+      Goals → Self on the board, and `eki self`; each change has a page with
+      its diff, its failed checks and its thread)
 - *Evolve:* this is the stage that lets the rest evolve. It is also the
   first thing eki should improve once it works.
 
@@ -422,16 +432,21 @@ The self-build track is eki changing its code. This is the other half — what i
       listed and can be deleted — as commits in Stage 1's skill store
       (035ecd6: `eki skills learned`, `eki skills rm`; the /skills panel
       lists them as skills, without a "learned" mark yet)
-- [ ] eki takes the next unchecked item in this file as self-work (the self-build track),
-      at whatever autonomy is set
-- [ ] eki keeps this file current: ticks what landed, with the commit
+- [x] eki takes the next unchecked item in this file as self-work (the self-build track),
+      at whatever autonomy is set (745807a: the loop's turns, `eki/roadmap.py`;
+      an item marked `(for a person)` is never taken)
+- [x] eki keeps this file current: ticks what landed, with the change that did
+      it — in the same commit, so a discarded change takes its tick with it
+      (745807a: `*(eki: self/<id>)*`)
 - [x] A journal of what eki notices about itself — faults, provider
       failures, friction, gaps, history — kept without a model (8df9b37,
       `eki observe`)
-- [ ] A weekly note from the journal and this file: what eki noticed, and
+- [x] A weekly note from the journal and this file: what eki noticed, and
       two or three suggestions with their evidence. It suggests; you decide,
       and what you pick becomes an item here or an `eki self` request.
       Suggestions lean to adding a provider or server, not building a part
+      (745807a, 4909625: written by the loop once a week; on the board with
+      *Ask eki to do it*, *Add to ROADMAP*, *Dismiss*)
 
 ## Not planned
 
@@ -446,6 +461,7 @@ The self-build track is eki changing its code. This is the other half — what i
 ## Keeping this file
 
 Anyone — a person, an agent, eki — who finishes an item ticks it and names the
-commit. New ideas go under the stage they belong to, or under a new stage if
-they change the order. Don't delete history; move what's abandoned to
+commit (eki names the change, `self/<id>`, in the same commit). An item only a
+person can do says `(for a person)`; eki never takes it. New ideas go under
+the stage they belong to, or under a new stage if they change the order. Don't delete history; move what's abandoned to
 *Not planned* with a line saying why.

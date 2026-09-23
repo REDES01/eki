@@ -108,6 +108,7 @@ eki watch <id>          # follow one
 eki history -q kyoto    # search past conversations
 eki models              # what's loaded, what it costs in memory
 eki agent status
+eki context            # the one AGENTS.md Claude Code and Codex both read
 ```
 
 ## Adding things

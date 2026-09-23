@@ -177,10 +177,10 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       the body injected only when invoked (`/name`, `$name`) or when the
       model answers `[[skill:name]]` (`Engine._skilled`). Checked on Qwen3.8.
       Image routes don't take skills yet
-- [ ] **One standing context.** `AGENTS.md` is canonical, per project and
+- [x] **One standing context.** `AGENTS.md` is canonical, per project and
       globally; `CLAUDE.md` is an `@AGENTS.md` import plus what is truly
       Claude-only. The global files for both CLIs are generated from one
-      source. Stage 4's "how to use eki here" section lands in that source
+      source. Stage 4's "how to use eki here" section lands in that source *(eki: self/2efc14dd)*
 - [x] **One tool registry.** MCP servers declared once in eki
       (`~/.eki/mcp.json`, the `/mcp` panel), rendered into Claude Code per
       session (`--mcp-config`) and a managed block of Codex's `config.toml`;

@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from . import catalog
 from . import mcpregistry
 from . import skills as skills_mod
+from . import standing
 from .adapters.base import BackendError
 from . import codex_host
 from . import config as config_mod
@@ -83,6 +84,10 @@ async def lifespan(app: FastAPI):
     report = await asyncio.to_thread(skills_mod.boot)
     if report.get("linked") or report.get("conflicts") or report.get("error"):
         log.info("skills: %s", report)
+    # one standing context: AGENTS.md, linked into both CLIs (eki/standing.py)
+    report = await asyncio.to_thread(standing.boot)
+    if report.get("linked") or report.get("conflicts") or report.get("error"):
+        log.info("standing context: %s", report)
     # one tool registry, rendered into Codex's config (its web search
     # switch included) and Gemini CLI's settings at start; Claude Code
     # gets it per session

@@ -411,6 +411,46 @@ def cmd_skills(args) -> int:
     return 1
 
 
+def cmd_context(args) -> int:
+    """The standing context both CLIs read, without the service (eki/standing.py)."""
+    from . import standing
+    act = args.action
+    try:
+        if act == "status":
+            report = standing.sync()
+            for v in standing.state():
+                note = "  (a file eki didn't make; `eki context import` takes it in)" \
+                    if v["state"] == "conflict" else ""
+                print(f"{v['backend']:7} {v['path']:40} {v['state']}{note}")
+            print(f"\nsource: {standing.HOME}/AGENTS.md (everyone), CLAUDE.md (Claude only)")
+            return 0 if not report.get("conflicts") else 1
+        if act == "show":
+            standing.ensure_source()
+            name = "CLAUDE.md" if args.claude else "AGENTS.md"
+            print((standing.HOME / name).read_text(), end="")
+            return 0
+        if act == "edit":
+            standing.ensure_source()
+            path = standing.HOME / ("CLAUDE.md" if args.claude else "AGENTS.md")
+            subprocess.run([os.environ.get("EDITOR", "vi"), str(path)])
+            standing.sync()
+            return 0
+        if act == "import":
+            print(json.dumps(standing.import_existing(), indent=2))
+            return 0
+        if act == "sync":
+            print(json.dumps(standing.sync(), indent=2))
+            return 0
+        if act == "project":
+            r = standing.project(args.folder or ".")
+            print("; ".join(r["done"]) or r.get("note") or "already so")
+            return 0
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    return 1
+
+
 def cmd_agent(args) -> int:
     if args.action == "install":
         # a hand-started engine holds the port; the agent's would fail to bind
@@ -960,6 +1000,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="on/off: only for claude, codex, gemini or local")
     k.add_argument("--backends", default="", help="new: comma list (default all)")
 
+    cx = sub.add_parser("context", help="one AGENTS.md for Claude Code and Codex")
+    cx.add_argument("action", nargs="?", default="status",
+                    choices=["status", "show", "edit", "import", "sync", "project"])
+    cx.add_argument("folder", nargs="?", default="", help="project: the folder (default here)")
+    cx.add_argument("--claude", action="store_true", help="show/edit: the Claude-only part")
+
     g = sub.add_parser("agent", help="start the engine at login")
     g.add_argument("action", nargs="?", default="status",
                    choices=["install", "uninstall", "restart", "status", "access"])
@@ -1049,6 +1095,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                            "--port", str(args.port)])
     if args.cmd == "skills":
         return cmd_skills(args)
+    if args.cmd == "context":
+        return cmd_context(args)
     if args.cmd == "builds":
         return cmd_builds(args)
     if args.cmd == "observe":

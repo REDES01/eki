@@ -4,6 +4,8 @@ One set of skills for every backend. A skill is a folder with a `SKILL.md`
 (name and description in the frontmatter, instructions below, optional
 scripts and files beside it) — the Agent Skills format Claude Code, Codex and
 Gemini CLI all read. eki keeps the only copy; each backend gets a view.
+Standing instructions work the same way: one `AGENTS.md`, linked into
+Claude Code and Codex (docs/context.md).
 
 | Backend | How it sees a skill |
 |---|---|

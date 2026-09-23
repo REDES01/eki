@@ -28,6 +28,12 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", root / "codex" / "config.toml")
     monkeypatch.setattr(mcpregistry, "GEMINI_SETTINGS", root / "gemini" / "settings.json")
     monkeypatch.setattr(mcpregistry, "GEMINI_OWNED", root / "eki" / "mcp-gemini.json")
+    # the CLIs' standing context: CLAUDE.md, AGENTS.md
+    from eki import standing
+    monkeypatch.setattr(standing, "HOME", root / "eki" / "context")
+    monkeypatch.setattr(standing, "IMPORTED", root / "eki" / "context" / "imported")
+    monkeypatch.setattr(standing, "CLAUDE_HOME", root / "claude")
+    monkeypatch.setattr(standing, "CODEX_HOME", root / "codex")
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")

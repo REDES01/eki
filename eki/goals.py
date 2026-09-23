@@ -1,58 +1,48 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What a project wants to exist, and what's still missing (ROADMAP, Stage 3).
+"""Goals: things you ask eki to keep doing (ROADMAP, Stage 3).
 
-eki doesn't guess what work is worth doing on an idle machine. A project says
-what should exist — `goals.yaml` in its folder — and the backlog is the
-difference between that and the files that are there, like `make`:
+A goal is what you'd type in a chat, left running:
 
-    bible: [world.md]                  # read by every piece
-    goals:
-      - name: npcs
-        count: 20                      # or items: [innkeeper, smith, …]
-        id: "npc-{n:02}"
-        dir: "npcs/{id}"
-        parts:
-          bio:
-            kind: text
-            file: bio.md
-            prompt: |
-              Invent a new character for this world. Already made: {others}
-          portrait:
-            kind: image
-            file: portrait.png
-            from: [bio]
-            prompt: "Painterly fantasy portrait. {bio:600}"
-          lines:
-            kind: text
-            file: lines.md
-            from: [bio]
-            prompt: "Three lines this character says. {bio}"
+    Every morning, look at my X and propose 3 posts in my voice.
+    Make 20 NPCs for Ashfall — each with a bio, a portrait and three lines.
+    Keep the tests of ~/eki passing; open a branch when one breaks.
 
-A piece is one part of one item. It's missing while its file isn't there, and
-ready once the parts it's made `from` exist. In a prompt, `{bio}` is that
-item's bio (`{bio:600}` its first 600 characters), `{bible}` the bible,
-`{others}` the first line of this part in every other item — so the twentieth
-character isn't the first one again — and `{id}`, `{n}`, `{item}` name it.
-`line: frontier` marks a part worth a subscription; the rest stays local.
+Plus, optionally, when (once until it's done, every day, every week, every few
+hours), a folder to work in, and whether it may use your subscriptions. That's
+all. eki doesn't plan the work — the agent that gets it does, the same way it
+would in a chat: the routing table picks it (a harness when tools are needed,
+Qwen with Codex's hands for local work), and it writes files, draws through
+eki, and says where things stand.
+
+Each turn is an ordinary request in the goal's own thread, so it remembers
+what it did and what you said; you answer it there like any chat. A turn ends
+with one line — `GOAL: done`, `GOAL: continue` or `GOAL: waiting` — and that
+line is the whole protocol: done stops a one-off goal (a repeating one waits
+for its next time), continue asks for another turn, waiting waits for your
+reply. Turns run when the machine has room (eki/shift.py).
 """
 from __future__ import annotations
 
 import json
 import re
 import time
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
+from . import schedules as schedules_mod
 
-FILE = "goals.yaml"
-PROJECTS = Path("~/.eki/goals/projects.json").expanduser()
+PATH = Path("~/.eki/goals/goals.json").expanduser()
 LOG = Path("~/.eki/goals/log.jsonl").expanduser()
-KINDS = ("text", "image")
-#: how much of the bible and of {others} a prompt carries
-BIBLE_CHARS = 6000
-OTHERS_ITEMS = 60
+#: a one-off goal that hasn't said it's done after this many turns stops, to be looked at
+MAX_TURNS = 30
+#: a turn that failed is tried again after this long; this many failures in a row stops it
+RETRY_SECONDS = 1800
+MAX_FAILURES = 3
+STATES = ("active", "waiting", "paused", "done", "stuck")
+MARK = re.compile(r"^\s*\**\s*GOAL\s*:\s*(done|continue|waiting)\b", re.I | re.M)
 
 
 class GoalError(ValueError):
@@ -60,530 +50,226 @@ class GoalError(ValueError):
 
 
 @dataclass
-class Part:
-    name: str
-    kind: str
-    file: str
-    prompt: str
-    after: List[str] = field(default_factory=list)
-    line: str = "local"                     # "local" | "frontier"
-    backend: str = ""                       # a provider key, to override the choice
-
-
-@dataclass
 class Goal:
-    name: str
-    items: List[str]
     id: str
-    dir: str
-    parts: Dict[str, Part]
-
-
-@dataclass
-class Piece:
-    folder: str
-    goal: str
-    item: str
-    n: int
-    part: str
-    kind: str
-    path: str                               # absolute
-    after: List[str]
-    line: str
-    backend: str
-    ready: bool
+    text: str
+    when: Dict[str, Any] = field(default_factory=lambda: {"kind": "once"})
+    folder: str = ""
+    spare: bool = False                 # may use subscriptions, within their spare room
+    state: str = "active"
+    conversation: str = ""
+    created_at: int = field(default_factory=lambda: int(time.time()))
+    turns: int = 0
+    last_turn_at: int = 0
+    last_turn: int = 0                  # the thread's turn id of the last goal prompt
+    next_at: int = 0                    # a repeating goal's next time; a retry's
+    failures: int = 0
+    note: str = ""                      # what it's waiting on, why it stopped
 
     @property
-    def key(self) -> str:
-        return f"{self.goal}/{self.item}/{self.part}"
+    def repeats(self) -> bool:
+        return self.when.get("kind") != "once"
 
     def to_json(self) -> Dict[str, Any]:
-        return {"folder": self.folder, "goal": self.goal, "item": self.item, "n": self.n,
-                "part": self.part, "kind": self.kind, "path": self.path, "line": self.line,
-                "backend": self.backend, "ready": self.ready}
+        out = asdict(self)
+        out["repeats"] = self.repeats
+        out["when_text"] = describe(self.when)
+        return out
 
 
-@dataclass
-class Spec:
-    folder: str
-    bible: List[str]
-    goals: List[Goal]
+def describe(when: Dict[str, Any]) -> str:
+    if when.get("kind") == "once":
+        return "once, until it's done"
+    return schedules_mod.describe(when)
 
 
-def _order(parts: Dict[str, Part], goal: str) -> Dict[str, Part]:
-    """Parts in an order where each comes after what it's made from."""
-    done: List[str] = []
-    seen: set = set()
-
-    def visit(name: str, trail: List[str]) -> None:
-        if name in done:
-            return
-        if name in trail:
-            raise GoalError(f"{goal}: parts go round in a circle: {' → '.join(trail + [name])}")
-        if name not in parts:
-            raise GoalError(f"{goal}: {trail[-1]} is made from {name!r}, which isn't a part")
-        for dep in parts[name].after:
-            visit(dep, trail + [name])
-        if name not in seen:
-            seen.add(name)
-            done.append(name)
-
-    for name in parts:
-        visit(name, [])
-    return {n: parts[n] for n in done}
+def check_when(when: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    when = dict(when or {"kind": "once"})
+    kind = when.get("kind")
+    if kind == "once":
+        return {"kind": "once"}
+    if kind == "interval":
+        minutes = int(when.get("minutes") or 0)
+        if minutes < 15:
+            raise GoalError("a repeating goal runs at most every 15 minutes")
+        return {"kind": "interval", "minutes": minutes}
+    if kind == "daily":
+        at = str(when.get("at") or "09:00")
+        if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", at):
+            raise GoalError(f"not a time of day: {at!r}")
+        days = sorted({int(d) for d in (when.get("days") or range(7)) if 0 <= int(d) <= 6})
+        return {"kind": "daily", "at": at, "days": days or list(range(7))}
+    raise GoalError("when is once, daily (at, days) or interval (minutes)")
 
 
-def load(folder: str) -> Spec:
-    root = Path(folder).expanduser()
-    path = root / FILE
+# ---- the store ------------------------------------------------------------------------
+
+def _load_raw() -> List[Dict[str, Any]]:
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
-    except FileNotFoundError:
-        raise GoalError(f"no {FILE} in {root}")
-    except yaml.YAMLError as e:
-        raise GoalError(f"{path}: {e}")
-    return from_raw(raw, root)
-
-
-def goal_from_raw(g: Any) -> Goal:
-    """One goal entry, checked — what goals.yaml says, or what the board sends."""
-    if not isinstance(g, dict):
-        raise GoalError("a goal is a set of fields (name, count, parts…)")
-    name = str(g.get("name") or "").strip()
-    if not name or not re.fullmatch(r"[\w.-]+", name):
-        raise GoalError(f"a goal needs a plain name (letters, digits, - _ .), not {name!r}")
-    if g.get("items"):
-        items = [str(i).strip() for i in g["items"] if str(i).strip()]
-        if len(set(items)) != len(items):
-            raise GoalError(f"{name}: the same item is listed twice")
-    elif g.get("count"):
-        fmt = str(g.get("id") or name + "-{n:02}")
-        try:
-            count = int(g["count"])
-            items = [fmt.format(n=i + 1) for i in range(count)]
-        except (KeyError, ValueError, IndexError) as e:
-            raise GoalError(f"{name}: can't number the items with {fmt!r} ({e})")
-        if count < 1 or count > 10000:
-            raise GoalError(f"{name}: count is between 1 and 10000")
-        if len(set(items)) != len(items):
-            raise GoalError(f"{name}: the id {fmt!r} gives every item the same name — use {{n}} in it")
-    else:
-        raise GoalError(f"{name}: say how many (count) or which (items)")
-    parts: Dict[str, Part] = {}
-    for pname, p in (g.get("parts") or {}).items():
-        p = p or {}
-        if not re.fullmatch(r"[\w.-]+", str(pname)):
-            raise GoalError(f"{name}: a part needs a plain name, not {pname!r}")
-        kind = str(p.get("kind") or "text")
-        if kind not in KINDS:
-            raise GoalError(f"{name}.{pname}: kind is one of {', '.join(KINDS)}")
-        if not p.get("file") or not str(p.get("prompt") or "").strip():
-            raise GoalError(f"{name}.{pname}: needs a file and a prompt")
-        after = p.get("from") or []
-        parts[str(pname)] = Part(str(pname), kind, str(p["file"]), str(p["prompt"]),
-                                 [str(a) for a in ([after] if isinstance(after, str) else after)],
-                                 str(p.get("line") or "local"), str(p.get("backend") or ""))
-    if not parts:
-        raise GoalError(f"{name}: no parts")
-    # a part a prompt reads is made before it, whether or not `from` says so —
-    # otherwise {bio} could be filled in before there is a bio
-    for part in parts.values():
-        for ref, _ in _FIELD.findall(part.prompt):
-            if ref in parts and ref != part.name and ref not in part.after:
-                part.after.append(ref)
-    files = [p.file for p in parts.values()]
-    if len(set(files)) != len(files):
-        raise GoalError(f"{name}: two parts write the same file")
-    return Goal(name, items, "{item}", str(g.get("dir") or name + "/{id}"), _order(parts, name))
-
-
-def from_raw(raw: Dict[str, Any], root: Path) -> Spec:
-    bible = raw.get("bible") or []
-    if isinstance(bible, str):
-        bible = [bible]
-    goals = []
-    for g in raw.get("goals") or []:
-        goal = goal_from_raw(g)
-        if any(x.name == goal.name for x in goals):
-            raise GoalError(f"two goals are called {goal.name!r}")
-        goals.append(goal)
-    return Spec(str(root), [str(b) for b in bible], goals)
-
-
-# ---- what you've paused or deleted (the project's .eki/state.json) ----------------------
-
-def _state_path(folder: str) -> Path:
-    return Path(folder) / ".eki" / "state.json"
-
-
-def state(folder: str) -> Dict[str, List[str]]:
-    """{"paused": [goal], "deleted": ["goal/item" or "goal/item/part"]}"""
-    try:
-        raw = json.loads(_state_path(folder).read_text())
-    except (OSError, ValueError):
-        raw = {}
-    return {"paused": list(raw.get("paused") or []), "deleted": list(raw.get("deleted") or [])}
-
-
-def _save_state(folder: str, data: Dict[str, List[str]]) -> None:
-    path = _state_path(folder)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(path)
-
-
-def _deleted(st: Dict[str, List[str]], goal: str, item: str, part: str = "") -> bool:
-    gone = st["deleted"]
-    return f"{goal}/{item}" in gone or bool(part and f"{goal}/{item}/{part}" in gone)
-
-
-def _item_dir(spec: Spec, goal: Goal, item: str, n: int) -> Path:
-    return Path(spec.folder) / goal.dir.format(id=item, item=item, n=n)
-
-
-def pieces(spec: Spec) -> List[Piece]:
-    """Every piece that's still missing, item by item, in dependency order —
-    not ones you deleted (they stay deleted until you ask for them again)."""
-    out = []
-    st = state(spec.folder)
-    for goal in spec.goals:
-        for n, item in enumerate(goal.items, 1):
-            where = _item_dir(spec, goal, item, n)
-            for part in goal.parts.values():
-                path = where / part.file
-                if path.exists() or _deleted(st, goal.name, item, part.name):
-                    continue
-                ready = all((where / goal.parts[d].file).exists() for d in part.after)
-                out.append(Piece(spec.folder, goal.name, item, n, part.name, part.kind, str(path),
-                                 part.after, part.line, part.backend, ready))
-    return out
-
-
-def status(spec: Spec) -> List[Dict[str, Any]]:
-    rows = []
-    st = state(spec.folder)
-    for goal in spec.goals:
-        deleted = sum(_deleted(st, goal.name, i, p) for i in goal.items for p in goal.parts)
-        total = len(goal.items) * len(goal.parts) - deleted
-        missing = [p for p in pieces(Spec(spec.folder, spec.bible, [goal]))]
-        kinds = sorted({p.kind for p in goal.parts.values()})
-        rows.append({"goal": goal.name, "items": len(goal.items), "parts": list(goal.parts),
-                     "kinds": kinds, "done": total - len(missing), "total": total,
-                     "ready": sum(p.ready for p in missing), "deleted": deleted,
-                     "paused": goal.name in st["paused"]})
-    return rows
-
-
-def _read(path: Path, limit: int = 0) -> str:
-    try:
-        text = path.read_text().strip()
-    except (OSError, UnicodeDecodeError):
-        return ""
-    return text[:limit] if limit else text
-
-
-def bible(spec: Spec) -> str:
-    parts = [_read(Path(spec.folder) / b) for b in spec.bible]
-    text = "\n\n".join(p for p in parts if p)
-    return text[:BIBLE_CHARS]
-
-
-_FIELD = re.compile(r"\{(\w+)(?::(\d+))?\}")
-
-
-def render(spec: Spec, piece: Piece) -> str:
-    """The prompt for a piece, with what it's made from filled in."""
-    goal = next(g for g in spec.goals if g.name == piece.goal)
-    part = goal.parts[piece.part]
-    where = _item_dir(spec, goal, piece.item, piece.n)
-
-    def others() -> str:
-        names = []
-        for n, item in enumerate(goal.items, 1):
-            if item == piece.item:
-                continue
-            first = _read(_item_dir(spec, goal, item, n) / part.file, 400).splitlines()
-            line = next((ln.strip("# ").strip() for ln in first if ln.strip()), "")
-            if line:
-                names.append(line[:100])
-        return "; ".join(names[:OTHERS_ITEMS]) or "none yet"
-
-    def value(name: str) -> str:
-        if name in goal.parts:
-            return _read(where / goal.parts[name].file)
-        if name == "bible":
-            return bible(spec)
-        if name == "others":
-            return others()
-        if name in ("id", "item"):
-            return piece.item
-        if name == "n":
-            return str(piece.n)
-        return "{" + name + "}"
-
-    def fill(m: "re.Match[str]") -> str:
-        text = value(m.group(1))
-        return text[:int(m.group(2))] if m.group(2) else text
-
-    text = _FIELD.sub(fill, part.prompt).strip()
-    asked = notes(spec.folder).get(piece.key)
-    if asked:
-        text += f"\n\nThis time: {asked}"
-    return text
-
-
-# ---- reviewing (the board: eki/web/goals.html) -----------------------------------------
-
-def _notes_path(folder: str) -> Path:
-    return Path(folder) / ".eki" / "notes.json"
-
-
-def notes(folder: str) -> Dict[str, str]:
-    try:
-        return dict(json.loads(_notes_path(folder).read_text()))
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_notes(folder: str, data: Dict[str, str]) -> None:
-    path = _notes_path(folder)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-    tmp.replace(path)
-
-
-def forget_note(folder: str, key: str) -> None:
-    have = notes(folder)
-    if have.pop(key, None) is not None:
-        _save_notes(folder, have)
-
-
-def _title(text: str) -> str:
-    for line in text.splitlines():
-        line = line.strip().lstrip("#").strip()
-        if line:
-            return line[:120]
-    return ""
-
-
-def items(spec: Spec, only: str = "") -> List[Dict[str, Any]]:
-    """Every item with each part as it stands, for the board."""
-    out = []
-    pending = notes(spec.folder)
-    st = state(spec.folder)
-    for goal in spec.goals:
-        if only and goal.name != only:
-            continue
-        rows = []
-        for n, item in enumerate(goal.items, 1):
-            where = _item_dir(spec, goal, item, n)
-            parts = []
-            title = ""
-            for part in goal.parts.values():
-                path = where / part.file
-                entry: Dict[str, Any] = {"name": part.name, "kind": part.kind,
-                                         "exists": path.exists(), "line": part.line,
-                                         "after": part.after, "file": part.file,
-                                         "deleted": _deleted(st, goal.name, item, part.name),
-                                         "note": pending.get(f"{goal.name}/{item}/{part.name}", "")}
-                if entry["exists"]:
-                    entry["path"] = str(path.relative_to(spec.folder))
-                    entry["mtime"] = int(path.stat().st_mtime)
-                    if part.kind == "text":
-                        entry["text"] = _read(path, 4000)
-                        title = title or _title(entry["text"])
-                else:
-                    entry["ready"] = all((where / goal.parts[d].file).exists() for d in part.after)
-                parts.append(entry)
-            rows.append({"item": item, "n": n, "title": title or item, "parts": parts,
-                         "deleted": _deleted(st, goal.name, item),
-                         "dir": str(where.relative_to(spec.folder))})
-        out.append({"goal": goal.name, "parts": list(goal.parts), "items": rows,
-                    "paused": goal.name in st["paused"]})
-    return out
-
-
-def dependents(goal: Goal, part: str) -> List[str]:
-    """The parts made from `part`, directly or through another."""
-    out: List[str] = []
-    changed = True
-    while changed:
-        changed = False
-        for p in goal.parts.values():
-            if p.name not in out and (part in p.after or any(a in out for a in p.after)):
-                out.append(p.name)
-                changed = True
-    return out
-
-
-def _goal(spec: Spec, name: str) -> Goal:
-    goal = next((g for g in spec.goals if g.name == name), None)
-    if goal is None:
-        raise GoalError(f"no goal {name!r}")
-    return goal
-
-
-def _trash(spec: Spec, paths: List[Path]) -> int:
-    """Into the project's .eki/trash/<when>/, keeping their places — never deleted."""
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    moved = 0
-    for path in paths:
-        if not path.exists():
-            continue
-        keep = Path(spec.folder) / ".eki" / "trash" / stamp / path.relative_to(spec.folder)
-        keep.parent.mkdir(parents=True, exist_ok=True)
-        path.replace(keep)
-        moved += 1
-    return moved
-
-
-def _scope(goal: Goal, item: str, part: str) -> List[str]:
-    if part and part not in goal.parts:
-        raise GoalError(f"{goal.name} has no part {part!r}")
-    if item and item not in goal.items:
-        raise GoalError(f"{goal.name} has no item {item!r}")
-    return [part] + dependents(goal, part) if part else list(goal.parts)
-
-
-def redo(spec: Spec, goal_name: str, item: str, part: str, note: str = "") -> List[str]:
-    """Make a piece again — and what was made from it, which would no longer
-    match. The old files move to the project's .eki/trash/. `note` is added
-    to the piece's prompt the next time it's made."""
-    goal = _goal(spec, goal_name)
-    if not item or not part:
-        raise GoalError("say which item and part to redo")
-    names = _scope(goal, item, part)
-    where = _item_dir(spec, goal, item, goal.items.index(item) + 1)
-    had = [n for n in names if (where / goal.parts[n].file).exists()]
-    _trash(spec, [where / goal.parts[n].file for n in names])
-    restore(spec, goal_name, item, part)               # wanted again, if it had been deleted
-    if note.strip():
-        have = notes(spec.folder)
-        have[f"{goal_name}/{item}/{part}"] = note.strip()[:500]
-        _save_notes(spec.folder, have)
-    return [f"{goal_name}/{item}/{n}" for n in had]
-
-
-def delete(spec: Spec, goal_name: str, item: str = "", part: str = "") -> Dict[str, Any]:
-    """Remove what was made, and keep it removed.
-
-    A part (and what was made from it) or a whole item: its files go to the
-    trash and it isn't made again until you restore it. The whole goal: every
-    file it made goes to the trash and the goal is paused, so nothing is
-    remade until you resume it."""
-    goal = _goal(spec, goal_name)
-    st = state(spec.folder)
-    if not item:
-        paths = [_item_dir(spec, goal, i, n) / p.file
-                 for n, i in enumerate(goal.items, 1) for p in goal.parts.values()]
-        moved = _trash(spec, paths)
-        if goal.name not in st["paused"]:
-            st["paused"].append(goal.name)
-        _save_state(spec.folder, st)
-        return {"moved": moved, "paused": True}
-    names = _scope(goal, item, part)
-    where = _item_dir(spec, goal, item, goal.items.index(item) + 1)
-    moved = _trash(spec, [where / goal.parts[n].file for n in names])
-    keys = [f"{goal.name}/{item}"] if not part else [f"{goal.name}/{item}/{n}" for n in names]
-    st["deleted"] += [k for k in keys if k not in st["deleted"]]
-    _save_state(spec.folder, st)
-    return {"moved": moved, "deleted": keys}
-
-
-def restore(spec: Spec, goal_name: str, item: str, part: str = "") -> List[str]:
-    """Want a deleted item or part again: it's made on the next idle turn."""
-    goal = _goal(spec, goal_name)
-    names = _scope(goal, item, part)
-    st = state(spec.folder)
-    drop = {f"{goal.name}/{item}/{n}" for n in names}
-    if not part:
-        drop.add(f"{goal.name}/{item}")
-    back = [k for k in st["deleted"] if k in drop]
-    if back:
-        st["deleted"] = [k for k in st["deleted"] if k not in drop]
-        _save_state(spec.folder, st)
-    return back
-
-
-def pause(folder: str, goal_name: str, paused: bool) -> bool:
-    spec = load(folder)
-    _goal(spec, goal_name)
-    st = state(spec.folder)
-    if paused and goal_name not in st["paused"]:
-        st["paused"].append(goal_name)
-    if not paused:
-        st["paused"] = [g for g in st["paused"] if g != goal_name]
-    _save_state(spec.folder, st)
-    return paused
-
-
-def inside(folder: str, relative: str) -> Optional[Path]:
-    """A file in a registered project, or None — nothing outside it is served."""
-    root = Path(folder).expanduser().resolve()
-    if str(root) not in [str(Path(f).resolve()) for f in projects()]:
-        return None
-    path = (root / relative).resolve()
-    if root not in path.parents or not path.is_file():
-        return None
-    return path
-
-
-def instructions(spec: Spec, piece: Piece) -> str:
-    """The system prompt a text piece is written under."""
-    world = bible(spec)
-    head = ("You are writing one piece of a larger project. Write only the piece itself — "
-            "no preamble, no notes about what you did, no questions. Stay consistent with "
-            "the project's world.")
-    return head + (f"\n\nThe world:\n\n{world}" if world else "")
-
-
-# ---- which projects -------------------------------------------------------------------
-
-def projects() -> List[str]:
-    try:
-        return list(json.loads(PROJECTS.read_text()).get("projects") or [])
+        return list(json.loads(PATH.read_text()).get("goals") or [])
     except (OSError, ValueError):
         return []
 
 
-def _save(folders: List[str]) -> None:
-    PROJECTS.parent.mkdir(parents=True, exist_ok=True)
-    tmp = PROJECTS.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"projects": folders}, indent=2))
-    tmp.replace(PROJECTS)
-
-
-def add(folder: str) -> Spec:
-    spec = load(folder)                     # refuses a folder without a readable goals.yaml
-    have = projects()
-    if spec.folder not in have:
-        _save(have + [spec.folder])
-    return spec
-
-
-def remove(folder: str) -> bool:
-    root = str(Path(folder).expanduser())
-    have = projects()
-    if root not in have:
-        return False
-    _save([f for f in have if f != root])
-    return True
-
-
-def backlog() -> List[Piece]:
-    """What's missing across every project, ready ones first, in order."""
-    out: List[Piece] = []
-    for folder in projects():
+def all_goals() -> List[Goal]:
+    out = []
+    for raw in _load_raw():
         try:
-            spec = load(folder)
-        except GoalError:
+            out.append(Goal(**{k: v for k, v in raw.items() if k in Goal.__dataclass_fields__}))
+        except TypeError:
             continue
-        paused = set(state(spec.folder)["paused"])
-        out += [p for p in pieces(spec) if p.goal not in paused]
     return out
 
+
+def _save(goals: List[Goal]) -> None:
+    PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"goals": [asdict(g) for g in goals]}, indent=2, ensure_ascii=False))
+    tmp.replace(PATH)
+
+
+def get(gid: str) -> Goal:
+    """By id, or by the start of it (the CLI)."""
+    goals = all_goals()
+    exact = next((g for g in goals if g.id == gid), None)
+    if exact:
+        return exact
+    starts = [g for g in goals if g.id.startswith(gid)] if gid else []
+    if len(starts) == 1:
+        return starts[0]
+    raise GoalError(f"no goal {gid!r}" if not starts else f"{gid!r} could be several goals")
+
+
+def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
+           spare: bool = False, now: Optional[float] = None) -> Goal:
+    text = text.strip()
+    if not text:
+        raise GoalError("say what eki should keep doing")
+    folder = str(Path(folder).expanduser()) if folder.strip() else ""
+    if folder and not Path(folder).is_dir():
+        raise GoalError(f"no folder {folder}")
+    # its first turn as soon as there's room, so you see it work; then on its schedule
+    g = Goal(id=uuid.uuid4().hex[:10], text=text, when=check_when(when), folder=folder, spare=bool(spare))
+    goals = all_goals()
+    goals.append(g)
+    _save(goals)
+    return g
+
+
+def update(gid: str, **fields: Any) -> Goal:
+    goals = all_goals()
+    g = next((x for x in goals if x.id == gid), None)
+    if g is None:
+        raise GoalError(f"no goal {gid!r}")
+    if "text" in fields:
+        fields["text"] = str(fields["text"]).strip()
+        if not fields["text"]:
+            raise GoalError("say what eki should keep doing")
+    if "folder" in fields:
+        f = str(fields["folder"] or "").strip()
+        fields["folder"] = str(Path(f).expanduser()) if f else ""
+        if fields["folder"] and not Path(fields["folder"]).is_dir():
+            raise GoalError(f"no folder {fields['folder']}")
+    if "when" in fields:
+        fields["when"] = check_when(fields["when"])
+    if "state" in fields and fields["state"] not in STATES:
+        raise GoalError(f"a goal is {', '.join(STATES)}")
+    for k, v in fields.items():
+        if k in Goal.__dataclass_fields__ and k != "id":
+            setattr(g, k, v)
+    if "when" in fields:
+        g.next_at = _next(g, time.time())
+    _save(goals)
+    return g
+
+
+def remove(gid: str) -> Goal:
+    goals = all_goals()
+    g = next((x for x in goals if x.id == gid), None)
+    if g is None:
+        raise GoalError(f"no goal {gid!r}")
+    _save([x for x in goals if x.id != gid])
+    return g
+
+
+# ---- when a goal wants a turn ----------------------------------------------------------------
+
+def _next(g: Goal, after: float) -> int:
+    if not g.repeats:
+        return 0
+    t = schedules_mod.next_time(g.when, after, None)
+    return int(t) if t else 0
+
+
+def due(g: Goal, now: float) -> bool:
+    if g.state != "active":
+        return False
+    return now >= (g.next_at or 0)
+
+
+def prompt(g: Goal, now: Optional[float] = None) -> str:
+    """What a turn says to the agent: the goal, and the one line to end with."""
+    folder = f" Work in {g.folder}." if g.folder else ""
+    if g.repeats:
+        when = datetime.fromtimestamp(now or time.time()).strftime("%A %Y-%m-%d %H:%M")
+        return (f"[eki · goal · {when}] {g.text}\n\n"
+                f"[eki: this is this time's run of a goal you keep doing in the background.{folder} "
+                "Do this time's part in one go. End your reply with one line: `GOAL: done` when "
+                "this time's part is finished, or `GOAL: waiting` if you need me to decide "
+                "something (ask it just above that line).]")
+    if g.turns == 0:
+        return (f"[eki · goal] {g.text}\n\n"
+                f"[eki: you're working on this in the background, whenever this machine has "
+                f"room.{folder} Do as much as makes sense in one go. End your reply with one line: "
+                "`GOAL: done` when the goal is met, `GOAL: continue` if there's more to do and you "
+                "want another turn, or `GOAL: waiting` if you need me to decide something (ask it "
+                "just above that line).]")
+    return (f"[eki · goal] Carry on with the goal: {g.text}\n\n"
+            "[eki: pick up where you left off. End with `GOAL: done`, `GOAL: continue` or "
+            "`GOAL: waiting`, as before.]")
+
+
+def outcome(answer: str) -> str:
+    """done | continue | waiting — the last marker in the answer; none means continue."""
+    found = MARK.findall(answer or "")
+    return found[-1].lower() if found else "continue"
+
+
+def after_turn(g: Goal, answer: str, ok: bool, now: Optional[float] = None) -> Goal:
+    """Where the goal stands once a turn has ended."""
+    now = now or time.time()
+    fields: Dict[str, Any] = {"last_turn_at": int(now)}
+    if not ok:
+        failures = g.failures + 1
+        fields["failures"] = failures
+        if failures >= MAX_FAILURES:
+            fields.update(state="stuck", note=f"{failures} turns in a row failed")
+        else:
+            fields["next_at"] = int(now + RETRY_SECONDS)
+        return update(g.id, **fields)
+    fields["failures"] = 0
+    said = outcome(answer)
+    if said == "waiting":
+        fields.update(state="waiting", note="waiting for your reply")
+    elif g.repeats:
+        fields.update(next_at=_next(g, now), note="")
+    elif said == "done":
+        fields.update(state="done", note="")
+    elif g.turns >= MAX_TURNS:
+        fields.update(state="stuck", note=f"{g.turns} turns without saying it's done")
+    else:
+        fields.update(next_at=0, note="")
+    return update(g.id, **fields)
+
+
+def replied(g: Goal, turns: List[Dict[str, Any]]) -> bool:
+    """Has someone answered in the thread since the goal last asked?"""
+    return any(t["role"] == "user" and t["id"] > g.last_turn
+               and not str(t.get("content") or "").startswith("[eki · goal")
+               for t in turns)
+
+
+# ---- what the shift did -------------------------------------------------------------------
 
 def note(entry: Dict[str, Any]) -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -605,10 +291,3 @@ def history(since: float) -> List[Dict[str, Any]]:
         if float(e.get("at") or 0) >= since:
             out.append(e)
     return out
-
-
-def clean(text: str) -> str:
-    """A text piece as it goes to disk: a model's thinking left out."""
-    if "</think>" in text:
-        text = text.rpartition("</think>")[2]
-    return text.strip() + "\n"

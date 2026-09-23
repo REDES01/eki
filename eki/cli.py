@@ -604,168 +604,95 @@ def cmd_builds(args) -> int:
     return 0
 
 
-def _goal_folder(args, service: str) -> str:
-    if args.folder:
-        return os.path.abspath(os.path.expanduser(args.folder))
-    here = os.getcwd()
-    if os.path.exists(os.path.join(here, "goals.yaml")):
-        return here
-    projects = [p["folder"] for p in call("GET", "/api/goals", service)["projects"]]
-    if len(projects) == 1:
-        return projects[0]
-    raise SystemExit("which project? run it inside the folder, or pass --folder"
-                     + ("" if not projects else " (" + ", ".join(projects) + ")"))
+def _when_of(every: str, at: str) -> Optional[Dict[str, Any]]:
+    """--every day|weekdays|week|mon…sun|<n>h|<n>m, --at HH:MM → a goal's when."""
+    if not every:
+        return None
+    every = every.lower().strip()
+    at = at or "09:00"
+    days = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    if every in ("day", "daily"):
+        return {"kind": "daily", "at": at}
+    if every in ("weekday", "weekdays"):
+        return {"kind": "daily", "at": at, "days": [0, 1, 2, 3, 4]}
+    if every in ("week", "weekly"):
+        return {"kind": "daily", "at": at, "days": [0]}
+    if every[:3] in days:
+        return {"kind": "daily", "at": at, "days": [days[every[:3]]]}
+    import re as _re
+    m = _re.fullmatch(r"(\d+)\s*(h|m|hours?|min(utes?)?)", every)
+    if m:
+        n = int(m.group(1))
+        return {"kind": "interval", "minutes": n * 60 if m.group(2).startswith("h") else n}
+    raise SystemExit(f"--every is day, weekdays, week, a weekday (mon…sun), or like 4h / 90m — not {every!r}")
 
 
-def _edit_text(text: str) -> str:
-    import shlex
-    import tempfile
-    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-        f.write(text)
-        path = f.name
-    try:
-        subprocess.run(shlex.split(editor) + [path], check=False)
-        return open(path).read()
-    finally:
-        os.unlink(path)
-
-
-def _say_impact(im: Dict[str, Any]) -> List[str]:
-    redo = []
-    for c in im.get("changed") or []:
-        also = f" (and the {' and '.join(c['with'])} made from them)" if c["with"] else ""
-        answer = input(f"the {c['part']} prompt changed; {c['made']} already made{also}. make them again? [y/N] ")
-        if answer.strip().lower().startswith("y"):
-            redo.append(c["part"])
-    if im.get("orphaned"):
-        print(f"· a file name or folder changed: {im['orphaned']} made file(s) won't be recognised")
-    if im.get("new_items"):
-        print(f"· {im['new_items']} new item(s) will be made")
-    return redo
-
-
-def _goal_new_or_edit(args) -> int:
-    if args.action == "edit" or args.folder:
-        folder = _goal_folder(args, args.service)
-    else:
-        folder = os.getcwd()            # a new goal goes in the folder you're in
-    old = ""
-    if args.action == "new":
-        if not args.arg:
-            print('eki goals new "30 weapons, each with a description and an icon"', file=sys.stderr)
-            return 2
-        print("drafting on your local model…", file=sys.stderr, flush=True)
-        r = httpx.post(f"{args.service}/api/goals/draft", json={"folder": folder, "description": args.arg},
-                       timeout=600)
-        if r.status_code >= 400:
-            print(f"! {r.json().get('detail', r.text)}", file=sys.stderr)
-            return 1
-        text = r.json()["yaml"]
-        print(text)
-        if not args.yes:
-            answer = input(f"save it to {folder}/goals.yaml? [y]es / [e]dit first / [N]o ").strip().lower()
-            if answer.startswith("e"):
-                text = _edit_text(text)
-            elif not answer.startswith("y"):
-                return 0
-    else:
-        old = args.arg
-        if not old:
-            print("eki goals edit <goal>", file=sys.stderr)
-            return 2
-        text = call("GET", "/api/goals/definition", args.service,
-                    params={"folder": folder, "goal": old})["yaml"]
-        changed = _edit_text(text)
-        if changed.strip() == text.strip():
-            print("no change")
-            return 0
-        text = changed
-    while True:
-        pv = call("POST", "/api/goals/preview", args.service, json={"folder": folder, "old": old, "yaml": text})
-        if pv.get("ok"):
-            break
-        print(f"! {pv.get('error')}", file=sys.stderr)
-        if input("edit again? [Y/n] ").strip().lower().startswith("n"):
-            return 1
-        text = _edit_text(text)
-    redo = _say_impact(pv.get("impact") or {}) if old and not args.yes else []
-    got = call("POST", "/api/goals/save", args.service,
-               json={"folder": folder, "old": old, "yaml": text, "redo": redo})
-    st = got["status"]
-    print(f"saved {got['goal']} in {got['folder']}: {st['done']}/{st['total']} made — "
-          "the rest is made whenever the machine has room")
-    return 0
+def _goal_line(g: Dict[str, Any]) -> str:
+    folder = f" · {g['folder']}" if g.get("folder") else ""
+    spare = " · may use subscriptions" if g.get("spare") else ""
+    return f"{g['id'][:6]}  {g['status']:<10} {g['text'][:70]}\n        {g['when_text']}{folder}{spare}" + \
+        (f"\n        {g['note']}" if g.get("note") else "")
 
 
 def cmd_goals(args) -> int:
-    """Declared goals and the idle shift working on them (eki/goals.py)."""
-    if args.action in ("new", "edit"):
-        return _goal_new_or_edit(args)
-    if args.action == "rm":
+    """Goals: things eki keeps doing when the machine has room (eki/goals.py)."""
+    a = args.action
+    if a == "add":
         if not args.arg:
-            print("eki goals rm <goal> [--trash]", file=sys.stderr)
+            print('eki goals add "every morning, look at my X and propose 3 posts" --every day --at 08:00',
+                  file=sys.stderr)
             return 2
-        folder = _goal_folder(args, args.service)
-        what = "and move its files to the trash" if args.trash else "(its files stay)"
-        if not args.yes and not input(f"remove {args.arg} from {folder}/goals.yaml {what}? [y/N] ").strip().lower().startswith("y"):
-            return 0
-        got = call("POST", "/api/goals/remove", args.service,
-                   json={"folder": folder, "goal": args.arg, "trash": args.trash})
-        print(f"removed {got['removed']}" + (f"; {got['moved']} file(s) in .eki/trash" if got["moved"] else ""))
+        folder = os.path.abspath(os.path.expanduser(args.folder)) if args.folder else ""
+        g = call("POST", "/api/goals", args.service,
+                 json={"text": args.arg, "when": _when_of(args.every, args.at), "folder": folder,
+                       "spare": args.spare})
+        print(f"added {g['id'][:6]} — {g['when_text']}; its first turn comes when the machine has room")
         return 0
-    if args.action == "add":
-        folder = os.path.abspath(os.path.expanduser(args.arg or "."))
-        got = call("POST", "/api/goals/projects", args.service, json={"folder": folder})
-        for g in got["goals"]:
-            print(f"{g['goal']}: {g['done']}/{g['total']} pieces there, {g['total'] - g['done']} to make")
-        print(f"added {got['folder']} — pieces are made whenever the machine has room")
-        return 0
-    if args.action == "remove":
-        folder = os.path.abspath(os.path.expanduser(args.arg or "."))
-        got = call("DELETE", "/api/goals/projects", args.service, params={"folder": folder})
-        print("removed" if got["removed"] else "it wasn't added")
-        return 0
-    if args.action == "mode":
-        if args.arg in ("resources", "away"):
-            body = {"when": args.arg}
-        elif args.arg in ("local", "spare", "off"):
-            body = {"mode": args.arg}
+    if a in ("rm", "pause", "resume", "run"):
+        if not args.arg:
+            print(f"eki goals {a} <goal id>", file=sys.stderr)
+            return 2
+        gid = next((g["id"] for g in call("GET", "/api/goals", args.service)["goals"]
+                    if g["id"].startswith(args.arg)), args.arg)
+        if a == "rm":
+            got = call("DELETE", f"/api/goals/{gid}", args.service)
+            print(f"removed {gid[:6]} (its thread stays in your history)")
+        elif a == "run":
+            call("POST", f"/api/goals/{gid}/run", args.service)
+            print("its next turn comes as soon as there's room")
         else:
-            print("eki goals mode local|spare|off   (which models background work may use)\n"
-                  "eki goals mode resources|away   (whenever there's room, or only when you're away)",
+            call("PATCH", f"/api/goals/{gid}", args.service,
+                 json={"state": "paused" if a == "pause" else "active"})
+            print("paused" if a == "pause" else "resumed")
+        return 0
+    if a == "mode":
+        body = {"on": True} if args.arg == "on" else {"on": False} if args.arg == "off" else \
+            {"when": args.arg} if args.arg in ("resources", "away") else None
+        if body is None:
+            print("eki goals mode on|off          (background work at all)\n"
+                  "eki goals mode resources|away  (whenever there's room, or only when you're away)",
                   file=sys.stderr)
             return 2
         call("POST", "/api/goals/mode", args.service, json=body)
-        args.action = "show"
-    if args.action == "report":
+    if a == "report":
         hours = float(args.arg or 24)
         r = call("GET", "/api/goals/report", args.service, params={"hours": hours})
         mins = round(r["working_seconds"] / 60)
-        print(f"last {hours:g} h: {r['made']} made, {r['failed']} failed, "
+        print(f"last {hours:g} h: {r['turns']} turns ({r['finished']} finished a goal), {r['failed']} failed, "
               f"{r['stepped_out']} stepped out for you · {mins} min of work")
         for key, b in r["by_backend"].items():
-            print(f"  {key:<22} {int(b['pieces'])} pieces, {round(b['seconds'] / 60)} min")
-        print(f"  on a subscription: {r['on_subscription']} pieces")
-        for f in r["failures"]:
-            print(f"  ! {f['piece']}: {f['error']}")
-        if r["recent"]:
-            print("  latest: " + ", ".join(r["recent"]))
+            print(f"  {key:<22} {int(b['turns'])} turns, {round(b['seconds'] / 60)} min")
+        print(f"  on a subscription: {r['on_subscription']} turns")
         return 0
     v = call("GET", "/api/goals", args.service)
     sh = v["shift"]
-    print(f"background: {v['mode']} · runs {'whenever there is room' if v['when'] == 'resources' else 'only when you are away'}")
+    print(f"background: {'on' if v['on'] else 'off'} · "
+          f"{'whenever there is room' if v['when'] == 'resources' else 'only when you are away'}")
     print(f"now: {sh.get('state')} — {sh.get('why')}")
-    if not v["projects"]:
-        print("no projects — put a goals.yaml in a folder, then `eki goals add <folder>`")
-    for p in v["projects"]:
-        print(f"\n{p['folder']}")
-        if p.get("error"):
-            print(f"  ! {p['error']}")
-            continue
-        for g in p["goals"]:
-            print(f"  {g['goal']:<16} {g['done']}/{g['total']} pieces  ({g['items']} × "
-                  f"{', '.join(g['parts'])})")
+    if not v["goals"]:
+        print('no goals — eki goals add "…"   (or New goal on the board: http://127.0.0.1:8787/goals)')
+    for g in v["goals"]:
+        print(_goal_line(g))
     return 0
 
 
@@ -898,15 +825,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--wait", type=int, default=600, help="seconds to wait for runs to finish")
     sp.add_argument("--watch", type=int, default=180, help="seconds it must stay healthy")
 
-    g = sub.add_parser("goals", help="what your projects want made, worked on while the machine has room")
+    g = sub.add_parser("goals", help="things eki keeps doing when the machine has room")
     g.add_argument("action", nargs="?", default="show",
-                   choices=["show", "add", "remove", "mode", "report", "new", "edit", "rm"])
+                   choices=["show", "add", "rm", "pause", "resume", "run", "mode", "report"])
     g.add_argument("arg", nargs="?", default="",
-                   help="a folder (add, remove); local|spare|off or resources|away (mode); hours (report); "
-                        "what to make, in words (new); a goal's name (edit, rm)")
-    g.add_argument("-f", "--folder", default="", help="the project (default: this folder, or the only one)")
-    g.add_argument("--trash", action="store_true", help="rm: move its files to the project's .eki/trash too")
-    g.add_argument("-y", "--yes", action="store_true", help="don't ask")
+                   help="what to keep doing, in words (add); a goal id (rm, pause, resume, run); "
+                        "on|off|resources|away (mode); hours (report)")
+    g.add_argument("-f", "--folder", default="", help="add: a folder for it to work in")
+    g.add_argument("--every", default="", help="add: day, weekdays, week, mon…sun, or like 4h (default: once, until done)")
+    g.add_argument("--at", default="", help="add: the time of day, HH:MM (default 09:00)")
+    g.add_argument("--spare", action="store_true",
+                   help="add: may use your subscriptions, within their spare room")
 
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")

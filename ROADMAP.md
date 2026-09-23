@@ -16,8 +16,8 @@ subscriptions they rent run out. eki is the station on that machine: always
 open, the local models are the local lines, Claude Code and Codex are the
 express. It keeps the right models on the hardware, sends each request to the
 cheapest line that can carry it, and — the part nothing else does — fills the
-idle capacity with work worth doing, from goals you declare, stepping out
-the moment you or another app need the room.
+idle capacity with work worth doing — goals you set the way you'd ask in a
+chat — stepping out the moment you or another app need the room.
 
 The first measurement, on the Mac eki is built on (2026-09-23): over three
 days the local models did about 55 minutes of work — about 1% of the time —
@@ -41,9 +41,9 @@ better the more you use it.
 2. *The lines* — routing to the cheapest line that can do the job; a model
    without tools hands over; a subscription that runs out carries on in the
    next (Stage 2).
-3. *The idle shift* — declared goals turned into a backlog, worked through
-   whenever the machine has room, giving way when something needs it, within
-   a subscription budget that never touches the last of a window (Stage 3).
+3. *The idle shift* — goals you'd say in a chat, given turns whenever the
+   machine has room, giving way when something needs it, within a
+   subscription budget that never touches the last of a window (Stage 3).
 4. *The neighborhood* — skills, corrections, the tools you connected and a
    project's canon, held once and given to every model, so the unattended work
    agrees with you (Stages 1, 7).
@@ -261,25 +261,26 @@ a thread has to be able to move to another harness without losing its place.
 The machine works whenever it has room, on what you asked for, and gives way
 the moment you or another app need it.
 
-- [ ] **Goals.** A project declares what should exist (`goals.yaml`: 20 NPCs,
-      each with a bio, a portrait and three lines; a world bible every piece
-      reads). `eki goals` computes what's missing — the backlog is a diff, not
-      a guess — in dependency order (a portrait is drawn from its bio)
-- [ ] **The idle shift.** Work runs whenever the machine has room — you can
-      be typing. A piece starts only if its model fits in free memory and
-      other apps leave the CPU and GPU spare (read between pieces, when eki's
-      own model is idle); memory pressure mid-piece cancels it and unloads the
-      model. Your own requests always come first. `when: away` for anyone
-      who'd rather it only ran with nobody at the keyboard. The Mac is kept
-      awake while there's work (the screen may sleep)
-- [ ] **Budget modes.** `local` (default: only models on this machine, zero
-      subscription), `spare` (a subscription only while under pace for the
-      week, never the last 30% of any window), `off`
-- [ ] **The morning note.** What got made, what failed, what it cost — in
-      pieces, hours and subscription share
+- [x] **Goals are sentences.** What you'd type in a chat, left running: once
+      until it's done, or every day, week or few hours; optionally a folder,
+      and whether it may use your subscriptions. Each turn is an ordinary
+      request in the goal's thread — routed like anything you type, so the
+      agent that gets it plans the work — ending with one line: done,
+      continue, or waiting for you (docs/goals.md)
+- [x] **The idle shift.** Turns run whenever the machine has room — you can
+      be typing. A turn starts only if its model fits in free memory and other
+      apps leave the CPU and GPU spare (eki's own model servers left out);
+      memory pressure cancels it; your own requests come first; only on
+      power; `away` for nobody-at-the-keyboard
+- [x] **Budget.** Only models on this machine unless the goal may use
+      subscriptions — then only under pace for the week, never the last 30%
+- [x] **The board** at `/goals`, and in the Mac app: goals, their threads, a
+      reply box; `eki goals` and `eki goals report`
 - [ ] Measured: hours of useful local work a day, against the 1% baseline
-- *Evolve:* pieces you redo or delete count against the model and template
-  that made them; eki proposes the goals it sees you working toward.
+- [ ] Goals that need the screen (computer use) run only when you're away
+- *Evolve:* replies in a goal's thread are the feedback — what you keep asking
+  a goal to change becomes a skill its turns get; eki proposes goals it sees
+  you working toward.
 
 ## Stage 4 — The command line agents can use
 

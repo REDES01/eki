@@ -1,124 +1,60 @@
-# Goals and the idle shift
+# Goals
 
-A machine bought for AI mostly sits idle. eki keeps it working — but not by
-guessing what to do. A project declares what should exist, and eki makes what's
-missing whenever the machine has room (ROADMAP, Stage 3).
+A goal is something you'd ask in a chat, left running:
 
-## Declaring a goal
+> Every morning, look at my X and propose 3 posts in my voice.
+>
+> Make 20 NPCs for Ashfall — a bio, a portrait and three lines each.
+>
+> Keep the tests in ~/eki passing; fix what breaks on a branch.
 
-`goals.yaml` in the project folder:
+That, and optionally: **when** (once until it's done, every day, weekdays,
+every week, every few hours), a **folder** to work in, and whether it **may use
+your subscriptions**. Nothing else to fill in — eki doesn't plan the work. The
+agent that gets each turn does, the way it would in a chat.
 
-```yaml
-bible: [world.md]                  # every piece reads this
-goals:
-  - name: npcs
-    count: 20                      # or items: [innkeeper, smith, …]
-    id: "npc-{n:02}"
-    dir: "npcs/{id}"
-    parts:
-      bio:
-        kind: text
-        file: bio.md
-        prompt: |
-          Invent a new character for this world: name as a heading, then
-          role, home, temperament and one secret. Already made: {others}
-      portrait:
-        kind: image
-        file: portrait.png
-        from: [bio]
-        prompt: "Painterly fantasy portrait, head and shoulders. {bio:500}"
-      lines:
-        kind: text
-        file: lines.md
-        from: [bio]
-        prompt: "Three short lines this character says to a traveller. {bio}"
-```
+## How it runs
 
-Then `eki goals add ~/games/rpg`. The backlog is the difference between this
-and the files that exist — like `make`. Delete a portrait file by hand and it
-gets drawn again (on the board, *Redo* does that and *Delete* keeps it gone); raise `count` and the new ones get made.
-
-In a prompt: `{bio}` is this item's bio (`{bio:500}` its first 500
-characters), `{bible}` the bible, `{others}` the first line of this part in
-every other item (so the twentieth character isn't the first one again),
-`{id}` / `{n}` the item. Text pieces are written under a system prompt that
-carries the bible; a model's thinking never reaches the file.
-
-## Creating, changing, removing
-
-Nobody has to write the YAML by hand:
-
-- **New goal** on the board (or `eki goals new "30 weapons, each with a
-  description, lore and an icon"` in the project folder): describe it in words
-  and the local model drafts the entry — items, parts, files, prompts, what's
-  made from what. Check it in the form, change anything, save. *Start blank*
-  skips the draft.
-- **Edit goal** (or `eki goals edit <goal>`, which opens your editor on just
-  that entry): count, item names, parts, prompts. Before saving it says what
-  the change means for what's already made — a changed prompt leaves the
-  existing pieces as they were unless you tick *make them again*; a changed
-  file name means the old files won't be recognised; more items get made.
-- **Remove goal** (or `eki goals rm <goal> [--trash]`): out of goals.yaml,
-  keeping its files, or moving them to the trash.
-
-An edit rewrites only its own entry: your comments, the bible and the other
-goals stay exactly as written, and every save is checked by loading the file
-back (and undone if it doesn't load). A part named in another's prompt
-(`{bio}`) is always made first, whether or not `from:` lists it.
-
-## When it runs
-
-Whenever there's room — you can keep working:
-
-- a piece starts only if its model fits in free memory, and other apps leave
-  the CPU (60%) and GPU (35%) spare. The CPU and GPU are read *between*
-  pieces, when eki's own model is idle, so its own work doesn't count;
-- memory pressure mid-piece cancels the piece (it's made again later) and
-  unloads the model the shift loaded;
-- your own requests to eki come first: one arriving cancels the piece in
-  progress;
-- a piece that fails rests half an hour before it's tried again;
-- the Mac is kept from idle-sleeping while there's work (the screen may
-  sleep).
-
-`eki goals mode away` makes it wait for nobody at the keyboard (5 minutes),
-`eki goals mode resources` goes back.
-
-## What it may spend
-
-| mode | uses |
-|---|---|
-| `local` (default) | only models on this machine — no subscription at all |
-| `spare` | also a subscription, for parts marked `line: frontier`, only while the week is being spent slower than it passes and never the last 30% of any window |
-| `off` | nothing |
-
-`eki goals mode spare`. A part is local unless it says `line: frontier`
-(the main character's key scene, say); `backend: <provider>` names one outright.
+- **In its own thread.** Each turn is an ordinary request in the goal's
+  thread, so it remembers what it did and what you said. It's in your chat
+  list like any conversation, and you answer it there — or in the reply box
+  on the board.
+- **Routed like anything you type.** Writing goes to the local model; work
+  that needs tools (files, commands, drawing through eki) goes to a harness —
+  Qwen with Codex's hands when it stays on this machine. A thread stays with
+  the model that's been answering it.
+- **Within its budget.** By default a goal uses only the models on this
+  machine. Tick *May use my subscriptions* and it may use Claude Code or Codex —
+  only while that subscription is under pace for the week, and never the last
+  30% of a window.
+- **When the machine has room.** A turn starts only if its model fits in free
+  memory and other apps leave the CPU and GPU spare; your own requests come
+  first (a goal's turn on a local model steps aside for them); only on power;
+  the Mac is kept from idle-sleeping while there's work. *Only when I'm away*
+  waits for nobody at the keyboard.
+- **Until it says where it stands.** A turn ends with one line: `GOAL: done`
+  (a one-off goal stops; a repeating one waits for its next time), `GOAL:
+  continue` (another turn when there's room), or `GOAL: waiting` (it asked you
+  something — it carries on once you reply). A one-off goal that hasn't said
+  it's done after 30 turns, or fails three turns in a row, stops as *stuck*.
+- **Never on its own behalf.** A goal proposes; it doesn't post, send or buy.
+  Anything that acts in the world is yours to do from its thread.
 
 ## The board
 
 `http://127.0.0.1:8787/goals`, and **Goals** in the Mac app — the same page.
+Write a goal at the top (the *when* is guessed from your words — "every
+morning at 8" — and stays yours to change); each goal shows its status, its
+last answer, *Run now*, *Pause*, *Delete*. Open one for its thread, *Edit*, and
+a reply box.
 
-- **All goals**, across projects: progress, parts, what each is doing
-  (working, queued, paused, done), pause and resume. Projects are added and
-  removed here too.
-- **A goal**: its items as a picture grid (when it makes pictures) or a list,
-  a filter, pause, and *Delete everything it made* — every file to the trash,
-  and the goal paused so nothing is remade until you resume it.
-- **An item**: every part in full. *Redo* a part (with an optional note for
-  the next making); *Delete* a part or the whole item — it goes to the trash
-  and **stays deleted** until you choose *Make again*. A part's dependents
-  (the portrait drawn from a bio) go with it.
-
-Nothing is ever deleted outright: files move to the project's `.eki/trash/`.
-Paused goals and deleted pieces are kept in the project's `.eki/state.json`.
-
-## Seeing it from the command line
+## From the command line
 
 ```
-eki goals              # each project's progress, and what the shift is doing now
-eki goals report 12    # the last 12 hours: made, failed, stepped out, minutes, by model
+eki goals add "Every morning, look at my X and propose 3 posts" --every day --at 08:00 --spare
+eki goals add "Make 20 NPCs for Ashfall" -f ~/games/ashfall
+eki goals                    # each goal, its status, and what the shift is doing
+eki goals run|pause|resume|rm <id>
+eki goals mode on|off|resources|away
+eki goals report 12          # the last 12 hours: turns, outcomes, minutes, on which models
 ```
-
-Every piece is also a run (`eki runs`), and the log is
-`~/.eki/goals/log.jsonl`.

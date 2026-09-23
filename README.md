@@ -32,8 +32,10 @@ express.
 macOS on Apple silicon — on purpose: unified memory makes one quiet box that
 runs big models all day, and that's the machine eki is for.
 
-Where it's going — filling the idle hours with work worth doing, from goals
-you declare: [ROADMAP.md](ROADMAP.md).
+**Goals** keep the idle hours working: something you'd ask in a chat — "every
+morning, look at my X and propose 3 posts" — left running, given turns when
+the machine has room ([docs/goals.md](docs/goals.md)). Where it's going:
+[ROADMAP.md](ROADMAP.md).
 
 ## Install
 

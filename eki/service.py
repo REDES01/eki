@@ -599,149 +599,74 @@ def goals_view() -> Any:
     return engine().goals_view()
 
 
-@app.post("/api/goals/projects")
-def goals_add(body: Dict[str, Any]) -> Any:
+def _goal_call(fn, *args, **kw) -> Any:
     from . import goals as goals_mod
     try:
-        spec = goals_mod.add(str(body.get("folder") or ""))
+        return fn(*args, **kw)
     except goals_mod.GoalError as e:
         raise HTTPException(400, str(e))
-    return {"folder": spec.folder, "goals": goals_mod.status(spec)}
 
 
-@app.delete("/api/goals/projects")
-def goals_remove(folder: str) -> Any:
-    from . import goals as goals_mod
-    return {"removed": goals_mod.remove(folder)}
+@app.post("/api/goals")
+def goals_create(body: Dict[str, Any]) -> Any:
+    """A goal: what to keep doing, in words; when; a folder; may it use subscriptions."""
+    return _goal_call(engine().goals_create, str(body.get("text") or ""), body.get("when"),
+                      str(body.get("folder") or ""), bool(body.get("spare")))
+
+
+@app.patch("/api/goals/{gid}")
+def goals_update(gid: str, body: Dict[str, Any]) -> Any:
+    fields = {k: body[k] for k in ("text", "when", "folder", "spare", "state") if k in body}
+    if "state" in fields and fields["state"] not in ("active", "paused"):
+        raise HTTPException(400, "a goal can be paused or made active")
+    return _goal_call(engine().goals_update, gid, **fields)
+
+
+@app.post("/api/goals/{gid}/run")
+def goals_run_now(gid: str) -> Any:
+    return _goal_call(engine().goals_run_now, gid)
+
+
+@app.delete("/api/goals/{gid}")
+def goals_remove(gid: str) -> Any:
+    return _goal_call(engine().goals_remove, gid)
 
 
 @app.post("/api/goals/mode")
 def goals_mode(body: Dict[str, Any]) -> Any:
+    """Background work on or off; whenever there's room, or only when you're away."""
     eng = engine()
     changes = {}
-    if body.get("mode") in ("local", "spare", "off"):
-        changes["background"] = body["mode"]
+    if "on" in body:
+        changes["background"] = "local" if body["on"] else "off"
     if body.get("when") in ("resources", "away"):
         changes["background_when"] = body["when"]
     if not changes:
-        raise HTTPException(400, "mode is local, spare or off; when is resources or away")
+        raise HTTPException(400, "on is true or false; when is resources or away")
     eng.settings = settings_mod.save({**settings_mod.load(), **changes})
+    eng.shift_wake.set()
     return eng.goals_view()
 
 
 @app.get("/goals")
 def goals_board() -> Any:
-    """The review board: every item's pieces, redo with a note, the mode."""
+    """The board: goals, their threads, a reply box."""
     from fastapi.responses import HTMLResponse
     page = Path(__file__).with_name("web") / "goals.html"
     return HTMLResponse(page.read_text(), headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/goals/items")
-def goals_items(folder: str, goal: str = "") -> Any:
-    from . import goals as goals_mod
-    try:
-        return engine().goals_items(folder, goal)
-    except goals_mod.GoalError as e:
-        raise HTTPException(400, str(e))
-
-
-def _goal_call(fn, *args) -> Any:
-    from . import goals as goals_mod
-    try:
-        return fn(*args)
-    except goals_mod.GoalError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/goals/delete")
-def goals_delete(body: Dict[str, Any]) -> Any:
-    """A part, an item (stays deleted), or everything a goal made (and pause it)."""
-    return _goal_call(engine().goals_delete, str(body.get("folder") or ""), str(body.get("goal") or ""),
-                      str(body.get("item") or ""), str(body.get("part") or ""))
-
-
-@app.post("/api/goals/restore")
-def goals_restore(body: Dict[str, Any]) -> Any:
-    return _goal_call(engine().goals_restore, str(body.get("folder") or ""), str(body.get("goal") or ""),
-                      str(body.get("item") or ""), str(body.get("part") or ""))
-
-
-@app.get("/api/goals/definition")
-def goals_definition(folder: str, goal: str) -> Any:
-    return _goal_call(engine().goals_definition, folder, goal)
-
-
-@app.get("/api/goals/kinds")
-def goals_kinds() -> Any:
-    return {"kinds": engine()._goal_kinds()}
-
-
-@app.post("/api/goals/draft")
-async def goals_draft(body: Dict[str, Any]) -> Any:
-    """A goal entry from a sentence, by the local model — shown, not saved."""
-    from . import goals as goals_mod
-    try:
-        return await engine().goals_draft(str(body.get("folder") or ""), str(body.get("description") or ""))
-    except goals_mod.GoalError as e:
-        raise HTTPException(400, str(e))
-
-
-def _entry_of(body: Dict[str, Any]) -> Dict[str, Any]:
-    """The entry from the form, or parsed from its YAML view."""
-    from . import goaledit
-    if body.get("yaml"):
-        return goaledit.parse_draft(str(body["yaml"]))
-    return dict(body.get("entry") or {})
-
-
-@app.post("/api/goals/preview")
-def goals_preview(body: Dict[str, Any]) -> Any:
-    from . import goals as goals_mod
-    try:
-        entry = _entry_of(body)
-    except goals_mod.GoalError as e:
-        return {"ok": False, "error": str(e)}
-    return engine().goals_preview(str(body.get("folder") or ""), str(body.get("old") or ""), entry)
-
-
-@app.post("/api/goals/save")
-def goals_save(body: Dict[str, Any]) -> Any:
-    return _goal_call(lambda: engine().goals_save(str(body.get("folder") or ""), str(body.get("old") or ""),
-                                                  _entry_of(body), list(body.get("redo") or [])))
-
-
-@app.post("/api/goals/remove")
-def goals_remove(body: Dict[str, Any]) -> Any:
-    return _goal_call(engine().goals_remove, str(body.get("folder") or ""), str(body.get("goal") or ""),
-                      bool(body.get("trash")))
-
-
-@app.post("/api/goals/pause")
-def goals_pause(body: Dict[str, Any]) -> Any:
-    return _goal_call(engine().goals_pause, str(body.get("folder") or ""), str(body.get("goal") or ""),
-                      bool(body.get("paused", True)))
-
-
 @app.get("/api/goals/file")
-def goals_file(folder: str, path: str) -> Any:
+def goals_file(path: str) -> Any:
+    """A picture a goal's thread shows: eki's own images, or a file in a goal's folder."""
     from fastapi.responses import FileResponse
     from . import goals as goals_mod
-    found = goals_mod.inside(folder, path)
-    if found is None:
-        raise HTTPException(404, "not a file in a goals project")
-    return FileResponse(str(found), headers={"Cache-Control": "no-cache"})
-
-
-@app.post("/api/goals/redo")
-def goals_redo(body: Dict[str, Any]) -> Any:
-    from . import goals as goals_mod
-    try:
-        return engine().goals_redo(str(body.get("folder") or ""), str(body.get("goal") or ""),
-                                   str(body.get("item") or ""), str(body.get("part") or ""),
-                                   str(body.get("note") or ""))
-    except goals_mod.GoalError as e:
-        raise HTTPException(400, str(e))
+    real = Path(path).expanduser().resolve()
+    roots = [Path("~/.eki/images").expanduser().resolve()] + \
+        [Path(g.folder).resolve() for g in goals_mod.all_goals() if g.folder]
+    if not real.is_file() or not any(r == real or r in real.parents for r in roots):
+        raise HTTPException(404, "not a file a goal made")
+    return FileResponse(str(real), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/goals/report")

@@ -10,7 +10,7 @@
     --ink: #1d1c1a; --ink-2: #5d5a53; --ink-3: #8f8b82;
     --accent: #c9622b; --accent-soft: #f6e3d7;
     --ok: #2f8f5b; --ok-soft: #dcefe3; --wait: #b7791f; --wait-soft: #f6ead3;
-    --danger: #b3412f; --danger-soft: #f6dcd6;
+    --danger: #b3412f; --danger-soft: #f6dcd6; --info-soft: #e3e9f4; --info: #3d5f94;
     --radius: 12px; --shadow: 0 1px 2px rgba(20,18,15,.06), 0 2px 8px rgba(20,18,15,.05);
   }
   @media (prefers-color-scheme: dark) {
@@ -19,22 +19,19 @@
       --ink: #ecebe7; --ink-2: #b3afa6; --ink-3: #807c74;
       --accent: #e0834f; --accent-soft: #3b2a20;
       --ok: #52b67f; --ok-soft: #1f3327; --wait: #d9a23e; --wait-soft: #372c19;
-      --danger: #e0715e; --danger-soft: #3d2320;
+      --danger: #e0715e; --danger-soft: #3d2320; --info-soft: #1f2838; --info: #8fb0e6;
       --shadow: 0 1px 2px rgba(0,0,0,.3);
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  button { font: inherit; }
+  button, input, select, textarea { font: inherit; }
   header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
            backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-  .bar { max-width: 1400px; margin: 0 auto; padding: 12px 20px; display: flex; flex-wrap: wrap;
-         gap: 10px 20px; align-items: center; }
-  h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
-  h1 a { color: inherit; text-decoration: none; }
-  .status { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px;
-            min-width: 0; flex: 1 1 260px; }
+  .bar { max-width: 980px; margin: 0 auto; padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; } h1 a { color: inherit; text-decoration: none; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; min-width: 0; flex: 1 1 240px; }
   .status .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
   .dot.working { background: var(--ok); animation: pulse 1.6s ease-in-out infinite; }
@@ -46,159 +43,78 @@
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   label.check { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
-  .hint { max-width: 1400px; margin: 0 auto; padding: 0 20px 10px; color: var(--ink-3); font-size: 12px; }
-  main { max-width: 1400px; margin: 0 auto; padding: 20px 20px 80px; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 20px 80px; }
   .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 8px;
-         font-size: 12.5px; padding: 4px 11px; cursor: pointer; white-space: nowrap; }
+         font-size: 12.5px; padding: 5px 12px; cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-block; }
   .btn:hover { border-color: var(--line-2); color: var(--ink); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.danger { color: var(--danger); }
-  .btn.danger:hover { border-color: var(--danger); }
-  .btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
-  .btn.small { font-size: 11.5px; padding: 2px 8px; border-radius: 7px; }
-  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600;
-           padding: 2px 8px; border-radius: 99px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
-  .badge.working { background: var(--ok-soft); color: var(--ok); }
-  .badge.paused { background: var(--wait-soft); color: var(--wait); }
-  .badge.done { background: var(--sunk); color: var(--ink-2); }
-  .badge.deleted { background: var(--danger-soft); color: var(--danger); }
-  .progress { height: 6px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
-  .progress i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .btn.primary:disabled { opacity: .5; cursor: default; }
+  .btn.danger { color: var(--danger); } .btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.small { font-size: 11.5px; padding: 3px 9px; border-radius: 7px; }
   .muted { color: var(--ink-3); }
-  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
-                   font-weight: 650; margin: 28px 0 10px; }
-  .section-label:first-child { margin-top: 0; }
-
-  /* overview */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+  textarea.input, input.input, select.input { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+                border-radius: 8px; padding: 7px 10px; font-size: 13.5px; }
+  textarea.input { width: 100%; resize: vertical; }
+  textarea.big { width: 100%; border: 0; padding: 4px 2px; font-size: 16px; min-height: 64px; background: transparent;
+                 outline: none; resize: vertical; color: var(--ink); }
+  .composer { padding: 14px 16px; margin-bottom: 22px; }
+  .composer .opts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;
+                    padding-top: 10px; border-top: 1px solid var(--line); }
+  .composer .opts .grow { flex: 1 1 200px; }
+  .composer .examples { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .chip { border: 1px solid var(--line); background: var(--bg); color: var(--ink-2); border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+  .chip:hover { color: var(--ink); border-color: var(--line-2); }
+  .err { color: var(--danger); font-size: 12.5px; margin-top: 6px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); font-weight: 650; margin: 0 0 10px; }
   .goals { display: flex; flex-direction: column; gap: 10px; }
-  .goal-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1fr) minmax(170px, 1fr) auto;
-              gap: 18px; align-items: center; background: var(--surface); border: 1px solid var(--line);
-              border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); cursor: pointer; }
-  .goal-row:hover { border-color: var(--line-2); }
-  .goal-row .name { font-weight: 650; font-size: 15px; }
-  .goal-row .where { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .goal-row .parts { font-size: 12.5px; color: var(--ink-2); }
-  .goal-row .prog { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-  .goal-row .acts { display: flex; gap: 8px; align-items: center; }
-  .projects { display: flex; flex-direction: column; gap: 6px; }
-  .project { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 12px;
-             border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
-  .project code { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .project .err { color: var(--danger); font-size: 12px; }
-  form.add { display: flex; gap: 8px; margin-top: 8px; }
-  input.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px;
-               padding: 6px 10px; font: inherit; font-size: 13px; flex: 1; min-width: 0; }
-  .err-line { color: var(--danger); font-size: 12.5px; margin-top: 6px; }
-  .empty { text-align: center; color: var(--ink-3); padding: 70px 20px; }
-  .empty code, .hint code { background: var(--sunk); padding: 1px 6px; border-radius: 5px; color: var(--ink-2); }
-
-  /* goal page */
-  .back { color: var(--ink-3); text-decoration: none; font-size: 13px; }
-  .back:hover { color: var(--ink); }
-  .goal-top { display: flex; gap: 16px 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin: 10px 0 18px; }
-  .goal-top h2 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
-  .goal-top .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; color: var(--ink-3); font-size: 12.5px; }
-  .goal-top .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
-  .toolbar .progress { width: 220px; }
-  .confirm { display: inline-flex; gap: 8px; align-items: center; background: var(--danger-soft); color: var(--danger);
-             border-radius: 9px; padding: 4px 6px 4px 10px; font-size: 12.5px; flex-wrap: wrap; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
-  .card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-          box-shadow: var(--shadow); overflow: hidden; cursor: pointer; display: flex; flex-direction: column; }
-  .card:hover { border-color: var(--line-2); }
-  .card.working { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
-  .card.gone { opacity: .55; }
-  .card .pic { aspect-ratio: 1; background: var(--sunk); position: relative; }
-  .card .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .card .cap { padding: 9px 12px 11px; }
-  .card .t { font-weight: 600; font-size: 13.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card .s { font-size: 11.5px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; margin-top: 2px; }
-  .pending { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: 12px; padding: 12px; text-align: center; }
-  .making { background: linear-gradient(100deg, var(--sunk) 30%, color-mix(in srgb, var(--sunk) 70%, var(--surface)) 50%, var(--sunk) 70%);
-            background-size: 300% 100%; animation: shimmer 1.6s linear infinite; color: var(--ok); }
-  @keyframes shimmer { to { background-position: -150% 0; } }
-  .pips { display: inline-flex; gap: 3px; }
-  .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
-  .pip.on { background: var(--accent); }
-  .pip.work { background: var(--ok); animation: pulse 1.6s infinite; }
-  .pip.gone { background: var(--danger); opacity: .6; }
-  .list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line);
-          border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
-  .row { display: grid; grid-template-columns: minmax(160px, 1fr) 2.2fr auto; gap: 16px; align-items: center;
-         padding: 11px 14px; cursor: pointer; border-top: 1px solid var(--line); }
-  .row:first-child { border-top: 0; }
-  .row:hover { background: var(--sunk); }
-  .row.gone { opacity: .55; }
-  .row.working { box-shadow: inset 3px 0 0 var(--ok); }
-  .row .t { font-weight: 600; font-size: 13.5px; }
-  .row .id { font-size: 11.5px; color: var(--ink-3); }
-  .row .prev { color: var(--ink-2); font-size: 12.5px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-
-  /* item panel */
-  .scrim { position: fixed; inset: 0; background: rgba(15,14,12,.28); z-index: 20; }
-  .panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); background: var(--surface);
-           border-left: 1px solid var(--line); z-index: 21; overflow-y: auto; box-shadow: -8px 0 30px rgba(0,0,0,.12); }
-  .panel-head { position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--line);
-                padding: 14px 18px; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; z-index: 1; }
-  .panel-head h3 { margin: 0; font-size: 17px; line-height: 1.3; }
-  .panel-head .sub { font-size: 12px; color: var(--ink-3); margin-top: 3px; word-break: break-all; }
-  .panel-body { padding: 16px 18px 40px; display: flex; flex-direction: column; gap: 18px; }
-  .x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--ink-3); cursor: pointer; padding: 2px 6px; }
-  .part-block .ph { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-  .part-name { text-transform: uppercase; letter-spacing: .07em; font-size: 11px; color: var(--ink-3); font-weight: 650; }
-  .part-block img { width: 100%; border-radius: 10px; display: block; background: var(--sunk); }
-  .part-block .text { color: var(--ink-2); font-size: 13.5px; }
-  .text p { margin: 0 0 8px; }
-  .text ul { margin: 0; padding-left: 18px; }
-  .text li { margin-bottom: 5px; }
-  .placeholder { background: var(--sunk); border-radius: 10px; padding: 18px; color: var(--ink-3); font-size: 12.5px; text-align: center; }
-  .placeholder.making { color: var(--ok); }
-  .note { font-size: 12px; color: var(--accent); margin-top: 6px; }
-  form.redo { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; background: var(--sunk); border-radius: 9px; padding: 8px; }
-  form.redo .r { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
-  form.redo .also { color: var(--ink-3); font-size: 11.5px; margin-right: auto; }
-
-  /* the goal editor */
-  .editor { max-width: 860px; }
-  .editor h2 { margin: 10px 0 4px; font-size: 22px; letter-spacing: -.01em; }
-  .editor .lede { color: var(--ink-3); margin: 0 0 18px; font-size: 13px; }
-  .box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
-         box-shadow: var(--shadow); margin-bottom: 14px; }
-  .box h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
-  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-  .field > span { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
-  .field small { color: var(--ink-3); font-size: 11.5px; }
-  .field input.text { flex: none; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-  textarea.text, select.text { font: inherit; font-size: 13px; }
-  textarea.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px;
-                  padding: 8px 10px; resize: vertical; min-height: 70px; width: 100%; }
-  textarea.mono, .yaml { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-  select.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 8px; }
-  .radio { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 13px; }
-  .part-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--bg); }
-  .part-card .top { display: grid; grid-template-columns: 1fr 120px 1fr auto; gap: 10px; align-items: end; }
-  .froms { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
-  .impact { border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
-  .impact.warn { background: var(--wait-soft); color: var(--ink); }
-  .impact.bad { background: var(--danger-soft); color: var(--danger); }
-  .impact.okay { background: var(--ok-soft); color: var(--ink); }
-  .impact label { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
-  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--accent);
-             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  .goal { padding: 14px 16px; cursor: pointer; }
+  .goal:hover { border-color: var(--line-2); }
+  .goal .top { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .goal .text { font-weight: 600; font-size: 14.5px; line-height: 1.4; }
+  .goal .meta { color: var(--ink-3); font-size: 12px; margin-top: 3px; }
+  .goal .last { color: var(--ink-2); font-size: 13px; margin-top: 8px; display: -webkit-box; -webkit-line-clamp: 3;
+                -webkit-box-orient: vertical; overflow: hidden; border-left: 2px solid var(--line); padding-left: 10px; }
+  .goal .acts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px;
+           background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
+  .badge.working { background: var(--ok-soft); color: var(--ok); }
+  .badge.waiting { background: var(--info-soft); color: var(--info); }
+  .badge.paused, .badge.blocked { background: var(--wait-soft); color: var(--wait); }
+  .badge.stuck { background: var(--danger-soft); color: var(--danger); }
+  .confirm { display: inline-flex; gap: 6px; align-items: center; background: var(--danger-soft); color: var(--danger);
+             border-radius: 9px; padding: 3px 5px 3px 10px; font-size: 12.5px; flex-wrap: wrap; }
+  .empty { text-align: center; color: var(--ink-3); padding: 40px 20px; }
+  .back { color: var(--ink-3); text-decoration: none; font-size: 13px; } .back:hover { color: var(--ink); }
+  .goal-head { margin: 10px 0 16px; }
+  .goal-head .text { font-size: 19px; font-weight: 650; line-height: 1.35; letter-spacing: -.01em; }
+  .goal-head .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--ink-3); font-size: 12.5px; margin-top: 8px; }
+  .goal-head .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .note { background: var(--wait-soft); border-radius: 9px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+  .thread { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
+  .turn-goal { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }
+  .turn-goal::before, .turn-goal::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .msg { padding: 12px 14px; }
+  .msg.you { background: var(--accent-soft); border-color: transparent; box-shadow: none; margin-left: 12%; }
+  .msg .who { font-size: 11.5px; color: var(--ink-3); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+  .msg .body { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+  .body p { margin: 0 0 8px; } .body ul, .body ol { margin: 0 0 8px; padding-left: 20px; } .body li { margin-bottom: 4px; }
+  .body h1, .body h2, .body h3, .body h4 { font-size: 14.5px; margin: 10px 0 6px; }
+  .body pre { background: var(--sunk); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12px; }
+  .body code { background: var(--sunk); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
+  .body pre code { background: none; padding: 0; }
+  .body img { max-width: 100%; max-height: 420px; border-radius: 9px; display: block; margin: 6px 0; }
+  .body a { color: var(--accent); }
+  .mark { font-size: 11px; font-weight: 650; border-radius: 99px; padding: 1px 8px; background: var(--sunk); color: var(--ink-2); }
+  .mark.done { background: var(--ok-soft); color: var(--ok); } .mark.waiting { background: var(--info-soft); color: var(--info); }
+  .working-line { color: var(--ok); font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .spinner { width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--ok); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .yaml { white-space: pre-wrap; background: var(--sunk); border-radius: 9px; padding: 10px 12px; color: var(--ink-2); margin: 0; }
-  details summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
-  .danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
-  @media (max-width: 760px) { .part-card .top { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 760px) {
-    .bar { padding: 10px 16px; } main { padding: 16px 16px 60px; } .hint { padding: 0 16px 10px; }
-    .goal-row { grid-template-columns: 1fr; gap: 10px; }
-    .row { grid-template-columns: 1fr auto; } .row .prev { display: none; }
-    .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-  }
+  .reply { margin-top: 18px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-end; }
+  .reply textarea { flex: 1; border: 0; background: transparent; resize: none; outline: none; font-size: 14px; min-height: 40px; }
+  .edit { padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  @media (max-width: 640px) { .bar { padding: 10px 16px; } main { padding: 16px 16px 60px; } .msg.you { margin-left: 0; } }
 </style>
 </head>
 <body>
@@ -207,585 +123,323 @@
     <h1><a href="#/">Goals</a></h1>
     <div class="status"><i class="dot" id="dot"></i><span class="text" id="status">Connecting…</span></div>
     <div class="controls">
-      <div class="seg" id="mode" role="group" aria-label="What background work may use">
-        <button data-mode="local" title="Only models on this machine — no subscription">Local</button>
-        <button data-mode="spare" title="Also a subscription for parts marked line: frontier — under pace, never the last 30%">Spare</button>
-        <button data-mode="off" title="No background work">Off</button>
+      <div class="seg" role="group" aria-label="Background work">
+        <button data-on="1">On</button><button data-on="0">Off</button>
       </div>
-      <label class="check"><input type="checkbox" id="away"> Only when I'm away</label>
+      <label class="check" title="Otherwise it runs whenever the machine has room, stepping aside for you and other apps"><input type="checkbox" id="away"> Only when I'm away</label>
     </div>
   </div>
-  <div class="hint" id="hint"></div>
 </header>
 <main id="main"><div class="empty">Loading…</div></main>
-<div id="layer"></div>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
-const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
+            draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, touched: false } };
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const EXAMPLES = [
+  "Every morning, look at my X and propose 3 posts in my voice.",
+  "Make 20 NPCs for my game — a bio, a portrait and three lines each.",
+  "Keep the tests in this repo passing; fix what breaks on a branch.",
+];
 
-const S = { view: null, items: null, itemsKey: "", sig: "", error: "", addError: "",
-            confirm: "", redo: "", query: "", showDeleted: store.get("eki.goals.showDeleted") === "1" };
-
-const HINTS = {
-  local: "Local — only the models on this machine; no subscription is used.",
-  spare: "Spare — parts marked line: frontier may use a subscription, only while you're under pace for the week and never the last 30% of a window.",
-  off: "Off — nothing runs in the background.",
-};
-
-async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} :
-    { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+async function api(path, method, body) {
+  const r = await fetch(path, method ? { method, headers: {"Content-Type": "application/json"},
+                                         body: body === undefined ? undefined : JSON.stringify(body) } : {});
   if (!r.ok) { let m = await r.text(); try { m = JSON.parse(m).detail || m; } catch {} throw new Error(m); }
   return r.json();
 }
-
-// ---- routes: #/  ·  #/g/<folder>/<goal>  ·  #/g/<folder>/<goal>/<item>
 function route() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
-  if (parts[0] === "g" && parts.length >= 3) return { page: "goal", folder: parts[1], goal: parts[2], item: parts[3] || "" };
-  if (parts[0] === "new") return { page: "edit", folder: parts[1] || "", goal: "" };
-  if (parts[0] === "edit" && parts.length >= 3) return { page: "edit", folder: parts[1], goal: parts[2] };
-  return { page: "home" };
+  const p = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  return p[0] === "g" && p[1] ? { page: "goal", id: p[1] } : { page: "home" };
 }
-const goalHref = (f, g, i) => "#/g/" + enc(f) + "/" + enc(g) + (i ? "/" + enc(i) : "");
 
-function md(text, dropTitle) {
-  let out = "", list = false, dropped = !dropTitle;
-  for (const raw of String(text).split("\n")) {
-    const line = raw.trim();
-    if (!line) { if (list) { out += "</ul>"; list = false; } continue; }
-    if (/^#{1,6}\s/.test(line)) { if (!dropped) { dropped = true; continue; }
-      out += `<p><strong>${esc(line.replace(/^#+\s*/, ""))}</strong></p>`; continue; }
-    const li = line.match(/^([*\-•]|\d+\.)\s+(.*)$/);
-    if (li) { if (!list) { out += "<ul>"; list = true; } out += `<li>${esc(li[2])}</li>`; continue; }
-    if (list) { out += "</ul>"; list = false; }
-    out += `<p>${esc(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`;
+// ---- when ----------------------------------------------------------------------------------
+function whenOf(d) {
+  if (d.kind === "daily") return { kind: "daily", at: d.at || "09:00" };
+  if (d.kind === "weekdays") return { kind: "daily", at: d.at || "09:00", days: [0, 1, 2, 3, 4] };
+  if (d.kind === "weekly") return { kind: "daily", at: d.at || "09:00", days: [Number(d.day)] };
+  if (d.kind === "interval") return { kind: "interval", minutes: Math.max(15, Math.round(Number(d.hours || 4) * 60)) };
+  return { kind: "once" };
+}
+function draftOf(when) {
+  const d = { kind: "once", at: "09:00", day: "0", hours: "4" };
+  if (when?.kind === "interval") { d.kind = "interval"; d.hours = String(when.minutes / 60); }
+  if (when?.kind === "daily") {
+    d.at = when.at; const days = when.days || [0, 1, 2, 3, 4, 5, 6];
+    d.kind = days.length === 7 ? "daily" : days.join() === "0,1,2,3,4" ? "weekdays" : "weekly";
+    d.day = String(days[0] ?? 0);
   }
-  return out + (list ? "</ul>" : "");
+  return d;
 }
-const plain = t => String(t || "").split("\n").map(l => l.replace(/^#+\s*|^[*\-•]\s+/, "").trim()).filter(Boolean);
-
-function stateBadge(g) {
-  const label = {working: "Working", paused: "Paused", done: "Done", queued: g.ready ? "Queued" : "Waiting"}[g.state] || g.state;
-  return `<span class="badge ${esc(g.state)}">${label}</span>`;
+// a first guess at "when" from the words; the choice stays yours
+function guessWhen(text, d) {
+  const t = text.toLowerCase();
+  const time = t.match(/\bat (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
+  if (time) {
+    let h = Number(time[1]);
+    if (time[3] === "pm" && h < 12) h += 12;
+    if (time[3] === "am" && h === 12) h = 0;
+    if (h < 24) d.at = String(h).padStart(2, "0") + ":" + (time[2] || "00");
+  }
+  const hours = t.match(/every (\d+) ?(hours?|h\b)/);
+  const dayName = DAYS.findIndex(n => t.includes("every " + n.toLowerCase()));
+  if (hours) { d.kind = "interval"; d.hours = hours[1]; }
+  else if (/every hour|hourly/.test(t)) { d.kind = "interval"; d.hours = "1"; }
+  else if (/weekday/.test(t)) d.kind = "weekdays";
+  else if (dayName >= 0) { d.kind = "weekly"; d.day = String(dayName); }
+  else if (/every week|weekly/.test(t)) { d.kind = "weekly"; d.day = "0"; }
+  else if (/every (day|morning|evening|night)|daily|each (day|morning)/.test(t)) {
+    d.kind = "daily"; if (!time) d.at = /evening|night/.test(t) ? "19:00" : "09:00"; }
+  else d.kind = "once";
 }
-const fileUrl = (folder, p) => `/api/goals/file?folder=${enc(folder)}&path=${enc(p.path)}&v=${p.mtime}`;
-const goalOf = r => (S.view?.projects || []).find(p => p.folder === r.folder)?.goals?.find(g => g.goal === r.goal);
+function whenControls(d, prefix) {
+  return `<select class="input" data-w="kind" data-for="${prefix}">
+      <option value="once" ${d.kind === "once" ? "selected" : ""}>Once, until it's done</option>
+      <option value="daily" ${d.kind === "daily" ? "selected" : ""}>Every day</option>
+      <option value="weekdays" ${d.kind === "weekdays" ? "selected" : ""}>Weekdays</option>
+      <option value="weekly" ${d.kind === "weekly" ? "selected" : ""}>Every week</option>
+      <option value="interval" ${d.kind === "interval" ? "selected" : ""}>Every few hours</option></select>
+    ${d.kind === "weekly" ? `<select class="input" data-w="day" data-for="${prefix}">${DAYS.map((n, i) => `<option value="${i}" ${String(i) === d.day ? "selected" : ""}>on ${n}</option>`).join("")}</select>` : ""}
+    ${["daily", "weekdays", "weekly"].includes(d.kind) ? `<span class="muted">at</span><input class="input" type="time" data-w="at" data-for="${prefix}" value="${esc(d.at)}">` : ""}
+    ${d.kind === "interval" ? `<span class="muted">every</span><input class="input" type="number" min="0.25" step="0.25" style="width:80px" data-w="hours" data-for="${prefix}" value="${esc(d.hours)}"><span class="muted">hours</span>` : ""}`;
+}
 
-// ---- header -------------------------------------------------------------------------------
+// ---- text ----------------------------------------------------------------------------------
+const imgUrl = p => `/api/goals/file?path=${enc(decodeURIComponent(p))}`;
+function inline(s) {
+  return esc(s)
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, a, p) => /^https?:/.test(p) ? `<img alt="${a}" src="${p}">` : `<img alt="${a}" src="${imgUrl(p)}">`)
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,;:!?)]|$)/g, "$1<em>$2</em>");
+}
+function md(text) {
+  let out = "", list = "", code = false, buf = [];
+  const close = () => { if (list) { out += `</${list}>`; list = ""; } };
+  for (const raw of String(text || "").split("\n")) {
+    if (/^```/.test(raw.trim())) { if (code) { out += `<pre><code>${esc(buf.join("\n"))}</code></pre>`; buf = []; code = false; } else { close(); code = true; } continue; }
+    if (code) { buf.push(raw); continue; }
+    const line = raw.trim();
+    if (!line) { close(); continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { close(); out += `<h${h[1].length + 1}>${inline(h[2])}</h${h[1].length + 1}>`; continue; }
+    const ul = line.match(/^[*\-•]\s+(.*)$/), ol = line.match(/^\d+[.)]\s+(.*)$/);
+    if (ul || ol) { const want = ul ? "ul" : "ol"; if (list !== want) { close(); out += `<${want}>`; list = want; }
+                   out += `<li>${inline((ul || ol)[1])}</li>`; continue; }
+    close(); out += `<p>${inline(line)}</p>`;
+  }
+  if (code) out += `<pre><code>${esc(buf.join("\n"))}</code></pre>`;
+  close(); return out;
+}
+const MARK = /^\s*\**\s*GOAL\s*:\s*(done|continue|waiting)\b.*$/gim;
+function splitMark(text) {
+  let m, last = "";
+  const re = new RegExp(MARK.source, "gim");
+  while ((m = re.exec(text || ""))) last = m[1].toLowerCase();
+  return { body: String(text || "").replace(MARK, "").trim(), mark: last };
+}
+const plain = t => splitMark(t).body.replace(/!\[[^\]]*\]\([^)]*\)/g, "[picture]").replace(/[#*`>]/g, "").replace(/\s+/g, " ").trim();
+const STATUS = { working: "Working", queued: "Up next", scheduled: "Scheduled", waiting: "Waiting for you",
+                 paused: "Paused", done: "Done", stuck: "Stuck", blocked: "Can't start" };
+const ago = t => { if (!t) return ""; const s = Date.now() / 1000 - t;
+  return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
+const next = t => { if (!t) return ""; const d = new Date(t * 1000);
+  return "next " + d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }); };
+
+// ---- header ---------------------------------------------------------------------------------
 function header() {
   const v = S.view; if (!v) return;
   const sh = v.shift || {}, st = sh.state || "idle";
   $("#dot").className = "dot " + (st === "stepped out" ? "stepped" : st);
   const label = {working: "Working", waiting: "Waiting", idle: "Idle", off: "Off", "stepped out": "Stepped aside"}[st] || st;
-  $("#status").textContent = `${label} — ${sh.why || ""}`;
-  $("#status").title = $("#status").textContent;
-  for (const b of $("#mode").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.mode === v.mode));
+  $("#status").textContent = `${label} — ${sh.why || ""}`; $("#status").title = $("#status").textContent;
+  for (const b of document.querySelectorAll("[data-on]")) b.setAttribute("aria-pressed", String((b.dataset.on === "1") === v.on));
   $("#away").checked = v.when === "away";
-  $("#hint").textContent = HINTS[v.mode] + (v.when === "away" ? " Runs only with nobody at the keyboard."
-    : " Runs whenever the machine has room; steps aside for you and other apps; only on power.");
 }
 
-// ---- all goals --------------------------------------------------------------------------------
+// ---- the list ----------------------------------------------------------------------------------
 function home() {
-  const v = S.view;
-  const projects = v?.projects || [];
-  const goals = projects.flatMap(p => (p.goals || []).map(g => ({...g, folder: p.folder})));
-  let h = "";
-  if (!goals.length) {
-    h += `<div class="empty">No goals yet.<br><br>A goal says what should exist — twenty characters, fifty item descriptions, a set of icons —<br>and eki makes what's missing whenever the machine has room.<br><br><a class="btn primary" href="#/new">New goal</a></div>`;
-  } else {
-    h += `<div class="toolbar" style="justify-content:space-between;margin-bottom:0"><div class="section-label" style="margin:0">Goals</div>
-      <a class="btn primary" href="#/new">New goal</a></div><div class="goals" style="margin-top:10px">`;
-    for (const g of goals) {
-      const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
-      const now = g.state === "working" ? ` · making ${esc(g.working)}` : "";
-      h += `<div class="goal-row" data-open="${esc(goalHref(g.folder, g.goal))}">
-        <div><div class="name">${esc(g.goal)}</div><div class="where" title="${esc(g.folder)}">${esc(g.folder.split("/").pop())}</div></div>
-        <div class="parts">${g.items} × ${g.parts.map(esc).join(" · ")}</div>
-        <div class="prog"><div class="progress"><i style="width:${pct}%"></i></div>
-          <span>${g.done} of ${g.total} made${g.deleted ? ` · ${g.deleted} deleted` : ""}${now}</span></div>
-        <div class="acts">${stateBadge(g)}
-          <button class="btn small" data-pause="${g.paused ? "0" : "1"}" data-folder="${esc(g.folder)}" data-goal="${esc(g.goal)}">${g.paused ? "Resume" : "Pause"}</button></div>
-      </div>`;
-    }
-    h += `</div>`;
-  }
-  h += `<div class="section-label">Projects</div><div class="projects">`;
-  for (const p of projects) {
-    const k = "rm:" + p.folder;
-    h += `<div class="project"><code title="${esc(p.folder)}">${esc(p.folder)}</code>
-      ${p.error ? `<span class="err">${esc(p.error)}</span>` : ""}
-      ${S.confirm === k
-        ? `<span class="confirm">Stop working on this folder? Its files stay. <button class="btn small danger solid" data-rm="${esc(p.folder)}">Remove</button><button class="btn small" data-cancel>Cancel</button></span>`
-        : `<button class="btn small" data-ask="${esc(k)}">Remove</button>`}</div>`;
-  }
-  h += `</div><form class="add" id="add"><input class="text" name="folder" placeholder="Add a project folder with a goals.yaml — e.g. ~/games/ashfall" autocomplete="off">
-    <button class="btn primary" type="submit">Add</button></form>${S.addError ? `<div class="err-line">${esc(S.addError)}</div>` : ""}`;
+  const d = S.draft, goals = S.view?.goals || [];
+  let h = `<div class="card composer">
+    <textarea class="big" id="new-text" rows="2" placeholder="What should eki keep doing?">${esc(d.text)}</textarea>
+    ${d.text ? "" : `<div class="examples">${EXAMPLES.map(e => `<button class="chip" data-example="${esc(e)}">${esc(e)}</button>`).join("")}</div>`}
+    <div class="opts">${whenControls(d, "new")}
+      <input class="input grow" id="new-folder" placeholder="Folder to work in (optional) — e.g. ~/games/ashfall" value="${esc(d.folder)}">
+      <label class="check" title="Only when that subscription is under pace for the week, and never its last 30%"><input type="checkbox" id="new-spare" ${d.spare ? "checked" : ""}> May use my subscriptions</label>
+      <button class="btn primary" data-add ${d.text.trim() ? "" : "disabled"}>Add goal</button></div>
+    ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
+  if (!goals.length) return h + `<div class="empty">No goals yet. Write one above — the way you'd ask in a chat.<br>eki gives it turns whenever the machine has room, and you answer it in its thread.</div>`;
+  h += `<div class="label">Goals</div><div class="goals">` + goals.map(g => {
+    const k = "rm:" + g.id;
+    const last = plain(g.last);
+    return `<div class="card goal" data-open="${esc(g.id)}">
+      <div class="top"><div><div class="text">${esc(g.text)}</div>
+        <div class="meta">${esc(g.when_text)}${g.folder ? " · " + esc(g.folder.split("/").pop()) : ""}${g.spare ? " · may use subscriptions" : ""}${g.last_backend ? " · " + esc(g.last_backend) : ""}${g.last_turn_at ? " · " + ago(g.last_turn_at) : ""}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</div></div>
+        <span class="badge ${esc(g.status)}">${STATUS[g.status] || esc(g.status)}</span></div>
+      ${g.note ? `<div class="meta" style="color:var(--wait)">${esc(g.note)}</div>` : ""}
+      ${last ? `<div class="last">${esc(last.slice(0, 400))}</div>` : ""}
+      <div class="acts">
+        <button class="btn small" data-run="${esc(g.id)}">Run now</button>
+        <button class="btn small" data-pause="${esc(g.id)}" data-to="${g.state === "paused" ? "active" : "paused"}">${g.state === "paused" ? "Resume" : "Pause"}</button>
+        ${S.confirm === k ? `<span class="confirm">Delete this goal? Its thread stays in your history. <button class="btn small danger solid" data-rm="${esc(g.id)}">Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
+                          : `<button class="btn small danger" data-ask="${esc(k)}">Delete</button>`}</div></div>`;
+  }).join("") + `</div>`;
   return h;
 }
 
-// ---- one goal ---------------------------------------------------------------------------------
-function pips(it, working) {
-  return `<span class="pips">${it.parts.map(p => `<i class="pip ${p.exists ? "on" : working === p.name ? "work" : p.deleted ? "gone" : ""}" title="${esc(p.name)}"></i>`).join("")}</span>`;
-}
-function itemState(it, working) {
-  if (it.deleted) return "deleted";
-  const made = it.parts.filter(p => p.exists).length, wanted = it.parts.filter(p => !p.deleted).length;
-  if (working) return "making " + working;
-  return made >= wanted ? `${made} of ${it.parts.length}` : `${made} of ${wanted} made`;
-}
-
+// ---- one goal: its thread ------------------------------------------------------------------------
 function goalPage(r) {
-  const g = goalOf(r), data = S.items;
-  if (!g) return `<a class="back" href="#/">← All goals</a><div class="empty">That goal isn't here any more.</div>`;
-  const goal = data?.goals?.[0];
-  const hasPic = goal && goal.items[0]?.parts.some(p => p.kind === "image");
-  const workingKey = data?.working || "";
-  const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
-  const k = "all:" + r.folder + ":" + r.goal;
-  let h = `<a class="back" href="#/">← All goals</a>
-    <div class="goal-top"><div><h2>${esc(r.goal)}</h2>
-      <div class="meta">${stateBadge(g)}<span title="${esc(r.folder)}">${esc(r.folder)}</span><span>${g.items} × ${g.parts.map(esc).join(" · ")}</span></div></div>
-      <div class="tools">
-        <a class="btn" href="#/edit/${enc(r.folder)}/${enc(r.goal)}">Edit goal</a>
-        <button class="btn" data-pause="${g.paused ? "0" : "1"}" data-folder="${esc(r.folder)}" data-goal="${esc(r.goal)}">${g.paused ? "Resume" : "Pause"}</button>
-        ${S.confirm === k
-          ? `<span class="confirm">Move all ${g.done} generated files to the project's .eki/trash and pause? <button class="btn small danger solid" data-delete-all>Delete all</button><button class="btn small" data-cancel>Cancel</button></span>`
-          : `<button class="btn danger" data-ask="${esc(k)}" ${g.done ? "" : "disabled"}>Delete everything it made…</button>`}
-      </div></div>
-    <div class="toolbar"><div class="progress"><i style="width:${pct}%"></i></div>
-      <span class="muted">${g.done} of ${g.total} made${g.deleted ? ` · ${g.deleted} deleted` : ""}</span>
-      <input class="text" id="filter" placeholder="Filter" value="${esc(S.query)}" style="max-width:220px">
-      ${g.deleted ? `<label class="check"><input type="checkbox" id="showDeleted" ${S.showDeleted ? "checked" : ""}> Show deleted</label>` : ""}
-    </div>`;
-  if (!goal) return h + `<div class="empty">Loading…</div>`;
-  const shown = goal.items.filter(it => (S.showDeleted || !it.deleted));
-  if (hasPic) {
-    h += `<div class="grid">` + shown.map(it => {
-      const img = it.parts.find(p => p.kind === "image");
-      const w = workingKey.startsWith(`${goal.goal}/${it.item}/`) ? workingKey.split("/").pop() : "";
-      const pic = img.exists ? `<img loading="lazy" alt="" src="${fileUrl(data.folder, img)}">`
-        : `<div class="pending ${w === img.name ? "making" : ""}">${it.deleted || img.deleted ? "Deleted" : w === img.name ? "Being made…" : "Not made yet"}</div>`;
-      return `<div class="card ${w ? "working" : ""} ${it.deleted ? "gone" : ""}" data-search="${esc(search(it))}" data-open="${esc(goalHref(r.folder, r.goal, it.item))}">
-        <div class="pic">${pic}</div><div class="cap"><div class="t">${esc(it.title)}</div>
-        <div class="s">${pips(it, w)}<span>${esc(itemState(it, w))}</span></div></div></div>`;
-    }).join("") + `</div>`;
+  const g = (S.view?.goals || []).find(x => x.id === r.id);
+  if (!g) return `<a class="back" href="#/">← Goals</a><div class="empty">That goal isn't here any more.</div>`;
+  const k = "rm:" + g.id;
+  let h = `<a class="back" href="#/">← Goals</a><div class="goal-head">`;
+  if (S.editing) {
+    const d = S.editDraft;
+    h += `<div class="card edit"><textarea class="input" id="edit-text" rows="3">${esc(d.text)}</textarea>
+      <div class="row">${whenControls(d, "edit")}</div>
+      <div class="row"><input class="input" style="flex:1" id="edit-folder" placeholder="Folder to work in (optional)" value="${esc(d.folder)}">
+        <label class="check"><input type="checkbox" id="edit-spare" ${d.spare ? "checked" : ""}> May use my subscriptions</label></div>
+      <div class="row"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel-edit>Cancel</button>
+        ${S.error ? `<span class="err">${esc(S.error)}</span>` : ""}</div></div>`;
   } else {
-    h += `<div class="list">` + shown.map(it => {
-      const w = workingKey.startsWith(`${goal.goal}/${it.item}/`) ? workingKey.split("/").pop() : "";
-      const first = it.parts.find(p => p.exists && p.kind === "text");
-      const prev = first ? plain(first.text).slice(it.title !== it.item ? 1 : 0).join(" ") : "";
-      return `<div class="row ${w ? "working" : ""} ${it.deleted ? "gone" : ""}" data-search="${esc(search(it))}" data-open="${esc(goalHref(r.folder, r.goal, it.item))}">
-        <div><div class="t">${esc(it.title)}</div><div class="id">${esc(it.item)}</div></div>
-        <div class="prev">${esc(prev) || `<span class="muted">${w ? "Being made…" : "Not made yet"}</span>`}</div>
-        <div class="s">${pips(it, w)}</div></div>`;
-    }).join("") + `</div>`;
+    h += `<div class="text">${esc(g.text)}</div>
+      <div class="meta"><span class="badge ${esc(g.status)}">${STATUS[g.status] || esc(g.status)}</span>
+        <span>${esc(g.when_text)}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</span>
+        ${g.folder ? `<span title="${esc(g.folder)}">${esc(g.folder)}</span>` : ""}
+        <span>${g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine"}</span>
+        <span>${g.turns} turn${g.turns === 1 ? "" : "s"}</span></div>
+      ${g.note ? `<div class="note">${esc(g.note)}${g.note.includes("subscription") && !g.spare ? " — Edit it and tick “May use my subscriptions”." : ""}</div>` : ""}
+      <div class="acts"><button class="btn" data-run="${esc(g.id)}">Run now</button>
+        <button class="btn" data-pause="${esc(g.id)}" data-to="${g.state === "paused" ? "active" : "paused"}">${g.state === "paused" ? "Resume" : "Pause"}</button>
+        <button class="btn" data-edit>Edit</button>
+        ${S.confirm === k ? `<span class="confirm">Delete this goal? Its thread stays in your history. <button class="btn small danger solid" data-rm="${esc(g.id)}">Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
+                          : `<button class="btn danger" data-ask="${esc(k)}">Delete</button>`}</div>`;
+  }
+  h += `</div><div class="thread">`;
+  const turns = S.thread?.turns || [];
+  if (!g.conversation) h += `<div class="empty">No turns yet — it gets its first as soon as the machine has room.</div>`;
+  for (const t of turns) {
+    const text = t.content || "";
+    if (t.role === "user" && text.startsWith("[eki · goal")) {
+      const when = text.match(/^\[eki · goal · ([^\]]+)\]/);
+      h += `<div class="turn-goal">${when ? "Turn · " + esc(when[1]) : "Turn"}</div>`;
+      continue;
+    }
+    if (t.role === "user") { h += `<div class="card msg you"><div class="who">You</div><div class="body">${md(text)}</div></div>`; continue; }
+    if (t.role !== "assistant") continue;
+    const { body, mark } = splitMark(text);
+    h += `<div class="card msg"><div class="who">${esc(t.backend || "")}${mark ? `<span class="mark ${mark}">${mark === "done" ? "done" : mark === "waiting" ? "waiting for you" : "will carry on"}</span>` : ""}</div>
+      <div class="body">${md(body)}</div></div>`;
+  }
+  if (S.thread?.active_run) h += `<div class="working-line"><span class="spinner"></span>Working on it…</div>`;
+  h += `</div>`;
+  if (g.conversation) {
+    h += `<div class="card reply"><textarea id="reply" rows="2" placeholder="${g.status === "waiting" ? "Answer it — it carries on after" : "Reply in this thread — feedback it keeps in mind"}"></textarea>
+      <button class="btn primary" data-send ${S.sending ? "disabled" : ""}>Send</button></div>`;
   }
   return h;
 }
-const search = it => (it.title + " " + it.item + " " + it.parts.map(p => p.text || "").join(" ")).toLowerCase();
 
-// ---- one item (the panel) -----------------------------------------------------------------
-function deps(goal, name) {
-  const out = []; let changed = true; const parts = goal.items[0]?.parts || [];
-  while (changed) { changed = false;
-    for (const p of parts) if (!out.includes(p.name) && (p.after.includes(name) || p.after.some(a => out.includes(a)))) { out.push(p.name); changed = true; } }
-  return out;
-}
-function panel(r) {
-  const goal = S.items?.goals?.[0];
-  const it = goal?.items.find(x => x.item === r.item);
-  if (!it) return "";
-  const working = S.items.working || "";
-  const ik = "item:" + it.item;
-  const firstText = it.parts.find(p => p.kind === "text" && p.exists);
-  let body = "";
-  for (const p of it.parts) {
-    const key = `${goal.goal}/${it.item}/${p.name}`;
-    const d = deps(goal, p.name);
-    let content, acts = "";
-    if (p.exists) {
-      content = p.kind === "image" ? `<img alt="" src="${fileUrl(S.items.folder, p)}">`
-        : `<div class="text">${md(p.text, p === firstText)}</div>`;
-      acts = S.confirm === "part:" + key
-        ? `<span class="confirm">Delete the ${esc(p.name)}${d.length ? ` — and the ${esc(d.join(" and "))} made from it` : ""}? It won't be made again. <button class="btn small danger solid" data-del-part="${esc(p.name)}">Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
-        : `<button class="btn small" data-redo="${esc(p.name)}">Redo</button><button class="btn small danger" data-ask="part:${esc(key)}">Delete</button>`;
-    } else if (p.deleted || it.deleted) {
-      content = `<div class="placeholder">Deleted — it won't be made again</div>`;
-      acts = it.deleted ? "" : `<button class="btn small" data-restore="${esc(p.name)}">Make again</button>`;
-    } else {
-      const making = working === key;
-      const need = p.after.filter(a => !it.parts.find(x => x.name === a)?.exists);
-      const why = making ? "Being made…" : p.line === "frontier" && S.view.mode !== "spare" ? "Waits for Spare mode"
-        : need.length ? `Waits for ${need.join(", ")}` : S.view.mode === "off" ? "Background work is off" : goalOf(r)?.paused ? "The goal is paused" : "Next up";
-      content = `<div class="placeholder ${making ? "making" : ""}">${esc(why)}</div>`;
-    }
-    const form = S.redo === key ? `<form class="redo" data-part="${esc(p.name)}"><input class="text" name="note" placeholder="What should change? (optional)" autocomplete="off">
-      <div class="r"><span class="also">${d.length ? "Also redoes " + esc(d.join(", ")) : ""}</span>
-      <button type="button" class="btn small" data-cancel>Cancel</button><button class="btn small primary" type="submit">Redo</button></div></form>` : "";
-    body += `<div class="part-block"><div class="ph"><span class="part-name">${esc(p.name)} <span class="muted">· ${esc(p.file)}</span></span><span>${acts}</span></div>
-      ${content}${p.note ? `<div class="note">Next time: ${esc(p.note)}</div>` : ""}${form}</div>`;
-  }
-  const itemActs = it.deleted
-    ? `<button class="btn small" data-restore="">Make again</button>`
-    : S.confirm === ik
-      ? `<span class="confirm">Delete this item? Its files go to .eki/trash and it won't be made again. <button class="btn small danger solid" data-del-item>Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
-      : `<button class="btn small danger" data-ask="${esc(ik)}">Delete item</button>`;
-  return `<div class="scrim" data-close></div><aside class="panel" role="dialog" aria-label="${esc(it.title)}">
-    <div class="panel-head"><div><h3>${esc(it.title)}</h3><div class="sub">${esc(it.item)} · ${esc(it.dir)}</div>
-      <div style="margin-top:8px">${itemActs}</div></div><button class="x" data-close aria-label="Close">×</button></div>
-    <div class="panel-body">${body}</div></aside>`;
-}
-
-
-// ---- a goal's definition: new, edit, remove ---------------------------------------------------
-let uid = 0;
-const E = { key: "", folder: "", old: "", parts: [], name: "", mode: "count", count: 10, names: "", id: "", dir: "",
-            yaml: false, yamlText: "", describe: "", drafting: false, draftNote: "", shown: false,
-            preview: null, redo: new Set(), removing: false, trash: false, saving: false, error: "", kinds: ["text"] };
-
-function toParts(entry) {
-  const ps = Object.entries(entry.parts || {}).map(([name, p]) => ({ uid: ++uid, name, kind: p.kind || "text", file: p.file || "",
-    fromNames: [].concat(p.from || []), frontier: p.line === "frontier", backend: p.backend || "", prompt: p.prompt || "" }));
-  for (const p of ps) p.from = p.fromNames.map(n => ps.find(x => x.name === n)?.uid).filter(Boolean);
-  return ps;
-}
-function loadEntry(entry) {
-  E.name = entry.name || ""; E.parts = toParts(entry);
-  if (entry.items) { E.mode = "names"; E.names = entry.items.join("\n"); E.count = entry.items.length; }
-  else { E.mode = "count"; E.count = entry.count || 10; }
-  E.id = entry.id || ""; E.dir = entry.dir || ""; E.shown = true; E.yamlText = "";
-}
-function entryOf() {
-  const parts = {};
-  for (const p of E.parts) {
-    parts[p.name] = { kind: p.kind, file: p.file, prompt: p.prompt,
-      from: p.from.map(u => E.parts.find(x => x.uid === u)?.name).filter(Boolean) };
-    if (p.frontier) parts[p.name].line = "frontier";
-    if (p.backend) parts[p.name].backend = p.backend;
-  }
-  const e = { name: E.name.trim(), parts };
-  if (E.mode === "names") e.items = E.names.split("\n").map(x => x.trim()).filter(Boolean);
-  else { e.count = Number(E.count) || 0; if (E.id.trim()) e.id = E.id.trim(); }
-  if (E.dir.trim()) e.dir = E.dir.trim();
-  return e;
-}
-function blankPart(i) {
-  return { uid: ++uid, name: i ? "part" + (i + 1) : "text", kind: "text", file: i ? `part${i + 1}.md` : "text.md", from: [], frontier: false, backend: "", prompt: "" };
-}
-
-async function openEditor(r) {
-  const key = r.folder + "\n" + r.goal;
-  if (E.key === key) return;
-  Object.assign(E, { key, folder: r.folder, old: r.goal, parts: [], name: "", mode: "count", count: 10, names: "", id: "", dir: "",
-    yaml: false, yamlText: "", describe: "", drafting: false, draftNote: "", shown: false, preview: null, redo: new Set(),
-    removing: false, trash: false, saving: false, error: "" });
-  try { E.kinds = (await api("/api/goals/kinds")).kinds; } catch {}
-  if (!E.folder) E.folder = (S.view?.projects || [])[0]?.folder || "";
-  if (r.goal) {
-    try { loadEntry((await api(`/api/goals/definition?folder=${enc(r.folder)}&goal=${enc(r.goal)}`)).entry); }
-    catch (e) { E.error = e.message; }
-    preview();
-  }
-  drawEditor();
-}
-
-let previewTimer = null;
-function preview() {
-  clearTimeout(previewTimer);
-  previewTimer = setTimeout(async () => {
-    const body = { folder: E.folder, old: E.old };
-    if (E.yaml) body.yaml = E.yamlText; else body.entry = entryOf();
-    try { E.preview = await api("/api/goals/preview", body); } catch (e) { E.preview = { ok: false, error: e.message }; }
-    const box = $("#impact"); if (box) box.innerHTML = impactHtml();
-    const y = $("#yaml-view"); if (y && E.preview?.yaml && !E.yaml) y.textContent = E.preview.yaml;
-  }, 350);
-}
-
-function impactHtml() {
-  const p = E.preview;
-  if (!p) return "";
-  if (!p.ok) return `<div class="impact bad">${esc(p.error)}</div>`;
-  const im = p.impact || {}; let h = "";
-  for (const c of im.changed || []) {
-    h += `<div class="impact warn">The <b>${esc(c.part)}</b> prompt changed — ${c.made} already made ${c.made === 1 ? "stays" : "stay"} as ${c.made === 1 ? "it was" : "they were"}${c.with.length ? `, and the ${esc(c.with.join(" and "))} made from ${c.made === 1 ? "it" : "them"}` : ""}.
-      <label><input type="checkbox" data-redo-part="${esc(c.part)}" ${E.redo.has(c.part) ? "checked" : ""}> Make ${c.made === 1 ? "it" : "them"} again with the new prompt (the old files go to the trash)</label></div>`;
-  }
-  if (im.orphaned) h += `<div class="impact warn">A file name or folder changed: ${im.orphaned} file${im.orphaned === 1 ? "" : "s"} already made won't be recognised, and will be made again under the new name.</div>`;
-  if (im.dropped_items) h += `<div class="impact warn">${im.dropped_items} item${im.dropped_items === 1 ? "" : "s"} fewer — their files stay, but aren't part of the goal any more.</div>`;
-  if (im.new_items) h += `<div class="impact okay">${im.new_items} new item${im.new_items === 1 ? "" : "s"} will be made.</div>`;
-  if (!h && !E.old) h = `<div class="impact okay">Ready. Once saved, it's made whenever the machine has room.</div>`;
-  return h;
-}
-
-// a part named in a prompt is made first, whatever the checkboxes say (eki/goals.py)
-function promptUses(p, other) { return new RegExp("\\{" + other.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(:\\d+)?\\}").test(p.prompt); }
-function partCard(p, i) {
-  const others = E.parts.filter(x => x.uid !== p.uid);
-  const names = E.parts.map(x => x.uid !== p.uid ? `{${x.name}}` : null).filter(Boolean);
-  return `<div class="part-card" data-part-uid="${p.uid}">
-    <div class="top">
-      <label class="field"><span>Part</span><input class="text" data-pk="name" value="${esc(p.name)}"></label>
-      <label class="field"><span>Kind</span><select class="text" data-pk="kind">
-        <option value="text" ${p.kind === "text" ? "selected" : ""}>Text</option>
-        <option value="image" ${p.kind === "image" ? "selected" : ""} ${E.kinds.includes("image") ? "" : "disabled"}>Image${E.kinds.includes("image") ? "" : " (no local image model)"}</option></select></label>
-      <label class="field"><span>File</span><input class="text" data-pk="file" value="${esc(p.file)}"></label>
-      <button type="button" class="btn small danger" data-rm-part="${p.uid}" style="margin-bottom:12px" ${E.parts.length > 1 ? "" : "disabled"}>Remove</button>
-    </div>
-    ${others.length ? `<div class="field"><span>Made from</span><div class="froms">${others.map(o => {
-      const used = promptUses(p, o);
-      return `<label title="${used ? "Its prompt uses {" + esc(o.name) + "}, so it's always made first" : ""}"><input type="checkbox" data-from="${o.uid}" ${p.from.includes(o.uid) || used ? "checked" : ""} ${used ? "disabled" : ""}> ${esc(o.name)}${used ? ` <span class="muted">(in the prompt)</span>` : ""}</label>`; }).join("")}</div></div>` : ""}
-    <label class="field"><span>Prompt</span><textarea class="text mono" data-pk="prompt" rows="${Math.min(10, Math.max(3, p.prompt.split("\n").length + 1))}">${esc(p.prompt)}</textarea>
-      <small>Fill-ins: ${["{others}", "{n}", "{id}"].concat(names).map(esc).join(" ")} — add :500 to cut a part to its first 500 characters. Every piece also reads the project's world bible.</small></label>
-    <label class="check"><input type="checkbox" data-pk="frontier" ${p.frontier ? "checked" : ""}> Worth a subscription (used only in Spare mode)</label>
-  </div>`;
-}
-
-function editorHtml() {
-  const projects = (S.view?.projects || []).map(p => p.folder);
-  const isNew = !E.old;
-  let h = `<div class="editor"><a class="back" href="${isNew ? "#/" : goalHref(E.folder, E.old)}">← ${isNew ? "All goals" : esc(E.old)}</a>
-    <h2>${isNew ? "New goal" : "Edit " + esc(E.old)}</h2>
-    <p class="lede">A goal says what should exist — a number of items, each made of parts — and how to make each part. It lives in the project's goals.yaml.</p>`;
-  if (E.error) h += `<div class="impact bad">${esc(E.error)}</div>`;
-  if (isNew) {
-    h += `<div class="box"><h3>Project</h3>
-      ${projects.length ? `<select class="text" id="ed-folder" style="width:100%">${projects.map(f => `<option value="${esc(f)}" ${f === E.folder ? "selected" : ""}>${esc(f)}</option>`).join("")}
-        <option value="" ${projects.includes(E.folder) ? "" : "selected"}>Another folder…</option></select>` : ""}
-      ${!projects.includes(E.folder) || !projects.length ? `<input class="text" id="ed-folder-path" placeholder="A folder — e.g. ~/games/ashfall (a goals.yaml is created if it has none)" value="${esc(projects.includes(E.folder) ? "" : E.folder)}" style="width:100%;margin-top:8px">` : ""}
-    </div>
-    <div class="box"><h3>Describe it</h3>
-      <textarea class="text" id="ed-describe" rows="3" placeholder="e.g. 30 weapons for this world, each with a name and short description, a longer lore entry, and an icon">${esc(E.describe)}</textarea>
-      <div class="actions"><button class="btn primary" data-draft ${E.drafting ? "disabled" : ""}>${E.drafting ? `<span class="spinner"></span>Drafting on your local model…` : "Draft it"}</button>
-        ${E.shown ? "" : `<button class="btn" data-blank>Start blank</button>`}
-        <span class="muted">${esc(E.draftNote)}</span></div></div>`;
-  }
-  if (!E.shown) return h + "</div>";
-  h += `<div class="box"><h3>Goal</h3>
-    <div class="cols"><label class="field"><span>Name</span><input class="text" data-ek="name" value="${esc(E.name)}" placeholder="weapons"></label>
-      <div class="field"><span>Items</span><div class="radio">
-        <label><input type="radio" name="mode" value="count" ${E.mode === "count" ? "checked" : ""}> How many</label>
-        <label><input type="radio" name="mode" value="names" ${E.mode === "names" ? "checked" : ""}> Named</label></div></div></div>
-    ${E.mode === "count"
-      ? `<div class="cols"><label class="field"><span>How many</span><input class="text" type="number" min="1" max="10000" data-ek="count" value="${esc(E.count)}"></label>
-         <label class="field"><span>Item names</span><input class="text" data-ek="id" value="${esc(E.id)}" placeholder="${esc((E.name || "item") + "-{n:02}")}"><small>{n} is the number; {n:02} pads it to 01, 02…</small></label></div>`
-      : `<label class="field"><span>One per line</span><textarea class="text" data-ek="names" rows="4" placeholder="innkeeper&#10;blacksmith&#10;ferryman">${esc(E.names)}</textarea></label>`}
-    <label class="field"><span>Where each item's files go</span><input class="text" data-ek="dir" value="${esc(E.dir)}" placeholder="${esc((E.name || "goal") + "/{id}")}"><small>Inside the project; {id} is the item's name.</small></label>
-    </div>
-    <div class="box"><h3>Parts</h3>${E.parts.map(partCard).join("")}
-      <button class="btn" data-add-part>Add a part</button></div>
-    <div id="impact">${impactHtml()}</div>
-    <details ${E.yaml ? "open" : ""} id="yaml-details"><summary>As YAML${E.yaml ? " (editing — the form is set aside)" : ""}</summary>
-      ${E.yaml ? `<textarea class="text mono" id="ed-yaml" rows="18">${esc(E.yamlText)}</textarea>`
-               : `<pre class="yaml" id="yaml-view">${esc(E.preview?.yaml || "")}</pre>`}
-      <div class="actions"><button class="btn small" data-yaml-mode>${E.yaml ? "Back to the form" : "Edit as YAML"}</button></div></details>
-    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save ${E.saving ? "disabled" : ""}>${isNew ? "Save goal" : "Save changes"}</button>
-      <a class="btn" href="${isNew ? "#/" : goalHref(E.folder, E.old)}">Cancel</a></div>`;
-  if (!isNew) {
-    h += `<div class="box danger-zone" style="margin-top:28px"><h3>Remove this goal</h3>
-      ${E.removing ? `<div class="radio" style="margin-bottom:10px">
-          <label><input type="radio" name="trash" value="0" ${E.trash ? "" : "checked"}> Keep the files it made</label>
-          <label><input type="radio" name="trash" value="1" ${E.trash ? "checked" : ""}> Move them to the project's .eki/trash</label></div>
-        <div class="actions"><button class="btn danger solid" data-remove-goal>Remove ${esc(E.old)}</button><button class="btn" data-cancel-remove>Cancel</button></div>`
-      : `<p class="muted" style="margin:0 0 10px">Takes it out of goals.yaml. Nothing is made for it any more.</p><button class="btn danger" data-ask-remove>Remove goal…</button>`}</div>`;
-  }
-  return h + "</div>";
-}
-function drawEditor() { header(); $("#main").innerHTML = editorHtml(); $("#layer").innerHTML = ""; }
-
-function syncFroms(p) {
-  for (const o of E.parts) {
-    if (o.uid === p.uid) continue;
-    const box = document.querySelector(`[data-part-uid="${p.uid}"] [data-from="${o.uid}"]`);
-    if (!box) continue;
-    const used = promptUses(p, o);
-    box.disabled = used; box.checked = used || p.from.includes(o.uid);
-  }
-}
-function partOf(el) { const c = el.closest("[data-part-uid]"); return c && E.parts.find(p => p.uid === Number(c.dataset.partUid)); }
-
-document.addEventListener("input", e => {
-  if (route().page !== "edit") return;
-  const t = e.target;
-  if (t.id === "ed-describe") { E.describe = t.value; return; }
-  if (t.id === "ed-folder-path") { E.folder = t.value.trim(); return; }
-  if (t.id === "ed-yaml") { E.yamlText = t.value; return preview(); }
-  if (t.dataset.ek) { E[t.dataset.ek] = t.value; return preview(); }
-  const p = partOf(t);
-  if (p && t.dataset.pk === "prompt") { p.prompt = t.value; syncFroms(p); return preview(); }
-  if (p && t.dataset.pk && t.dataset.pk !== "frontier" && t.dataset.pk !== "kind") {
-    const was = p.name; p[t.dataset.pk] = t.value;
-    if (t.dataset.pk === "name" && was !== p.name) {
-      // a part's name shows in the others' "Made from": redraw those, keep focus here
-      for (const el of document.querySelectorAll(`[data-from="${p.uid}"]`)) el.parentElement.lastChild.textContent = " " + p.name;
-    }
-    preview();
-  }
-});
-document.addEventListener("change", e => {
-  if (route().page !== "edit") return;
-  const t = e.target, p = partOf(t);
-  if (t.id === "ed-folder") { E.folder = t.value; drawEditor(); return; }
-  if (t.name === "mode") { E.mode = t.value; drawEditor(); return preview(); }
-  if (t.name === "trash") { E.trash = t.value === "1"; return; }
-  if (t.dataset.redoPart) { t.checked ? E.redo.add(t.dataset.redoPart) : E.redo.delete(t.dataset.redoPart); return; }
-  if (p && t.dataset.pk === "frontier") { p.frontier = t.checked; return preview(); }
-  if (p && t.dataset.pk === "kind") {
-    p.kind = t.value;
-    if (p.kind === "image" && /\.md$/.test(p.file)) p.file = p.file.replace(/\.md$/, ".png");
-    if (p.kind === "text" && /\.png$/.test(p.file)) p.file = p.file.replace(/\.png$/, ".md");
-    drawEditor(); return preview();
-  }
-  if (p && t.dataset.from) {
-    const u = Number(t.dataset.from);
-    p.from = t.checked ? [...new Set([...p.from, u])] : p.from.filter(x => x !== u);
-    return preview();
-  }
-});
-document.addEventListener("click", async e => {
-  if (route().page !== "edit") return;
-  const t = e.target;
-  if (t.closest("[data-draft]")) {
-    if (!E.describe.trim()) { E.draftNote = "Say what it should make first."; return drawEditor(); }
-    if (!E.folder) { E.draftNote = "Choose the project folder first."; return drawEditor(); }
-    E.drafting = true; E.draftNote = "This usually takes under a minute."; drawEditor();
-    try {
-      const got = await api("/api/goals/draft", { folder: E.folder, description: E.describe });
-      loadEntry(got.entry); E.draftNote = `Drafted by ${got.backend}. Check it, change what you like, then save.`;
-    } catch (err) { E.draftNote = err.message; }
-    E.drafting = false; drawEditor(); preview(); return;
-  }
-  if (t.closest("[data-blank]")) { loadEntry({ name: "", count: 10, parts: {} }); E.parts = [blankPart(0)]; drawEditor(); return preview(); }
-  if (t.closest("[data-add-part]")) { E.parts.push(blankPart(E.parts.length)); drawEditor(); return preview(); }
-  const rp = t.closest("[data-rm-part]");
-  if (rp) { const u = Number(rp.dataset.rmPart); E.parts = E.parts.filter(p => p.uid !== u);
-            for (const p of E.parts) p.from = p.from.filter(x => x !== u); drawEditor(); return preview(); }
-  if (t.closest("[data-yaml-mode]")) {
-    if (E.yaml) {                     // back to the form: take what the YAML says, if it reads
-      try { const got = await api("/api/goals/preview", { folder: E.folder, old: E.old, yaml: E.yamlText });
-            if (!got.ok) throw new Error(got.error);
-            loadEntry(got.entry); } catch (err) { E.error = "The YAML doesn't read yet: " + err.message; drawEditor(); return; }
-      E.yaml = false; E.error = "";
-    } else { E.yaml = true; E.yamlText = E.preview?.yaml || ""; }
-    drawEditor(); return preview();
-  }
-  if (t.closest("[data-save]")) {
-    E.saving = true; E.error = ""; drawEditor();
-    const body = { folder: E.folder, old: E.old, redo: [...E.redo] };
-    if (E.yaml) body.yaml = E.yamlText; else body.entry = entryOf();
-    try {
-      const got = await api("/api/goals/save", body);
-      E.key = ""; location.hash = goalHref(got.folder, got.goal);
-    } catch (err) { E.error = err.message; E.saving = false; drawEditor(); }
-    return;
-  }
-  if (t.closest("[data-ask-remove]")) { E.removing = true; return drawEditor(); }
-  if (t.closest("[data-cancel-remove]")) { E.removing = false; return drawEditor(); }
-  if (t.closest("[data-remove-goal]")) {
-    try { await api("/api/goals/remove", { folder: E.folder, goal: E.old, trash: E.trash }); E.key = ""; location.hash = "#/"; }
-    catch (err) { E.error = err.message; drawEditor(); }
-  }
-});
-
-// ---- drawing and refreshing ---------------------------------------------------------------
-function busy() { return S.redo || document.activeElement?.matches("input.text"); }
-
+// ---- drawing and refreshing ------------------------------------------------------------------------
+function busy() { const a = document.activeElement; return a && a.matches("textarea, input:not([type=checkbox])"); }
 function draw() {
   header();
   const r = route();
-  if (!S.view) return;
-  if (r.page === "edit") { openEditor(r).then(() => { if (E.key) drawEditor(); }); return; }
-  if (r.page === "home") { $("#main").innerHTML = home(); $("#layer").innerHTML = ""; }
-  else {
-    $("#main").innerHTML = goalPage(r);
-    $("#layer").innerHTML = r.item ? panel(r) : "";
-    applyFilter();
-  }
-  const f = $("form.redo input"); if (f) f.focus();
+  $("#main").innerHTML = r.page === "goal" ? goalPage(r) : home();
 }
-function applyFilter() {
-  const q = S.query.toLowerCase();
-  for (const c of document.querySelectorAll("[data-search]")) c.style.display = !q || c.dataset.search.includes(q) ? "" : "none";
-}
-
 async function refresh(force) {
   try {
     const v = await api("/api/goals");
     const r = route();
-    let items = S.items, key = "";
+    let thread = null;
     if (r.page === "goal") {
-      key = r.folder + "\n" + r.goal;
-      items = await api(`/api/goals/items?folder=${enc(r.folder)}&goal=${enc(r.goal)}`);
+      const g = v.goals.find(x => x.id === r.id);
+      if (g?.conversation) thread = await api(`/api/conversations/${enc(g.conversation)}`).catch(() => null);
     }
-    S.view = v; S.error = "";
-    if (r.page === "edit") { header(); if (force) draw(); return; }
-    const sig = JSON.stringify([v, items, key]);
-    if (force || sig !== S.sig) {
-      S.sig = sig; S.items = items; S.itemsKey = key;
-      if (force || !busy()) draw(); else header();
-    }
+    const sig = JSON.stringify([v.goals, v.on, v.when, thread, r]);
+    S.view = v; S.thread = thread;
+    if (force || (sig !== S.sig && !busy() && !S.editing)) { S.sig = sig; draw(); } else header();
   } catch (e) {
     $("#dot").className = "dot"; $("#status").textContent = "The engine isn't answering — is eki running?";
   }
 }
-async function act(path, body) {
-  try { await api(path, body); } catch (e) { alertLine(e.message); }
-  S.confirm = ""; S.redo = ""; await refresh(true);
-}
-function alertLine(m) { $("#status").textContent = m; }
+async function act(fn) { S.error = ""; try { await fn(); } catch (e) { S.error = e.message; } S.confirm = ""; await refresh(true); }
 
-// ---- events -------------------------------------------------------------------------------
-document.addEventListener("click", async e => {
-  const t = e.target, r = route();
-  const m = t.closest("#mode button");
-  if (m) return act("/api/goals/mode", {mode: m.dataset.mode});
-  const pz = t.closest("[data-pause]");
-  if (pz) { e.stopPropagation(); return act("/api/goals/pause", {folder: pz.dataset.folder, goal: pz.dataset.goal, paused: pz.dataset.pause === "1"}); }
-  if (t.closest("[data-ask]")) { e.stopPropagation(); S.confirm = t.closest("[data-ask]").dataset.ask; S.redo = ""; return draw(); }
-  if (t.closest("[data-cancel]")) { S.confirm = ""; S.redo = ""; return draw(); }
-  const rm = t.closest("[data-rm]");
-  if (rm) { S.confirm = ""; await fetch(`/api/goals/projects?folder=${enc(rm.dataset.rm)}`, {method: "DELETE"}); return refresh(true); }
-  if (t.closest("[data-delete-all]")) return act("/api/goals/delete", {folder: r.folder, goal: r.goal});
-  if (t.closest("[data-del-item]")) return act("/api/goals/delete", {folder: r.folder, goal: r.goal, item: r.item});
-  const dp = t.closest("[data-del-part]");
-  if (dp) return act("/api/goals/delete", {folder: r.folder, goal: r.goal, item: r.item, part: dp.dataset.delPart});
-  const rs = t.closest("[data-restore]");
-  if (rs) return act("/api/goals/restore", {folder: r.folder, goal: r.goal, item: r.item, part: rs.dataset.restore});
-  const rd = t.closest("[data-redo]");
-  if (rd) { S.redo = `${r.goal}/${r.item}/${rd.dataset.redo}`; S.confirm = ""; return draw(); }
-  if (t.closest("[data-close]")) { location.hash = goalHref(r.folder, r.goal); return; }
-  const op = t.closest("[data-open]");
-  if (op && !t.closest("button")) { S.confirm = ""; S.redo = ""; location.hash = op.dataset.open; }
-});
-document.addEventListener("submit", async e => {
-  e.preventDefault();
-  const f = e.target, r = route();
-  if (f.id === "add") {
-    try { await api("/api/goals/projects", {folder: f.folder.value.trim()}); S.addError = ""; }
-    catch (err) { S.addError = err.message; }
-    return refresh(true);
-  }
-  if (f.matches("form.redo")) return act("/api/goals/redo", {folder: r.folder, goal: r.goal, item: r.item, part: f.dataset.part, note: f.note.value});
-});
+// ---- events ------------------------------------------------------------------------------------
 document.addEventListener("input", e => {
-  if (e.target.id === "filter") { S.query = e.target.value; applyFilter(); }
+  const t = e.target;
+  if (t.id === "new-text") { S.draft.text = t.value; if (!S.draft.touched) { const before = S.draft.kind + S.draft.at; guessWhen(t.value, S.draft);
+      if (before !== S.draft.kind + S.draft.at) { const at = t.selectionStart; draw(); const n = $("#new-text"); n.focus(); n.setSelectionRange(at, at); return; } }
+    const b = $("[data-add]"); if (b) b.disabled = !t.value.trim(); return; }
+  if (t.id === "new-folder") S.draft.folder = t.value;
+  if (t.id === "edit-text") S.editDraft.text = t.value;
+  if (t.id === "edit-folder") S.editDraft.folder = t.value;
+  if (t.dataset.w) { const d = t.dataset.for === "new" ? S.draft : S.editDraft; d[t.dataset.w] = t.value; if (t.dataset.for === "new") d.touched = true; }
 });
 document.addEventListener("change", e => {
-  if (e.target.id === "showDeleted") { S.showDeleted = e.target.checked; store.set("eki.goals.showDeleted", S.showDeleted ? "1" : "0"); draw(); }
-  if (e.target.id === "away") act("/api/goals/mode", {when: e.target.checked ? "away" : "resources"});
+  const t = e.target;
+  if (t.id === "away") return act(() => api("/api/goals/mode", "POST", { when: t.checked ? "away" : "resources" }));
+  if (t.id === "new-spare") S.draft.spare = t.checked;
+  if (t.id === "edit-spare") S.editDraft.spare = t.checked;
+  if (t.dataset.w === "kind") draw();
+});
+document.addEventListener("click", async e => {
+  const t = e.target, r = route();
+  const on = t.closest("[data-on]");
+  if (on) return act(() => api("/api/goals/mode", "POST", { on: on.dataset.on === "1" }));
+  const ex = t.closest("[data-example]");
+  if (ex) { S.draft.text = ex.dataset.example; S.draft.touched = false; guessWhen(S.draft.text, S.draft); draw(); $("#new-text").focus(); return; }
+  if (t.closest("[data-add]")) {
+    const d = S.draft;
+    return act(async () => {
+      const g = await api("/api/goals", "POST", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare });
+      S.draft = { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, touched: false };
+      location.hash = "#/g/" + enc(g.id);
+    });
+  }
+  const run = t.closest("[data-run]");
+  if (run) { e.stopPropagation(); return act(() => api(`/api/goals/${enc(run.dataset.run)}/run`, "POST")); }
+  const pz = t.closest("[data-pause]");
+  if (pz) { e.stopPropagation(); return act(() => api(`/api/goals/${enc(pz.dataset.pause)}`, "PATCH", { state: pz.dataset.to })); }
+  const ask = t.closest("[data-ask]");
+  if (ask) { e.stopPropagation(); S.confirm = ask.dataset.ask; return draw(); }
+  if (t.closest("[data-cancel]")) { e.stopPropagation(); S.confirm = ""; return draw(); }
+  const rm = t.closest("[data-rm]");
+  if (rm) { e.stopPropagation(); return act(async () => { await api(`/api/goals/${enc(rm.dataset.rm)}`, "DELETE"); location.hash = "#/"; }); }
+  if (t.closest("[data-edit]")) {
+    const g = S.view.goals.find(x => x.id === r.id);
+    S.editDraft = { ...draftOf(g.when), text: g.text, folder: g.folder, spare: g.spare }; S.editing = true; S.error = ""; return draw();
+  }
+  if (t.closest("[data-cancel-edit]")) { S.editing = false; S.error = ""; return draw(); }
+  if (t.closest("[data-save]")) {
+    const d = S.editDraft;
+    try { await api(`/api/goals/${enc(r.id)}`, "PATCH", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare });
+          S.editing = false; S.error = ""; }
+    catch (err) { S.error = err.message; }
+    return refresh(true);
+  }
+  if (t.closest("[data-send]")) {
+    const g = S.view.goals.find(x => x.id === r.id), box = $("#reply");
+    if (!box.value.trim()) return;
+    S.sending = true; draw();
+    try { await api("/api/ask", "POST", { prompt: box.value, conversation: g.conversation, repo: g.folder || "" }); }
+    catch (err) { S.error = err.message; }
+    S.sending = false; return refresh(true);
+  }
+  const op = t.closest("[data-open]");
+  if (op && !t.closest("button")) location.hash = "#/g/" + enc(op.dataset.open);
 });
 document.addEventListener("keydown", e => {
-  if (e.key !== "Escape") return;
-  if (S.redo || S.confirm) { S.redo = ""; S.confirm = ""; return draw(); }
-  const r = route(); if (r.item) location.hash = goalHref(r.folder, r.goal);
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (e.target.id === "new-text") $("[data-add]")?.click();
+    if (e.target.id === "reply") $("[data-send]")?.click();
+  }
+  if (e.key === "Escape") { S.confirm = ""; if (S.editing) { S.editing = false; } draw(); }
 });
-window.addEventListener("hashchange", () => { S.confirm = ""; S.redo = ""; S.query = r0(); refresh(true); });
-const r0 = () => route().page === "goal" ? S.query : "";
-
+window.addEventListener("hashchange", () => { S.confirm = ""; S.editing = false; S.error = ""; refresh(true); });
 refresh(true);
 setInterval(() => refresh(false), 3000);
 </script>

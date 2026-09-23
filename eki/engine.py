@@ -47,7 +47,6 @@ from . import learn as learn_mod
 from . import handoff as handoff_mod
 from . import failover as failover_mod
 from . import goals as goals_mod
-from . import goaledit
 from . import shift as shift_mod
 from . import models as models_mod
 from . import table as table_mod
@@ -79,6 +78,14 @@ from .store import Store
 HEALTH_TTL = 20.0
 
 
+def _goal_of(run: Dict[str, Any]) -> str:
+    """The goal a run is a turn of, or ""."""
+    try:
+        return str((json.loads(run.get("payload") or "{}") or {}).get("goal") or "")
+    except (TypeError, ValueError):
+        return ""
+
+
 class Engine:
     def __init__(self, cfg, owner: bool = False, port: int = 8787):
         #: where the service listens; Codex is pointed here for local models
@@ -107,8 +114,9 @@ class Engine:
         # the idle shift (eki/goals.py, eki/shift.py): the piece in progress,
         # the models it loaded, pieces resting after a failure, what it's doing
         self._shift_run: str = ""
+        self._shift_goal: str = ""
+        self._shift_local = False                  # the turn in progress is on a model on this machine
         self._shift_loaded: set = set()
-        self._shift_rest: Dict[str, float] = {}
         self._shift_state: Dict[str, Any] = {"state": "idle", "why": "not started yet"}
         self._awake = shift_mod.Awake()
         #: set when a piece ends, so the next one starts at once, not on the next tick
@@ -470,7 +478,9 @@ class Engine:
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
                                payload=json.dumps(payload) if payload else "")
-        self._shift_step_out("your request comes first")
+        if self._shift_local:
+            # a goal's turn on the model your request may need: yours first
+            self._shift_step_out("your request comes first")
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
@@ -598,10 +608,6 @@ class Engine:
             async for piece in self._measure(run):
                 yield piece
             return
-        if run.get("kind") == "goal":
-            async for piece in self._goal_piece(run):
-                yield piece
-            return
         if run.get("payload") and json.loads(run["payload"]).get("continuation"):
             async for piece in self._continuation(run):
                 yield piece
@@ -643,7 +649,8 @@ class Engine:
                     task=label.task, difficulty=label.difficulty,
                     row=row, row_title=table_mod.TITLES.get(row, row), targets=targets)
         choice = self.router.choose(need)
-        if requested and cid:
+        if requested and cid and not _goal_of(run):
+            # you picked it — learned from; a goal's turn is eki's own pick, not yours
             self._learn_override(need, requested, cid)
         if choice.backend is None and wants_harness:
             # it needs tools and nothing with tools can take it now: a model
@@ -1362,10 +1369,9 @@ class Engine:
             out += ["", "Your rules: " + "; ".join(extra)]
         return "\n".join(out)
 
-    async def routing_explain(self, prompt: str, thread: str = "", folder: str = "",
-                              before_turn: int = 0) -> Dict[str, Any]:
-        """Where a request would go, and why — nothing runs. `before_turn`:
-        read the thread only up to that turn (a request replayed in place)."""
+    async def _route(self, prompt: str, thread: str = "", folder: str = "",
+                     before_turn: int = 0) -> Tuple[Any, str, Need, Any]:
+        """(label, why this row, the need, the choice) — what routing would do, run nothing."""
         try:
             label = await self.classifier.label(prompt, has_folder=bool(folder))
         except Exception:                           # noqa: BLE001
@@ -1374,13 +1380,20 @@ class Engine:
             if thread else []
         row, row_why, targets, stays, escalate = self._plan(
             label, {"prompt": prompt, "images": False, "cwd": folder}, before, thread, "")
-        cells = self.routing_table(thread)
         wants_harness = self._wants_harness(label, folder, False, "") and not (stays and self._bare(stays))
         need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
                     images_out=label.task == "image", web=label.task == "research" and not stays,
                     task=label.task, difficulty=label.difficulty, row=row,
                     row_title=table_mod.TITLES.get(row, row), targets=targets)
-        choice = self.router.choose(need)
+        return label, row_why, need, self.router.choose(need)
+
+    async def routing_explain(self, prompt: str, thread: str = "", folder: str = "",
+                              before_turn: int = 0) -> Dict[str, Any]:
+        """Where a request would go, and why — nothing runs. `before_turn`:
+        read the thread only up to that turn (a request replayed in place)."""
+        label, row_why, need, choice = await self._route(prompt, thread, folder, before_turn)
+        row = need.row
+        cells = self.routing_table(thread)
         labels = self._target_labels()
         return {"prompt": prompt, "label": label.to_json(), "row": row, "row_title": need.row_title,
                 "row_why": row_why, "row_targets": [labels.get(t, t) for t in need.targets],
@@ -2911,56 +2924,60 @@ class Engine:
                 self.models.touch(key)
         return label
 
-    # ---- the idle shift (ROADMAP, Stage 3) -----------------------------------
+    # ---- goals: things eki keeps doing (eki/goals.py, eki/shift.py) ---------------------------
 
-    def _shift_mode(self) -> str:
-        mode = str(self.settings.get("background", "local"))
-        return mode if mode in ("local", "spare", "off") else "local"
+    def _shift_on(self) -> bool:
+        return str(self.settings.get("background", "local")) != "off"
 
-    def _piece_backend(self, piece: "goals_mod.Piece", mode: str) -> Tuple[str, str]:
-        """(provider, why) for a piece — a local model, unless the part asks
-        for the express line and `spare` mode has room — or ("", why not)."""
-        if piece.backend:
-            return (piece.backend, "named in goals.yaml") if self.get(piece.backend) else \
-                ("", f"{piece.backend} isn't a provider here")
-        row = "picture" if piece.kind == "image" else "writing"
-        targets = [table_mod.parse_target(t)[0]
-                   for t in (self.routing_table().get(row) or {}).get("targets") or []]
-        for b in self.backends:                     # anything the row left out, last
-            if b.key not in targets:
-                targets.append(b.key)
-
-        def able(key: str) -> Optional[Backend]:
+    def _local_text(self) -> str:
+        """The model on this machine that writes, when a goal's turn needs no tools."""
+        rows = [table_mod.parse_target(t)[0] for t in
+                (self.routing_table().get("writing") or {}).get("targets") or []]
+        for key in rows + [b.key for b in self.backends]:
             b = self.get(key)
-            if b is None or key in self.router.reserved:
-                return None
-            caps = b.info.capabilities
-            if piece.kind == "image":
-                return b if caps.images_out else None
-            return b if caps.text and not (caps.images_out and not caps.text) else None
+            if (b is not None and b.info.cost.tier == 0 and b.info.capabilities.text
+                    and key not in self.router.reserved and b.info.kind not in ("claude_code", "codex")):
+                return key
+        return ""
 
-        if piece.line == "frontier":
-            if mode != "spare":
-                return "", "worth a subscription — waits for `spare` mode"
-            for key in targets:
-                b = able(key)
-                if b is None or b.info.cost.tier != 50:
-                    continue
-                room = shift_mod.spare_room(self.quota.latest.get(b.info.quota_source or ""),
-                                            reserve=float(self.settings.get("background_reserve",
-                                                                            shift_mod.RESERVE)))
-                if room.ok:
-                    return key, "spare subscription room"
-                return "", f"{key}: {room.why}"
-            return "", "no subscription can take it"
-        for key in targets:
-            b = able(key)
-            if b is not None and b.info.cost.tier == 0 and "-2b" not in key:
-                return key, "local"
-        return "", f"no local model makes {piece.kind}"
+    def _goal_backend(self, g: "goals_mod.Goal", need: Need, choice: Any) -> Tuple[str, str]:
+        """(provider, why) for a goal's turn, within what the goal may spend — or ("", why not).
+
+        Routing picks as it would for anything you type; the goal's budget
+        then keeps it on this machine unless the goal may use a subscription
+        and that subscription has spare room (never the last 30% of a window)."""
+        b = choice.backend if choice is not None else None
+        if b is not None and b.info.cost.tier == 0:
+            return b.key, "local"
+        if b is not None and g.spare and b.info.cost.tier == 50:
+            room = shift_mod.spare_room(self.quota.latest.get(b.info.quota_source or ""),
+                                        reserve=float(self.settings.get("background_reserve", shift_mod.RESERVE)))
+            if room.ok:
+                return b.key, "spare subscription room"
+            spare_why = f"{b.key}: {room.why}"
+        else:
+            spare_why = ""
+        # on this machine instead: with hands if the work needs tools, the writer if not
+        if need.images_out:
+            for x in self.backends:
+                if x.info.cost.tier == 0 and x.info.capabilities.images_out and x.key not in self.router.reserved:
+                    return x.key, "local"
+        if need.tools:
+            for key in self._local_with_tools().values():
+                if self.get(key) is not None:
+                    return key, "local, with tools"
+            return "", spare_why or (f"needs tools — {b.key if b else 'a harness'}; "
+                                     "let this goal use your subscriptions")
+        key = self._local_text()
+        if key:
+            return key, "local"
+        return "", spare_why or "no model on this machine can take it"
+
+    def _goal_run(self) -> Dict[str, Any]:
+        return (self.runs.get(self._shift_run) or {}) if self._shift_run else {}
 
     def _shift_step_out(self, why: str) -> bool:
-        """Cancel the piece in progress (it's redone later)."""
+        """Cancel the goal's turn in progress; it's taken up again later."""
         rid = self._shift_run
         if not rid or rid not in self.runner.running:
             return False
@@ -2981,53 +2998,93 @@ class Engine:
         return gone
 
     def _asks_running(self) -> bool:
+        """One of your requests is running (not a goal's turn)."""
         for rid in self.runner.running:
             run = self.runs.get(rid) or {}
-            if run.get("kind", "ask") == "ask":
+            if run.get("kind", "ask") == "ask" and not _goal_of(run):
                 return True
         return False
 
+    def _goal_finished(self) -> None:
+        """The turn that just ended: where its goal stands now."""
+        run = self._goal_run()
+        gid = self._shift_goal
+        self._shift_run, self._shift_goal, self._shift_local = "", "", False
+        if not run or not gid:
+            return
+        try:
+            g = goals_mod.get(gid)
+        except goals_mod.GoalError:
+            return                                  # removed while it ran
+        state = run.get("state")
+        seconds = round((run.get("ended_at") or time.time()) - (run.get("started_at") or time.time()), 1)
+        entry = {"at": int(time.time()), "goal": gid, "run": run["id"], "backend": run.get("backend"),
+                 "seconds": seconds, "state": state}
+        if state == "cancelled":
+            entry["state"] = "stepped out"          # not the goal's fault: tried again when there's room
+        else:
+            ok = state == "done"
+            answer = run.get("output") or ""
+            if g.conversation:
+                last = [t for t in self.store.turns(g.conversation) if t["role"] == "assistant"]
+                answer = (last[-1].get("content") if last else "") or answer
+            g = goals_mod.after_turn(g, answer, ok)
+            entry["outcome"] = goals_mod.outcome(answer) if ok else "failed"
+            if not ok:
+                entry["error"] = (run.get("error") or "")[:200]
+        goals_mod.note(entry)
+
     async def shift_tick(self) -> Dict[str, Any]:
-        """Start the next piece if the machine has room; step out if not."""
-        mode = self._shift_mode()
+        """Give the next goal that's due a turn, if the machine has room; step out if not."""
         now = int(time.time())
         if self._shift_run and self._shift_run in self.runner.running:
-            if self._asks_running():
+            if self._shift_local and self._asks_running():
                 self._shift_step_out("your request comes first")
             else:
                 held = shift_mod.must_stop(bool(self.settings.get("background_on_battery", False)))
-                if not held.ok:
+                if not held.ok and (self._shift_local or "battery" in held.why):
                     self._shift_step_out(held.why)
                     await self._shift_unload(held.why)
             return self._shift_state
-        self._shift_run = ""
-        if mode == "off":
+        if self._shift_run:
+            self._goal_finished()
+        if not self._shift_on():
             self._awake.let_go()
             self._shift_state = {"state": "off", "why": "background work is off", "at": now}
             return self._shift_state
+        goals = goals_mod.all_goals()
+        for g in goals:                             # a reply lets a waiting goal carry on
+            if g.state == "waiting" and g.conversation and goals_mod.replied(g, self.store.turns(g.conversation)):
+                goals_mod.update(g.id, state="active", next_at=0, note="")
         if self._asks_running():
             self._shift_state = {"state": "waiting", "why": "your request is running", "at": now}
             return self._shift_state
-        todo = [p for p in await asyncio.to_thread(goals_mod.backlog)
-                if p.ready and self._shift_rest.get(p.folder + ":" + p.key, 0) < now]
-        choices = []
-        blocked = ""
-        for p in todo:
-            key, why = self._piece_backend(p, mode)
-            if key:
-                choices.append((p, key, why))
-            else:
-                blocked = blocked or f"{p.key}: {why}"
-        if not choices:
+        due = sorted((g for g in goals_mod.all_goals() if goals_mod.due(g, now)),
+                     key=lambda g: (g.next_at, g.created_at))
+        if not due:
             self._awake.let_go()
             self._shift_state = {"state": "idle", "at": now,
-                                 "why": blocked or ("nothing left to make" if goals_mod.projects()
-                                                    else "no goals — `eki goals add <folder>`")}
+                                 "why": "nothing due" if goals else "no goals yet"}
             return self._shift_state
-        # the model that's already loaded first: swapping models costs more than a piece
-        loaded = [c for c in choices if getattr(self._local_for(c[1]), "running", False)]
-        piece, key, why = (loaded or choices)[0]
+        picked = None
+        for g in due:
+            text = goals_mod.prompt(g, now)
+            # routed on the goal's own words — eki's framing around them isn't the work
+            _, _, need, choice = await self._route(g.text, g.conversation, g.folder)
+            key, why = self._goal_backend(g, need, choice)
+            if key:
+                picked = (g, key, why, text)
+                break
+            if g.note != why:
+                goals_mod.update(g.id, note=why)
+        if picked is None:
+            self._awake.let_go()
+            self._shift_state = {"state": "idle", "why": f"{due[0].text[:60]}: {goals_mod.get(due[0].id).note}",
+                                 "at": now}
+            return self._shift_state
+        g, key, why, text = picked
         local = self._local_for(key)
+        on_machine = self.get(key).info.cost.tier == 0
         pids = [os.getpid()] + [models_mod.listener_pid(m.port) or 0
                                 for m in self.models.models.values() if m.running and m.port]
         gate = await asyncio.to_thread(
@@ -3036,290 +3093,104 @@ class Engine:
             when=str(self.settings.get("background_when", "resources")), exclude_pids=pids,
             cpu_limit=float(self.settings.get("background_cpu", shift_mod.CPU_BUSY)),
             gpu_limit=float(self.settings.get("background_gpu", shift_mod.GPU_BUSY)),
-            on_battery_ok=bool(self.settings.get("background_on_battery", False)))
+            on_battery_ok=bool(self.settings.get("background_on_battery", False)),
+            measure_gpu=on_machine)
         if not gate.ok:
             self._awake.let_go()
             if "memory" in gate.why:
                 await self._shift_unload(gate.why)
-            self._shift_state = {"state": "waiting", "why": gate.why, "at": now, "next": piece.key}
+            self._shift_state = {"state": "waiting", "why": gate.why, "at": now, "next": g.id}
             return self._shift_state
         self._awake.hold()
-        payload = {**piece.to_json(), "backend": key, "why": why}
-        rid = self.runs.create(f"{os.path.basename(piece.folder)}: {piece.key}", requested=key,
-                               kind="goal", cwd=piece.folder, payload=json.dumps(payload))
-        self._shift_run = rid
-        self._shift_state = {"state": "working", "why": f"{piece.key} on {key}", "at": now, "run": rid}
+        if local is not None and not local.running:
+            self._shift_loaded.add(local.key)
+        cid = g.conversation or self.store.new_conversation()
+        turn = self.store.add_turn(cid, "user", text, meta={"goal": g.id})
+        rid = self.runs.create(text, conversation=cid, cwd=g.folder, requested=key, user_turn=turn,
+                               payload=json.dumps({"goal": g.id, "why": why}))
+        goals_mod.update(g.id, conversation=cid, turns=g.turns + 1, last_turn=turn,
+                         last_turn_at=now, note="")
+        self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine
+        self._shift_state = {"state": "working", "why": f"{g.text[:60]} — on {key}", "at": now,
+                             "run": rid, "goal": g.id}
         await self.runner.submit(rid)
+        task = self.runner.tasks.get(rid)
+        if task is not None:                        # the next goal starts the moment this ends
+            task.add_done_callback(lambda _t: self.shift_wake.set())
         return self._shift_state
 
-    async def _goal_piece(self, run: Dict[str, Any]) -> AsyncIterator[Union[str, Dict[str, str]]]:
-        """One piece of a goal: made, written into the project, noted."""
-        job = json.loads(run.get("payload") or "{}")
-        started = time.time()
-        entry = {"at": int(started), "folder": job.get("folder"),
-                 "piece": f"{job.get('goal')}/{job.get('item')}/{job.get('part')}",
-                 "backend": job.get("backend"), "run": run["id"]}
-        spec = goals_mod.load(job["folder"])
-        piece = next((p for p in goals_mod.pieces(spec)
-                      if (p.goal, p.item, p.part) == (job.get("goal"), job.get("item"), job.get("part"))),
-                     None)
-        if piece is None:
-            yield "already there, deleted, or no longer in goals.yaml\n"
-            return
-        key = job["backend"]
-        backend = self.get(key)
-        if backend is None:
-            raise BackendError(f"no provider {key}")
-        yield {"backend": key, "reason": f"background: {piece.key} ({job.get('why') or 'local'})"}
-        local = self._local_for(key)
-        if local is not None:
-            if not local.running:
-                message = await self.models.start(local.key)
-                if not local.running:
-                    raise BackendError(message)
-                self._shift_loaded.add(local.key)
-            self.models.hold(local.key)
-        options = dict(self.options.get(key, {}))
-        subject = adapters.build(backend.info, options)
-        prompt = goals_mod.render(spec, piece)
-        target = Path(piece.path)
-        state = "failed"
-        try:
-            if piece.kind == "image":
-                drawn = ""
-                async for chunk in subject.stream([Message("user", prompt)], prompt=prompt):
-                    yield chunk
-                    m = re.search(r"!\[[^\]]*\]\(([^)]+)\)", chunk)
-                    if m:
-                        drawn = m.group(1).replace("%20", " ")
-                if not drawn or not os.path.isfile(drawn):
-                    raise BackendError("no picture came back")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(f".{target.name}.part")
-                shutil.copyfile(drawn, tmp)
-                os.replace(tmp, target)
-            else:
-                parts: List[str] = []
-                messages = [Message("system", goals_mod.instructions(spec, piece)),
-                            Message("user", prompt)]
-                async for chunk in subject.stream(messages):
-                    if isinstance(chunk, str):
-                        parts.append(chunk)
-                        yield chunk
-                text = goals_mod.clean("".join(parts))
-                if len(text.strip()) < 20:
-                    raise BackendError("the piece came back empty")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(f".{target.name}.part")
-                tmp.write_text(text)
-                os.replace(tmp, target)
-            state = "done"
-            goals_mod.forget_note(piece.folder, piece.key)          # it was for this making
-            yield f"\n→ {target}\n"
-        except (asyncio.CancelledError, GeneratorExit):
-            state = "stepped out"
-            raise
-        except Exception as e:                      # noqa: BLE001
-            entry["error"] = str(e)[:300]
-            # resting, not retried at once: a piece that failed shouldn't
-            # take every idle minute
-            self._shift_rest[piece.folder + ":" + piece.key] = time.time() + 1800
-            raise
-        finally:
-            if local is not None:
-                self.models.release(local.key)
-            try:
-                await subject.close()
-            except Exception:                       # noqa: BLE001
-                pass
-            goals_mod.note({**entry, "state": state, "seconds": round(time.time() - started, 1),
-                            "line": piece.line})
-            self.shift_wake.set()
-
-    def _shift_job(self) -> Dict[str, Any]:
-        """The piece the shift is making right now, or {}."""
-        if not self._shift_run or self._shift_run not in self.runner.running:
-            return {}
-        return json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
+    # ---- goals, for the board and the command line ---------------------------------------------
 
     def goals_view(self) -> Dict[str, Any]:
         rows = []
-        job = self._shift_job()
-        for folder in goals_mod.projects():
-            try:
-                spec = goals_mod.load(folder)
-            except goals_mod.GoalError as e:
-                rows.append({"folder": folder, "error": str(e)})
-                continue
-            goals = goals_mod.status(spec)
-            for g in goals:
-                working = job.get("folder") == spec.folder and job.get("goal") == g["goal"]
-                g["working"] = f"{job.get('item')}/{job.get('part')}" if working else ""
-                g["state"] = ("working" if working else "paused" if g["paused"]
-                              else "done" if g["done"] >= g["total"] else "queued")
-            rows.append({"folder": folder, "goals": goals})
-        return {"mode": self._shift_mode(),
-                "when": str(self.settings.get("background_when", "resources")),
-                "shift": self._shift_state, "projects": rows}
+        running = self._shift_goal if self._shift_run in self.runner.running else ""
+        for g in goals_mod.all_goals():
+            row = g.to_json()
+            row["working"] = g.id == running
+            row["last"] = ""
+            row["last_backend"] = ""
+            if g.conversation:
+                said = [t for t in self.store.turns(g.conversation) if t["role"] == "assistant"]
+                if said:
+                    row["last"] = (said[-1].get("content") or "")[-1500:]
+                    row["last_backend"] = said[-1].get("backend") or ""
+            row["status"] = ("working" if row["working"] else g.state if g.state != "active"
+                             else "blocked" if g.note else "scheduled" if g.repeats and g.next_at > time.time()
+                             else "queued")
+            rows.append(row)
+        return {"on": self._shift_on(), "when": str(self.settings.get("background_when", "resources")),
+                "shift": self._shift_state, "goals": rows}
 
-    def goals_items(self, folder: str, goal: str = "") -> Dict[str, Any]:
-        spec = goals_mod.load(folder)
-        job = self._shift_job()
-        working = f"{job.get('goal')}/{job.get('item')}/{job.get('part')}" \
-            if job.get("folder") == spec.folder else ""
-        return {"folder": spec.folder, "working": working, "goals": goals_mod.items(spec, goal)}
-
-    def _step_out_of(self, folder: str, goal: str, item: str = "", why: str = "") -> None:
-        job = self._shift_job()
-        if (job.get("folder") == folder and job.get("goal") == goal
-                and (not item or job.get("item") == item)):
-            self._shift_step_out(why or "its piece was changed")
-
-    def goals_delete(self, folder: str, goal: str, item: str = "", part: str = "") -> Dict[str, Any]:
-        spec = goals_mod.load(folder)
-        self._step_out_of(spec.folder, goal, item, "you deleted it")
-        done = goals_mod.delete(spec, goal, item, part)
-        observe_mod.note("history", what="goal delete", piece="/".join(x for x in (goal, item, part) if x),
-                         moved=done.get("moved"))
+    def goals_create(self, text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
+                     spare: bool = False) -> Dict[str, Any]:
+        g = goals_mod.create(text, when, folder, spare)
+        observe_mod.note("history", what="goal added", goal=g.id, text=text[:200])
         self.shift_wake.set()
-        return done
+        return g.to_json()
 
-    def goals_restore(self, folder: str, goal: str, item: str, part: str = "") -> Dict[str, Any]:
-        spec = goals_mod.load(folder)
-        back = goals_mod.restore(spec, goal, item, part)
+    def goals_update(self, gid: str, **fields: Any) -> Dict[str, Any]:
+        g = goals_mod.get(gid)
+        if fields.get("state") == "paused" and self._shift_goal == g.id:
+            self._shift_step_out("you paused its goal")
+        if fields.get("state") == "active":
+            fields.setdefault("note", "")
+            fields.setdefault("failures", 0)
+            if g.state in ("done", "stuck") and not g.repeats:
+                fields.setdefault("next_at", 0)
+        g = goals_mod.update(g.id, **fields)
         self.shift_wake.set()
-        return {"restored": back}
+        return g.to_json()
 
-    def goals_pause(self, folder: str, goal: str, paused: bool) -> Dict[str, Any]:
-        spec = goals_mod.load(folder)
-        if paused:
-            self._step_out_of(spec.folder, goal, "", "you paused its goal")
-        goals_mod.pause(spec.folder, goal, paused)
-        self.shift_wake.set()
-        return {"goal": goal, "paused": paused}
+    def goals_run_now(self, gid: str) -> Dict[str, Any]:
+        """Its next turn at the first room, whatever its schedule says."""
+        g = goals_mod.get(gid)
+        return self.goals_update(g.id, state="active", next_at=0)
 
-    def goals_redo(self, folder: str, goal: str, item: str, part: str, note: str = "") -> Dict[str, Any]:
-        spec = goals_mod.load(folder)
-        key = f"{goal}/{item}/{part}"
-        self._step_out_of(spec.folder, goal, item, "its piece is being redone")
-        moved = goals_mod.redo(spec, goal, item, part, note)
-        self._shift_rest.pop(spec.folder + ":" + key, None)
-        observe_mod.note("history", what="goal redo", piece=key, moved=moved, note=note[:200])
-        self.shift_wake.set()
-        return {"redone": moved}
-
-    # ---- goals themselves: new, changed, removed (eki/goaledit.py) --------------------------
-
-    def _goal_kinds(self) -> List[str]:
-        """What this machine can make in the background: text, and pictures if a local model draws."""
-        kinds = []
-        for kind in ("text", "image"):
-            probe = goals_mod.Piece("", "", "", 0, "", kind, "", [], "local", "", True)
-            if self._piece_backend(probe, "local")[0]:
-                kinds.append(kind)
-        return kinds
-
-    async def goals_draft(self, folder: str, description: str) -> Dict[str, Any]:
-        """A goal entry from a sentence, written by the local text model."""
-        if not description.strip():
-            raise goals_mod.GoalError("say what the goal should make")
-        folder = str(Path(folder).expanduser())
-        probe = goals_mod.Piece(folder, "", "", 0, "", "text", "", [], "local", "", True)
-        key, why = self._piece_backend(probe, "local")
-        if not key:
-            raise goals_mod.GoalError(f"no local model to draft with ({why})")
-        local = self._local_for(key)
-        if local is not None:
-            if not local.running:
-                message = await self.models.start(local.key, eager=True)
-                if not local.running:
-                    raise goals_mod.GoalError(message)
-            self.models.hold(local.key)
-        self._shift_step_out("drafting a goal")
-        subject = adapters.build(self.get(key).info, dict(self.options.get(key, {})))
-        prompt = goaledit.draft_prompt(description, folder, self._goal_kinds())
-        messages = [Message("user", prompt)]
-        try:
-            for attempt in range(2):
-                text = ""
-                async for chunk in subject.stream(messages):
-                    if isinstance(chunk, str):
-                        text += chunk
-                try:
-                    entry = goaledit.parse_draft(text)
-                    return {"entry": entry, "yaml": goaledit.dump(entry), "backend": key}
-                except goals_mod.GoalError as e:
-                    if attempt:
-                        raise goals_mod.GoalError(f"the draft didn't work out: {e}")
-                    messages = messages + [Message("assistant", text),
-                                           Message("user", f"That entry has a problem: {e}. "
-                                                           "Reply with the corrected entry only.")]
-        finally:
-            if local is not None:
-                self.models.release(local.key)
-            try:
-                await subject.close()
-            except Exception:                       # noqa: BLE001
-                pass
-        raise goals_mod.GoalError("no draft")
-
-    def goals_definition(self, folder: str, goal: str) -> Dict[str, Any]:
-        entry = goaledit.clean(goaledit.entry(folder, goal))
-        return {"entry": entry, "yaml": goaledit.dump(entry)}
-
-    def goals_preview(self, folder: str, old: str, entry: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            clean = goaledit.clean(entry)
-            return {"ok": True, "yaml": goaledit.dump(clean), "entry": clean,
-                    "impact": goaledit.impact(folder, old, clean)}
-        except goals_mod.GoalError as e:
-            return {"ok": False, "error": str(e)}
-
-    def goals_save(self, folder: str, old: str, entry: Dict[str, Any],
-                   redo: Optional[List[str]] = None) -> Dict[str, Any]:
-        folder = str(Path(folder).expanduser())
-        clean = goaledit.clean(entry)
-        name = str(clean.get("name"))
-        if old:
-            self._step_out_of(folder, old, "", "its goal was changed")
-        spec = goaledit.put(folder, clean, old)
-        if old and old != name:                   # a rename carries its pause and deletions
-            st = goals_mod.state(folder)
-            st["paused"] = [name if g == old else g for g in st["paused"]]
-            st["deleted"] = [name + k[len(old):] if k.startswith(old + "/") else k for k in st["deleted"]]
-            goals_mod._save_state(folder, st)
-        moved = goaledit.redo_parts(folder, name, redo) if redo else 0
-        if spec.folder not in goals_mod.projects():
-            goals_mod.add(spec.folder)
-        observe_mod.note("history", what="goal saved", goal=name, was=old or "", redo=redo or [])
-        self.shift_wake.set()
-        return {"goal": name, "folder": spec.folder, "moved": moved,
-                "status": next(g for g in goals_mod.status(spec) if g["goal"] == name)}
-
-    def goals_remove(self, folder: str, goal: str, trash: bool = False) -> Dict[str, Any]:
-        folder = str(Path(folder).expanduser())
-        self._step_out_of(folder, goal, "", "its goal was removed")
-        done = goaledit.remove(folder, goal, trash)
-        observe_mod.note("history", what="goal removed", goal=goal, trash=trash, moved=done["moved"])
-        return done
+    def goals_remove(self, gid: str) -> Dict[str, Any]:
+        g = goals_mod.get(gid)
+        if self._shift_goal == g.id:
+            self._shift_step_out("you removed its goal")
+        goals_mod.remove(g.id)
+        observe_mod.note("history", what="goal removed", goal=g.id)
+        return {"removed": g.id, "conversation": g.conversation}
 
     def goals_report(self, hours: float = 24.0) -> Dict[str, Any]:
-        """What the shift made, what failed, and what it cost."""
+        """What the shift did: turns, outcomes, time, and on which models."""
         entries = goals_mod.history(time.time() - hours * 3600)
-        made = [e for e in entries if e.get("state") == "done"]
-        failed = [e for e in entries if e.get("state") == "failed"]
-        out = [e for e in entries if e.get("state") == "stepped out"]
+        turns = [e for e in entries if e.get("state") == "done"]
         by_backend: Dict[str, Dict[str, float]] = {}
-        for e in made:
-            b = by_backend.setdefault(e.get("backend") or "?", {"pieces": 0, "seconds": 0.0})
-            b["pieces"] += 1
+        for e in turns:
+            b = by_backend.setdefault(e.get("backend") or "?", {"turns": 0, "seconds": 0.0})
+            b["turns"] += 1
             b["seconds"] += float(e.get("seconds") or 0)
-        subscription = [e for e in made if e.get("line") == "frontier"]
-        return {"hours": hours, "made": len(made), "failed": len(failed), "stepped_out": len(out),
+        local = {b.key for b in self.backends if b.info.cost.tier == 0}
+        return {"hours": hours, "turns": len(turns),
+                "failed": sum(e.get("state") == "failed" for e in entries),
+                "stepped_out": sum(e.get("state") == "stepped out" for e in entries),
+                "finished": sum(e.get("outcome") == "done" for e in entries),
                 "working_seconds": round(sum(float(e.get("seconds") or 0) for e in entries), 1),
-                "by_backend": by_backend, "on_subscription": len(subscription),
-                "failures": [{"piece": e.get("piece"), "error": e.get("error")} for e in failed[-10:]],
-                "recent": [e.get("piece") for e in made[-10:]]}
+                "by_backend": by_backend,
+                "on_subscription": sum(1 for e in turns if (e.get("backend") or "") not in local)}
 
     # ---- measuring ---------------------------------------------------
 

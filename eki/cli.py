@@ -512,9 +512,14 @@ def cmd_watch(args) -> int:
         if not todo:
             print("the programs are up to date (as of the last reading)")
             return 0
+        failed = False
         for key, prog in todo:
             print(f"updating {key} {prog.get('installed')} → {prog.get('latest')}: {' '.join(prog['update'])}")
-            subprocess.run(prog["update"])
+            if subprocess.run(prog["update"]).returncode != 0:
+                print(f"! {key} didn't update — see above", file=sys.stderr)
+                failed = True
+        if failed:
+            return 1
         print("done — `eki lineup refresh` to read again; open threads pick the new version up "
               "when their session next starts")
         return 0

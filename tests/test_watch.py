@@ -322,6 +322,22 @@ def test_versions_and_how_to_update():
     assert watch.update_command("codex", "")[:2] == ["npm", "install"]
 
 
+def test_codex_is_updated_the_way_the_copy_eki_runs_was_installed(tmp_path):
+    # the standalone binary is replaced from its release — npm would update another copy
+    # (seen live: npm went to Homebrew's prefix, eki kept running 0.154)
+    alone = tmp_path / "bin" / "codex"
+    alone.parent.mkdir()
+    alone.write_text("")
+    assert watch.update_command("codex", str(alone))[1:] == ["-m", "eki.codex_host", "update",
+                                                             str(alone.resolve())]
+    js = tmp_path / "lib" / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"
+    js.parent.mkdir(parents=True)
+    js.write_text("")
+    link = tmp_path / "bin" / "codex-npm"
+    link.symlink_to(js)
+    assert watch.update_command("codex", str(link))[:2] == ["npm", "install"]
+
+
 def test_news_says_the_program_is_behind():
     after = {"vendors": {"claude_code": {"vendor": "Anthropic", "ladder": {"default": "opus"},
                                          "program": {"installed": "2.1.278", "latest": "2.1.280",

@@ -30,6 +30,7 @@ from __future__ import annotations
 import html as html_mod
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -321,8 +322,17 @@ def update_command(kind: str, binary: str) -> List[str]:
     if kind == "claude_code":
         return [binary or "claude", "update"]
     real = str(Path(binary).resolve()) if binary else ""
-    if "homebrew" in real or "Cellar" in real:
+    # the copy eki runs, updated the way it was installed: npm's lives in
+    # node_modules (Homebrew's prefix too), a cask in the Cellar, and the
+    # standalone one updates itself
+    if "node_modules" in real:
+        return ["npm", "install", "-g", f"{NPM['codex']}@latest"]
+    if "Cellar" in real or "Caskroom" in real:
         return ["brew", "upgrade", "codex"]
+    if real and Path(real).is_file():
+        # standalone, from Codex's GitHub release: `codex update` can't tell
+        # how it got there, so eki replaces it from the same release
+        return [sys.executable, "-m", "eki.codex_host", "update", real]
     return ["npm", "install", "-g", f"{NPM['codex']}@latest"]
 
 

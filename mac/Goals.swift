@@ -36,6 +36,10 @@ struct EngineWeb: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        // the board's Choose… button: AppKit's own folder panel, at once, as a
+        // sheet on this window (a browser gets the engine's dialog instead)
+        config.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page,
+                                                             name: "ekiPickFolder")
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
@@ -49,7 +53,7 @@ struct EngineWeb: NSViewRepresentable {
 
     func updateNSView(_ web: WKWebView, context: Context) {}
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
         let port: Int
         init(port: Int) { self.port = port }
 
@@ -72,6 +76,31 @@ struct EngineWeb: NSViewRepresentable {
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if let url = action.request.url { NSWorkspace.shared.open(url) }
             return nil
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
+                                   replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+            let from = ((message.body as? [String: Any])?["from"] as? String) ?? ""
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.prompt = "Choose"
+            panel.message = "Choose a folder for eki to work in"
+            // from what's typed in, if it's a folder; else home
+            let start = (from as NSString).expandingTildeInPath
+            var isDir: ObjCBool = false
+            let given = !from.isEmpty && FileManager.default.fileExists(atPath: start, isDirectory: &isDir)
+                && isDir.boolValue
+            panel.directoryURL = URL(fileURLWithPath: given ? start : NSHomeDirectory())
+            if let window = message.webView?.window {
+                panel.beginSheetModal(for: window) { answer in
+                    replyHandler(answer == .OK ? (panel.url?.path ?? "") : "", nil)
+                }
+            } else {
+                replyHandler(panel.runModal() == .OK ? (panel.url?.path ?? "") : "", nil)
+            }
         }
 
         /// the engine restarting under the page: try again shortly

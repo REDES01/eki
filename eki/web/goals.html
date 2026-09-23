@@ -386,6 +386,12 @@ async function refresh(force) {
     $("#dot").className = "dot"; $("#status").textContent = "The engine isn't answering — is eki running?";
   }
 }
+// in the Mac app, its own folder panel (instant, a sheet on the window); in a browser, the engine's dialog
+async function pickFolder(from) {
+  const native = window.webkit?.messageHandlers?.ekiPickFolder;
+  if (native) return (await native.postMessage({ from })) || "";
+  return (await api("/api/pick-folder", "POST", { from })).path || "";
+}
 async function act(fn) { S.error = ""; try { await fn(); } catch (e) { S.error = e.message; } S.confirm = ""; await refresh(true); }
 
 // ---- events ------------------------------------------------------------------------------------
@@ -420,8 +426,8 @@ document.addEventListener("click", async e => {
   if (pick) {
     const d = pick.dataset.pick === "new" ? S.draft : S.editDraft;
     pick.disabled = true;
-    try { const r = await api("/api/pick-folder", "POST", { from: d.folder || "" });
-          if (r.path) { d.folder = r.path; S.error = ""; } }
+    try { const path = await pickFolder(d.folder || "");
+          if (path) { d.folder = path; S.error = ""; } }
     catch (err) { S.error = err.message; }
     return draw();
   }

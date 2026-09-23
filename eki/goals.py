@@ -41,6 +41,8 @@ MAX_TURNS = 30
 #: a turn that failed is tried again after this long; this many failures in a row stops it
 RETRY_SECONDS = 1800
 MAX_FAILURES = 3
+#: after stepping aside, a goal waits this long before its next try — no thrashing
+STEP_OUT_PAUSE = 60
 STATES = ("active", "waiting", "paused", "done", "stuck")
 MARK = re.compile(r"^\s*\**\s*GOAL\s*:\s*(done|continue|waiting)\b", re.I | re.M)
 

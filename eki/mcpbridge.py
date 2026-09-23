@@ -244,7 +244,7 @@ class Bridge:
 
     async def _run(self, prompt: str, **kw: Any) -> str:
         """A run of its own in a fresh thread, waited for; the answer text."""
-        started = await self.engine.ask(prompt, conversation="", **kw)
+        started = await self.engine.ask(prompt, conversation="", via="agent", **kw)
         rid = started["run"]
         runner = self.engine.runner
         q = runner.subscribe(rid)
@@ -457,7 +457,8 @@ class RemoteEngine:
 
     async def ask(self, prompt: str, conversation: str = "", **kw: Any) -> Dict[str, str]:
         body = {"prompt": prompt, "conversation": conversation,
-                "backend": kw.get("backend_key", "") or "", "images": bool(kw.get("images"))}
+                "backend": kw.get("backend_key", "") or "", "images": bool(kw.get("images")),
+                "via": "agent"}
         image = kw.get("image") or {}
         for k in ("width", "height", "batch"):
             if image.get(k):
@@ -489,7 +490,7 @@ class RemoteBridge(Bridge):
     """The same tools, over the HTTP API."""
 
     async def _run(self, prompt: str, **kw: Any) -> str:
-        started = await self.engine.ask(prompt, conversation="", **kw)
+        started = await self.engine.ask(prompt, conversation="", via="agent", **kw)
         run = await self.engine.wait(started["run"])
         if run.get("state") == "failed":
             raise RuntimeError(run.get("error") or "the run failed")

@@ -79,8 +79,11 @@ class Local(Backend):
     async def health(self):
         return Health(True)
 
+    systems = []
+
     async def stream(self, messages, **kw):
         Local.seen.append((self.info.key, messages[-1].content, kw.get("cwd")))
+        Local.systems.append(" ".join(m.content for m in messages if m.role == "system"))
         if Local.delay:
             await asyncio.sleep(Local.delay)
         yield Local.script.pop(0) if Local.script else "Did some.\nGOAL: continue"
@@ -111,7 +114,7 @@ def eng(tmp_path, monkeypatch):
     e.router.is_up = lambda k: True
     monkeypatch.setattr(shift, "check", lambda **kw: shift.Gate(True))
     monkeypatch.setattr(shift, "must_stop", lambda *a: shift.Gate(True))
-    Local.seen, Local.script, Local.delay = [], [], 0.0
+    Local.seen, Local.script, Local.delay, Local.systems = [], [], 0.0, []
     return e
 
 
@@ -263,3 +266,89 @@ def test_the_gpu_counts_other_apps_not_ekis_own_model(monkeypatch):
     ticks = iter([0.0, 1.0])
     monkeypatch.setattr(shift.time, "monotonic", lambda: next(ticks))
     assert shift.gpu_busy_others(exclude=[1]) == pytest.approx(0.1)
+
+
+# ---- the bug: a goal stepping aside for its own agent -----------------------------------
+
+@pytest.mark.asyncio
+async def test_what_a_goals_own_agent_asks_through_eki_isnt_your_request(eng):
+    g = goals.create("Make 20 NPCs")
+    Local.delay = 1.0
+    await eng.shift_tick()
+    rid = eng._shift_run
+    await asyncio.sleep(0.1)
+    Local.delay = 0.0
+    nested = await eng.ask("Say the single word: hello", backend_key="qwen", via="agent")   # eki_ask from inside
+    assert not eng._asks_running() or (eng.runs.get(nested["run"]) or {}).get("state") != "running"
+    assert (await eng.shift_tick())["state"] == "working"                  # carries on, doesn't step aside
+    assert (await settle(eng.runs, rid, timeout=5))["state"] == "done"
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_stepping_aside_isnt_a_turn_and_it_waits_a_moment(eng):
+    g = goals.create("Make 20 NPCs")
+    Local.delay = 2.0
+    await eng.shift_tick()
+    rid = eng._shift_run
+    await asyncio.sleep(0.1)
+    Local.delay = 0.0
+    await eng.ask("hello")                                                  # yours: it steps aside
+    await settle(eng.runs, rid, timeout=5)
+    eng._goal_finished()
+    g = goals.get(g.id)
+    assert g.turns == 0 and g.failures == 0
+    assert g.next_at > time.time() + 30                                     # no thrashing
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_model_without_tools_hands_over_inside_the_goals_budget(eng):
+    g = goals.create("Write a short poem about the sea")                  # plain writing: the local model…
+    Local.script = ["[[handoff: codex-qwen | save it as sea.md]]", "Saved sea.md.\nGOAL: done"]
+    await turn(eng)                                                          # …which decides it needs hands
+    assert [k for k, _, _ in Local.seen] == ["qwen", "codex-qwen"]         # handed over, still local
+    assert "codex-qwen" in Local.systems[0] and "claude_code" not in Local.systems[0]
+    assert goals.get(g.id).state == "done"
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_screen_is_off_in_a_goals_thread(eng, monkeypatch):
+    from eki import mcpbridge
+    made = {}
+    monkeypatch.setattr(mcpbridge, "Bridge", lambda *a, **kw: made.update(kw) or None)
+    g = goals.update(goals.create("x").id, conversation="c-goal")
+    eng._new_live(["claude"], None, "c-goal")
+    assert made["screen"] is False
+    eng._new_live(["claude"], None, "c-chat")
+    assert made["screen"] is True
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_memory_spike_passes_a_lasting_warning_doesnt(eng, monkeypatch):
+    goals.create("Make 20 NPCs")
+    Local.delay = 3.0
+    await eng.shift_tick()
+    rid = eng._shift_run
+    monkeypatch.setattr(shift, "must_stop", lambda *a: shift.Gate(False, "memory pressure is warning"))
+    await eng.shift_tick()
+    await eng.shift_tick()
+    assert rid in eng.runner.running                                          # a spike: carries on
+    await eng.shift_tick()
+    assert (await settle(eng.runs, rid, timeout=5))["state"] == "cancelled"   # it lasted: steps aside
+    eng._goal_finished()
+    assert goals.history(0)[-1]["why"] == "memory pressure is warning"       # and says why
+    await eng.runner.stop()
+
+
+def test_eki_ask_from_inside_an_agent_says_so(monkeypatch):
+    from eki import cli
+    sent = {}
+    monkeypatch.setattr(cli, "call", lambda m, p, s, **kw: sent.update(kw["json"]) or {"run": "r", "conversation": "c"})
+    monkeypatch.setenv("EKI_INSIDE", "1")
+    args = type("A", (), {"continue_": False, "prompt": "hello", "backend": "qwen", "repo": "", "image": False,
+                          "service": "x", "detach": True})()
+    cli.cmd_ask(None, args)
+    assert sent["via"] == "agent"

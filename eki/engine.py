@@ -78,12 +78,30 @@ from .store import Store
 HEALTH_TTL = 20.0
 
 
+def _payload(run: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        return dict(json.loads(run.get("payload") or "{}") or {})
+    except (TypeError, ValueError):
+        return {}
+
+
 def _goal_of(run: Dict[str, Any]) -> str:
     """The goal a run is a turn of, or ""."""
-    try:
-        return str((json.loads(run.get("payload") or "{}") or {}).get("goal") or "")
-    except (TypeError, ValueError):
-        return ""
+    return str(_payload(run).get("goal") or "")
+
+
+def _allowed_of(run: Dict[str, Any]) -> Optional[List[str]]:
+    """The providers a run may use (a goal's budget), or None for any."""
+    allowed = _payload(run).get("allowed")
+    return [str(a) for a in allowed] if isinstance(allowed, list) else None
+
+
+def _yours(run: Dict[str, Any]) -> bool:
+    """A request you made — not a goal's turn, not an agent asking eki for a
+    step through its tools, not a program carrying on by itself."""
+    p = _payload(run)
+    return run.get("kind", "ask") == "ask" and not p.get("goal") and p.get("via") != "agent" \
+        and not p.get("continuation")
 
 
 class Engine:
@@ -116,6 +134,7 @@ class Engine:
         self._shift_run: str = ""
         self._shift_goal: str = ""
         self._shift_local = False                  # the turn in progress is on a model on this machine
+        self._pressure = 0                         # ticks in a row with memory pressure
         self._shift_loaded: set = set()
         self._shift_state: Dict[str, Any] = {"state": "idle", "why": "not started yet"}
         self._awake = shift_mod.Awake()
@@ -455,7 +474,7 @@ class Engine:
     async def ask(self, prompt: str, *, conversation: str = "", backend_key: str = "",
                   repo: str = "", images: bool = False,
                   image: Optional[Dict[str, Any]] = None,
-                  attachments: Optional[List[str]] = None) -> Dict[str, str]:
+                  attachments: Optional[List[str]] = None, via: str = "") -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
@@ -475,10 +494,12 @@ class Engine:
             payload["image"] = image
         if attached:
             payload["attachments"] = attached
+        if via:
+            payload["via"] = via                    # "agent": a program asking through eki's tools
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
                                payload=json.dumps(payload) if payload else "")
-        if self._shift_local:
+        if self._shift_local and via != "agent":
             # a goal's turn on the model your request may need: yours first
             self._shift_step_out("your request comes first")
         await self.runner.submit(rid)
@@ -621,7 +642,9 @@ class Engine:
                 yield piece
             return
         shown = self._picture_before(run)
-        label = await self._label(run, after_image=bool(shown))
+        # a goal's turn is routed on the goal's own words — eki's framing isn't the work
+        routed = {**run, "prompt": _payload(run).get("route") or run["prompt"]}
+        label = await self._label(routed, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
         requested, _, wanted_model = (run["requested"] or "").partition(":")
         # Tools decide the harness: a request that needs tools — files,
@@ -635,7 +658,7 @@ class Engine:
                 if cid else []
         except Exception:                           # noqa: BLE001
             before = []
-        row, row_why, targets, stays, escalate = self._plan(label, run, before, cid, requested)
+        row, row_why, targets, stays, escalate = self._plan(label, routed, before, cid, requested)
         if stays and self._bare(stays):
             # staying with a model that has no tools: it decides itself, and
             # hands the thread over when the request needs more (eki/handoff.py)
@@ -647,7 +670,8 @@ class Engine:
                     web=label.task == "research" and not requested and not stays,
                     backend=requested or None,
                     task=label.task, difficulty=label.difficulty,
-                    row=row, row_title=table_mod.TITLES.get(row, row), targets=targets)
+                    row=row, row_title=table_mod.TITLES.get(row, row), targets=targets,
+                    allowed=_allowed_of(run))
         choice = self.router.choose(need)
         if requested and cid and not _goal_of(run):
             # you picked it — learned from; a goal's turn is eki's own pick, not yours
@@ -795,10 +819,11 @@ class Engine:
         if drawn:
             meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
+        hand_to = self._handoff_targets(_allowed_of(run))
         may_hand_off = self._bare(backend.key) and not requested and bool(cid) \
-            and self.settings.get("handoff", True) and bool(self._handoff_targets())
+            and self.settings.get("handoff", True) and bool(hand_to)
         if may_hand_off:
-            history = [Message("system", handoff_mod.instructions(self._handoff_targets()))] + history
+            history = [Message("system", handoff_mod.instructions(hand_to))] + history
         if self._lives(backend):
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
@@ -1010,11 +1035,21 @@ class Engine:
         return b is not None and b.info.capabilities.text and not b.info.capabilities.tools \
             and b.info.kind not in ("claude_code", "codex")
 
-    def _handoff_targets(self) -> List[Tuple[str, str]]:
+    def _handoff_targets(self, allowed: Optional[List[str]] = None) -> List[Tuple[str, str]]:
+        """Who a model without tools may hand a thread to: the subscriptions'
+        harnesses — or, inside a goal's budget, those it allows and the local
+        model with Codex's hands."""
         out = []
         for b in self._subscriptions():
-            out.append((b.key, f"{b.info.label} — files, commands, the web, the screen, and "
-                               "building real software"))
+            if allowed is None or b.key in allowed:
+                out.append((b.key, f"{b.info.label} — files, commands, the web, the screen, and "
+                                   "building real software"))
+        if allowed is not None:
+            for key in self._local_with_tools().values():
+                b = self.get(key)
+                if b is not None and key in allowed:
+                    out.append((key, f"{b.info.label} — files and commands in a folder, on this "
+                                     "machine (no web, no screen)"))
         return out
 
     def _plan(self, label: Any, run: Dict[str, Any], before: List[Dict[str, Any]], cid: str,
@@ -1050,7 +1085,7 @@ class Engine:
             return row, f"{fo.get('label') or fo.get('from')} hit its usage limit", ahead, "", False
         ho = run.get("_handoff")
         if ho:
-            subs = [b.key for b in self._subscriptions()]
+            subs = [k for k, _ in self._handoff_targets(_allowed_of(run))]
             first = [(f"{ho['to']}@default" if watch_mod.ladder(ho["to"]) else ho["to"])] \
                 if ho.get("to") in subs else []
             ahead = first + [t for t in targets if table_mod.parse_target(t)[0] in subs]
@@ -1370,7 +1405,7 @@ class Engine:
         return "\n".join(out)
 
     async def _route(self, prompt: str, thread: str = "", folder: str = "",
-                     before_turn: int = 0) -> Tuple[Any, str, Need, Any]:
+                     before_turn: int = 0, allowed: Optional[List[str]] = None) -> Tuple[Any, str, Need, Any]:
         """(label, why this row, the need, the choice) — what routing would do, run nothing."""
         try:
             label = await self.classifier.label(prompt, has_folder=bool(folder))
@@ -1379,12 +1414,14 @@ class Engine:
         before = [t for t in self.store.turns(thread) if not before_turn or t["id"] < before_turn] \
             if thread else []
         row, row_why, targets, stays, escalate = self._plan(
-            label, {"prompt": prompt, "images": False, "cwd": folder}, before, thread, "")
+            label, {"prompt": prompt, "images": False, "cwd": folder,
+                    "payload": json.dumps({"allowed": allowed}) if allowed is not None else ""},
+            before, thread, "")
         wants_harness = self._wants_harness(label, folder, False, "") and not (stays and self._bare(stays))
         need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
                     images_out=label.task == "image", web=label.task == "research" and not stays,
                     task=label.task, difficulty=label.difficulty, row=row,
-                    row_title=table_mod.TITLES.get(row, row), targets=targets)
+                    row_title=table_mod.TITLES.get(row, row), targets=targets, allowed=allowed)
         return label, row_why, need, self.router.choose(need)
 
     async def routing_explain(self, prompt: str, thread: str = "", folder: str = "",
@@ -2159,8 +2196,10 @@ class Engine:
             # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
             # built-in server needs an approval dialog only its own front
             # ends show, so it is opt-in beside these (claude_builtin_computer_use)
+            # never the screen in a goal's thread: it runs while you may be using the Mac
+            in_goal = bool(cid) and any(g.conversation == cid for g in goals_mod.all_goals())
             bridge = mcpbridge.Bridge(self, cid, depth=depth + 1,
-                                      screen=bool(self.settings.get("claude_screen", True)))
+                                      screen=bool(self.settings.get("claude_screen", True)) and not in_goal)
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
                            if b.info.kind == "claude_code"), "") or ""
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
@@ -2929,49 +2968,27 @@ class Engine:
     def _shift_on(self) -> bool:
         return str(self.settings.get("background", "local")) != "off"
 
-    def _local_text(self) -> str:
-        """The model on this machine that writes, when a goal's turn needs no tools."""
-        rows = [table_mod.parse_target(t)[0] for t in
-                (self.routing_table().get("writing") or {}).get("targets") or []]
-        for key in rows + [b.key for b in self.backends]:
-            b = self.get(key)
-            if (b is not None and b.info.cost.tier == 0 and b.info.capabilities.text
-                    and key not in self.router.reserved and b.info.kind not in ("claude_code", "codex")):
-                return key
-        return ""
+    def _goal_allowed(self, g: "goals_mod.Goal") -> List[str]:
+        """What a goal may use: the models on this machine, and — if it may
+        use subscriptions — those with spare room (under pace for the week,
+        never the last 30% of a window)."""
+        out = [b.key for b in self.backends if b.info.cost.tier == 0 and b.key not in self.router.reserved]
+        if g.spare:
+            reserve = float(self.settings.get("background_reserve", shift_mod.RESERVE))
+            for b in self._subscriptions():
+                if shift_mod.spare_room(self.quota.latest.get(b.info.quota_source or ""), reserve=reserve).ok:
+                    out.append(b.key)
+        return out
 
-    def _goal_backend(self, g: "goals_mod.Goal", need: Need, choice: Any) -> Tuple[str, str]:
-        """(provider, why) for a goal's turn, within what the goal may spend — or ("", why not).
-
-        Routing picks as it would for anything you type; the goal's budget
-        then keeps it on this machine unless the goal may use a subscription
-        and that subscription has spare room (never the last 30% of a window)."""
-        b = choice.backend if choice is not None else None
-        if b is not None and b.info.cost.tier == 0:
-            return b.key, "local"
-        if b is not None and g.spare and b.info.cost.tier == 50:
-            room = shift_mod.spare_room(self.quota.latest.get(b.info.quota_source or ""),
-                                        reserve=float(self.settings.get("background_reserve", shift_mod.RESERVE)))
-            if room.ok:
-                return b.key, "spare subscription room"
-            spare_why = f"{b.key}: {room.why}"
-        else:
-            spare_why = ""
-        # on this machine instead: with hands if the work needs tools, the writer if not
-        if need.images_out:
-            for x in self.backends:
-                if x.info.cost.tier == 0 and x.info.capabilities.images_out and x.key not in self.router.reserved:
-                    return x.key, "local"
-        if need.tools:
-            for key in self._local_with_tools().values():
-                if self.get(key) is not None:
-                    return key, "local, with tools"
-            return "", spare_why or (f"needs tools — {b.key if b else 'a harness'}; "
-                                     "let this goal use your subscriptions")
-        key = self._local_text()
-        if key:
-            return key, "local"
-        return "", spare_why or "no model on this machine can take it"
+    def _blocked_why(self, g: "goals_mod.Goal", need: Need) -> str:
+        """Why no model within the goal's budget can take its turn."""
+        if not g.spare:
+            everyone = self.router.choose(Need(**{**need.__dict__, "allowed": None}))
+            if everyone.backend is not None and everyone.backend.info.cost.tier != 0:
+                return (f"needs {everyone.backend.key} — let this goal use your subscriptions "
+                        "(it only takes their spare room)")
+            return "no model on this machine can take it"
+        return "its subscriptions have no spare room right now (under pace, last 30% kept for you)"
 
     def _goal_run(self) -> Dict[str, Any]:
         return (self.runs.get(self._shift_run) or {}) if self._shift_run else {}
@@ -2998,12 +3015,9 @@ class Engine:
         return gone
 
     def _asks_running(self) -> bool:
-        """One of your requests is running (not a goal's turn)."""
-        for rid in self.runner.running:
-            run = self.runs.get(rid) or {}
-            if run.get("kind", "ask") == "ask" and not _goal_of(run):
-                return True
-        return False
+        """One of your requests is running — not a goal's turn, nor anything
+        an agent started through eki's tools, nor a program carrying on."""
+        return any(_yours(self.runs.get(rid) or {}) for rid in self.runner.running)
 
     def _goal_finished(self) -> None:
         """The turn that just ended: where its goal stands now."""
@@ -3022,6 +3036,10 @@ class Engine:
                  "seconds": seconds, "state": state}
         if state == "cancelled":
             entry["state"] = "stepped out"          # not the goal's fault: tried again when there's room
+            if self._shift_state.get("state") == "stepped out":
+                entry["why"] = self._shift_state.get("why")
+            goals_mod.update(g.id, turns=max(0, g.turns - 1),
+                             next_at=max(g.next_at, int(time.time()) + goals_mod.STEP_OUT_PAUSE))
         else:
             ok = state == "done"
             answer = run.get("output") or ""
@@ -3042,9 +3060,14 @@ class Engine:
                 self._shift_step_out("your request comes first")
             else:
                 held = shift_mod.must_stop(bool(self.settings.get("background_on_battery", False)))
-                if not held.ok and (self._shift_local or "battery" in held.why):
+                # a spike (a picture model loading beside the writer) passes; a
+                # warning that lasts, or anything critical, doesn't
+                self._pressure = self._pressure + 1 if not held.ok else 0
+                lasting = "critical" in held.why or "battery" in held.why or self._pressure >= 3
+                if not held.ok and lasting and (self._shift_local or "battery" in held.why):
                     self._shift_step_out(held.why)
                     await self._shift_unload(held.why)
+                    self._pressure = 0
             return self._shift_state
         if self._shift_run:
             self._goal_finished()
@@ -3069,12 +3092,13 @@ class Engine:
         picked = None
         for g in due:
             text = goals_mod.prompt(g, now)
-            # routed on the goal's own words — eki's framing around them isn't the work
-            _, _, need, choice = await self._route(g.text, g.conversation, g.folder)
-            key, why = self._goal_backend(g, need, choice)
-            if key:
-                picked = (g, key, why, text)
+            allowed = self._goal_allowed(g)
+            # routed on the goal's own words, inside its budget — eki's framing isn't the work
+            _, _, need, choice = await self._route(g.text, g.conversation, g.folder, allowed=allowed)
+            if choice.backend is not None:
+                picked = (g, choice.backend.key, allowed, text)
                 break
+            why = self._blocked_why(g, need)
             if g.note != why:
                 goals_mod.update(g.id, note=why)
         if picked is None:
@@ -3082,7 +3106,7 @@ class Engine:
             self._shift_state = {"state": "idle", "why": f"{due[0].text[:60]}: {goals_mod.get(due[0].id).note}",
                                  "at": now}
             return self._shift_state
-        g, key, why, text = picked
+        g, key, allowed, text = picked
         local = self._local_for(key)
         on_machine = self.get(key).info.cost.tier == 0
         pids = [os.getpid()] + [models_mod.listener_pid(m.port) or 0
@@ -3106,8 +3130,10 @@ class Engine:
             self._shift_loaded.add(local.key)
         cid = g.conversation or self.store.new_conversation()
         turn = self.store.add_turn(cid, "user", text, meta={"goal": g.id})
-        rid = self.runs.create(text, conversation=cid, cwd=g.folder, requested=key, user_turn=turn,
-                               payload=json.dumps({"goal": g.id, "why": why}))
+        # not pinned to a model: routed as usual, inside the goal's budget — so a
+        # model without tools can still hand it to a harness the goal may use
+        rid = self.runs.create(text, conversation=cid, cwd=g.folder, user_turn=turn,
+                               payload=json.dumps({"goal": g.id, "allowed": allowed, "route": g.text}))
         goals_mod.update(g.id, conversation=cid, turns=g.turns + 1, last_turn=turn,
                          last_turn_at=now, note="")
         self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine

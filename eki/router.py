@@ -38,6 +38,8 @@ class Need:
     row: str = ""
     row_title: str = ""
     targets: List[str] = field(default_factory=list)
+    #: only these may take it (a goal's budget); None: any
+    allowed: Optional[List[str]] = None
 
 
 @dataclass
@@ -124,6 +126,9 @@ class Router:
         for b in self.backends:
             if b.key in self.reserved:
                 rejected.append(f"{b.key}: reserved as the router model")
+                continue
+            if need.allowed is not None and b.key not in need.allowed:
+                rejected.append(f"{b.key}: outside this goal's budget")
                 continue
             if self.policy.is_disabled(b.key):
                 rejected.append(f"{b.key}: turned off in policy")

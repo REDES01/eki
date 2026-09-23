@@ -107,6 +107,10 @@ def cmd_ask(cfg, args) -> int:
     body = {"prompt": args.prompt, "conversation": conversation,
             "backend": args.backend or "", "repo": args.repo or "",
             "images": bool(args.image)}
+    if os.environ.get("EKI_INSIDE"):
+        # run by a program the engine started (a goal's agent testing eki, say):
+        # its request, not yours — a goal's turn doesn't step aside for it
+        body["via"] = "agent"
     started = call("POST", "/api/ask", args.service, json=body)
     if args.detach:
         print(started["run"])

@@ -69,6 +69,9 @@ def sse(payload: Dict[str, Any]) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     eng: Engine = STATE["engine"]
+    # everything the engine starts — Claude Code, Codex, the shells they open —
+    # inherits this: an `eki ask` from in there is an agent asking, not you
+    os.environ[INSIDE] = "1"
     eng.quota.start()
     # eki watching itself: errors logged by its own loops and request
     # handlers are faults too (eki/observe.py)
@@ -258,6 +261,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="eki", lifespan=lifespan)
+#: set in the engine's environment; the CLI reads it (see cli.cmd_ask)
+INSIDE = "EKI_INSIDE"
 
 
 class AskBody(BaseModel):
@@ -273,6 +278,8 @@ class AskBody(BaseModel):
     batch: int = 0
     #: pictures on this Mac to show with the question and give to the program
     attachments: List[str] = []
+    #: "agent": a program asking through eki's tools, not a person
+    via: str = ""
 
 
 class AttachmentBody(BaseModel):
@@ -316,7 +323,7 @@ async def ask(body: AskBody) -> Any:
                               backend_key=body.backend, repo=body.repo,
                               images=body.images,
                               image={"width": body.width, "height": body.height, "batch": body.batch},
-                              attachments=body.attachments)
+                              attachments=body.attachments, via=body.via)
 
 
 @app.get("/api/runs")

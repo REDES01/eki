@@ -267,6 +267,12 @@ class Runner:
         task = self.tasks.get(rid)
         if task and not task.done():
             task.cancel()
+            run = self.store.get(rid)
+            if run and run["state"] == "queued":
+                # cancelled before it began: its task never runs, so nothing
+                # else will ever say it ended
+                self._state(rid, "cancelled", ended_at=int(time.time()))
+                self.tasks.pop(rid, None)
             return True
         run = self.store.get(rid)
         if run and run["state"] == "queued":

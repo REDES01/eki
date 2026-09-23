@@ -631,7 +631,17 @@ async def choose_folder(start: str = "", prompt: str = "") -> str:
 
 @app.get("/api/goals")
 def goals_view() -> Any:
-    return engine().goals_view()
+    out = engine().goals_view()
+    out["page"] = _board_version()          # the board reloads itself when it changes
+    return out
+
+
+def _board_version() -> str:
+    try:
+        st = (Path(__file__).with_name("web") / "goals.html").stat()
+        return f"{int(st.st_mtime)}-{st.st_size}"
+    except OSError:
+        return ""
 
 
 def _goal_call(fn, *args, **kw) -> Any:

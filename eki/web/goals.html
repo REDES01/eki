@@ -370,6 +370,9 @@ function draw() {
 async function refresh(force) {
   try {
     const v = await api("/api/goals");
+    // a newer board (eki updated under it): load it, unless you're in the middle of something
+    if (S.page && v.page && v.page !== S.page && !S.draft.text && !S.editing && !busy() && !$("#reply")?.value) return location.reload();
+    S.page = S.page || v.page;
     const r = route();
     let thread = null;
     if (r.page === "goal") {

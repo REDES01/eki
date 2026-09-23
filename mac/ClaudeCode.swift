@@ -285,8 +285,8 @@ struct McpPanel: View {
                             .lineLimit(1).truncationMode(.middle)
                     }
                     Spacer()
-                    ForEach(["claude", "codex"], id: \.self) { b in
-                        Toggle(b == "claude" ? "Claude" : "Codex", isOn: Binding(
+                    ForEach(["claude", "codex", "gemini"], id: \.self) { b in
+                        Toggle(["claude": "Claude", "codex": "Codex"][b] ?? "Gemini", isOn: Binding(
                             get: { backends.contains(b) },
                             set: { on in Task { await registryToggle(name, on, backend: b) } }))
                             .toggleStyle(.checkbox)
@@ -409,6 +409,7 @@ struct AddFromCatalogSheet: View {
     @State private var key = ""
     @State private var claude = true
     @State private var codex = true
+    @State private var gemini = true
     @State private var error = ""
 
     private var keyEnv: String { entry["key_env"]?.text ?? "" }
@@ -425,6 +426,7 @@ struct AddFromCatalogSheet: View {
             HStack(spacing: 16) {
                 Toggle("Claude Code", isOn: $claude).toggleStyle(.checkbox)
                 Toggle("Codex (and local models under it)", isOn: $codex).toggleStyle(.checkbox)
+                Toggle("Gemini CLI", isOn: $gemini).toggleStyle(.checkbox)
             }
             if !error.isEmpty { Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger) }
             HStack {
@@ -445,6 +447,7 @@ struct AddFromCatalogSheet: View {
         var backends: [String] = []
         if claude { backends.append("claude") }
         if codex { backends.append("codex") }
+        if gemini { backends.append("gemini") }
         do {
             _ = try await model.client.mcpPut(name, spec: ["name": name, "catalog": entry["id"]?.text ?? "",
                                                           "key": key, "backends": backends])
@@ -466,6 +469,7 @@ struct AddMcpServerSheet: View {
     @State private var env = ""
     @State private var claude = true
     @State private var codex = true
+    @State private var gemini = true
     @State private var error = ""
 
     var body: some View {
@@ -480,6 +484,7 @@ struct AddMcpServerSheet: View {
             HStack(spacing: 16) {
                 Toggle("Claude Code", isOn: $claude).toggleStyle(.checkbox)
                 Toggle("Codex", isOn: $codex).toggleStyle(.checkbox)
+                Toggle("Gemini CLI", isOn: $gemini).toggleStyle(.checkbox)
             }
             if !error.isEmpty {
                 Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
@@ -506,6 +511,7 @@ struct AddMcpServerSheet: View {
         var backends: [String] = []
         if claude { backends.append("claude") }
         if codex { backends.append("codex") }
+        if gemini { backends.append("gemini") }
         let spec: [String: Any] = ["name": name, "command": command, "url": url,
                                    "env": envMap, "backends": backends]
         do {

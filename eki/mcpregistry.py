@@ -5,7 +5,11 @@ Servers are declared once, in ~/.eki/mcp.json, and every backend gets a
 view: Claude Code receives them per session as `--mcp-config` (its
 `dynamic` scope — nothing is written into ~/.claude), Codex gets a managed
 block in its config.toml between two marker lines, rewritten whole each
-time so a hand-written server above or below it is never touched.
+time so a hand-written server above or below it is never touched. Gemini
+CLI reads servers only from its settings.json, which is JSON and can't
+hold markers, so eki keeps a note of the entries it wrote there
+(~/.eki/mcp-gemini.json) and replaces only those; a server of the same
+name that someone else put there wins and is left alone.
 
 The servers Claude Code already knows from its own files (user, project,
 claude.ai connectors) are not copied here; they show in the panel with
@@ -25,9 +29,16 @@ from typing import Any, Dict, List, Optional
 HOME = Path("~/.eki").expanduser()
 PATH = HOME / "mcp.json"
 CODEX_CONFIG = Path("~/.codex/config.toml").expanduser()
+GEMINI_SETTINGS = Path("~/.gemini/settings.json").expanduser()
+#: the names eki wrote into Gemini's settings, so the next render replaces
+#: exactly those
+GEMINI_OWNED = HOME / "mcp-gemini.json"
 BEGIN = "# --- eki: MCP servers (managed; edit with eki, not by hand) ---"
 END = "# --- eki: end ---"
-BACKENDS = ("claude", "codex")
+BACKENDS = ("claude", "codex", "gemini")
+#: the sides there were before a server said which ones it is on for; one
+#: added since gets every server until it is turned off there
+FIRST_BACKENDS = ("claude", "codex")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 #: Servers eki knows how to add in one step: the command, the key it needs,
@@ -66,13 +77,12 @@ def catalog_entry(entry_id: str) -> Optional[Dict[str, Any]]:
 
 
 def provides(backend: str, what: str) -> bool:
-    """Whether a backend side (claude / codex) has an enabled server that
+    """Whether a backend side (claude / codex / gemini) has an enabled server that
     provides a capability — the web, say. The router reads this so a local
     model with Codex's hands and a search server counts as one that can
     research; without one it doesn't, and research goes elsewhere."""
     for spec in load().values():
-        if spec.get("enabled", True) and backend in (spec.get("backends") or []) \
-                and what in (spec.get("provides") or []):
+        if _on(spec, backend) and what in (spec.get("provides") or []):
             return True
     return False
 
@@ -83,7 +93,17 @@ def load() -> Dict[str, Dict[str, Any]]:
     except (OSError, ValueError):
         return {}
     servers = data.get("servers") if isinstance(data, dict) else None
-    return {k: v for k, v in (servers or {}).items() if isinstance(v, dict) and NAME_RE.match(k)}
+    out = {k: v for k, v in (servers or {}).items() if isinstance(v, dict) and NAME_RE.match(k)}
+    for spec in out.values():
+        offered = spec.get("offered") or FIRST_BACKENDS
+        on = set(spec.get("backends") or []) | {b for b in BACKENDS if b not in offered}
+        spec["backends"] = [b for b in BACKENDS if b in on]
+        spec["offered"] = list(BACKENDS)
+    return out
+
+
+def _on(spec: Dict[str, Any], backend: str) -> bool:
+    return bool(spec.get("enabled", True)) and backend in (spec.get("backends") or [])
 
 
 def save(servers: Dict[str, Dict[str, Any]]) -> None:
@@ -112,7 +132,7 @@ def normalize(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     if kind != "stdio" and not url:
         raise ValueError("a remote server needs a url")
     backends = [b for b in (spec.get("backends") or list(BACKENDS)) if b in BACKENDS]
-    out: Dict[str, Any] = {"type": kind, "backends": backends,
+    out: Dict[str, Any] = {"type": kind, "backends": backends, "offered": list(BACKENDS),
                            "enabled": bool(spec.get("enabled", True))}
     if kind == "stdio":
         out["command"] = str(command).strip()
@@ -137,7 +157,7 @@ def put(name: str, spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     servers = load()
     servers[name] = normalize(name, spec)
     save(servers)
-    render_codex(servers)
+    render(servers)
     return servers
 
 
@@ -145,7 +165,7 @@ def remove(name: str) -> Dict[str, Dict[str, Any]]:
     servers = load()
     servers.pop(name, None)
     save(servers)
-    render_codex(servers)
+    render(servers)
     return servers
 
 
@@ -161,7 +181,7 @@ def set_enabled(name: str, enabled: bool, backend: str = "") -> Dict[str, Dict[s
     else:
         spec["enabled"] = bool(enabled)
     save(servers)
-    render_codex(servers)
+    render(servers)
     return servers
 
 
@@ -172,7 +192,7 @@ def for_claude(servers: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str,
     servers = load() if servers is None else servers
     out: Dict[str, Any] = {}
     for name, spec in servers.items():
-        if not spec.get("enabled", True) or "claude" not in (spec.get("backends") or []):
+        if not _on(spec, "claude"):
             continue
         if spec.get("type") == "stdio":
             entry: Dict[str, Any] = {"type": "stdio", "command": spec["command"],
@@ -214,6 +234,14 @@ def claude_argv(servers: Optional[Dict[str, Dict[str, Any]]] = None,
     return ["--mcp-config", json.dumps(doc)]
 
 
+def render(servers: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    """Every CLI that keeps its servers in a file of its own: Codex, and
+    Gemini CLI. Claude Code needs nothing written; it is given them per
+    session."""
+    render_codex(servers)
+    render_gemini(servers)
+
+
 def _toml_str(s: str) -> str:
     return json.dumps(str(s))          # JSON string escaping is valid TOML basic-string escaping
 
@@ -234,7 +262,7 @@ def codex_block(servers: Optional[Dict[str, Dict[str, Any]]] = None,
                   "env = { PYTHONPATH = " + _toml_str(root) + " }",
                   "startup_timeout_sec = 30", ""]
     for name, spec in servers.items():
-        if not spec.get("enabled", True) or "codex" not in (spec.get("backends") or []):
+        if not _on(spec, "codex"):
             continue
         lines.append(f"[mcp_servers.{name}]" if NAME_RE.match(name) and "." not in name
                      else f'[mcp_servers.{_toml_str(name)}]')
@@ -298,6 +326,86 @@ def _ensure_web_search(text: str) -> str:
     return line + text
 
 
+def gemini_servers(servers: Optional[Dict[str, Dict[str, Any]]] = None,
+                   eki_command: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    """The `mcpServers` entries for Gemini CLI, in its own shape (`httpUrl`
+    for streamable HTTP, `url` for SSE), plus eki's own tools as a stdio
+    server, as Codex has them."""
+    servers = load() if servers is None else servers
+    out: Dict[str, Dict[str, Any]] = {}
+    eki_cmd = eki_command if eki_command is not None else eki_stdio_command()
+    if eki_cmd:
+        root = str(Path(__file__).resolve().parent.parent)
+        out["eki"] = {"command": eki_cmd[0], "args": list(eki_cmd[1:]),
+                      "env": {"PYTHONPATH": root}}
+    for name, spec in servers.items():
+        if not _on(spec, "gemini"):
+            continue
+        if spec.get("type") == "stdio":
+            entry: Dict[str, Any] = {"command": spec["command"], "args": list(spec.get("args") or [])}
+            if spec.get("env"):
+                entry["env"] = dict(spec["env"])
+        else:
+            entry = {"httpUrl" if spec.get("type") == "http" else "url": spec["url"]}
+            if spec.get("headers"):
+                entry["headers"] = dict(spec["headers"])
+        out[name] = entry
+    return out
+
+
+def _gemini_owned() -> List[str]:
+    try:
+        names = json.loads(GEMINI_OWNED.read_text()).get("servers")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(n) for n in names or [] if isinstance(n, str)]
+
+
+def render_gemini(servers: Optional[Dict[str, Dict[str, Any]]] = None,
+                  path: Optional[Path] = None,
+                  eki_command: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Put the registry's servers into Gemini CLI's settings.json, replacing
+    what eki wrote there last time and nothing else. Returns what was
+    done: the names written, and the ones someone else holds. Nothing is
+    written when Gemini CLI has never run here (no ~/.gemini), or when its
+    file can't be read as JSON — a file eki can't parse is not eki's to
+    rewrite."""
+    path = path or GEMINI_SETTINGS
+    report: Dict[str, Any] = {"written": [], "conflicts": []}
+    if not path.parent.is_dir():
+        return report
+    try:
+        original = path.read_text()
+    except FileNotFoundError:
+        original = ""
+    except OSError:
+        return report
+    try:
+        before = json.loads(original) if original.strip() else {}
+    except ValueError:
+        return {**report, "error": f"{path} isn't plain JSON; left alone"}
+    settings = json.loads(json.dumps(before))
+    current = settings.get("mcpServers", {}) if isinstance(settings, dict) else None
+    if not isinstance(current, dict):
+        return {**report, "error": f"{path} has no usable mcpServers; left alone"}
+    owned = set(_gemini_owned())
+    kept = {k: v for k, v in current.items() if k not in owned}
+    for name, entry in gemini_servers(servers, eki_command).items():
+        if name in kept:
+            report["conflicts"].append(name)
+            continue
+        kept[name] = entry
+        report["written"].append(name)
+    if kept or "mcpServers" in settings:
+        settings["mcpServers"] = kept
+    if settings != before:
+        path.write_text(json.dumps(settings, indent=2) + "\n")
+    if sorted(owned) != sorted(report["written"]):
+        GEMINI_OWNED.parent.mkdir(parents=True, exist_ok=True)
+        GEMINI_OWNED.write_text(json.dumps({"servers": report["written"]}, indent=2))
+    return report
+
+
 def eki_stdio_command() -> List[str]:
     """How another program starts eki's tool server: this interpreter,
     this package. The bundled app and a dev checkout both resolve here."""
@@ -337,5 +445,5 @@ def import_from_claude(status: List[Dict[str, Any]], names: List[str]) -> Dict[s
         except ValueError:
             continue
     save(servers)
-    render_codex(servers)
+    render(servers)
     return servers

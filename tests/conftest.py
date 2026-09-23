@@ -19,6 +19,12 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(learn, "ABSORBED", root / "eki" / "learn" / "absorbed")
     # Claude Code's own memory: a test must never read or move your notes
     monkeypatch.setattr(learn, "CLAUDE_PROJECTS", root / "claude" / "projects")
+    # the tool registry and the CLIs' files it is rendered into
+    from eki import mcpregistry
+    monkeypatch.setattr(mcpregistry, "PATH", root / "eki" / "mcp.json")
+    monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", root / "codex" / "config.toml")
+    monkeypatch.setattr(mcpregistry, "GEMINI_SETTINGS", root / "gemini" / "settings.json")
+    monkeypatch.setattr(mcpregistry, "GEMINI_OWNED", root / "eki" / "mcp-gemini.json")
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")

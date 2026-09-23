@@ -343,12 +343,15 @@ image model) — and, on a Mac, its own built-in computer-use server (the
 terminal's 24 screen tools), which eki starts for each session since the
 headless program doesn't bring it by itself. Codex gets the same through a
 stdio server, `eki mcp`, with eki's own screen tools in place of the
-built-in. Both switches are in Settings → Routing.
+built-in. Both switches are in Settings → Routing. Gemini CLI gets `eki mcp`
+too, in its `settings.json`.
 
 MCP servers you add in eki's `/mcp` panel go into `~/.eki/mcp.json` and are
-rendered into both CLIs — Claude Code per session (nothing written into
-`~/.claude`), Codex in a managed block of its `config.toml`. A server Claude
-Code already has can be shared with Codex from the same panel.
+rendered into every CLI — Claude Code per session (nothing written into
+`~/.claude`), Codex in a managed block of its `config.toml`, Gemini CLI as
+entries in `~/.gemini/settings.json` that eki keeps a note of and replaces
+(a server of the same name you put there yourself is left alone). A server
+Claude Code already has can be shared with the others from the same panel.
 
 ## Claude and Codex usage
 

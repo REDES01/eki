@@ -124,3 +124,60 @@ def test_a_program_with_no_quota_reading_waits_behind_the_measured_ones(monkeypa
               quota=NS(pace=lambda: {}, latest={"claude": NS(windows=[]), "codex": NS(windows=[])}))
     order = engine_mod.Engine._subscriptions(fake)
     assert [b.key for b in order] == ["codex", "claude", "gemini"]
+
+
+# ---- the tool registry, in Gemini CLI's settings.json -------------------------------
+
+def _settings():
+    from eki import mcpregistry
+    return json.loads(mcpregistry.GEMINI_SETTINGS.read_text())
+
+
+def test_registry_servers_reach_gemini_and_only_eki_s_entries_are_replaced():
+    from eki import mcpregistry
+    path = mcpregistry.GEMINI_SETTINGS
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"theme": "Dracula",
+                                "mcpServers": {"mine": {"command": "my-mcp"},
+                                               "fs": {"command": "their-fs"}}}))
+    mcpregistry.put("fs", {"command": "npx -y fs-mcp /tmp"})
+    mcpregistry.put("remote", {"url": "https://mcp.example/x", "headers": {"Authorization": "Bearer t"}})
+    mcpregistry.put("events", {"type": "sse", "url": "https://mcp.example/sse"})
+    s = _settings()
+    assert s["theme"] == "Dracula" and s["mcpServers"]["mine"] == {"command": "my-mcp"}
+    assert s["mcpServers"]["fs"] == {"command": "their-fs"}          # theirs wins, untouched
+    assert s["mcpServers"]["remote"] == {"httpUrl": "https://mcp.example/x",
+                                         "headers": {"Authorization": "Bearer t"}}
+    assert s["mcpServers"]["events"] == {"url": "https://mcp.example/sse"}
+    assert s["mcpServers"]["eki"]["args"][-1] == "mcp"               # eki's own tools
+    mcpregistry.set_enabled("remote", False, "gemini")
+    assert "remote" not in _settings()["mcpServers"]
+    mcpregistry.remove("events")
+    s = _settings()
+    assert "events" not in s["mcpServers"] and s["mcpServers"]["mine"] == {"command": "my-mcp"}
+    assert mcpregistry.render_gemini()["conflicts"] == ["fs"]
+
+
+def test_gemini_is_left_alone_when_it_never_ran_or_its_file_is_not_json():
+    from eki import mcpregistry
+    path = mcpregistry.GEMINI_SETTINGS
+    mcpregistry.put("fs", {"command": "fs-mcp"})
+    assert not path.parent.exists()                                  # no ~/.gemini made for it
+    path.parent.mkdir(parents=True)
+    path.write_text('{\n  // a comment Gemini allows\n  "theme": "x"\n}\n')
+    assert "error" in mcpregistry.render_gemini()
+    assert "// a comment" in path.read_text()
+
+
+def test_servers_from_before_gemini_are_on_for_it_until_turned_off():
+    from eki import mcpregistry
+    mcpregistry.PATH.parent.mkdir(parents=True, exist_ok=True)
+    mcpregistry.PATH.write_text(json.dumps({"servers": {
+        "search": {"type": "stdio", "command": "s", "args": [], "backends": ["claude", "codex"],
+                   "enabled": True, "provides": ["web"]},
+        "gh": {"type": "stdio", "command": "g", "args": [], "backends": ["claude"], "enabled": True}}}))
+    assert mcpregistry.provides("gemini", "web")
+    assert mcpregistry.load()["gh"]["backends"] == ["claude", "gemini"]
+    mcpregistry.set_enabled("search", False, "gemini")
+    assert not mcpregistry.provides("gemini", "web")
+    assert mcpregistry.provides("codex", "web")

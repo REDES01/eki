@@ -83,12 +83,19 @@ async def lifespan(app: FastAPI):
     report = await asyncio.to_thread(skills_mod.boot)
     if report.get("linked") or report.get("conflicts") or report.get("error"):
         log.info("skills: %s", report)
-    # one tool registry, rendered into Codex's config at start (its web
-    # search switch included); Claude Code gets it per session
+    # one tool registry, rendered into Codex's config (its web search
+    # switch included) and Gemini CLI's settings at start; Claude Code
+    # gets it per session
     try:
         await asyncio.to_thread(mcpregistry.render_codex)
     except OSError as e:
         log.warning("codex config: %s", e)
+    try:
+        report = await asyncio.to_thread(mcpregistry.render_gemini)
+        if report.get("conflicts") or report.get("error"):
+            log.info("gemini mcp: %s", report)
+    except OSError as e:
+        log.warning("gemini settings: %s", e)
 
     async def reap() -> None:
         # unload local models eki started once they've sat unused a while
@@ -416,7 +423,7 @@ class McpServerBody(BaseModel):
     env: Dict[str, str] = {}
     url: str = ""
     headers: Dict[str, str] = {}
-    backends: List[str] = ["claude", "codex"]
+    backends: List[str] = ["claude", "codex", "gemini"]
     enabled: bool = True
     provides: List[str] = []
     #: from the catalog: its id, and the key it asks for
@@ -439,7 +446,8 @@ class McpToggleBody(BaseModel):
 def mcp_registry() -> Any:
     """eki's own MCP registry (~/.eki/mcp.json), rendered into both CLIs."""
     return {"servers": mcpregistry.load(), "path": str(mcpregistry.PATH),
-            "codex_config": str(mcpregistry.CODEX_CONFIG)}
+            "codex_config": str(mcpregistry.CODEX_CONFIG),
+            "gemini_settings": str(mcpregistry.GEMINI_SETTINGS)}
 
 
 @app.put("/api/mcp/{name}")

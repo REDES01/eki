@@ -92,7 +92,13 @@ it in the managed block eki keeps in `~/.codex/config.toml`.
 ones enabled for it as `--mcp-config` on each session (its `dynamic`
 scope; `mcp_apply` adds them to an open session without a restart); Codex
 gets them in the managed block between `# --- eki: MCP servers` markers,
-rewritten whole, everything else in the file untouched. Servers Claude
+rewritten whole, everything else in the file untouched. Gemini CLI's
+`~/.gemini/settings.json` is JSON with no room for markers, so eki notes
+the names it wrote there (`~/.eki/mcp-gemini.json`) and replaces only
+those; it writes nothing before Gemini CLI has made `~/.gemini`, nor into a
+file that isn't plain JSON (Gemini allows comments; eki won't drop them).
+A server added before Gemini CLI was a side is on for it until turned off
+there. Servers Claude
 Code already has from its own config or claude.ai are listed in the panel
 with their scope and can be imported with *Share with Codex*.
 

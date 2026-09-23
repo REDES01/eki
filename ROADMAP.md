@@ -61,17 +61,19 @@ first release unless it needs them.
   The self-build track makes the loop; every stage is work eki should be
   doing on itself, and carries an *evolve* line saying what it learns to
   keep up.
-- **eki integrates; it doesn't build the parts.** Models come from
-  providers, tools come from MCP servers, instructions come from skills.
-  eki is the registry of all three, the router between them, and the one
-  interface — never a harness of its own and never the maker of a tool a
-  provider or a server should supply. A capability a request needs (the
-  web, the screen, a repo, a picture) is something a provider *has*, and
-  routing finds one that has it; a gap is filled by adding a provider or
-  a server, not by code in eki. The only tools eki serves are the ones
-  that *are* integration: reaching another provider through eki
-  (`eki_ask`, `eki_image`, `eki_capabilities`). Its screen tools are a
-  stopgap until a program's own computer use works under it, and go then.
+- **eki is a light router that makes full use of the harnesses that
+  exist.** Models come from providers, harnesses from their makers (Claude
+  Code, Codex), tools from MCP servers, instructions from skills. eki is
+  the registry of all of them, the router between them, and the one
+  interface — it doesn't build a harness of its own or a tool a provider or
+  a server should supply. A capability a request needs (the web, the
+  screen, a repo, a picture) is something a provider *has*, and routing
+  finds one that has it; a gap is filled by adding a provider or a server.
+  The tools eki serves are the ones that *are* integration: reaching
+  another provider (`eki_ask`, `eki_image`, `eki_capabilities`), and — for
+  a model with no tools of its own — the single one it needs: hand the
+  thread to a harness. Its screen tools are a stopgap until a program's own
+  computer use works under it, and go then.
 - **The app is a front end.** Everything eki does is done by the engine and
   reachable from `eki`; the Mac app draws it. Nothing needs the app.
 - **Your credentials stay yours.** Subscriptions are reached only by running
@@ -84,10 +86,12 @@ first release unless it needs them.
   people run and how its makers measured it is on Ollama. eki reads those
   daily and routes by them. Its own tests are the fallback, for what no
   one describes.
-- **Nothing raw under Auto.** A request that isn't for a picture goes to a
-  harness — Claude Code, Codex, a local model with Codex's hands — never
-  to a bare model, which would describe what it can't do. A bare model
-  answers only when picked by name, or when no harness can take the work.
+- **A thread stays with the model that answers.** It has the context. The
+  first message is routed by the table; after that the thread moves only
+  when it must — the model hands it over (a model without tools does, when
+  a request needs files, commands, the web or a real build), you pick
+  another, its answer failed, or it can't take the request (quota, not
+  running). A program joining a thread is given what was said before.
 - **The command line is the agents' interface.** Any agent with a shell can
   call `eki`. No second protocol until something without a shell needs one.
 - **Files are the handoff.** A backend's output lands in the project folder
@@ -222,10 +226,12 @@ a thread has to be able to move to another harness without losing its place.
       the CLIs' own session state. A rule for when to resume a native session
       and when to hand over a summary; who writes the summary; the summary is
       kept in the thread and can be read. Project memory (Stage 6) builds on it
-- [ ] **Failover on a limit.** When a subscription run hits its limit (or
-      the quota data says it is about to), the thread carries on in another
-      harness through the handoff above, on the next plan with room before
-      any API key — and the thread says what moved and why
+- [x] **Failover on a limit.** When a subscription run hits its limit
+      mid-run, the same request carries on in the row's next choice on
+      another subscription — told what was written, in the same copy of the
+      folder — and the thread says what moved and why (`eki/failover.py`,
+      docs/routing.md). *Still open:* moving *before* the wall when the
+      quota data says it's about to
 - *Evolve:* merge conflicts, refusals that stopped a child run and
   handoffs that lost something are recorded as outcomes, and the policy and
   the summary rule are adjusted from them, visibly.

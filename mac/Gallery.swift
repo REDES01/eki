@@ -141,8 +141,10 @@ struct GalleryPane: View {
     var body: some View {
         GeometryReader { geo in
             let most = max(300, Double(geo.size.width) - Self.gridMinimum)
+            // what the tiles and their header get: the pane, less an open artifact
+            let room = Double(geo.size.width) - (stage.artifact != nil ? min(panelWidth, most) + 6 : 0)
             HStack(spacing: 0) {
-                grid
+                grid(room)
                 if let artifact = stage.artifact {
                     PanelHandle(width: $panelWidth, limit: 300...most)
                     ArtifactPanel(artifact: artifact, walks: true)
@@ -161,9 +163,9 @@ struct GalleryPane: View {
         }
     }
 
-    private var grid: some View {
+    private func grid(_ room: Double) -> some View {
         VStack(spacing: 0) {
-            header
+            header(room)
             Rectangle().fill(Palette.hairline).frame(height: 1)
             if shown.isEmpty {
                 empty
@@ -184,13 +186,15 @@ struct GalleryPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Beside an open artifact there is room for a column of tiles and not
-    /// much else, so the filter folds into a menu and the search steps aside.
-    private var header: some View {
-        let compact = stage.artifact != nil
+    /// As the room narrows — a smaller window, or an artifact open beside the
+    /// tiles — the filter folds into a menu, then the search steps aside; the
+    /// title never wraps and the summary is cut short rather than the tiles.
+    private func header(_ room: Double) -> some View {
+        let compact = stage.artifact != nil || room < 820 + 60 * zoom
+        let searching = room >= 480 + 60 * zoom
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Artifacts").font(.hubTitle)
+                Text("Artifacts").font(.hubTitle).lineLimit(1).fixedSize()
                 HStack(spacing: 6) {
                     Text(loaded ? summary : "Looking…")
                         .foregroundStyle(Palette.inkFaint)
@@ -205,7 +209,7 @@ struct GalleryPane: View {
                 }
                 .font(.zoomed(size: 11.5))
             }
-            .layoutPriority(1)
+            .frame(minWidth: 0, alignment: .leading)
             Spacer(minLength: 12)
             if compact {
                 Picker("", selection: $filter) {
@@ -215,6 +219,9 @@ struct GalleryPane: View {
                 .labelsHidden()
                 .fixedSize()
                 .controlSize(.small)
+                if (searching || !query.isEmpty) && stage.artifact == nil {
+                    SearchField(text: $query).frame(width: 150)
+                }
             } else {
                 Picker("", selection: $filter) {
                     ForEach(MadeFilter.allCases) { Text($0.rawValue).tag($0) }

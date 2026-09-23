@@ -209,8 +209,10 @@ def main() -> int:
     url = a.url or f"{REPO}/archive/refs/tags/v{a.version}.tar.gz"
     sha = a.sha256
     if not sha:
-        with urllib.request.urlopen(url, timeout=120) as r:
-            sha = hashlib.sha256(r.read()).hexdigest()
+        # curl: GitHub's archive redirect to codeload can stall urllib
+        data = subprocess.run(["curl", "-fsSL", "--max-time", "120", url], capture_output=True,
+                              check=True).stdout
+        sha = hashlib.sha256(data).hexdigest()
     sys.stdout.write(formula(a.version, url, sha))
     return 0
 

@@ -66,6 +66,9 @@ DEFAULTS: Dict[str, Any] = {
     #: a model with no tools of its own may hand the thread to Claude Code
     #: or Codex when a request needs more (eki/handoff.py)
     "handoff": True,
+    #: a subscription that runs out mid-run: the next choice in the row, on
+    #: another subscription, carries on from where it stopped (eki/failover.py)
+    "failover": True,
     #: a fault in eki's own code (eki/observe.py): "propose" — eki writes a
     #: fix as an `eki self` proposal (never applied), or "off"
     "self_fix": "propose",

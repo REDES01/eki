@@ -92,6 +92,29 @@ Checked live on 2026-09-23: haiku and rewrite on the local model (2 s each),
 the disk question handed to Claude Code · Opus with a brief, the RPG idea
 built on the haiku by Opus, which had been given the thread.
 
+## Out of usage, halfway through
+
+The table already skips a subscription whose window is spent. When one runs
+out **during** a run — Claude Code's week ends halfway through building a
+game — the run doesn't fail. eki (`eki/failover.py`):
+
+- recognises the stop as a limit: Claude Code's own "rejected" rate-limit
+  event (unless it's paying on past the window), or the words every
+  provider uses — "usage limit reached", "hit your usage limit", 429;
+- hands the same request to the row's next choice on **another**
+  subscription, told what the first had written so far and to carry on —
+  with the conversation so far, like any harness joining a thread;
+- in the same copy of the folder: what the first changed is already there,
+  and both sets of changes come back to your folder together;
+- says so in the thread: what the first wrote, then
+  *— Claude Code hit its usage limit (…); Codex carries on —*, then the
+  rest;
+- holds that subscription out for 15 minutes, so the next request doesn't
+  try it first while the quota readings catch up.
+
+Two hops at most. A model you picked by name reports its limit instead —
+you chose it. Any other failure fails as before. Setting `failover` (on).
+
 ## Order
 
 What can do it (running, quota, able) → your rules → the vendor's ladder →

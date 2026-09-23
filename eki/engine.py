@@ -44,6 +44,7 @@ from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
 from . import handoff as handoff_mod
+from . import failover as failover_mod
 from . import table as table_mod
 from . import capacity as capacity_mod
 from . import prefs as prefs_mod
@@ -692,10 +693,14 @@ class Engine:
         # sees what was said to it. Joining a thread others have spoken in —
         # handed over, or picked — it is given the conversation so far first.
         earlier = self._earlier_for(backend, cid, run) if cid else ""
-        if run.get("_handoff") or earlier:
+        fo = run.get("_failover") or {}
+        if run.get("_handoff") or earlier or fo:
             ho = run.get("_handoff") or {}
             asked = (f"{ho.get('brief')}\n\n(Their message: {run['prompt']})" if ho.get("brief")
                      else run["prompt"])
+            if fo:
+                asked = failover_mod.brief(fo.get("label") or fo.get("from") or "The model before",
+                                           fo.get("why") or "", fo.get("partial") or "") + asked
             work_run = {**work_run, "prompt": earlier + asked}
             if history and history[-1].role == "user":
                 history = history[:-1] + [Message("user", work_run["prompt"])]
@@ -754,6 +759,9 @@ class Engine:
         meta: Dict[str, Any] = {"run": run["id"], "label": meta_label, "model": chosen_model}
         if run.get("_handoff"):
             meta["handoff"] = run["_handoff"]
+        if run.get("_failover"):
+            fo = run["_failover"]
+            meta["failover"] = {k: fo[k] for k in ("from", "why", "hops", "tried") if k in fo}
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
         if ws is not None and ws.mode == "worktree":
@@ -775,7 +783,10 @@ class Engine:
             stream = handoff_mod.watch(stream)
         if run.get("_handoff"):
             stream = self._with_note(stream, run["_handoff"])
+        if run.get("_failover"):
+            stream = self._carried_on(stream, run["_failover"], backend)
         handed: Optional[handoff_mod.HandOff] = None
+        ran_out: Optional[Dict[str, Any]] = None
         try:
             async for chunk in stream:
                 if isinstance(chunk, str):
@@ -784,12 +795,24 @@ class Engine:
         except handoff_mod.HandOff as h:
             handed = h
         except BackendError as e:
-            line = self._keep_workspace(ws, run)
-            if cid:
-                self.store.add_turn(cid, "assistant", ("".join(parts) or f"[failed: {e}]") + line,
-                                    backend.key, choice.reason,
-                                    meta={**meta, "failed": True})
-            raise
+            if self._fails_over(e, run, requested):
+                # out of usage mid-run: the thread's copy of the folder stays
+                # as it is, and the next choice carries on from there
+                was = run.get("_failover") or {}
+                ran_out = {"from": backend.key, "label": backend.info.label,
+                           "source": backend.info.quota_source or backend.key,
+                           "why": str(e)[:240], "partial": "".join(parts)[-6000:],
+                           "hops": int(was.get("hops") or 0) + 1,
+                           "tried": list(was.get("tried") or []) + [backend.key],
+                           "sources": list(was.get("sources") or [])
+                           + [backend.info.quota_source or backend.key]}
+            else:
+                line = self._keep_workspace(ws, run)
+                if cid:
+                    self.store.add_turn(cid, "assistant", ("".join(parts) or f"[failed: {e}]") + line,
+                                        backend.key, choice.reason,
+                                        meta={**meta, "failed": True})
+                raise
         except (asyncio.CancelledError, GeneratorExit):
             if self.runner.stopping:
                 # the engine is going away, not you stopping it: the copy is
@@ -815,6 +838,16 @@ class Engine:
                 held.release()
             if ws is not None:
                 self._in_copy.discard(ws.tree)
+
+        if ran_out is not None:
+            # the same request, to the next choice not on that subscription —
+            # told what was done, in the same copy of the folder
+            observe_mod.note("history", what="failover", frm=backend.key, run=run["id"],
+                             why=ran_out["why"][:200])
+            self._quota_after_limit(backend)
+            async for piece in self._dispatch({**run, "_failover": ran_out}):
+                yield piece
+            return
 
         if handed is not None:
             # the model without tools passed it on: the same request, with its
@@ -976,6 +1009,19 @@ class Engine:
         row, why = table_mod.row_for(label.task, label.difficulty, failed, run["prompt"], examples)
         cells = self.routing_table(cid)
         targets = list((cells.get(row) or {}).get("targets") or [])
+        fo = run.get("_failover")
+        if fo:
+            # out of usage mid-run: the row's next choice on another subscription
+            gone = set(fo.get("tried") or [])
+            spent = set(fo.get("sources") or [])
+            ahead = []
+            for t in targets:
+                k = table_mod.parse_target(t)[0]
+                b = self.get(k)
+                if k in gone or b is None or (b.info.quota_source or k) in spent:
+                    continue
+                ahead.append(t)
+            return row, f"{fo.get('label') or fo.get('from')} hit its usage limit", ahead, "", False
         ho = run.get("_handoff")
         if ho:
             subs = [b.key for b in self._subscriptions()]
@@ -1032,6 +1078,34 @@ class Engine:
         """The harness's answer, opened by a line saying who handed it over."""
         frm = next((b.info.label for b in self.backends if b.key == ho.get("from")), ho.get("from"))
         yield f"*{frm} handed this over: {ho.get('brief') or 'it needs tools'}*\n\n"
+        async for chunk in stream:
+            yield chunk
+
+    def _fails_over(self, e: Exception, run: Dict[str, Any], requested: str) -> bool:
+        """A usage limit, on a model eki chose, with hops left."""
+        if requested or run.get("images") or not self.settings.get("failover", True):
+            return False
+        if int((run.get("_failover") or {}).get("hops") or 0) >= failover_mod.MAX_HOPS:
+            return False
+        return failover_mod.is_limit(str(e))
+
+    def _quota_after_limit(self, backend: Backend) -> None:
+        """The window is spent: the router is told before it picks again."""
+        try:
+            src = backend.info.quota_source or backend.key
+            self.quota.mark_exhausted(src)
+        except Exception:                           # noqa: BLE001
+            pass
+
+    async def _carried_on(self, stream: AsyncIterator[Any], fo: Dict[str, Any],
+                          backend: Backend) -> AsyncIterator[Any]:
+        """What the model before had written, a line saying it ran out, then
+        this one carrying on — one answer in the thread."""
+        if fo.get("partial"):
+            yield fo["partial"]
+        why = (fo.get("why") or "usage limit").split(": ", 1)[-1]
+        yield (f"\n\n*— {fo.get('label') or fo.get('from')} hit its usage limit ({why}); "
+               f"{backend.info.label} carries on —*\n\n")
         async for chunk in stream:
             yield chunk
 
@@ -1707,6 +1781,8 @@ class Engine:
             carrying_on = bool((json.loads(run.get("payload") or "{}") or {}).get("resume_of"))
         except (TypeError, ValueError):
             carrying_on = False
+        # carrying on after a limit: the copy as the model before left it
+        carrying_on = carrying_on or bool(run.get("_failover"))
         async with lock:
             try:
                 # carrying on after a restart: the copy as the run left it
@@ -2559,6 +2635,12 @@ class Engine:
                         yield {"kind": "cancel", "request_id": ev["request_id"]}
                     elif kind == "rate_limit":
                         self._note_rate_limits(ev["info"])
+                        why = failover_mod.rejected(ev["info"])
+                        if why and self.settings.get("failover", True):
+                            # don't let it wait for the reset: another model can carry on now
+                            if session.alive:
+                                await session.interrupt()
+                            raise BackendError(f"{backend.info.label}: {why}")
                     elif kind == "context":
                         # how full the thread is — shown as a meter, and kept
                         # with the answer so it's known when the thread is idle

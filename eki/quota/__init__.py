@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Dict, List, Optional
 
 from .base import QuotaProvider, Reading, Window, label_for  # noqa: F401
@@ -24,6 +25,9 @@ class QuotaBoard:
         self.ceiling = ceiling
         self.poll_seconds = poll_seconds
         self.latest: Dict[str, Reading] = {}
+        # {provider: (until, why)}: a limit a program hit mid-run, held until
+        # the readings can say so themselves (they're polled, and cached)
+        self.walls: Dict[str, tuple] = {}
         self._task: Optional[asyncio.Task] = None
 
     async def refresh(self, force: bool = False) -> Dict[str, Reading]:
@@ -68,6 +72,12 @@ class QuotaBoard:
         a credit meter running high on its own means money, not a wall.
         """
         out: Dict[str, str] = {}
+        now = time.time()
+        for key, (until, why) in list(self.walls.items()):
+            if until > now:
+                out[key] = why
+            else:
+                self.walls.pop(key, None)
         for key, reading in self.latest.items():
             credits = credits_left(reading)
             for w in reading.windows:
@@ -81,3 +91,9 @@ class QuotaBoard:
                         why += ", credits spent too"
                     out[key] = why
         return out
+
+    def mark_exhausted(self, key: str, why: str = "hit its usage limit",
+                       seconds: float = 900.0) -> None:
+        """A program said it's out, mid-run: out for a while, whatever the
+        last reading said."""
+        self.walls[key] = (time.time() + max(60.0, seconds), why)

@@ -34,6 +34,10 @@ def private_skills(tmp_path, monkeypatch):
     from eki import settings
     monkeypatch.setattr(settings, "PATH", root / "eki" / "settings.json")
     from eki import builds, selfloop, selfwork
+    # eki's own source, as far as a test knows, is nowhere: no test makes a
+    # branch or a worktree in the real repo (a test that wants self-work
+    # gives the engine a throwaway repo of its own)
+    monkeypatch.setenv("EKI_SOURCE", str(root / "no-source"))
     monkeypatch.setattr(builds, "BUILDS", root / "eki" / "builds")
     monkeypatch.setattr(builds, "SELF_HOME", root / "eki" / "self")
     # eki's changes to itself, and the loop's items and notes

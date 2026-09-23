@@ -411,6 +411,7 @@ class SelfLoop:
         why = self._self_why_not()
         if why:
             return why
+        await asyncio.to_thread(self._self_reconcile)
         if selfloop.note_due(since=g.created_at):
             selfloop.add("note", "eki's weekly note")
         review_max = int(self.settings.get("self_review_max", selfloop.REVIEW_MAX))   # type: ignore[attr-defined]
@@ -491,6 +492,17 @@ class SelfLoop:
         return {"goal": g.to_json()}
 
     # ---- deciding on a change -------------------------------------------------------------
+
+    def _self_reconcile(self, force: bool = False) -> None:
+        """Changes you merged or deleted by hand: their items follow."""
+        for cid in selfwork.reconcile(force=force):
+            try:
+                c = selfwork.change(cid)
+            except selfwork.SelfWorkError:
+                continue
+            it = self._self_item_of(c)
+            if it is not None:
+                selfloop.after_change(it, c)
 
     def _self_item_of(self, c: Dict[str, Any]) -> Optional[selfloop.Item]:
         try:
@@ -629,6 +641,8 @@ class SelfLoop:
     def self_view(self) -> Dict[str, Any]:
         why_not = self._self_why_not()
         root = self._self_root()
+        if not why_not:
+            self._self_reconcile()
         g = self._self_goal()
         rows = selfwork.changes(limit=60)
         items = selfloop.items()

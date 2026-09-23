@@ -306,6 +306,35 @@ def change(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     return found[0]
 
 
+_RECONCILED = {"at": 0.0}
+
+
+def reconcile(home: Optional[Path] = None, force: bool = False) -> List[str]:
+    """Proposals decided outside eki: merged by hand (applied), or their
+    branch deleted (gone). Written down, so each is looked at in git once.
+    At most once a minute unless `force`. Returns the ids that moved."""
+    now = time.time()
+    if not force and now - _RECONCILED["at"] < 60:
+        return []
+    _RECONCILED["at"] = now
+    moved = []
+    for c in changes(home):
+        if c["state"] not in ("proposed", "conflicts") or not c.get("commit"):
+            continue
+        root = Path(c["root"])
+        branch = c.get("branch") or f"self/{c['id']}"
+        if not (root / ".git").exists():
+            set_state(c["id"], "gone", home, why=f"{root} isn't a checkout any more")
+        elif is_in(root, c["commit"], "HEAD"):
+            set_state(c["id"], "applied", home, how="merged into your checkout by hand")
+        elif not _ok(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}"):
+            set_state(c["id"], "gone", home, why="its branch was deleted outside eki")
+        else:
+            continue
+        moved.append(c["id"])
+    return moved
+
+
 def waiting(home: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Fit changes nobody has decided on yet — what eki is waiting for you to look at."""
     return [c for c in changes(home) if c["state"] in ("proposed", "conflicts") and c.get("fit")]

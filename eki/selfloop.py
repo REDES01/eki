@@ -276,8 +276,9 @@ def after_change(it: Item, change: Dict[str, Any], home: Optional[Path] = None) 
                           note="a first slice landed; the rest is still open")
         else:
             fields["state"] = "done"
-    elif state in ("discarded", "undone"):
-        fields.update(state="dropped", note=f"you {'took it back' if state == 'undone' else 'discarded its change'}")
+    elif state in ("discarded", "undone", "gone"):
+        fields.update(state="dropped", note={"undone": "you took it back", "gone": "its branch was deleted"}
+                      .get(state, "you discarded its change"))
     elif state in ("unfit", "rolled back", "stopped"):
         attempts = it.attempts + 1
         why = change.get("why") or failed_check(change) or change.get("verdict") or state

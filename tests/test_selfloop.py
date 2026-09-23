@@ -453,3 +453,23 @@ async def test_the_view_says_what_it_is_doing_and_what_waits(eng):
         eng.self_settings(autonomy="yolo")
     assert eng.self_settings(autonomy="apply", areas={"docs/": "propose"})["self_autonomy"] == "apply"
     await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_changes_decided_outside_eki_are_noticed(eng):
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    first = await eng.self_ask("make VALUE two")
+    await settle(eng.runs, first["run"], timeout=20)
+    Agent.edits = {"README.md": "eki, reworded\n"}
+    second = await eng.self_ask("reword the README")
+    await settle(eng.runs, second["run"], timeout=20)
+    merged, deleted = selfloop.get(first["item"]).change, selfloop.get(second["item"]).change
+    git(eng.root, "merge", "-q", "--ff-only", f"self/{merged}")                # you merged one by hand
+    git(eng.root, "worktree", "remove", "--force", selfwork.change(deleted)["worktree"])
+    git(eng.root, "branch", "-D", f"self/{deleted}")                          # and deleted the other
+    assert len(selfwork.waiting()) == 2
+    eng._self_reconcile(force=True)
+    assert selfwork.change(merged)["state"] == "applied" and selfwork.change(deleted)["state"] == "gone"
+    assert selfwork.waiting() == [] and selfloop.get(second["item"]).state == "dropped"
+    assert selfloop.get(first["item"]).state == "done"
+    await eng.runner.stop()

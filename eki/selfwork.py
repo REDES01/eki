@@ -289,7 +289,9 @@ def changes(home: Optional[Path] = None, limit: int = 0) -> List[Dict[str, Any]]
         row["state"] = st.get("state") or first_state(e)
         row["state_at"] = st.get("at") or e.get("at") or 0
         row["title"] = e.get("title") or (e.get("request") or "").strip().split("\n")[0][:100]
-        row.setdefault("source", "asked")
+        # records from before the loop don't say who wanted them; a fault's brief does
+        row.setdefault("source", "fault" if (e.get("request") or "").startswith("Fix a fault eki observed")
+                       else "asked")
         out.append(row)
     # newest news first; within a second, the one written down last
     out.sort(key=lambda c: (-int(c.get("state_at") or 0), -seq.get(c["id"], 0)))

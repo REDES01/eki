@@ -213,7 +213,9 @@ def _fast_forward(src: Path, commit: str) -> str:
         return subprocess.run(["git", "-C", str(src), *a], capture_output=True, text=True, timeout=30)
     if not commit:
         return "no commit to bring in"
-    if git("status", "--porcelain").stdout.strip():
+    # files you haven't added to git don't stop it (git refuses by itself if
+    # the merge would overwrite one); edits to tracked files do
+    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
         return "not merged: your checkout has uncommitted changes"
     if git("merge-base", "--is-ancestor", "HEAD", commit).returncode != 0:
         return "not merged: your checkout has moved on; merge the self/ branch when you're ready"

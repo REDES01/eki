@@ -53,6 +53,9 @@ from . import capacity as capacity_mod
 from . import prefs as prefs_mod
 from . import watch as watch_mod
 from . import observe as observe_mod
+from . import selfloop
+from . import selfengine as selfengine_mod
+from .selfengine import SelfLoop
 from . import workspace as workspace_mod
 from . import live
 from . import mcpbridge
@@ -107,7 +110,7 @@ def _yours(run: Dict[str, Any]) -> bool:
         and not p.get("continuation")
 
 
-class Engine:
+class Engine(SelfLoop):
     def __init__(self, cfg, owner: bool = False, port: int = 8787):
         #: where the service listens; Codex is pointed here for local models
         self.port = port
@@ -572,6 +575,12 @@ class Engine:
         if not done:
             return {}
         what = f"self/{done['self']}" if done.get("self") else Path(done.get("target") or "").name
+        if done.get("self"):
+            try:
+                # the change it carried: applied, or rolled back — and its item follows
+                await asyncio.to_thread(self.self_settled, done)
+            except Exception:                       # noqa: BLE001
+                pass
         if done["state"] == "healthy":
             title = f"now running {what}"
             body = done.get("merged") or "the new build is healthy"
@@ -596,10 +605,14 @@ class Engine:
         if cid and backend and self.store.session(cid, backend):
             prompt = "Carry on where you left off."
             turn = self.store.add_turn(cid, "user", prompt)
+            # a change to eki itself carries on as one: the same item, its worktree
+            was = _payload(old)
+            carried = {k: was[k] for k in ("self_item", "goal", "allowed", "route") if k in was} \
+                if was.get("self_item") else {}
             # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
                                    requested=backend, images=False, user_turn=turn,
-                                   payload=json.dumps({"resume_of": rid}))
+                                   payload=json.dumps({"resume_of": rid, **carried}))
             await self.runner.submit(new)
             return {"run": new, "conversation": cid, "resumed": "session"}
         got = await self.retry(rid)
@@ -644,14 +657,27 @@ class Engine:
             async for piece in self._continuation(run):
                 yield piece
             return
+        if _payload(run).get("self_item") and not run.get("_self_inner"):
+            # a change to eki itself: worktree, agent, checks (eki/selfengine.py)
+            async for piece in self._self_work(run):
+                yield piece
+            return
 
         cid = run["conversation_id"]
         talk = prefs_mod.addressed(run["prompt"], self._route_names(), has_folder=bool(run["cwd"])) \
-            if cid and not run["requested"] and not run["images"] else ""
+            if cid and not run["requested"] and not run["images"] and not run.get("_self_inner") else ""
         if talk:
             async for piece in self._routing_talk(run, cid, talk):
                 yield piece
             return
+        if cid and not run["cwd"] and not run["images"] and not run.get("_self_inner") \
+                and not _goal_of(run) and _payload(run).get("via") != "agent":
+            # "eki, make the chat list show the project name": eki changing itself
+            wants = selfloop.addressed(run["prompt"])
+            if wants and not self._self_why_not():
+                async for piece in self._self_from_chat(run, wants):
+                    yield piece
+                return
         shown = self._picture_before(run)
         # a goal's turn is routed on the goal's own words — eki's framing isn't the work
         routed = {**run, "prompt": _payload(run).get("route") or run["prompt"]}
@@ -753,6 +779,12 @@ class Engine:
         ws: Optional[workspace_mod.Workspace] = None
         held: Optional[asyncio.Lock] = None
         work_run = run
+        if run.get("_as"):
+            # eki's own words to the agent (self-work's brief, the weekly
+            # note's evidence) in place of the line the thread shows
+            work_run = {**run, "prompt": run["_as"]}
+            if history and history[-1].role == "user":
+                history = history[:-1] + [Message("user", run["_as"])]
         # A program that keeps its own session (Claude Code, Codex) only ever
         # sees what was said to it. Joining a thread others have spoken in —
         # handed over, or picked — it is given the conversation so far first.
@@ -760,8 +792,8 @@ class Engine:
         fo = run.get("_failover") or {}
         if run.get("_handoff") or earlier or fo:
             ho = run.get("_handoff") or {}
-            asked = (f"{ho.get('brief')}\n\n(Their message: {run['prompt']})" if ho.get("brief")
-                     else run["prompt"])
+            told = run.get("_as") or run["prompt"]
+            asked = (f"{ho.get('brief')}\n\n(Their message: {told})" if ho.get("brief") else told)
             if fo:
                 asked = failover_mod.brief(fo.get("label") or fo.get("from") or "The model before",
                                            fo.get("why") or "", fo.get("partial") or "") + asked
@@ -1805,7 +1837,8 @@ class Engine:
 
     async def consider_fix(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         """Propose a fix for a fault if it's due (observe.due), one at a time.
-        Never applies it: the result is a self/ branch and a verdict."""
+        The result is a self/ branch and a verdict — applied only at the
+        `apply` autonomy setting."""
         if str(self.settings.get("self_fix", "propose")) != "propose":
             return {"skipped": "self_fix is off"}
         from . import builds as builds_mod
@@ -1814,40 +1847,40 @@ class Engine:
         why = observe_mod.due(entry, daily=int(self.settings.get("self_fix_daily", observe_mod.DAILY)))
         if why:
             return {"skipped": why}
-        if self._fixing.locked():
+        if any(i.source == "fault" and i.state in ("queued", "working") for i in selfloop.items()):
             return {"skipped": "another fix is being written"}
-        async with self._fixing:
-            return await self._propose_fix(entry)
+        return await self._propose_fix(entry)
 
     async def _propose_fix(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """A fault becomes a piece of self-work (eki/selfengine.py): the loop
+        takes it when eki works on itself; otherwise it starts at once. Either
+        way the result is a self/ branch and a verdict, applied only if the
+        autonomy setting says so."""
         from . import builds as builds_mod
-        from . import selfwork
         sig = entry["signature"]
-        observe_mod.mark(sig, state="working", at=int(time.time()), error=entry.get("error"))
-        root = builds_mod.source()
+        root = self._self_root()
         running = builds_mod.running()
         # fix the code that is actually running: a build's commit, or your checkout's HEAD
         base = running.get("commit") if not running.get("dev") and running.get("commit") else "HEAD"
         seen = [e for e in observe_mod.entries(time.time() - observe_mod.QUIET_DAYS * 86400, "fault")
                 if e.get("signature") == sig]
         request = observe_mod.brief(entry, seen, observe_mod.recent_commits(root, entry.get("file") or ""))
-        service = f"http://127.0.0.1:{self.port}"
+        # no base check: code with a fault in it may well fail its own tests,
+        # and that is the point — the candidate check judges the fix
+        it = selfloop.add("fault", f"Fix {sig}", request, key=sig, base=base, check_base=False)
+        g = self._self_goal()
+        if g is not None and g.state == "active":
+            observe_mod.mark(sig, state="queued", item=it.id, at=int(time.time()), error=entry.get("error"))
+            self._self_wake()
+            return {"state": "queued", "item": it.id}
+        observe_mod.mark(sig, state="working", item=it.id, at=int(time.time()), error=entry.get("error"))
         try:
-            # no base check: code with a fault in it may well fail its own tests,
-            # and that is the point — the candidate check judges the fix
-            p = await asyncio.to_thread(selfwork.propose, request, root=root, base=base,
-                                        ask=selfwork.ask_engine(service), python=sys.executable,
-                                        check_base=False)
+            started = await self._self_start(it)
         except Exception as e:                      # noqa: BLE001
             observe_mod.mark(sig, state="error", why=str(e)[:300])
+            selfloop.update(it.id, state="gave up", note=str(e)[:300])
             return {"state": "error", "why": str(e)[:300]}
-        observe_mod.mark(sig, state="proposed" if p.commit else "not proposed", self=p.id,
-                         branch=p.branch, fit=p.fit, verdict=p.verdict, run=p.run, backend=p.backend,
-                         files=p.files)
-        if self.settings.get("notify_learned", True):
-            head = "proposed a fix" if p.fit else "tried to fix"
-            await self._notify(f"{head}: {sig}"[:120], p.verdict)
-        return {"state": "proposed", "self": p.id, "fit": p.fit, "verdict": p.verdict}
+        return {"state": "working", "item": it.id, "run": started["run"]}
 
     # ---- a folder per thread (eki/workspace.py) ------------------------------
 
@@ -2170,6 +2203,13 @@ class Engine:
     async def _live_session(self, cid: str, backend: Backend, cwd: str, model: str = "") -> Any:
         """The conversation's session, started or resumed as needed."""
         session = self.live.get(cid)
+        if session is not None and session.alive and getattr(session, "cwd", None) and \
+                os.path.realpath(str(session.cwd)) != os.path.realpath(self._workdir(cwd)):
+            # the thread moved to another folder (eki working on itself, in its
+            # own worktree): a program works where it was started, so start it there
+            self.live.pop(cid, None)
+            await session.close()
+            session = None
         if session is not None and session.alive and getattr(session, "screen", None) not in (None,
                                                                                     self._screen_for(cid)):
             # a goal's screen setting changed: its tools are fixed when a session starts
@@ -3087,6 +3127,9 @@ class Engine:
                 entry["why"] = self._shift_state.get("why")
             goals_mod.update(g.id, turns=max(0, g.turns - 1),
                              next_at=max(g.next_at, int(time.time()) + goals_mod.STEP_OUT_PAUSE))
+        elif g.kind == "self":
+            # the piece of self-work said where it stands itself (eki/selfengine.py)
+            self._self_goal_finished(g, run, entry)
         else:
             ok = state == "done"
             answer = run.get("output") or ""
@@ -3179,6 +3222,16 @@ class Engine:
             return self._shift_state
         picked = None
         for g in due:
+            if g.kind == "self":
+                # eki working on itself: its turn is the next piece of self-work
+                # (eki/selfloop.py), not the goal's sentence
+                plan = await self._self_plan(g, now)
+                if isinstance(plan, str):
+                    # look again later — or at once, when something it waits on changes (_self_wake)
+                    goals_mod.update(g.id, note=plan, next_at=now + selfengine_mod.IDLE_RECHECK)
+                    continue
+                picked = (plan[0], plan[1], plan[2], "", True, plan[3])
+                break
             if g.screen:
                 wait = await self._screen_wait(you)
                 if wait:
@@ -3204,7 +3257,8 @@ class Engine:
             self._shift_state = {"state": "idle", "why": f"{due[0].text[:60]}: {goals_mod.get(due[0].id).note}",
                                  "at": now}
             return self._shift_state
-        g, key, allowed, text, new_thread = picked
+        g, key, allowed, text, new_thread = picked[:5]
+        self_item = picked[5] if len(picked) > 5 else None
         local = self._local_for(key)
         on_machine = self.get(key).info.cost.tier == 0
         pids = [os.getpid()] + [models_mod.listener_pid(m.port) or 0
@@ -3227,6 +3281,19 @@ class Engine:
         self._awake.hold(display=g.screen)          # the screen stays on for a goal that uses it
         if local is not None and not local.running:
             self._shift_loaded.add(local.key)
+        if self_item is not None:
+            started = await self._self_start(self_item, goal=g, allowed=allowed)
+            rid = started["run"]
+            goals_mod.update(g.id, conversation=started["conversation"], turns=g.turns + 1,
+                             last_turn_at=now, note="")
+            self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine
+            self._shift_screen, self._shift_on_time, self._shift_started = False, False, time.time()
+            self._shift_state = {"state": "working", "why": f"eki, on itself: {self_item.title[:50]} — on {key}",
+                                 "at": now, "run": rid, "goal": g.id}
+            task = self.runner.tasks.get(rid)
+            if task is not None:
+                task.add_done_callback(lambda _t: self.shift_wake.set())
+            return self._shift_state
         if not new_thread:
             cid = g.conversation
         elif g.fresh and g.repeats:
@@ -3282,6 +3349,7 @@ class Engine:
                     row["last_backend"] = said[-1].get("backend") or ""
             row["status"] = ("working" if row["working"] else g.state if g.state != "active"
                              else "away" if g.screen and g.note.startswith(SCREEN_WAIT)
+                             else self._self_status(g) if g.kind == "self" and g.note
                              else "blocked" if g.note else "scheduled" if g.repeats and g.next_at > time.time()
                              else "queued")
             rows.append(row)

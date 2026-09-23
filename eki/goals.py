@@ -73,6 +73,9 @@ class Goal:
     on_time: bool = False
     #: repeating: each time in a new thread, rather than carrying on the last one
     fresh: bool = False
+    #: "" — a sentence left running; "self" — eki working on itself: each turn
+    #: is the next piece of self-work, in its own thread (eki/selfloop.py)
+    kind: str = ""
     state: str = "active"
     conversation: str = ""
     created_at: int = field(default_factory=lambda: int(time.time()))
@@ -159,16 +162,20 @@ def get(gid: str) -> Goal:
 
 def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
            spare: bool = False, now: Optional[float] = None, screen: bool = False,
-           on_time: bool = False, fresh: bool = False) -> Goal:
+           on_time: bool = False, fresh: bool = False, kind: str = "") -> Goal:
     text = text.strip()
     if not text:
         raise GoalError("say what eki should keep doing")
     folder = str(Path(folder).expanduser()) if folder.strip() else ""
     if folder and not Path(folder).is_dir():
         raise GoalError(f"no folder {folder}")
+    if kind not in ("", "self"):
+        raise GoalError(f"no kind of goal {kind!r}")
+    if kind and any(g.kind == kind for g in all_goals()):
+        raise GoalError("eki already has a goal to work on itself")
     # its first turn as soon as there's room, so you see it work; then on its schedule
     g = Goal(id=uuid.uuid4().hex[:10], text=text, when=check_when(when), folder=folder, spare=bool(spare),
-             screen=bool(screen), on_time=bool(on_time), fresh=bool(fresh))
+             screen=bool(screen), on_time=bool(on_time), fresh=bool(fresh), kind=kind)
     goals = all_goals()
     goals.append(g)
     _save(goals)

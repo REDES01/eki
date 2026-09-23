@@ -128,7 +128,8 @@ def test_every_proposal_is_written_down(tmp_path):
 def test_the_report_says_how_to_read_take_or_drop_it(tmp_path):
     p = propose(tmp_path, repo(tmp_path), agent({"eki/thing.py": "VALUE = 2\n"}))
     text = "\n".join(p.lines())
-    assert f"merge {p.branch}" in text and "worktree remove" in text and "diff " in text
+    assert f"merge {p.branch}" in text and f"eki self discard {p.id}" in text
+    assert f"eki self apply {p.id}" in text and f"eki self diff {p.id}" in text
 
 
 def test_not_a_repo(tmp_path):

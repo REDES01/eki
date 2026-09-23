@@ -144,27 +144,44 @@ async def quiet(eng):
 
 @pytest.mark.asyncio
 async def test_a_fault_twice_gets_a_fix_proposal_once(tmp_path, monkeypatch):
-    from eki import selfwork
+    from eki import selfloop
     eng = clinic(tmp_path, monkeypatch)
     Glitch.mode = "bug"
-    asked = []
+    started = []
 
-    def fake_propose(request, **kw):
-        asked.append((request, kw["base"]))
-        return selfwork.Proposal(id="f1", request=request, root="/r", branch="self/f1",
-                                 commit="c", fit=True, verdict="fit to run — proposed, not merged",
-                                 run="r9", backend="codex")
-    monkeypatch.setattr(selfwork, "propose", fake_propose)
+    async def start(it, goal=None, allowed=None):              # the self-work run, stood in for
+        started.append(it)
+        return {"run": "r9", "conversation": "c9"}
+    monkeypatch.setattr(eng, "_self_start", start)
     for _ in range(3):
-        started = await eng.ask("do it", backend_key="glitch")
-        assert (await settle(eng.runs, started["run"]))["state"] == "failed"
+        ran = await eng.ask("do it", backend_key="glitch")
+        assert (await settle(eng.runs, ran["run"]))["state"] == "failed"
         await quiet(eng)
-    assert len(asked) == 1                                      # the second time; not the third
-    assert "ValueError" in asked[0][0] and "Traceback" in asked[0][0]
+    assert len(started) == 1                                    # the second time; not the third
+    it = started[0]
+    assert it.source == "fault" and "ValueError" in it.request and "Traceback" in it.request
+    assert it.base == "HEAD" and not it.check_base              # the running code, broken as it is
     sig = "ValueError in eki/skills.py:_check_name"
-    p = observe.proposals()[sig]
-    assert p["state"] == "proposed" and p["branch"] == "self/f1" and p["fit"]
+    assert observe.proposals()[sig]["state"] == "working" and observe.proposals()[sig]["item"] == it.id
+    assert selfloop.get(it.id).key == sig
     assert observe.summary()["faults"][0]["count"] == 3
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_with_eki_working_on_itself_a_fault_waits_for_the_loop(tmp_path, monkeypatch):
+    from eki import goals, selfloop
+    eng = clinic(tmp_path, monkeypatch)
+    Glitch.mode = "bug"
+    goals.create(selfloop.GOAL_TEXT, spare=True, kind="self")
+    monkeypatch.setattr(eng, "_self_start", lambda *a, **k: pytest.fail("the loop takes it, not now"))
+    for _ in range(2):
+        ran = await eng.ask("do it", backend_key="glitch")
+        await settle(eng.runs, ran["run"])
+        await quiet(eng)
+    queued = [i for i in selfloop.items() if i.source == "fault"]
+    assert len(queued) == 1 and queued[0].state == "queued"
+    assert observe.proposals()["ValueError in eki/skills.py:_check_name"]["state"] == "queued"
     await eng.runner.stop()
 
 

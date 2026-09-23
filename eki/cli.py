@@ -435,43 +435,181 @@ def cmd_agent(args) -> int:
     return 0
 
 
-def cmd_self(args) -> int:
-    """eki, working on eki (see eki/selfwork.py). Proposes; never merges."""
-    from . import selfwork
-    if not args.request:
-        rows = selfwork.history()
-        if not rows:
-            print("nothing proposed yet — try: eki self \"…\"")
-        for e in rows[-args.limit:]:
-            when = time.strftime("%m-%d %H:%M", time.localtime(e.get("at") or 0))
-            mark = "fit " if e.get("fit") else "    "
-            print(f"{when}  {mark} self/{e['id']}  {e['request'][:60]}  — {e['verdict'][:70]}")
-        return 0
-    ensure_engine(args.service)
-    say = lambda line: print(f"· {line}", file=sys.stderr, flush=True)   # noqa: E731
-    try:
-        from . import builds
-        p = selfwork.propose(args.request, root=builds.source(), base=args.base,
-                             check_base=not args.anyway,
-                             ask=selfwork.ask_engine(args.service, args.backend or "", say),
-                             say=say)
-    except selfwork.SelfWorkError as e:
-        print(f"! {e}", file=sys.stderr)
+SELF_VERBS = ("apply", "discard", "undo", "diff", "show", "on", "off", "next", "note",
+              "autonomy", "retry", "drop", "mine")
+
+
+def _ago(t: float) -> str:
+    return time.strftime("%m-%d %H:%M", time.localtime(t or 0))
+
+
+def _self_status(service: str, limit: int) -> int:
+    v = call("GET", "/api/self", service)
+    if not v["can"]:
+        print(v["why_not"])
         return 1
-    print(json.dumps(p.to_json(), indent=2) if args.json else "\n".join(p.lines()))
-    from . import settings as settings_mod
-    apply = args.apply or settings_mod.load().get("self_autonomy") == "apply"
-    if apply and p.fit and not p.protected and p.commit:
-        # apply here: the proposal's commit becomes a build, and the
-        # supervisor swaps it in, watches it, and rolls back if it's unhealthy
-        from . import builds
-        build = builds.make(builds.source(), p.commit, note=f"self/{p.id}")
-        builds.swap(build, self_id=p.id)
-        print(f"\napplying: {build} — the supervisor swaps it in once runs finish, "
-              f"watches it, and swaps back if it isn't healthy (eki builds)")
-    elif apply and p.protected:
-        print("\nnot applied: it touches what eki may not change alone — for a person to merge")
-    return 0 if p.fit else 1
+    g = v.get("goal")
+    if g is None:
+        print("eki works on itself: off — `eki self on` lets it, whenever the machine has room")
+    else:
+        spend = "your subscriptions' spare room" if g.get("spare") else "nothing but what you allow"
+        if v.get("local"):
+            spend += " and the local models"
+        print(f"eki works on itself: {'on' if g['state'] == 'active' else g['state']} — uses {spend}"
+              + ("   (eki self off)" if g["state"] == "active" else "   (eki self on)"))
+        if g.get("working"):
+            now = next(iter(v["working"]), {})
+            print(f"now: working on “{now.get('title', '')}”")
+        elif g.get("note"):
+            print(f"now: {g['note']}")
+    areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
+    print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
+          + f" · at most {v['review_max']} waiting for you")
+    if v["waiting"]:
+        print("\nwaiting for you:")
+        for c in v["waiting"]:
+            print(f"  self/{c['id']}  {c.get('source', ''):<7} {c['title'][:58]}"
+                  f"\n              eki self diff {c['id']} · eki self apply {c['id']} · eki self discard {c['id']}")
+    ahead = v["working"] + v["queue"]
+    nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}" for n in v["roadmap"]["next"][:3]]
+    if ahead or nexts:
+        print("\nup next:")
+        for i in ahead:
+            print(f"  {i['source']:<7} {i['title'][:70]}" + ("  (working)" if i["state"] == "working" else ""))
+        for line in nexts:
+            print(line)
+    if v["left"]:
+        print("\nleft for you:")
+        for i in v["left"]:
+            print(f"  {i['id'][:6]}  {i['title'][:60]} — {i.get('note', '')[:90]}"
+                  f"\n          (eki self retry {i['id'][:6]} to let it try again)")
+    rows = [c for c in v["changes"] if c["state"] not in ("proposed", "conflicts")][:limit]
+    if rows:
+        print("\nrecent:")
+        for c in rows:
+            print(f"  {_ago(c.get('state_at'))}  {c['state']:<11} self/{c['id']}  {c['title'][:56]}")
+    note = v.get("note")
+    if note:
+        print(f"\nweekly note ({note['id']}): {len(note.get('suggestions') or [])} suggestions — "
+              "on the board (Goals → Self)")
+    return 0
+
+
+def _self_verb(args, verb: str, rest: List[str]) -> int:
+    s = args.service
+    arg = rest[0] if rest else ""
+    if verb in ("on", "off"):
+        got = call("POST", "/api/self/on", s, json={"on": verb == "on"})
+        g = got.get("goal")
+        print("eki works on itself whenever the machine has room — changes come to you as proposals "
+              "(Goals → Self, or `eki self`)" if verb == "on" and g else
+              "paused — nothing new starts; what's running finishes" if g else "it wasn't on")
+        return 0
+    if verb == "autonomy":
+        if not rest:
+            v = call("GET", "/api/self", s)
+            print(f"{v['autonomy']}; areas: {json.dumps(v.get('areas') or {})}")
+            return 0
+        body: Dict[str, Any] = {}
+        areas: Dict[str, str] = {}
+        for word in rest:
+            if "=" in word:
+                path, _, mode = word.partition("=")
+                areas[path] = mode
+            else:
+                body["autonomy"] = word
+        if areas:
+            v = call("GET", "/api/self", s)
+            merged = {**(v.get("areas") or {}), **areas}
+            body["areas"] = {k: m for k, m in merged.items() if m in ("apply", "propose")}
+        print(json.dumps(call("PUT", "/api/self/settings", s, json=body)))
+        return 0
+    if verb == "next":
+        v = call("GET", "/api/self", s)
+        for i in v["working"] + v["queue"]:
+            print(f"{i['source']:<8} {i['title']}")
+        for n in v["roadmap"]["next"]:
+            print(f"roadmap  {n['section']}: {n['title']}")
+        return 0
+    if verb == "note":
+        v = call("GET", "/api/self", s)
+        if arg == "now" or not v.get("note"):
+            got = call("POST", "/api/self/note", s)
+            print(f"writing this week's note: run {got.get('run')} — `eki watch {got.get('run')}`")
+            return 0
+        note = v["note"]
+        print(f"eki's note of {note['id']}\n\n{note['text']}\n")
+        for i, sug in enumerate(note.get("suggestions") or []):
+            print(f"{i}. {sug['title']} [{sug['kind']}]{' — ' + sug['picked'] if sug.get('picked') else ''}"
+                  f"\n   {sug['why']}")
+        return 0
+    if not arg:
+        print(f"eki self {verb} <id>", file=sys.stderr)
+        return 2
+    if verb in ("retry", "drop", "mine"):
+        got = call("POST", f"/api/self/items/{arg}/{'person' if verb == 'mine' else verb}", s)
+        print(f"{got['title']}: {got['state']}")
+        return 0
+    if verb == "diff":
+        print(call("GET", f"/api/self/changes/{arg}/diff", s)["diff"])
+        return 0
+    if verb == "show":
+        print("\n".join(call("GET", f"/api/self/changes/{arg}", s)["lines"]))
+        return 0
+    if verb in ("apply", "undo"):
+        print("· a change put on top of your checkout is judged again first — a minute or two",
+              file=sys.stderr)
+    try:
+        # applying may rebase and re-run the checks: longer than an ordinary call
+        r = httpx.post(f"{s}/api/self/changes/{arg}/{verb}", timeout=1800)
+    except httpx.HTTPError as e:
+        print(f"! lost the engine: {e}", file=sys.stderr)
+        return 1
+    got = r.json()
+    if r.status_code >= 400:
+        print(f"! {got.get('detail') or r.text[:200]}", file=sys.stderr)
+        return 1
+    say = {"applying": "applying — the supervisor swaps it in once nothing is running, watches it, "
+                       "and goes back if it isn't healthy (eki builds)",
+           "applied": got.get("merged") or "applied",
+           "conflicts": "it no longer goes on top of your checkout — `eki self retry` lets eki try again",
+           "unfit": "it didn't pass its checks on top of your checkout",
+           "discarded": "discarded", "not undone": f"not undone: {got.get('why')}"}
+    print(say.get(got.get("state") or "", json.dumps(got)))
+    return 0
+
+
+def cmd_self(args) -> int:
+    """eki, working on eki (eki/selfwork.py, eki/selfloop.py, docs/self-build.md)."""
+    words = list(args.request or [])
+    verb = words[0].lower() if words else ""
+    if verb in SELF_VERBS and (len(words) <= 2 or verb == "autonomy"):
+        ensure_engine(args.service)
+        return _self_verb(args, verb, words[1:])
+    request = " ".join(words).strip()
+    if not request:
+        ensure_engine(args.service)
+        return _self_status(args.service, args.limit)
+    ensure_engine(args.service)
+    body = {"request": request, "when": "later" if args.later else "now", "apply": args.apply,
+            "base": args.base if args.base != "HEAD" else "", "check_base": not args.anyway,
+            "backend": args.backend or ""}
+    got = call("POST", "/api/self", args.service, json=body)
+    if got.get("queued"):
+        print("queued — eki takes it when the machine has room" if got.get("goal") else
+              "queued — but eki isn't working on itself yet: `eki self on`")
+        return 0
+    print(f"· run {got['run']} — its own thread in the app; Ctrl-C stops watching, not the work",
+          file=sys.stderr)
+    watch(got["run"], args.service)
+    item = call("GET", f"/api/self/items/{got['item']}", args.service)
+    c = item.get("change_detail")
+    if not c:
+        print(f"\n{item['state']}: {item.get('note') or 'no change was made'}")
+        return 1
+    if args.json:
+        print(json.dumps(c, indent=2))
+    return 0 if c.get("fit") else 1
 
 
 def cmd_routing(args) -> int:
@@ -814,8 +952,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     g.add_argument("action", nargs="?", default="status",
                    choices=["install", "uninstall", "restart", "status", "access"])
 
-    sw = sub.add_parser("self", help="have eki change its own source, as a proposal")
-    sw.add_argument("request", nargs="?", default="")
+    sw = sub.add_parser("self", help="eki working on itself: ask for a change, see what it did, decide",
+                        description="eki self                      what it's doing, what waits for you, what's next\n"
+                                    "eki self \"change …\"           a change to eki, now (--later: when there's room)\n"
+                                    "eki self on|off               let eki work on itself whenever the machine has room\n"
+                                    "eki self diff|show|apply|discard|undo <id>\n"
+                                    "eki self next                 what it would take next\n"
+                                    "eki self retry|drop|mine <item>\n"
+                                    "eki self autonomy propose|apply [path=apply …]\n"
+                                    "eki self note [now]           the weekly note: what it noticed, what it suggests",
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sw.add_argument("request", nargs="*", default=[])
+    sw.add_argument("--later", action="store_true",
+                    help="queue it: eki takes it when the machine has room (eki self on)")
     sw.add_argument("-b", "--backend", help="the agent to use (default: routed)")
     sw.add_argument("--base", default="HEAD", help="commit or branch to start from")
     sw.add_argument("--anyway", action="store_true",

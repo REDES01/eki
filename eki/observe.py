@@ -53,7 +53,8 @@ QUIET_DAYS = 7
 #: the journal keeps this many lines
 KEEP = 5000
 #: whose faults are never handed back to self-work (they'd have to fix themselves)
-SELF_MACHINERY = ("selfwork.py", "candidate.py", "builds.py", "supervisor.sh", "observe.py", "agent.py")
+SELF_MACHINERY = ("selfwork.py", "candidate.py", "builds.py", "supervisor.sh", "observe.py", "agent.py",
+                  "selfloop.py", "selfengine.py", "roadmap.py")
 
 _lock = threading.Lock()
 
@@ -270,7 +271,7 @@ def due(entry: Dict[str, Any], now: Optional[float] = None,
         return f"seen {len(seen)} of {need} times"
     known = proposals()
     last = known.get(sig) or {}
-    if last.get("state") in ("working",):
+    if last.get("state") in ("working", "queued"):
         return "a proposal for it is being written"
     if last.get("at", 0) > now - QUIET_DAYS * 86400:
         return "proposed for this week already"

@@ -81,13 +81,27 @@ def test_a_self_change_waits_if_your_checkout_has_work_in_it(src):
     (src / "README.md").write_text("v2\n")
     sh(src, "commit", "-q", "-am", "self: v2")
     sh(src, "checkout", "-q", "main")
-    (src / "notes.txt").write_text("yours\n")
+    (src / "eki" / "__init__.py").write_text("# yours, not committed\n")
     b = builds.make(src, "self/abc")
     builds.SELF_HOME.mkdir(parents=True)
     (builds.SELF_HOME / "swap.json").write_text(json.dumps(
         {"state": "healthy", "target": str(b), "self": "abc", "at": 1}))
     assert "uncommitted" in builds.settle_swap()["merged"]
     assert (src / "README.md").read_text() == "v1\n"
+
+
+def test_files_you_never_added_to_git_dont_stop_it(src):
+    sh(src, "checkout", "-q", "-b", "self/abc")
+    (src / "README.md").write_text("v2\n")
+    sh(src, "commit", "-q", "-am", "self: v2")
+    sh(src, "checkout", "-q", "main")
+    (src / "notes.txt").write_text("yours, untracked\n")
+    b = builds.make(src, "self/abc")
+    builds.SELF_HOME.mkdir(parents=True)
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps(
+        {"state": "healthy", "target": str(b), "self": "abc", "at": 1}))
+    assert builds.settle_swap()["merged"] == "merged into your checkout"
+    assert (src / "README.md").read_text() == "v2\n" and (src / "notes.txt").exists()
 
 
 def test_old_builds_go_but_never_current_or_previous(src):

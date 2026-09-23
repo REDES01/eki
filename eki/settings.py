@@ -60,6 +60,15 @@ DEFAULTS: Dict[str, Any] = {
     #: change that touches nothing protected is swapped in, watched, and
     #: rolled back if unhealthy — docs/self-build.md)
     "self_autonomy": "propose",
+    #: the same, per path: {"docs/": "apply", "ROADMAP.md": "apply"} — the
+    #: longest match wins; a change is applied only if every file may be
+    "self_autonomy_areas": {},
+    #: while this many fit changes wait for you, eki starts no new self-work
+    #: of its own (what you ask for still goes ahead)
+    "self_review_max": 3,
+    #: eki's own code is worked on by your subscriptions' spare room; on,
+    #: the local models (Qwen with Codex's hands) may take it too
+    "self_local": False,
     #: who reads the vendors' model pages and the benchmark charts each day
     #: (eki/watch.py): "" = Claude Code if you have it (it can see a chart)
     "watch_reader": "",

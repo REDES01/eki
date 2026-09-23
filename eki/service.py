@@ -744,6 +744,123 @@ async def watch_take(name: str) -> Any:
         raise HTTPException(409, str(e))
 
 
+# ---- eki working on itself (eki/selfengine.py, docs/self-build.md) ---------------------
+
+def _self_call(fn, *args, **kw) -> Any:
+    from . import selfwork
+    try:
+        return fn(*args, **kw)
+    except selfwork.SelfWorkError as e:
+        raise HTTPException(409, str(e))
+    except KeyError as e:
+        raise HTTPException(404, f"not found: {e}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+async def _self_await(fn, *args, **kw) -> Any:
+    from . import selfwork
+    try:
+        return await fn(*args, **kw)
+    except selfwork.SelfWorkError as e:
+        raise HTTPException(409, str(e))
+    except KeyError as e:
+        raise HTTPException(404, f"not found: {e}")
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/self")
+def self_view() -> Any:
+    """What eki is doing to itself, what waits for you, what's next."""
+    out = engine().self_view()
+    out["page"] = _board_version()
+    return out
+
+
+@app.post("/api/self")
+async def self_ask(body: Dict[str, Any]) -> Any:
+    """A change to eki: `when` now (a run, in its own thread) or later (the loop takes it)."""
+    when = str(body.get("when") or "now")
+    if when not in ("now", "later"):
+        raise HTTPException(400, "when is now or later")
+    return await _self_await(engine().self_ask, str(body.get("request") or ""), when=when,
+                             conversation=str(body.get("conversation") or ""),
+                             apply=bool(body.get("apply")), base=str(body.get("base") or ""),
+                             check_base=bool(body.get("check_base", True)),
+                             backend=str(body.get("backend") or ""), title=str(body.get("title") or ""))
+
+
+@app.post("/api/self/on")
+def self_on(body: Dict[str, Any]) -> Any:
+    """Start or pause the goal that has eki work on itself when there's room."""
+    return _self_call(engine().self_on, bool(body.get("on", True)),
+                      spare=body["spare"] if "spare" in body else None)
+
+
+@app.put("/api/self/settings")
+def self_settings(body: Dict[str, Any]) -> Any:
+    """How far it goes alone (autonomy, per area), how much waits for you, local models."""
+    return _self_call(engine().self_settings, **{k: body[k] for k in ("autonomy", "areas", "review_max", "local")
+                                                 if k in body})
+
+
+@app.get("/api/self/changes/{cid}")
+def self_change(cid: str) -> Any:
+    from . import selfwork
+    c = _self_call(selfwork.change, cid)
+    fields = {k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__}
+    return {**c, "lines": selfwork.Proposal(**fields).lines()}
+
+
+@app.get("/api/self/changes/{cid}/diff")
+def self_diff(cid: str) -> Any:
+    return {"diff": _self_call(engine().self_diff, cid)}
+
+
+@app.post("/api/self/changes/{cid}/{action}")
+async def self_decide(cid: str, action: str) -> Any:
+    eng = engine()
+    fn = {"apply": eng.self_apply, "discard": eng.self_discard, "undo": eng.self_undo}.get(action)
+    if fn is None:
+        raise HTTPException(404, "apply, discard or undo")
+    return await _self_await(fn, cid)
+
+
+@app.get("/api/self/items/{iid}")
+def self_item(iid: str) -> Any:
+    from . import selfloop, selfwork
+    it = _self_call(selfloop.get, iid).to_json()
+    try:
+        it["change_detail"] = selfwork.change(it["change"]) if it.get("change") else None
+    except selfwork.SelfWorkError:
+        it["change_detail"] = None
+    return it
+
+
+@app.post("/api/self/items/{iid}/{action}")
+def self_item_action(iid: str, action: str) -> Any:
+    return _self_call(engine().self_item_action, iid, action)
+
+
+@app.post("/api/self/roadmap/{key}/{action}")
+def self_roadmap_action(key: str, action: str) -> Any:
+    """A ROADMAP item the loop hasn't taken yet: person (leave it for me) or drop."""
+    return _self_call(engine().self_roadmap_action, key, action)
+
+
+@app.post("/api/self/note")
+async def self_note() -> Any:
+    """Write this week's note now, rather than when it's due."""
+    return await _self_await(engine().self_note_now)
+
+
+@app.post("/api/self/notes/{nid}/{index}/{action}")
+async def self_suggestion(nid: str, index: int, action: str) -> Any:
+    """A weekly note's suggestion: ask (a request eki takes later), roadmap, dismiss."""
+    return await _self_await(engine().self_suggestion, nid, index, action)
+
+
 @app.get("/api/observe")
 def observed(days: float = 7) -> Any:
     """What eki noticed about itself, and the fixes it proposed."""

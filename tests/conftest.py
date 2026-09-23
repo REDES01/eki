@@ -30,9 +30,15 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(watch, "_CACHE", {"mtime": None, "state": {}})
     from eki import observe
     monkeypatch.setattr(observe, "HOME", root / "eki" / "observe")
-    from eki import builds
+    # eki's settings: a test that changes one never writes this Mac's file
+    from eki import settings
+    monkeypatch.setattr(settings, "PATH", root / "eki" / "settings.json")
+    from eki import builds, selfloop, selfwork
     monkeypatch.setattr(builds, "BUILDS", root / "eki" / "builds")
     monkeypatch.setattr(builds, "SELF_HOME", root / "eki" / "self")
+    # eki's changes to itself, and the loop's items and notes
+    monkeypatch.setattr(selfwork, "HOME", root / "eki" / "self")
+    monkeypatch.setattr(selfloop, "HOME", root / "eki" / "self")
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
     from eki import goals, shift, launcher
     # no test builds, or sees, this Mac's eki.app

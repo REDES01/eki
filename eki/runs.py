@@ -173,6 +173,16 @@ class RunStore:
                 " ORDER BY created_at DESC LIMIT ?", (backend, limit)).fetchall()
         return [float(r[0]) for r in rows]
 
+    def busy_seconds(self, since: float) -> Dict[str, float]:
+        """Seconds each backend spent on runs that started after `since` —
+        how much of the week the machine actually worked, and on what."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT backend, SUM(ended_at - started_at) FROM runs WHERE started_at >= ?"
+                " AND ended_at >= started_at AND backend IS NOT NULL AND backend != ''"
+                " GROUP BY backend", (int(since),)).fetchall()
+        return {str(r[0]): float(r[1] or 0) for r in rows}
+
     def finished_count(self, backends: List[str]) -> int:
         """Requests that have ever finished on these backends (a running count)."""
         if not backends:

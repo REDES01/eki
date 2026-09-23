@@ -16,6 +16,12 @@ work goes on. It steps back when something needs them:
 `when: away` is for anyone who'd rather it only ran with nobody at the
 keyboard. Your own requests to eki always come first.
 
+A goal that uses the screen runs only while you're away, whatever the mode:
+the screen is one, and it's yours. Its own clicks and keys would look like
+someone at the keyboard, so eki's screen tools leave a mark when they move
+anything (`note_input`), and `Presence` tells your input from theirs — so it
+steps out the moment you're back.
+
 The subscription budget (`spare` mode) is checked here too: a subscription
 only while you're under pace for the week, and never the last of a window.
 """
@@ -26,6 +32,7 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 from . import memory
@@ -38,6 +45,9 @@ GPU_BUSY = 0.35
 AWAY_SECONDS = 300
 #: `spare` never uses the last of any window
 RESERVE = 0.30
+#: when eki's screen tools last clicked, typed or scrolled — written by
+#: whichever process drove the screen (the engine, or `eki mcp` under Codex)
+INPUT_MARK = Path("~/.eki/run/input-at").expanduser()
 
 
 @dataclass
@@ -57,6 +67,61 @@ def idle_seconds() -> Optional[float]:
     """Since the last key press or mouse move (macOS), or None if unknown."""
     m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', _run(["ioreg", "-c", "IOHIDSystem", "-d", "4"]))
     return int(m.group(1)) / 1e9 if m else None
+
+
+def screen_locked() -> Optional[bool]:
+    """Whether the login window is over the screen (macOS); None if unknown."""
+    out = _run(["ioreg", "-n", "Root", "-d1"])
+    if "IOConsoleUsers" not in out:
+        return None
+    return bool(re.search(r'"CGSSessionScreenIsLocked"\s*=\s*Yes', out))
+
+
+def note_input(now: Optional[float] = None) -> None:
+    """eki's screen tools just moved something: not you."""
+    try:
+        INPUT_MARK.parent.mkdir(parents=True, exist_ok=True)
+        INPUT_MARK.write_text(str(now or time.time()))
+    except OSError:
+        pass
+
+
+def eki_input_at() -> float:
+    try:
+        return float(INPUT_MARK.read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
+class Presence:
+    """When you last touched the keyboard or mouse, eki's own input left out.
+
+    macOS knows only when the last input was, anyone's. An input more than a
+    moment after eki's screen tools last acted is yours; one before that
+    could be either, so what was known stands."""
+
+    GRACE = 1.5
+
+    def __init__(self) -> None:
+        self.seen_at: Optional[float] = None
+
+    def update(self, idle: Optional[float], eki_at: float, now: Optional[float] = None) -> Optional[float]:
+        """Seconds since your last input, or None if unknown."""
+        now = now or time.time()
+        if idle is None:
+            return None
+        latest = now - idle
+        if latest > eki_at + self.GRACE or self.seen_at is None:
+            # yours — or, not having watched before, taken to be
+            self.seen_at = latest
+        return max(0.0, now - self.seen_at)
+
+    def since(self, t: float) -> bool:
+        """You've touched the Mac since `t`."""
+        return self.seen_at is not None and self.seen_at > t
+
+    def read(self) -> Optional[float]:
+        return self.update(idle_seconds(), eki_input_at())
 
 
 def gpu_busy() -> Optional[float]:
@@ -131,12 +196,13 @@ def cpu_busy(exclude: Iterable[int] = ()) -> Optional[float]:
 def check(*, model_gb: float = 0.0, model_loaded: bool = True, when: str = "resources",
           exclude_pids: Iterable[int] = (), cpu_limit: float = CPU_BUSY,
           gpu_limit: float = GPU_BUSY, measure_gpu: bool = True,
-          on_battery_ok: bool = False) -> Gate:
-    """May the next piece start? Checked between pieces."""
+          on_battery_ok: bool = False, idle: Optional[float] = None) -> Gate:
+    """May the next piece start? Checked between pieces. `idle`: seconds
+    since your last input, eki's own left out (Presence), if known."""
     if not on_battery_ok and on_battery():
         return Gate(False, "on battery — waiting for power")
     if when == "away":
-        idle = idle_seconds()
+        idle = idle if idle is not None else idle_seconds()
         if idle is not None and idle < AWAY_SECONDS:
             return Gate(False, f"you're here (input {int(idle)} s ago)")
     snap = memory.snapshot()
@@ -196,12 +262,18 @@ class Awake:
     def __init__(self) -> None:
         self.proc: Optional[subprocess.Popen] = None
         self.until = 0.0
+        self.display = False
 
-    def hold(self) -> None:
-        if self.proc is not None and self.proc.poll() is None and time.time() < self.until - 60:
+    def hold(self, display: bool = False) -> None:
+        """`display`: the screen stays on too — for a goal that uses it."""
+        if self.proc is not None and self.proc.poll() is None and time.time() < self.until - 60 \
+                and self.display == display:
             return
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+        self.display = display
         try:
-            self.proc = subprocess.Popen(["caffeinate", "-i", "-t", str(self.LEASE)],
+            self.proc = subprocess.Popen(["caffeinate", "-di" if display else "-i", "-t", str(self.LEASE)],
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.until = time.time() + self.LEASE
         except OSError:

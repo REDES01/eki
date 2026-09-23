@@ -90,6 +90,10 @@ def _goal_of(run: Dict[str, Any]) -> str:
     return str(_payload(run).get("goal") or "")
 
 
+#: a goal that uses the screen, waiting for you to leave it
+SCREEN_WAIT = "uses the screen — waits until you're away"
+
+
 def _allowed_of(run: Dict[str, Any]) -> Optional[List[str]]:
     """The providers a run may use (a goal's budget), or None for any."""
     allowed = _payload(run).get("allowed")
@@ -138,6 +142,10 @@ class Engine:
         self._shift_loaded: set = set()
         self._shift_state: Dict[str, Any] = {"state": "idle", "why": "not started yet"}
         self._awake = shift_mod.Awake()
+        #: the turn in progress uses the screen, since when; and who's at the keyboard
+        self._shift_screen = False
+        self._shift_started = 0.0
+        self._presence = shift_mod.Presence()
         #: set when a piece ends, so the next one starts at once, not on the next tick
         self.shift_wake = asyncio.Event()
         #: Claude Code kept open per conversation (see eki/live.py)
@@ -653,17 +661,20 @@ class Engine:
         # a model directly (a local one says "hello" in ~4 s, ~37 s under
         # Codex's instructions — runs.db, 2026-09-23).
         wants_harness = self._wants_harness(label, run["cwd"], bool(run["images"]), requested)
+        # a goal that uses the screen: whatever its words, it needs the screen tools
+        screen_goal = bool(_payload(run).get("screen"))
         try:
             before = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)] \
                 if cid else []
         except Exception:                           # noqa: BLE001
             before = []
         row, row_why, targets, stays, escalate = self._plan(label, routed, before, cid, requested)
-        if stays and self._bare(stays):
+        if stays and self._bare(stays) and not screen_goal:
             # staying with a model that has no tools: it decides itself, and
             # hands the thread over when the request needs more (eki/handoff.py)
             wants_harness = False
-        need = Need(repo=bool(run["cwd"]), escalate=escalate,
+        wants_harness = wants_harness or screen_goal
+        need = Need(repo=bool(run["cwd"]), escalate=escalate, vision=screen_goal,
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
                     # research means looking things up: a provider with the web
@@ -1405,8 +1416,11 @@ class Engine:
         return "\n".join(out)
 
     async def _route(self, prompt: str, thread: str = "", folder: str = "",
-                     before_turn: int = 0, allowed: Optional[List[str]] = None) -> Tuple[Any, str, Need, Any]:
-        """(label, why this row, the need, the choice) — what routing would do, run nothing."""
+                     before_turn: int = 0, allowed: Optional[List[str]] = None,
+                     screen: bool = False) -> Tuple[Any, str, Need, Any]:
+        """(label, why this row, the need, the choice) — what routing would do, run nothing.
+        `screen`: it uses the screen, whatever its words say (a goal that may) — so it
+        needs a harness, and a model that can see."""
         try:
             label = await self.classifier.label(prompt, has_folder=bool(folder))
         except Exception:                           # noqa: BLE001
@@ -1417,8 +1431,9 @@ class Engine:
             label, {"prompt": prompt, "images": False, "cwd": folder,
                     "payload": json.dumps({"allowed": allowed}) if allowed is not None else ""},
             before, thread, "")
-        wants_harness = self._wants_harness(label, folder, False, "") and not (stays and self._bare(stays))
-        need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
+        wants_harness = (self._wants_harness(label, folder, False, "") and not (stays and self._bare(stays))) \
+            or screen
+        need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness, vision=screen,
                     images_out=label.task == "image", web=label.task == "research" and not stays,
                     task=label.task, difficulty=label.difficulty, row=row,
                     row_title=table_mod.TITLES.get(row, row), targets=targets, allowed=allowed)
@@ -2152,10 +2167,19 @@ class Engine:
     async def _live_session(self, cid: str, backend: Backend, cwd: str, model: str = "") -> Any:
         """The conversation's session, started or resumed as needed."""
         session = self.live.get(cid)
+        if session is not None and session.alive and getattr(session, "screen", None) not in (None,
+                                                                                    self._screen_for(cid)):
+            # a goal's screen setting changed: its tools are fixed when a session starts
+            self.live.pop(cid, None)
+            await session.close()
+            session = None
         if session is not None and session.alive:
             session.backend_key = backend.key                              # type: ignore[attr-defined]
             return session
         warm = self.warm.pop(cwd or "", None)
+        if warm is not None and getattr(warm, "screen", True) != self._screen_for(cid):
+            self.warm[cwd or ""] = warm                 # warmed with the screen; this thread may not have it
+            warm = None
         cwd = self._workdir(cwd)
         resume = self.store.session(cid, backend.key) if cid else None
         if backend.info.kind == "codex":
@@ -2196,17 +2220,26 @@ class Engine:
             # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
             # built-in server needs an approval dialog only its own front
             # ends show, so it is opt-in beside these (claude_builtin_computer_use)
-            # never the screen in a goal's thread: it runs while you may be using the Mac
-            in_goal = bool(cid) and any(g.conversation == cid for g in goals_mod.all_goals())
-            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1,
-                                      screen=bool(self.settings.get("claude_screen", True)) and not in_goal)
+            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid))
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
                            if b.info.kind == "claude_code"), "") or ""
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
                                           learn_mod.agent_note(self.settings)) if x)
-        return live.LiveSession(argv, cwd, None, prompt,
-                                bridge=bridge,
-                                extra_servers=mcpregistry.builtin_for_claude(claude_bin))
+        session = live.LiveSession(argv, cwd, None, prompt,
+                                   bridge=bridge,
+                                   extra_servers=mcpregistry.builtin_for_claude(claude_bin))
+        session.screen = self._screen_for(cid)                             # type: ignore[attr-defined]
+        return session
+
+    def _screen_for(self, cid: str) -> bool:
+        """May the thread's agent use the screen tools? Yours, if Settings say so;
+        a goal's only if it may use the screen — and then its turns run only
+        while you're away. A goal's thread without it runs while you may be
+        using the Mac."""
+        if not self.settings.get("claude_screen", True):
+            return False
+        goal = next((g for g in goals_mod.all_goals() if g.conversation == cid), None) if cid else None
+        return goal is None or goal.screen
 
     def claude_binary(self) -> str:
         """Where Claude Code really is — the path macOS wants in its
@@ -2562,6 +2595,10 @@ class Engine:
     async def _codex_session(self, cid: str, backend: Backend, cwd: str, model: str,
                              resume: Optional[str]) -> codex_live.CodexSession:
         argv = backend.live_argv()                                          # type: ignore[attr-defined]
+        screen = self._screen_for(cid)
+        if not screen:
+            # Codex reaches eki's tools through `eki mcp`: that one, without the screen
+            argv = argv[:-1] + mcpregistry.codex_screen_off() + argv[-1:]
         wanted = model or str(self.options.get(backend.key, {}).get("model") or "")
         permissions = str(self.settings.get("permissions", "auto"))
         local = bool(self.options.get(backend.key, {}).get("local_model"))
@@ -2583,6 +2620,7 @@ class Engine:
         if cid:
             self.live[cid] = session
         session.backend_key = backend.key                                  # type: ignore[attr-defined]
+        session.screen = screen                                            # type: ignore[attr-defined]
         return session
 
     async def follow_live(self) -> int:
@@ -2977,7 +3015,8 @@ class Engine:
         use subscriptions — those with spare room (under pace for the week,
         never the last 30% of a window)."""
         out = [b.key for b in self.backends if b.info.cost.tier == 0 and b.key not in self.router.reserved]
-        if g.spare:
+        # the screen wants a model that can see and act: a goal that uses it may use subscriptions
+        if g.spare or g.screen:
             reserve = float(self.settings.get("background_reserve", shift_mod.RESERVE))
             for b in self._subscriptions():
                 if shift_mod.spare_room(self.quota.latest.get(b.info.quota_source or ""), reserve=reserve).ok:
@@ -2986,7 +3025,7 @@ class Engine:
 
     def _blocked_why(self, g: "goals_mod.Goal", need: Need) -> str:
         """Why no model within the goal's budget can take its turn."""
-        if not g.spare:
+        if not (g.spare or g.screen):
             everyone = self.router.choose(Need(**{**need.__dict__, "allowed": None}))
             if everyone.backend is not None and everyone.backend.info.cost.tier != 0:
                 return (f"needs {everyone.backend.key} — let this goal use your subscriptions "
@@ -3028,6 +3067,7 @@ class Engine:
         run = self._goal_run()
         gid = self._shift_goal
         self._shift_run, self._shift_goal, self._shift_local = "", "", False
+        self._shift_screen = False
         if not run or not gid:
             return
         try:
@@ -3059,8 +3099,13 @@ class Engine:
     async def shift_tick(self) -> Dict[str, Any]:
         """Give the next goal that's due a turn, if the machine has room; step out if not."""
         now = int(time.time())
+        # who's at the keyboard, eki's own clicks and keys left out
+        you = await asyncio.to_thread(self._presence.read)
         if self._shift_run and self._shift_run in self.runner.running:
-            if self._shift_local and self._asks_running():
+            if self._shift_screen and self._presence.since(self._shift_started):
+                self._shift_step_out("you're back — it was using the screen")
+                self._awake.hold()                  # the screen may sleep again
+            elif self._shift_local and self._asks_running():
                 self._shift_step_out("your request comes first")
             else:
                 held = shift_mod.must_stop(bool(self.settings.get("background_on_battery", False)))
@@ -3095,10 +3140,17 @@ class Engine:
             return self._shift_state
         picked = None
         for g in due:
+            if g.screen:
+                wait = await self._screen_wait(you)
+                if wait:
+                    if g.note != wait:
+                        goals_mod.update(g.id, note=wait)
+                    continue
             text = goals_mod.prompt(g, now)
             allowed = self._goal_allowed(g)
             # routed on the goal's own words, inside its budget — eki's framing isn't the work
-            _, _, need, choice = await self._route(g.text, g.conversation, g.folder, allowed=allowed)
+            _, _, need, choice = await self._route(g.text, g.conversation, g.folder, allowed=allowed,
+                                                   screen=g.screen)
             if choice.backend is not None:
                 picked = (g, choice.backend.key, allowed, text)
                 break
@@ -3122,25 +3174,29 @@ class Engine:
             cpu_limit=float(self.settings.get("background_cpu", shift_mod.CPU_BUSY)),
             gpu_limit=float(self.settings.get("background_gpu", shift_mod.GPU_BUSY)),
             on_battery_ok=bool(self.settings.get("background_on_battery", False)),
-            measure_gpu=on_machine)
+            measure_gpu=on_machine, idle=you)
         if not gate.ok:
             self._awake.let_go()
             if "memory" in gate.why:
                 await self._shift_unload(gate.why)
             self._shift_state = {"state": "waiting", "why": gate.why, "at": now, "next": g.id}
             return self._shift_state
-        self._awake.hold()
+        self._awake.hold(display=g.screen)          # the screen stays on for a goal that uses it
         if local is not None and not local.running:
             self._shift_loaded.add(local.key)
         cid = g.conversation or self.store.new_conversation()
         turn = self.store.add_turn(cid, "user", text, meta={"goal": g.id})
         # not pinned to a model: routed as usual, inside the goal's budget — so a
         # model without tools can still hand it to a harness the goal may use
+        payload = {"goal": g.id, "allowed": allowed, "route": g.text}
+        if g.screen:
+            payload["screen"] = True
         rid = self.runs.create(text, conversation=cid, cwd=g.folder, user_turn=turn,
-                               payload=json.dumps({"goal": g.id, "allowed": allowed, "route": g.text}))
+                               payload=json.dumps(payload))
         goals_mod.update(g.id, conversation=cid, turns=g.turns + 1, last_turn=turn,
                          last_turn_at=now, note="")
         self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine
+        self._shift_screen, self._shift_started = g.screen, time.time()
         self._shift_state = {"state": "working", "why": f"{g.text[:60]} — on {key}", "at": now,
                              "run": rid, "goal": g.id}
         await self.runner.submit(rid)
@@ -3148,6 +3204,16 @@ class Engine:
         if task is not None:                        # the next goal starts the moment this ends
             task.add_done_callback(lambda _t: self.shift_wake.set())
         return self._shift_state
+
+    async def _screen_wait(self, you: Optional[float]) -> str:
+        """Why a goal that uses the screen can't have a turn now, or ""."""
+        if you is None:
+            return SCREEN_WAIT + " (and can't tell here whether you are)"
+        if you < shift_mod.AWAY_SECONDS:
+            return SCREEN_WAIT
+        if await asyncio.to_thread(shift_mod.screen_locked):
+            return SCREEN_WAIT + " with the Mac unlocked"
+        return ""
 
     # ---- goals, for the board and the command line ---------------------------------------------
 
@@ -3165,6 +3231,7 @@ class Engine:
                     row["last"] = (said[-1].get("content") or "")[-1500:]
                     row["last_backend"] = said[-1].get("backend") or ""
             row["status"] = ("working" if row["working"] else g.state if g.state != "active"
+                             else "away" if g.screen and g.note.startswith(SCREEN_WAIT)
                              else "blocked" if g.note else "scheduled" if g.repeats and g.next_at > time.time()
                              else "queued")
             rows.append(row)
@@ -3172,8 +3239,8 @@ class Engine:
                 "shift": self._shift_state, "goals": rows}
 
     def goals_create(self, text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
-                     spare: bool = False) -> Dict[str, Any]:
-        g = goals_mod.create(text, when, folder, spare)
+                     spare: bool = False, screen: bool = False) -> Dict[str, Any]:
+        g = goals_mod.create(text, when, folder, spare, screen=screen)
         observe_mod.note("history", what="goal added", goal=g.id, text=text[:200])
         self.shift_wake.set()
         return g.to_json()
@@ -3182,6 +3249,12 @@ class Engine:
         g = goals_mod.get(gid)
         if fields.get("state") == "paused" and self._shift_goal == g.id:
             self._shift_step_out("you paused its goal")
+        if "screen" in fields:
+            fields["screen"] = bool(fields["screen"])
+            if fields["screen"] != g.screen:
+                fields.setdefault("note", "")       # what it waited on may not hold any more
+                if not fields["screen"] and self._shift_goal == g.id and self._shift_screen:
+                    self._shift_step_out("it may not use the screen any more")
         if fields.get("state") == "active":
             fields.setdefault("note", "")
             fields.setdefault("failures", 0)

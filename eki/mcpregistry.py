@@ -304,6 +304,20 @@ def eki_stdio_command() -> List[str]:
     return [sys.executable, "-m", "eki.cli", "mcp"]
 
 
+def codex_screen_off() -> List[str]:
+    """Flags for a Codex whose thread mustn't use the screen (a goal's that
+    may not): eki's tool server started without the screen tools. Only when
+    this Codex has eki's server — a `-c` for one it hasn't would make half a
+    server it can't start."""
+    try:
+        if "[mcp_servers.eki]" not in CODEX_CONFIG.read_text():
+            return []
+    except OSError:
+        return []
+    root = str(Path(__file__).resolve().parent.parent)
+    return ["-c", "mcp_servers.eki.env={ PYTHONPATH = " + _toml_str(root) + ', EKI_SCREEN = "0" }']
+
+
 def import_from_claude(status: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[str, Any]]:
     """Take servers Claude Code already has (from mcp_status, with their
     config) into the registry, so Codex gets them too."""

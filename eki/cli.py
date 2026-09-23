@@ -642,6 +642,8 @@ def _when_of(every: str, at: str) -> Optional[Dict[str, Any]]:
 def _goal_line(g: Dict[str, Any]) -> str:
     folder = f" · {g['folder']}" if g.get("folder") else ""
     spare = " · may use subscriptions" if g.get("spare") else ""
+    if g.get("screen"):
+        spare = " · uses the screen when you're away, and subscriptions"
     return f"{g['id'][:6]}  {g['status']:<10} {g['text'][:70]}\n        {g['when_text']}{folder}{spare}" + \
         (f"\n        {g['note']}" if g.get("note") else "")
 
@@ -657,7 +659,7 @@ def cmd_goals(args) -> int:
         folder = os.path.abspath(os.path.expanduser(args.folder)) if args.folder else ""
         g = call("POST", "/api/goals", args.service,
                  json={"text": args.arg, "when": _when_of(args.every, args.at), "folder": folder,
-                       "spare": args.spare})
+                       "spare": args.spare, "screen": args.screen})
         print(f"added {g['id'][:6]} — {g['when_text']}; its first turn comes when the machine has room")
         return 0
     if a in ("rm", "pause", "resume", "run"):
@@ -848,6 +850,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     g.add_argument("--at", default="", help="add: the time of day, HH:MM (default 09:00)")
     g.add_argument("--spare", action="store_true",
                    help="add: may use your subscriptions, within their spare room")
+    g.add_argument("--screen", action="store_true",
+                   help="add: may look at and use the screen — its turns run only while you're away "
+                        "(and it may use your subscriptions' spare room)")
 
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")
@@ -860,8 +865,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         from . import mcpbridge
         depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
         from . import settings as settings_mod
+        # EKI_SCREEN=0: started for a thread that mustn't use the screen (a goal's)
+        screen = bool(settings_mod.load().get("claude_screen", True)) and os.environ.get("EKI_SCREEN") != "0"
         bridge = mcpbridge.RemoteBridge(mcpbridge.RemoteEngine(args.service), depth=depth + 1,
-                                        screen=bool(settings_mod.load().get("claude_screen", True)))
+                                        screen=screen)
         asyncio.run(mcpbridge.serve_stdio(bridge))
         return 0
     if args.cmd == "serve":

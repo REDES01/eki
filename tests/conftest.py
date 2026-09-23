@@ -40,7 +40,11 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(goals, "PATH", root / "eki" / "goals" / "goals.json")
     monkeypatch.setattr(goals, "LOG", root / "eki" / "goals" / "log.jsonl")
     # no test keeps this Mac awake
-    monkeypatch.setattr(shift.Awake, "hold", lambda self: None)
+    monkeypatch.setattr(shift.Awake, "hold", lambda self, display=False: None)
+    # nor reads who's at its keyboard, or leaves marks for this Mac's engine
+    monkeypatch.setattr(shift, "idle_seconds", lambda: None)
+    monkeypatch.setattr(shift, "screen_locked", lambda: False)
+    monkeypatch.setattr(shift, "INPUT_MARK", root / "eki" / "run" / "input-at")
 
 
 @pytest.fixture(autouse=True)

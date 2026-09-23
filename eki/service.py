@@ -625,14 +625,15 @@ def _goal_call(fn, *args, **kw) -> Any:
 
 @app.post("/api/goals")
 def goals_create(body: Dict[str, Any]) -> Any:
-    """A goal: what to keep doing, in words; when; a folder; may it use subscriptions."""
+    """A goal: what to keep doing, in words; when; a folder; may it use
+    subscriptions; may it use the screen (then only while you're away)."""
     return _goal_call(engine().goals_create, str(body.get("text") or ""), body.get("when"),
-                      str(body.get("folder") or ""), bool(body.get("spare")))
+                      str(body.get("folder") or ""), bool(body.get("spare")), bool(body.get("screen")))
 
 
 @app.patch("/api/goals/{gid}")
 def goals_update(gid: str, body: Dict[str, Any]) -> Any:
-    fields = {k: body[k] for k in ("text", "when", "folder", "spare", "state") if k in body}
+    fields = {k: body[k] for k in ("text", "when", "folder", "spare", "screen", "state") if k in body}
     if "state" in fields and fields["state"] not in ("active", "paused"):
         raise HTTPException(400, "a goal can be paused or made active")
     return _goal_call(engine().goals_update, gid, **fields)

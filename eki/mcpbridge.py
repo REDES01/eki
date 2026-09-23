@@ -364,11 +364,21 @@ def _helper() -> Optional[str]:
     return shutil.which("eki-hid")
 
 
+def _moved() -> None:
+    """The screen tools clicked or typed: marked, so it isn't taken for you at
+    the keyboard (a goal that uses the screen steps out when you're back)."""
+    from . import shift
+    shift.note_input()
+
+
 async def _hid(*args: str) -> Any:
     """Drive the input helper; without it, the little that osascript can do."""
     helper = _helper()
+    moves = args[0] in ("click", "type", "key", "scroll", "move", "drag")
     if helper:
         out = await _exec([helper, *args])
+        if moves:
+            _moved()
         if args[0] == "screen":
             try:
                 w, h = out.split()[:2]
@@ -377,6 +387,8 @@ async def _hid(*args: str) -> Any:
                 return 0, 0
         return out
     # fallback: System Events
+    if moves:
+        _moved()
     cmd = args[0]
     if cmd == "screen":
         out = await _exec(["osascript", "-e",

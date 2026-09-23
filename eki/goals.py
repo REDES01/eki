@@ -8,8 +8,9 @@ A goal is what you'd type in a chat, left running:
     Keep the tests of ~/eki passing; open a branch when one breaks.
 
 Plus, optionally, when (once until it's done, every day, every week, every few
-hours), a folder to work in, and whether it may use your subscriptions. That's
-all. eki doesn't plan the work — the agent that gets it does, the same way it
+hours), a folder to work in, whether it may use your subscriptions, and
+whether it may use the screen — a goal that does waits until you're away, and
+steps out the moment you're back. That's all. eki doesn't plan the work — the agent that gets it does, the same way it
 would in a chat: the routing table picks it (a harness when tools are needed,
 Qwen with Codex's hands for local work), and it writes files, draws through
 eki, and says where things stand.
@@ -58,6 +59,9 @@ class Goal:
     when: Dict[str, Any] = field(default_factory=lambda: {"kind": "once"})
     folder: str = ""
     spare: bool = False                 # may use subscriptions, within their spare room
+    #: may look at and drive the screen: only while you're away, and — the
+    #: screen wants a model that can see and act — with your subscriptions' spare room too
+    screen: bool = False
     state: str = "active"
     conversation: str = ""
     created_at: int = field(default_factory=lambda: int(time.time()))
@@ -143,7 +147,7 @@ def get(gid: str) -> Goal:
 
 
 def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
-           spare: bool = False, now: Optional[float] = None) -> Goal:
+           spare: bool = False, now: Optional[float] = None, screen: bool = False) -> Goal:
     text = text.strip()
     if not text:
         raise GoalError("say what eki should keep doing")
@@ -151,7 +155,8 @@ def create(text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
     if folder and not Path(folder).is_dir():
         raise GoalError(f"no folder {folder}")
     # its first turn as soon as there's room, so you see it work; then on its schedule
-    g = Goal(id=uuid.uuid4().hex[:10], text=text, when=check_when(when), folder=folder, spare=bool(spare))
+    g = Goal(id=uuid.uuid4().hex[:10], text=text, when=check_when(when), folder=folder, spare=bool(spare),
+             screen=bool(screen))
     goals = all_goals()
     goals.append(g)
     _save(goals)
@@ -212,6 +217,11 @@ def due(g: Goal, now: float) -> bool:
 def prompt(g: Goal, now: Optional[float] = None) -> str:
     """What a turn says to the agent: the goal, and the one line to end with."""
     folder = f" Work in {g.folder}." if g.folder else ""
+    if g.screen:
+        # its turns run only while you're away; what it may and mayn't do there
+        folder += (" You may look at and use this Mac's screen with eki's screen tools — I'm away "
+                   "from it. Don't post, send, buy or delete anything: draft it and ask me. Close "
+                   "what you opened.")
     if g.repeats:
         when = datetime.fromtimestamp(now or time.time()).strftime("%A %Y-%m-%d %H:%M")
         return (f"[eki · goal · {when}] {g.text}\n\n"
@@ -227,7 +237,7 @@ def prompt(g: Goal, now: Optional[float] = None) -> str:
                 "want another turn, or `GOAL: waiting` if you need me to decide something (ask it "
                 "just above that line).]")
     return (f"[eki · goal] Carry on with the goal: {g.text}\n\n"
-            "[eki: pick up where you left off. End with `GOAL: done`, `GOAL: continue` or "
+            f"[eki: pick up where you left off.{folder} End with `GOAL: done`, `GOAL: continue` or "
             "`GOAL: waiting`, as before.]")
 
 

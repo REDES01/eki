@@ -9,8 +9,8 @@ A goal is something you'd ask in a chat, left running:
 > Keep the tests in ~/eki passing; fix what breaks on a branch.
 
 That, and optionally: **when** (once until it's done, every day, weekdays,
-every week, every few hours), a **folder** to work in, and whether it **may use
-your subscriptions**. Nothing else to fill in — eki doesn't plan the work. The
+every week, every few hours), a **folder** to work in, whether it **may use
+your subscriptions**, and whether it **may use the screen**. Nothing else to fill in — eki doesn't plan the work. The
 agent that gets each turn does, the way it would in a chat.
 
 ## How it runs
@@ -32,6 +32,14 @@ agent that gets each turn does, the way it would in a chat.
   first (a goal's turn on a local model steps aside for them); only on power;
   the Mac is kept from idle-sleeping while there's work. *Only when I'm away*
   waits for nobody at the keyboard.
+- **The screen only while you're away.** A goal that may use the screen
+  (looking at your X timeline in the browser, say) gets eki's screen tools —
+  a goal without it never does, under Claude Code or Codex. Its turns start
+  only when nobody has touched the keyboard or mouse for 5 minutes and the
+  Mac isn't locked; the display is kept on while it works, and it steps out
+  the moment you touch anything (its own clicks and keys are told from
+  yours). The screen needs a model that can see and act, so such a goal may
+  use your subscriptions' spare room, and is routed to one that can see.
 - **Until it says where it stands.** A turn ends with one line: `GOAL: done`
   (a one-off goal stops; a repeating one waits for its next time), `GOAL:
   continue` (another turn when there's room), or `GOAL: waiting` (it asked you
@@ -51,7 +59,7 @@ a reply box.
 ## From the command line
 
 ```
-eki goals add "Every morning, look at my X and propose 3 posts" --every day --at 08:00 --spare
+eki goals add "Every morning, look at my X and propose 3 posts" --every day --at 08:00 --screen
 eki goals add "Make 20 NPCs for Ashfall" -f ~/games/ashfall
 eki goals                    # each goal, its status, and what the shift is doing
 eki goals run|pause|resume|rm <id>

@@ -96,7 +96,7 @@ def eng(tmp_path, monkeypatch):
     cfg = echo_config(tmp_path)
     cfg.backends, cfg.options = [], {}
     cfg.backends.append(BackendInfo(key="claude_code", kind="claude_code", label="Claude Code",
-                                    capabilities=Capabilities(tools=True, repo=True, web=True),
+                                    capabilities=Capabilities(tools=True, repo=True, web=True, vision=True),
                                     cost=Cost(tier=50), quota_source="claude"))
     cfg.options["claude_code"] = {"binary": "/bin/echo"}
     cfg.backends.append(BackendInfo(key="qwen", kind="mlx", label="Qwen (local)",
@@ -323,7 +323,97 @@ async def test_the_screen_is_off_in_a_goals_thread(eng, monkeypatch):
     assert made["screen"] is False
     eng._new_live(["claude"], None, "c-chat")
     assert made["screen"] is True
+    goals.update(goals.create("look at my X", screen=True).id, conversation="c-screen")
+    eng._new_live(["claude"], None, "c-screen")
+    assert made["screen"] is True                                           # one that may
     await eng.runner.stop()
+
+
+# ---- a goal that uses the screen: only while you're away ---------------------------------------
+
+def test_your_input_is_told_from_the_screen_tools(monkeypatch):
+    p = shift.Presence()
+    now = 10_000.0
+    assert p.update(20.0, 0.0, now) == 20.0                                 # you, 20 s ago
+    assert p.update(400.0, 0.0, now + 380) == 400.0                         # away for a while
+    shift.note_input(now + 390)                                             # eki clicks…
+    assert shift.eki_input_at() == now + 390
+    assert p.update(0.5, now + 390, now + 390.5) >= 390                     # …and isn't taken for you
+    assert not p.since(now + 100)
+    assert p.update(0.2, now + 390, now + 400) < 1                          # a move after it: you're back
+    assert p.since(now + 100)
+
+
+def away(monkeypatch, seconds, locked=False):
+    monkeypatch.setattr(shift, "idle_seconds", lambda: seconds)
+    monkeypatch.setattr(shift, "screen_locked", lambda: locked)
+
+
+@pytest.mark.asyncio
+async def test_a_screen_goal_waits_for_you_to_be_away(eng, monkeypatch):
+    from eki.engine import SCREEN_WAIT
+    g = goals.create("look at my X and propose 3 posts", screen=True)
+    away(monkeypatch, 12.0)
+    await turn(eng)
+    assert not Local.seen and goals.get(g.id).note == SCREEN_WAIT
+    assert [x for x in eng.goals_view()["goals"] if x["id"] == g.id][0]["status"] == "away"
+    eng._presence = shift.Presence()
+    away(monkeypatch, 900.0, locked=True)
+    await turn(eng)
+    assert not Local.seen and "unlocked" in goals.get(g.id).note
+    eng._presence = shift.Presence()
+    away(monkeypatch, 900.0)
+    held = []
+    monkeypatch.setattr(shift.Awake, "hold", lambda self, display=False: held.append(display))
+    eng.quota.latest["claude"] = Reading("claude", [Window("five_hour", "5H", 0.1)])
+    await eng.shift_tick()
+    rid = eng._shift_run
+    assert held[-1] is True                                                 # the screen stays on
+    assert '"screen": true' in eng.runs.get(rid)["payload"]
+    await settle(eng.runs, rid, timeout=5)
+    eng._goal_finished()
+    # a harness, on a subscription — a goal that may use the screen may use their spare room
+    assert Local.seen[-1][0] == "claude_code"
+    assert "screen" in Local.seen[-1][1] and "Don't post" in Local.seen[-1][1]
+    assert goals.get(g.id).note == ""
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_screen_goal_steps_out_when_youre_back_not_for_its_own_clicks(eng, monkeypatch):
+    g = goals.create("look at my X", screen=True)
+    away(monkeypatch, 900.0)
+    eng.quota.latest["claude"] = Reading("claude", [Window("five_hour", "5H", 0.1)])
+    Local.delay = 3.0
+    await eng.shift_tick()
+    rid = eng._shift_run
+    assert rid and eng._shift_screen
+    shift.note_input()                                                      # its own click…
+    away(monkeypatch, 0.3)
+    await eng.shift_tick()
+    assert eng._shift_run == rid and rid in eng.runner.running              # …carries on
+    await asyncio.sleep(2.0)
+    away(monkeypatch, 0.2)                                                  # you, well after it
+    await eng.shift_tick()
+    await settle(eng.runs, rid, timeout=5)
+    assert eng.runs.get(rid)["state"] == "cancelled"
+    eng._goal_finished()
+    g = goals.get(g.id)
+    assert g.turns == 0 and g.state == "active"
+    await eng.shift_tick()
+    assert not eng._shift_run                                               # and waits till you leave
+    Local.delay = 0.0
+    await eng.runner.stop()
+
+
+def test_codex_under_a_goal_gets_eki_without_the_screen(tmp_path, monkeypatch):
+    from eki import mcpregistry
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", cfg)
+    assert mcpregistry.codex_screen_off() == []                             # no eki server: nothing to change
+    cfg.write_text(mcpregistry.codex_block({}, ["python", "-m", "eki.cli", "mcp"]))
+    flags = mcpregistry.codex_screen_off()
+    assert flags[0] == "-c" and 'EKI_SCREEN = "0"' in flags[1] and "PYTHONPATH" in flags[1]
 
 
 @pytest.mark.asyncio

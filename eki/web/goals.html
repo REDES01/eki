@@ -81,6 +81,7 @@
   .badge.working { background: var(--ok-soft); color: var(--ok); }
   .badge.waiting { background: var(--info-soft); color: var(--info); }
   .badge.paused, .badge.blocked { background: var(--wait-soft); color: var(--wait); }
+  .badge.away { background: var(--info-soft); color: var(--info); }
   .badge.stuck { background: var(--danger-soft); color: var(--danger); }
   .confirm { display: inline-flex; gap: 6px; align-items: center; background: var(--danger-soft); color: var(--danger);
              border-radius: 9px; padding: 3px 5px 3px 10px; font-size: 12.5px; flex-wrap: wrap; }
@@ -136,7 +137,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
 const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
-            draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, touched: false } };
+            draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, touched: false } };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const EXAMPLES = [
   "Every morning, look at my X and propose 3 posts in my voice.",
@@ -243,7 +244,7 @@ function splitMark(text) {
 }
 const plain = t => splitMark(t).body.replace(/!\[[^\]]*\]\([^)]*\)/g, "[picture]").replace(/[#*`>]/g, "").replace(/\s+/g, " ").trim();
 const STATUS = { working: "Working", queued: "Up next", scheduled: "Scheduled", waiting: "Waiting for you",
-                 paused: "Paused", done: "Done", stuck: "Stuck", blocked: "Can't start" };
+                 paused: "Paused", done: "Done", stuck: "Stuck", blocked: "Can't start", away: "When you're away" };
 const ago = t => { if (!t) return ""; const s = Date.now() / 1000 - t;
   return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
 const next = t => { if (!t) return ""; const d = new Date(t * 1000);
@@ -260,6 +261,16 @@ function header() {
   $("#away").checked = v.when === "away";
 }
 
+// what a goal may use: your subscriptions; the screen — which needs them, and waits for you to be away
+function usesChecks(d, k) {
+  return `<label class="check" title="Only when that subscription is under pace for the week, and never its last 30%"><input type="checkbox" id="${k}-spare" ${d.spare || d.screen ? "checked" : ""} ${d.screen ? "disabled" : ""}> May use my subscriptions</label>
+    <label class="check" title="Looking at and using the screen — its turns run only while you're away, and step out when you're back. It uses your subscriptions' spare room: that takes a model that can see."><input type="checkbox" id="${k}-screen" ${d.screen ? "checked" : ""}> May use the screen while I'm away</label>`;
+}
+function usesText(g) {
+  return g.screen ? "uses the screen when you're away · may use your subscriptions (spare room only)"
+       : g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine";
+}
+
 // ---- the list ----------------------------------------------------------------------------------
 function home() {
   const d = S.draft, goals = S.view?.goals || [];
@@ -268,7 +279,7 @@ function home() {
     ${d.text ? "" : `<div class="examples">${EXAMPLES.map(e => `<button class="chip" data-example="${esc(e)}">${esc(e)}</button>`).join("")}</div>`}
     <div class="opts">${whenControls(d, "new")}
       <input class="input grow" id="new-folder" placeholder="Folder to work in (optional) — e.g. ~/games/ashfall" value="${esc(d.folder)}">
-      <label class="check" title="Only when that subscription is under pace for the week, and never its last 30%"><input type="checkbox" id="new-spare" ${d.spare ? "checked" : ""}> May use my subscriptions</label>
+      ${usesChecks(d, "new")}
       <button class="btn primary" data-add ${d.text.trim() ? "" : "disabled"}>Add goal</button></div>
     ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
   if (!goals.length) return h + `<div class="empty">No goals yet. Write one above — the way you'd ask in a chat.<br>eki gives it turns whenever the machine has room, and you answer it in its thread.</div>`;
@@ -277,7 +288,7 @@ function home() {
     const last = plain(g.last);
     return `<div class="card goal" data-open="${esc(g.id)}">
       <div class="top"><div><div class="text">${esc(g.text)}</div>
-        <div class="meta">${esc(g.when_text)}${g.folder ? " · " + esc(g.folder.split("/").pop()) : ""}${g.spare ? " · may use subscriptions" : ""}${g.last_backend ? " · " + esc(g.last_backend) : ""}${g.last_turn_at ? " · " + ago(g.last_turn_at) : ""}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</div></div>
+        <div class="meta">${esc(g.when_text)}${g.folder ? " · " + esc(g.folder.split("/").pop()) : ""}${g.screen ? " · uses the screen when you're away" : g.spare ? " · may use subscriptions" : ""}${g.last_backend ? " · " + esc(g.last_backend) : ""}${g.last_turn_at ? " · " + ago(g.last_turn_at) : ""}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</div></div>
         <span class="badge ${esc(g.status)}">${STATUS[g.status] || esc(g.status)}</span></div>
       ${g.note ? `<div class="meta" style="color:var(--wait)">${esc(g.note)}</div>` : ""}
       ${last ? `<div class="last">${esc(last.slice(0, 400))}</div>` : ""}
@@ -301,7 +312,7 @@ function goalPage(r) {
     h += `<div class="card edit"><textarea class="input" id="edit-text" rows="3">${esc(d.text)}</textarea>
       <div class="row">${whenControls(d, "edit")}</div>
       <div class="row"><input class="input" style="flex:1" id="edit-folder" placeholder="Folder to work in (optional)" value="${esc(d.folder)}">
-        <label class="check"><input type="checkbox" id="edit-spare" ${d.spare ? "checked" : ""}> May use my subscriptions</label></div>
+        ${usesChecks(d, "edit")}</div>
       <div class="row"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel-edit>Cancel</button>
         ${S.error ? `<span class="err">${esc(S.error)}</span>` : ""}</div></div>`;
   } else {
@@ -309,9 +320,9 @@ function goalPage(r) {
       <div class="meta"><span class="badge ${esc(g.status)}">${STATUS[g.status] || esc(g.status)}</span>
         <span>${esc(g.when_text)}${g.status === "scheduled" ? " · " + next(g.next_at) : ""}</span>
         ${g.folder ? `<span title="${esc(g.folder)}">${esc(g.folder)}</span>` : ""}
-        <span>${g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine"}</span>
+        <span>${usesText(g)}</span>
         <span>${g.turns} turn${g.turns === 1 ? "" : "s"}</span></div>
-      ${g.note ? `<div class="note">${esc(g.note)}${g.note.includes("subscription") && !g.spare ? " — Edit it and tick “May use my subscriptions”." : ""}</div>` : ""}
+      ${g.note ? `<div class="note">${esc(g.note)}${g.note.includes("subscription") && !g.spare && !g.screen ? " — Edit it and tick “May use my subscriptions”." : ""}</div>` : ""}
       <div class="acts"><button class="btn" data-run="${esc(g.id)}">Run now</button>
         <button class="btn" data-pause="${esc(g.id)}" data-to="${g.state === "paused" ? "active" : "paused"}">${g.state === "paused" ? "Resume" : "Pause"}</button>
         <button class="btn" data-edit>Edit</button>
@@ -384,6 +395,8 @@ document.addEventListener("change", e => {
   if (t.id === "away") return act(() => api("/api/goals/mode", "POST", { when: t.checked ? "away" : "resources" }));
   if (t.id === "new-spare") S.draft.spare = t.checked;
   if (t.id === "edit-spare") S.editDraft.spare = t.checked;
+  if (t.id === "new-screen") { S.draft.screen = t.checked; return draw(); }
+  if (t.id === "edit-screen") { S.editDraft.screen = t.checked; return draw(); }
   if (t.dataset.w === "kind") draw();
 });
 document.addEventListener("click", async e => {
@@ -395,8 +408,8 @@ document.addEventListener("click", async e => {
   if (t.closest("[data-add]")) {
     const d = S.draft;
     return act(async () => {
-      const g = await api("/api/goals", "POST", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare });
-      S.draft = { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, touched: false };
+      const g = await api("/api/goals", "POST", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen });
+      S.draft = { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, touched: false };
       location.hash = "#/g/" + enc(g.id);
     });
   }
@@ -411,12 +424,12 @@ document.addEventListener("click", async e => {
   if (rm) { e.stopPropagation(); return act(async () => { await api(`/api/goals/${enc(rm.dataset.rm)}`, "DELETE"); location.hash = "#/"; }); }
   if (t.closest("[data-edit]")) {
     const g = S.view.goals.find(x => x.id === r.id);
-    S.editDraft = { ...draftOf(g.when), text: g.text, folder: g.folder, spare: g.spare }; S.editing = true; S.error = ""; return draw();
+    S.editDraft = { ...draftOf(g.when), text: g.text, folder: g.folder, spare: g.spare, screen: g.screen }; S.editing = true; S.error = ""; return draw();
   }
   if (t.closest("[data-cancel-edit]")) { S.editing = false; S.error = ""; return draw(); }
   if (t.closest("[data-save]")) {
     const d = S.editDraft;
-    try { await api(`/api/goals/${enc(r.id)}`, "PATCH", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare });
+    try { await api(`/api/goals/${enc(r.id)}`, "PATCH", { text: d.text, when: whenOf(d), folder: d.folder, spare: d.spare, screen: d.screen });
           S.editing = false; S.error = ""; }
     catch (err) { S.error = err.message; }
     return refresh(true);

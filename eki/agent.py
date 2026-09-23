@@ -45,9 +45,13 @@ def plist_for(root: Path) -> dict:
     hid = root / "Eki.app" / "Contents" / "Helpers" / "eki-hid"
     if hid.exists():
         env["EKI_HID"] = str(hid)           # a build has no app beside it
+    # under the little eki app when it's built: macOS then asks in eki's
+    # name, for the engine and everything it starts (eki/launcher.py)
+    from . import launcher
+    under = [str(launcher.binary())] if launcher.current() else []
     return {
         "Label": LABEL,
-        "ProgramArguments": [str(python), "-m", "eki.cli", "serve"],
+        "ProgramArguments": under + [str(python), "-m", "eki.cli", "serve"],
         "WorkingDirectory": str(current),
         "RunAtLoad": True,
         # restart if it exits for any reason — but not in a tight loop if it
@@ -130,6 +134,8 @@ def install(root: Path) -> str:
             if not loaded():
                 break
             time.sleep(0.1)
+    from . import launcher
+    launcher.build()                        # best effort: without it, the engine runs as python
     with PLIST.open("wb") as f:
         plistlib.dump(plist_for(root), f)
     from . import builds

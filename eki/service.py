@@ -1593,6 +1593,20 @@ def health() -> Any:
             "build": builds.running().get("id", "dev"), "pid": os.getpid()}
 
 
+def _go_with_launcher() -> None:
+    """Started by the eki app (eki/launcher.swift): if it goes, so does the
+    engine — a stray engine would hold the port the next one needs."""
+    import threading
+    parent = os.getppid()
+
+    def watch() -> None:
+        while True:
+            time.sleep(2)
+            if os.getppid() != parent:
+                os._exit(0)
+    threading.Thread(target=watch, daemon=True, name="launcher-watch").start()
+
+
 def main(argv: Optional[list] = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="eki-service")
@@ -1602,6 +1616,8 @@ def main(argv: Optional[list] = None) -> int:
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if os.environ.get("EKI_LAUNCHER"):
+        _go_with_launcher()
     for note in migrate.run(Path(__file__).resolve().parent.parent):
         log.info("migrated: %s", note)
     logging.getLogger("httpx").setLevel(logging.WARNING)

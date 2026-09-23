@@ -473,3 +473,9 @@ async def test_changes_decided_outside_eki_are_noticed(eng):
     assert selfwork.waiting() == [] and selfloop.get(second["item"]).state == "dropped"
     assert selfloop.get(first["item"]).state == "done"
     await eng.runner.stop()
+
+
+def test_a_long_reason_is_cut_at_a_sentence():
+    said = ("I didn't change anything. " + "This needs a person at the trackpad. " * 30) + "\nITEM: person"
+    got = selfloop.reason(said)
+    assert len(got) <= 600 and got.endswith("trackpad.") and got.startswith("I didn't")

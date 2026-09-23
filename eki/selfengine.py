@@ -210,7 +210,10 @@ class SelfLoop:
             prop.said = selfloop.said(answer)
             it = selfloop.update(it.id, phase="checking", open={
                 **prop.to_json(), "agent_state": state, "reason": selfloop.reason(answer)})
-        yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
+        pending = await asyncio.to_thread(selfwork.changed, Path(prop.worktree)) \
+            if Path(prop.worktree).is_dir() else []
+        if pending and not selfwork.docs_only(pending):
+            yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
         tick = None
         if it.source == "roadmap" and prop.said in ("done", "already"):
             key, mark = it.key, f"*(eki: self/{prop.id})*"

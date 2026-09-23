@@ -239,10 +239,16 @@ def said(answer: str) -> str:
     return found[-1].lower() if found else ""
 
 
-def reason(answer: str) -> str:
-    """What the agent said above its ITEM line — why it's a person's, what's left."""
+def reason(answer: str, limit: int = 600) -> str:
+    """What the agent said above its ITEM line — why it's a person's, what's
+    left — cut at the end of a sentence, not in the middle of a word."""
     lines = [x.strip() for x in (answer or "").splitlines() if x.strip() and not ITEM_LINE.match(x)]
-    return " ".join(lines[-3:])[:400]
+    text = " ".join(lines[-3:])
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return cut[:end + 1] if end > limit // 3 else cut.rstrip() + "…"
 
 
 # ---- after the verdict: where the item stands --------------------------------------

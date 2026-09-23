@@ -206,6 +206,10 @@ def propose(request: str, *, root: Path, ask: Ask, base: str = "HEAD",
     python = python or sys.executable
     if not request.strip():
         raise SelfWorkError("say what to change")
+    from . import builds
+    why = builds.cant_change_code(root)
+    if why:
+        raise SelfWorkError(why)
     wid = uuid.uuid4().hex[:8]
     p = Proposal(id=wid, request=request.strip(), root=str(root), at=int(time.time()))
 

@@ -58,6 +58,29 @@ def info(path: Path) -> Dict[str, Any]:
     return {"id": "dev", "dev": True, "commit": commit, "source": str(path)}
 
 
+REPO = "https://github.com/REDES01/eki"
+
+
+def installed_by() -> str:
+    """"homebrew" when a package manager put eki here (its `eki` command says
+    so), "" for a checkout or a build."""
+    return os.environ.get("EKI_INSTALL", "").strip().lower()
+
+
+def cant_change_code(src: Path) -> str:
+    """Why eki can't work on its own code from `src`, or "".
+
+    A package manager owns what it installed and puts the released version
+    back on every upgrade, so eki doesn't edit it or swap builds under it.
+    Everything eki learns lives in ~/.eki and works the same either way."""
+    if not installed_by() or (Path(src) / ".git").exists():
+        return ""                   # a checkout, or a folder git will say more about
+    how = {"homebrew": "Homebrew"}.get(installed_by(), "a package manager")
+    return (f"eki was installed by {how}, which keeps it at the released version, so it "
+            f"doesn't change its own code here. To work on eki: git clone {REPO} and run "
+            f"it from there (docs/self-build.md).")
+
+
 def running() -> Dict[str, Any]:
     return info(here())
 
@@ -91,6 +114,9 @@ def ensure_layout(src: Path) -> Path:
 def make(src: Path, ref: str = "HEAD", note: str = "") -> Path:
     """An export of `ref` in your checkout, as a build. The same commit is
     the same build: made once."""
+    why = cant_change_code(src)
+    if why:
+        raise ValueError(why)
     commit = subprocess.run(["git", "-C", str(src), "rev-parse", "--verify", f"{ref}^{{commit}}"],
                             capture_output=True, text=True, timeout=30)
     if commit.returncode != 0:

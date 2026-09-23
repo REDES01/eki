@@ -1721,6 +1721,9 @@ class Engine:
         Never applies it: the result is a self/ branch and a verdict."""
         if str(self.settings.get("self_fix", "propose")) != "propose":
             return {"skipped": "self_fix is off"}
+        from . import builds as builds_mod
+        if builds_mod.cant_change_code(builds_mod.source()):
+            return {"skipped": "installed by a package manager — faults are kept in the journal"}
         why = observe_mod.due(entry, daily=int(self.settings.get("self_fix_daily", observe_mod.DAILY)))
         if why:
             return {"skipped": why}

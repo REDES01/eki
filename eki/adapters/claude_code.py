@@ -121,6 +121,8 @@ class ClaudeCodeBackend(Backend):
         """The two-way streaming mode (see eki/live.py): the program stays up
         between turns, streams partial text, and sends its questions and
         permission prompts over stdio instead of a terminal."""
+        if not self.bin:
+            raise BackendError("claude not found — install Claude Code or set binary")
         argv = [self.bin, "--output-format", "stream-json", "--verbose",
                 "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
                 "--include-partial-messages"]

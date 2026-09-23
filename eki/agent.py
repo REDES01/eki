@@ -72,7 +72,38 @@ def plist_for(root: Path) -> dict:
     }
 
 
+def _brew_owned() -> bool:
+    """Installed by Homebrew: `brew services` runs the engine (launchd on a
+    Mac, systemd on Linux) from the formula's service block."""
+    return os.environ.get("EKI_INSTALL", "").strip().lower() == "homebrew"
+
+
+def _brew(*args: str) -> Tuple[int, str]:
+    try:
+        out = subprocess.run(["brew", "services", *args, "eki"], capture_output=True, text=True,
+                             timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+    return out.returncode, (out.stdout + out.stderr).strip()
+
+
+def _brew_state() -> str:
+    code, out = _brew("info", "--json")
+    if code != 0:
+        return ""
+    try:
+        import json
+        info = json.loads(out)
+        info = info[0] if isinstance(info, list) and info else info
+        return str(info.get("status") or ("started" if info.get("running") else "")) \
+            if info.get("loaded") or info.get("running") else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
 def installed() -> bool:
+    if _brew_owned():
+        return bool(_brew_state())
     return PLIST.exists()
 
 
@@ -82,6 +113,10 @@ def loaded() -> bool:
 
 
 def install(root: Path) -> str:
+    if _brew_owned():
+        code, out = _brew("restart" if _brew_state() else "start")
+        return ("installed — the engine now starts at login (`brew services`)" if code == 0
+                else f"brew services couldn't start it: {out}")
     python = root / ".venv" / "bin" / "python"
     if not python.exists():
         return f"no virtualenv at {python} — run ./eki.sh once first"
@@ -109,6 +144,9 @@ def install(root: Path) -> str:
 
 
 def uninstall() -> str:
+    if _brew_owned():
+        code, out = _brew("stop")
+        return "removed — the engine will no longer start at login" if code == 0 else out
     if loaded():
         _launchctl("bootout", f"{_domain()}/{LABEL}")
     if PLIST.exists():
@@ -118,11 +156,18 @@ def uninstall() -> str:
 
 
 def restart() -> str:
+    if _brew_owned():
+        code, out = _brew("restart")
+        return "restarted" if code == 0 else f"couldn't restart: {out}"
     code, out = _launchctl("kickstart", "-k", f"{_domain()}/{LABEL}")
     return "restarted" if code == 0 else f"couldn't restart: {out}"
 
 
 def status() -> str:
+    if _brew_owned():
+        state = _brew_state()
+        return f"run by `brew services` · {state}" if state else \
+            "not started — `eki agent install` (or `brew services start eki`) to start it at login"
     if not installed():
         code, out = _launchctl("print", f"{_domain()}/{LABEL}")
         if code == 0:

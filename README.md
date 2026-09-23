@@ -32,6 +32,22 @@ Where it's going: [ROADMAP.md](ROADMAP.md).
 
 ## Install
 
+With Homebrew, on macOS or Linux — no app needed:
+
+```sh
+brew install REDES01/eki/eki
+eki agent install          # keep the engine running from login (brew services)
+eki ask "hello"
+```
+
+eki drives the Claude Code and Codex you already have, signed in as you; it
+holds no login of its own. `brew upgrade` updates it. A Homebrew install
+learns and keeps everything the same way (skills, routing, the lineup — all
+in `~/.eki`), but doesn't change its own code: to work on eki, clone this
+repo and run it from there (`./eki.sh`, then `bin/eki agent install`).
+
+### The Mac app
+
 Download `Eki-<version>.zip` from Releases, unzip, drag `Eki.app` to
 Applications, open it. The app carries its own Python and engine — there is
 nothing else to install.

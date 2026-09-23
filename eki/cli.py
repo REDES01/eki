@@ -608,6 +608,10 @@ def cmd_swap(args) -> int:
     """Move the engine onto another build, through the supervisor."""
     from . import builds, candidate
     src = builds.source()
+    why = builds.cant_change_code(src)
+    if why:
+        print(f"! {why}", file=sys.stderr)
+        return 1
     if args.back:
         target = builds.BUILDS / "previous"
         if not target.is_symlink():
@@ -643,6 +647,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-c", "--config", default=str(config_mod.default_path()))
     ap.add_argument("--service", default=DEFAULT_SERVICE, help=argparse.SUPPRESS)
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"eki {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("ask", help="tell it to do something")

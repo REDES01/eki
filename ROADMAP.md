@@ -131,10 +131,13 @@ MCP config, and the local models have none. eki owns one copy of each and
 gives every backend a view of it. Nothing is authored inside `~/.claude` or
 `~/.codex` by hand. This is the heart of the first public release.
 
-- [ ] **No app needed.** The engine and `eki` install with one command on
-      macOS and Linux and run as a user service; the Mac app is optional.
-      Mac-only parts (the login agent, the screen helper) are adapters with
-      an equivalent or a clear "not on this system"
+- [x] **No app needed.** `brew install REDES01/eki/eki` on macOS and
+      Linux; `eki agent install` hands the engine to `brew services`
+      (launchd or systemd). The formula is generated per release with every
+      dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
+      doesn't change its own code. *Still open:* the screen helper on Linux,
+      and `brew install eki` in homebrew/core once eki has the users for it
+      (75 stars, or 225 if we submit it ourselves)
 - [ ] **The harnesses people already use.** Claude Code and Codex now;
       Gemini CLI and other agent CLIs next, each through its official
       program and reading the same store

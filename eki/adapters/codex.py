@@ -110,6 +110,8 @@ class CodexBackend(Backend):
     def live_argv(self) -> List[str]:
         """The app-server (see eki/codex_live.py): the program without its
         screen, questions and approvals over stdio."""
+        if not self.bin:
+            raise BackendError("codex not found — install Codex or set binary")
         argv = [self.bin, "--enable", "default_mode_request_user_input",
                 "-c", "suppress_unstable_features_warning=true"]
         for feature in self._disabled():

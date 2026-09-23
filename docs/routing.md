@@ -22,11 +22,11 @@ itself, no model run.
 
 | Kind of work | e.g. | default choices |
 |---|---|---|
-| Quick question | "what is 17×23", "hi" | local → subscription's fast model |
-| Writing, translation | "short poem", "translate this" | local → subscriptions |
+| Quick question | "what is 17×23", "hi" | local model → local with Codex's hands → subscription's fast model |
+| Writing, translation | "short poem", "translate this" | local → local with hands → subscriptions |
 | Explain, reason | "explain Python's GIL" | subscriptions → local |
-| Code change | "fix the failing test" | subscriptions → local (small changes only) |
-| Big or hard code change | "refactor auth, update all callers" | subscriptions |
+| Code change | "fix the failing test" | subscriptions → local with hands (small changes only) |
+| Big or hard code change | "refactor auth, update all callers", "create an RPG game" | subscriptions |
 | Retry after a correction or failure | "no, standard library only" | the top model → the default → the next subscription |
 | Research on the web | "latest news on …" | subscriptions with web search |
 | Picture | "a watercolor fox" | image models |
@@ -65,6 +65,19 @@ Every row shows who set it — default, learned (and why), or you (in your
 words). What eki recognises as a message *for it* is narrow on purpose:
 short, not in a folder, an instruction or a question about routing naming a
 model or a kind of work. "use Claude's API in this script" goes to a model.
+
+## Answered, or done
+
+A request that only has to be **answered** — a quick question, a poem, a
+translation — may go to a model directly. One that has to be **done** —
+files, commands, the screen, the web, a question about this Mac ("what is
+taking up space in my downloads folder") — goes to a harness: Claude Code,
+Codex, or a local model with Codex's hands. On this Mac that is the
+difference between ~4 s and ~37 s for "hello" from the same local model:
+Codex's instructions are a lot to read before the first word.
+
+`eki routing` shows each choice's typical time (the median of its recent
+requests); of the two local choices, the faster goes first.
 
 ## Order
 

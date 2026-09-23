@@ -184,6 +184,14 @@ _HARD = re.compile(r"\b(design|architecture|migrat\w*|refactor|upgrade|split|end
                    r"legal|contract|patent|survey|consistent (character|across)|"
                    r"preserving|non.linear|in the style of|grant proposal|executive summary)\b"
                    r"|\b\d{3,4}[- ]word|\bmap the current state\b", re.I)
+#: making a thing: "create an interactive RPG game", "build me a website"
+_BUILD = re.compile(r"\b(create|build|make|develop|code|program|implement|set up|scaffold|prototype|write)\b"
+                    r"(?:\W+(?!(?:sure|it|this|that|them)\b)\w+){0,4}?"
+                    r"\W+(apps?|applications?|games?|websites?|sites?|web ?apps?|platform|engine|backend|frontend"
+                    r"|server|dashboard|simulator|saas|clone|mvp|tools?|bots?|cli|extensions?|plugins?|scripts?"
+                    r"|programs?|services?|library|api)\b", re.I)
+_BIG_BUILD = re.compile(r"\b(apps?|applications?|games?|websites?|sites?|web ?apps?|platform|engine|backend"
+                        r"|frontend|server|dashboard|simulator|saas|clone|mvp|services?)\b", re.I)
 _SIMPLE = re.compile(r"\b(explain|compare|why|walk me through|plan|design|help me|"
                      r"what are the|how does|critique)\b", re.I)
 _EASY = re.compile(r"^(hi|hey|hello|thanks|thank you|yes|no|ok(ay)?)\b", re.I)
@@ -245,9 +253,18 @@ def needs_hands(text: str) -> bool:
     t = text.strip()
     if wants_screen(t):
         return True
+    if _MINE.search(t):
+        return True                 # a question about *this* Mac has to be looked at, not answered
     if _ABOUT.search(t):
         return False
     return bool(_ACT.search(t))
+
+
+#: things on this Mac: "what is taking up space in my downloads folder"
+_MINE = re.compile(r"\bmy (downloads|desktop|documents|files?|folders?|disk|drive|ssd|storage|mac|macbook"
+                   r"|computer|laptop|photos|apps|applications|home folder|repo|project|screen|battery|wi-?fi)\b"
+                   r"|\b(this|the) (mac|computer|machine|folder|repo)\b|\bon (my|this) (mac|computer|machine)\b"
+                   r"|\b(disk space|free space|taking up space|running processes|what'?s running)\b", re.I)
 
 
 def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> Label:
@@ -263,8 +280,12 @@ def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> L
         task = "screen"
     elif _REPO.search(text) or (_FILE.search(text) and _REPO_VERB.search(text)):
         task = "repo"
-    elif asks_for_image(text) or (_IMAGE.search(text) and not _CODE.search(text)):
+    elif asks_for_image(text) or (_IMAGE.search(text) and not _CODE.search(text) and not _BUILD.search(text)):
         task = "image"
+    elif _BUILD.search(text) and not _ABOUT.search(text):
+        # making an app, a game, a site, a tool: code, and big unless it's a script
+        return Label(task="code", difficulty="hard" if _BIG_BUILD.search(_BUILD.search(text).group(0)) else "medium",
+                     source="rules", hands=True)
     elif after_image and image_followup(text):
         task = "image"
     elif re.search(r"^\W*(please\s+)?translate\b|\btranslate (this|that|it|the following)\b|翻译|how do you say",

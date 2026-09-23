@@ -601,7 +601,13 @@ class Engine:
         # hands) or, for a picture, an image model. A bare model would
         # describe what it can't do; a harness does it. Picked by name, a
         # bare model still answers — that's the picker's business.
-        wants_harness = not requested and label.task != "image" and not run["images"]
+        # A request that has to be *done* — files, commands, the screen, the
+        # web — goes to a harness (Claude Code, Codex, a local model with
+        # Codex's hands). One that only has to be answered — a quick
+        # question, a poem, a translation — may go to a model directly: a
+        # local one answers "hello" in 2 s, where the same model under
+        # Codex's instructions took 20–35 s (runs.db, 2026-09-23).
+        wants_harness = self._wants_harness(label, run["cwd"], bool(run["images"]), requested)
         # the answer before this one was corrected, or failed and this is
         # the second try: go up the vendor's ladder (eki/watch.py)
         try:
@@ -896,15 +902,41 @@ class Engine:
 
     def _base_table(self) -> Dict[str, List[str]]:
         subs = [b.key for b in self._subscriptions()]
-        local = next((b.key for b in self.backends if b.info.kind == "codex"
-                      and self.options.get(b.key, {}).get("local_model")), None) or \
-            next((b.key for b in self.backends if b.info.kind in ("mlx", "llamacpp") and b.info.capabilities.text
+        harness = next((b.key for b in self.backends if b.info.kind == "codex"
+                        and self.options.get(b.key, {}).get("local_model")), None)
+        # the local model itself: the one the harness drives, else the biggest text one
+        driven = self.options.get(harness, {}).get("local_model") if harness else None
+        raw = driven if driven and self.get(driven) is not None else \
+            next((b.key for b in sorted(self.backends, key=lambda b: -(watch_mod.params_of(
+                str(self.options.get(b.key, {}).get("model") or "")) or 0))
+                  if b.info.kind in ("mlx", "llamacpp") and b.info.capabilities.text
                   and b.key not in self.router.reserved), None)
         images = [b.key for b in self.backends if b.info.capabilities.images_out and not b.info.capabilities.text]
         web = [b.key for b in self.backends if b.info.capabilities.web]
         metered = [b.key for b in self.backends if b.info.kind in ("anthropic_api", "openai_compat")
                    and priors.class_of(b.info.kind, self.options.get(b.key, {}), b.info.capabilities) == "frontier_api"]
-        return table_mod.defaults(subs, local, images, web, metered)
+        return table_mod.defaults(subs, harness or raw, images, web, metered, raw=raw if harness else None,
+                                  seconds=self._typical_seconds())
+
+    @staticmethod
+    def _wants_harness(label: Any, folder: str, images: bool, requested: str) -> bool:
+        """Has to be *done* (files, commands, the screen, the web) → a harness.
+        Only has to be answered → a model directly may take it. Picked by
+        name → whatever was picked."""
+        return (not requested and label.task != "image" and not images
+                and (label.hands or bool(folder) or label.task in ("repo", "screen", "research")))
+
+    def _typical_seconds(self) -> Dict[str, float]:
+        """How long a request usually takes on each backend (the median of
+        its recent finished runs) — shown in the table, and the order of two
+        local choices."""
+        out = {}
+        for b in self.backends:
+            got = self.runs.durations(b.key, 30)
+            if len(got) >= 3:
+                got.sort()
+                out[b.key] = round(got[len(got) // 2], 1)
+        return out
 
     def routing_table(self, thread: str = "") -> Dict[str, Dict[str, Any]]:
         return table_mod.effective(self._base_table(), table_mod.load(), thread)
@@ -1070,8 +1102,11 @@ class Engine:
     def routing_view(self, thread: str = "") -> Dict[str, Any]:
         labels = self._target_labels()
         cells = self.routing_table(thread)
+        secs = self._typical_seconds()
         rows = [{"id": r, "title": t, "examples": ex + ((table_mod.load().get("examples") or {}).get(r) or []),
-                 "targets": [{"target": x, "label": labels.get(x, x)} for x in (cells.get(r) or {}).get("targets") or []],
+                 "targets": [{"target": x, "label": labels.get(x, x),
+                              "seconds": secs.get(table_mod.parse_target(x)[0])}
+                             for x in (cells.get(r) or {}).get("targets") or []],
                  "source": (cells.get(r) or {}).get("source"), "said": (cells.get(r) or {}).get("said")}
                 for r, t, ex in table_mod.ROWS]
         data = capacity_mod.load()
@@ -1094,7 +1129,8 @@ class Engine:
         out.append("| Kind of work | 1st | 2nd | 3rd | set by |")
         out.append("|---|---|---|---|---|")
         for r in v["rows"]:
-            ts = [t["label"] for t in r["targets"]] + ["—", "—", "—"]
+            ts = [t["label"] + (f" ~{t['seconds']:g}s" if t.get("seconds") is not None else "")
+                  for t in r["targets"]] + ["—", "—", "—"]
             by = r["source"] if r["source"] == "default" else f"{r['source']}: “{(r['said'] or '')[:60]}”"
             out.append(f"| {r['title']} | {ts[0]} | {ts[1]} | {ts[2]} | {by} |")
         if v["subscriptions"]:
@@ -1126,7 +1162,7 @@ class Engine:
         row, row_why = table_mod.row_for(label.task, label.difficulty, escalate, prompt,
                                          table_mod.load().get("examples") or {})
         cells = self.routing_table(thread)
-        wants_harness = label.task != "image"
+        wants_harness = self._wants_harness(label, folder, False, "")
         need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
                     images_out=label.task == "image", web=label.task == "research",
                     task=label.task, difficulty=label.difficulty, row=row,

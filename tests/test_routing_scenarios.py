@@ -237,8 +237,9 @@ def test_a_model_asked_for_by_name_overrides_the_routers_pick():
 
 
 def test_under_auto_nothing_goes_to_a_bare_text_model_while_a_harness_can_take_it(tmp_path, monkeypatch):
-    """A bare model would describe what it can't do; a harness does it. Only
-    when no harness can serve does Auto fall back to a bare model — and says so."""
+    """A request that has to be done goes to a harness — a bare model would
+    describe what it can't do. One that only has to be answered may go to a
+    model directly (faster: 2 s against 20–35 s under Codex's instructions)."""
     from eki import secrets, settings
     from eki.adapters.base import BackendInfo, Capabilities, Cost
     from eki.config import Config
@@ -256,7 +257,7 @@ def test_under_auto_nothing_goes_to_a_bare_text_model_while_a_harness_can_take_i
 
     async def go():
         for prompt, picked, expect in (("take screenshot", "", "hands"),   # the cheaper bare one passed over
-                                       ("hello there", "", "hands"),       # small talk too: no bare model under Auto
+                                       ("hello there", "", "bare"),        # small talk: answered directly
                                        ("hello there", "bare", "bare")):   # picked by name, it answers
             started = await eng.ask(prompt, backend_key=picked)
             await settle(eng.runs, started["run"])

@@ -164,6 +164,15 @@ class RunStore:
                 " ORDER BY created_at DESC LIMIT 1", (conversation,)).fetchone()
         return dict(row) if row else None
 
+    def durations(self, backend: str, limit: int = 30) -> List[float]:
+        """Seconds the latest finished requests on this backend took."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ended_at - started_at FROM runs WHERE backend = ? AND state = 'done'"
+                " AND kind = 'ask' AND started_at > 0 AND ended_at >= started_at"
+                " ORDER BY created_at DESC LIMIT ?", (backend, limit)).fetchall()
+        return [float(r[0]) for r in rows]
+
     def finished_count(self, backends: List[str]) -> int:
         """Requests that have ever finished on these backends (a running count)."""
         if not backends:

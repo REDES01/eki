@@ -12,6 +12,7 @@ import pytest
 from eki import capacity, prefs, table
 from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health, register
 from eki.router import Need, Router
+from tests.test_runs import echo_config, settle
 
 
 # ---- the prompt check -----------------------------------------------------------------
@@ -233,7 +234,6 @@ class Desk(Backend):
 
 def desk(tmp_path, monkeypatch):
     from eki.engine import Engine
-    from tests.test_runs import echo_config
     cfg = echo_config(tmp_path)
     cfg.backends = []
     cfg.options = {}
@@ -254,7 +254,6 @@ def desk(tmp_path, monkeypatch):
 
 
 async def ask(eng, prompt, cid="", backend_key=""):
-    from tests.test_runs import settle
     s = await eng.ask(prompt, conversation=cid, backend_key=backend_key)
     await settle(eng.runs, s["run"], timeout=5)
     return s["conversation"], eng.store.turns(s["conversation"])[-1]
@@ -327,3 +326,11 @@ def test_putting_a_provider_first_never_says_it_twice_and_keeps_its_roles():
     eff = table.effective(BASE, rules, "c1")
     assert eff["quick"]["targets"] == ["claude_code@fast", "codex-qwen", "codex@fast"]
     assert eff["retry"]["targets"][:2] == ["claude_code@top", "claude_code@default"]
+
+
+def test_a_local_model_answers_directly_first_its_harness_for_what_needs_hands():
+    t = table.defaults(["claude_code"], "codex-qwen", [], [], [], raw="qwen")
+    assert t["quick"][:2] == ["qwen", "codex-qwen"] and t["code"][-1] == "codex-qwen!easy"
+    # measured the other way round, the faster goes first
+    t = table.defaults(["claude_code"], "codex-qwen", [], [], [], raw="qwen", seconds={"qwen": 30, "codex-qwen": 5})
+    assert t["quick"][:2] == ["codex-qwen", "qwen"]

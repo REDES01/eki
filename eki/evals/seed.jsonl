@@ -204,3 +204,7 @@
 {"p": "translate 'happy new year' into five languages", "task": "translate", "difficulty": "easy"}
 {"p": "translate this FAQ into natural Brazilian Portuguese for our support site: How do I reset my password? Can I change my plan later? Where is my invoice?", "task": "translate", "difficulty": "medium"}
 {"p": "translate the attached Japanese patent abstract into English, preserving claim structure and technical terms", "task": "translate", "difficulty": "hard"}
+{"p": "create a interactive rpg game", "task": "code", "difficulty": "hard"}
+{"p": "build me a website for my bakery", "task": "code", "difficulty": "hard"}
+{"p": "make a simple todo app in react", "task": "code", "difficulty": "hard"}
+{"p": "write a bot that posts the weather to discord every morning", "task": "code", "difficulty": "medium"}

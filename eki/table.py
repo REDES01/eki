@@ -95,10 +95,19 @@ def row_for(task: str, difficulty: str, escalate: bool = False, prompt: str = ""
 # ---- the default table -------------------------------------------------------------------
 
 def defaults(subs: List[str], local: Optional[str], images: List[str], web: List[str],
-             metered: List[str]) -> Dict[str, List[str]]:
+             metered: List[str], raw: Optional[str] = None,
+             seconds: Optional[Dict[str, float]] = None) -> Dict[str, List[str]]:
     """The table for what this Mac has: `subs` are the subscriptions, the
-    one with the most room first; `local` the local model (with a harness,
-    if it has one); `metered` API keys, last."""
+    one with the most room first; `local` the local model with a harness
+    (or the model itself, when there's no harness); `raw` the local model
+    answering directly — for requests that only need an answer, faster; a
+    request that needs hands passes it over for the harness; `metered` API
+    keys, last. With `seconds` (typical time per backend) the two local
+    choices go fastest first."""
+    if raw and local and raw != local:
+        pair = sorted([raw, local], key=lambda k: (seconds or {}).get(k, 0 if k == raw else 1e9))
+    else:
+        pair = [local] if local else []
     s0 = subs[0] if subs else None
     s1 = subs[1] if len(subs) > 1 else None
     m = [f"{k}@default" for k in metered]
@@ -111,9 +120,9 @@ def defaults(subs: List[str], local: Optional[str], images: List[str], web: List
         return out
     at = lambda p, r: f"{p}@{r}" if p else None          # noqa: E731
     return {
-        "quick": row(local, at(s0, "fast"), at(s1, "fast")),
-        "writing": row(local, at(s0, "default"), at(s1, "default"), *m),
-        "explain": row(at(s0, "default"), at(s1, "default"), local, *m),
+        "quick": row(*pair, at(s0, "fast"), at(s1, "fast")),
+        "writing": row(*pair, at(s0, "default"), at(s1, "default"), *m),
+        "explain": row(at(s0, "default"), at(s1, "default"), *pair, *m),
         "code": row(at(s0, "default"), at(s1, "default"), f"{local}!easy" if local else None, *m),
         "code_hard": row(at(s0, "default"), at(s1, "default"), *m),
         "retry": row(at(s0, "top"), at(s0, "default"), at(s1, "default"), *m),

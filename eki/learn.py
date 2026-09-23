@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Skills eki drafts for itself after a run (ROADMAP, Stage 4 *Evolve*).
+"""Skills eki drafts for itself after a run (ROADMAP, Stage 1 *Evolve*).
 
 A skill is the safest thing eki can change about itself: a folder of
 instructions in a git repo, readable, revertible with one commit, and no

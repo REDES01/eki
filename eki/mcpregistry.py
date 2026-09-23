@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""One MCP registry, rendered into each CLI (ROADMAP, Stage 4).
+"""One MCP registry, rendered into each CLI (ROADMAP, Stage 1).
 
 Servers are declared once, in ~/.eki/mcp.json, and every backend gets a
 view: Claude Code receives them per session as `--mcp-config` (its

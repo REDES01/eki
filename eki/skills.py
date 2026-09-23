@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""One skill store, seen by every backend (ROADMAP, Stage 4).
+"""One skill store, seen by every backend (ROADMAP, Stage 1).
 
 A skill is a folder with a `SKILL.md` — name and description in the
 frontmatter, instructions below, optional scripts and resources beside it

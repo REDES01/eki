@@ -1,6 +1,6 @@
 # eki builds eki — how
 
-Design for Stage 1 of the [roadmap](../ROADMAP.md). What's decided, what's
+Design for the self-build track of the [roadmap](../ROADMAP.md). What's decided, what's
 built, and what each remaining piece has to do.
 
 ## The shape

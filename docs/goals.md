@@ -35,8 +35,8 @@ goals:
 ```
 
 Then `eki goals add ~/games/rpg`. The backlog is the difference between this
-and the files that exist — like `make`. Delete a portrait you don't like and it
-gets drawn again; raise `count` and the new ones get made.
+and the files that exist — like `make`. Delete a portrait file by hand and it
+gets drawn again (on the board, *Redo* does that and *Delete* keeps it gone); raise `count` and the new ones get made.
 
 In a prompt: `{bio}` is this item's bio (`{bio:500}` its first 500
 characters), `{bible}` the bible, `{others}` the first line of this part in
@@ -73,7 +73,25 @@ Whenever there's room — you can keep working:
 `eki goals mode spare`. A part is local unless it says `line: frontier`
 (the main character's key scene, say); `backend: <provider>` names one outright.
 
-## Seeing it
+## The board
+
+`http://127.0.0.1:8787/goals`, and **Goals** in the Mac app — the same page.
+
+- **All goals**, across projects: progress, parts, what each is doing
+  (working, queued, paused, done), pause and resume. Projects are added and
+  removed here too.
+- **A goal**: its items as a picture grid (when it makes pictures) or a list,
+  a filter, pause, and *Delete everything it made* — every file to the trash,
+  and the goal paused so nothing is remade until you resume it.
+- **An item**: every part in full. *Redo* a part (with an optional note for
+  the next making); *Delete* a part or the whole item — it goes to the trash
+  and **stays deleted** until you choose *Make again*. A part's dependents
+  (the portrait drawn from a bio) go with it.
+
+Nothing is ever deleted outright: files move to the project's `.eki/trash/`.
+Paused goals and deleted pieces are kept in the project's `.eki/state.json`.
+
+## Seeing it from the command line
 
 ```
 eki goals              # each project's progress, and what the shift is doing now

@@ -228,7 +228,13 @@ async def lifespan(app: FastAPI):
                 await eng.shift_tick()
             except Exception:                       # noqa: BLE001
                 log.exception("idle shift")
-            await asyncio.sleep(8)
+            # every 8 s, or the moment a piece ends — then the next starts at once
+            eng.shift_wake.clear()
+            try:
+                await asyncio.wait_for(eng.shift_wake.wait(), 8)
+                await asyncio.sleep(0.5)            # let the run settle
+            except asyncio.TimeoutError:
+                pass
 
     shift_task = asyncio.create_task(work_while_idle())
     reaper = asyncio.create_task(reap())

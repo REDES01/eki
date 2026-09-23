@@ -110,6 +110,8 @@ class Engine:
         self._shift_rest: Dict[str, float] = {}
         self._shift_state: Dict[str, Any] = {"state": "idle", "why": "not started yet"}
         self._awake = shift_mod.Awake()
+        #: set when a piece ends, so the next one starts at once, not on the next tick
+        self.shift_wake = asyncio.Event()
         #: Claude Code kept open per conversation (see eki/live.py)
         self.live: Dict[str, Any] = {}
         #: a question or permission prompt a run is waiting on: run id → event
@@ -3130,6 +3132,7 @@ class Engine:
                 pass
             goals_mod.note({**entry, "state": state, "seconds": round(time.time() - started, 1),
                             "line": piece.line})
+            self.shift_wake.set()
 
     def goals_view(self) -> Dict[str, Any]:
         rows = []

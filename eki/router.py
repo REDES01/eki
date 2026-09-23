@@ -31,6 +31,8 @@ class Need:
     #: what the request is and how demanding it is, from eki.classify
     task: str = ""
     difficulty: str = ""
+    #: the answer before this one was corrected, or failed: go up the ladder
+    escalate: bool = False
 
 
 @dataclass
@@ -75,7 +77,8 @@ class Router:
                  policy: Optional["Policy"] = None,
                  is_up: Optional[Callable[[str], Optional[bool]]] = None,
                  reserved: Optional[set] = None,
-                 models_for: Optional[Callable[[str], List[Any]]] = None):
+                 models_for: Optional[Callable[[str], List[Any]]] = None,
+                 ladder_for: Optional[Callable[[str], Dict[str, str]]] = None):
         self.backends = backends
         self.quota = quota
         #: current preferences; replaced wholesale when the user edits them
@@ -88,6 +91,9 @@ class Router:
         #: the registry's records for a provider's models: each has .model
         #: and .quality(task). None or empty means "just the default".
         self.models_for = models_for or (lambda key: [])
+        #: the vendor's own guidance for a program, read daily (eki/watch.py):
+        #: {"default", "top", "fast": model id, "vendor"}; {} = not read yet
+        self.ladder_for = ladder_for or (lambda key: {})
 
     def _quality(self, backend: Backend, task: str) -> float:
         return priors.quality(backend.info.kind, getattr(backend, "options", {}) or {},
@@ -161,11 +167,29 @@ class Router:
         def pace_of(b: Backend):
             return paces.get(b.info.quota_source or "") if b.info.quota_source else None
 
+        # A program with a ladder (the vendor's own guidance) takes the
+        # model its role calls for and is always good enough — that's what
+        # the vendor says the model is for. The rest (local models) are
+        # judged as before: good enough for this difficulty, or not.
+        role = self.role_for(need)
+        laddered: Dict[str, str] = {}
+        for b in candidates:
+            lad = self.ladder_for(b.key)
+            if lad:
+                chosen[b.key] = (self._ladder_model(lad, role, pace_of(b)), 1.0)
+                laddered[b.key] = lad.get("vendor", "")
+        if need.escalate and laddered:
+            for b in candidates:
+                if b.key not in laddered:
+                    rejected.append(f"{b.key}: the last answer needed a stronger model")
+            candidates = [b for b in candidates if b.key in laddered]
+
         if need.task and need.difficulty:
             bar = priors.NEED.get(need.difficulty, 0.72)
             for b in candidates:
-                chosen[b.key] = self._pick_model(b, need.task, need.difficulty, bar,
-                                                 pace=pace_of(b))
+                if b.key not in laddered:
+                    chosen[b.key] = self._pick_model(b, need.task, need.difficulty, bar,
+                                                     pace=pace_of(b))
             good = [b for b in candidates if chosen[b.key][1] >= bar]
             if good:
                 note = f" for {need.task}/{need.difficulty}"
@@ -203,7 +227,17 @@ class Router:
         pick = candidates[0]
         model = chosen.get(pick.key, ("", 0.0))[0]
         name = f"{pick.key} ({model})" if model else pick.key
-        why = f"{name}: cheapest fit (tier {tier(pick)}){note}"
+        if pick.key in laddered:
+            vendor = laddered[pick.key] or "the vendor"
+            said = {"top": f"{vendor}'s most capable", "fast": f"{vendor}'s fast model",
+                    "default": f"{vendor}'s default for most work"}[role]
+            if model != self.ladder_for(pick.key).get(role, model):
+                said = f"{vendor}'s default (its top model's window is being spent fast)"
+            why = f"{name}: {said}"
+            if need.escalate:
+                why += ", after the last answer was corrected or failed"
+        else:
+            why = f"{name}: cheapest fit (tier {tier(pick)}){note}"
         if tier(pick) != pick.info.cost.tier:
             why += " by policy"
         pace = pace_of(pick)
@@ -216,6 +250,32 @@ class Router:
         if pick.info.cost.note:
             why += f", {pick.info.cost.note}"
         return Choice(pick, why, rejected, model=model)
+
+    #: a top model with its own window (Fable's week) spent this much faster
+    #: than it lasts is given a rest: the default takes its work
+    TOP_PACE_LIMIT = 1.5
+
+    @staticmethod
+    def role_for(need: Need) -> str:
+        """The vendor's default for the work, hard work included; its top
+        model when the default fell short — the answer before was corrected,
+        or failed ("…or when your evals on Opus still fall short", as
+        Anthropic puts it); its fast one for easy work."""
+        if need.escalate:
+            return "top"
+        if need.difficulty == "easy":
+            return "fast"
+        return "default"
+
+    def _ladder_model(self, lad: Dict[str, str], role: str, pace: Any = None) -> str:
+        model = lad.get(role, lad.get("default", ""))
+        if role == "top" and pace is not None and model:
+            try:
+                if pace.model_factor(model) >= self.TOP_PACE_LIMIT:
+                    return lad.get("default", "")
+            except Exception:                       # noqa: BLE001
+                pass
+        return model
 
     def _pick_model(self, backend: Backend, task: str, difficulty: str,
                     bar: float, pace: Any = None) -> Tuple[str, float]:

@@ -105,6 +105,9 @@ async def lifespan(app: FastAPI):
                         log.info("removed %d unused worktree(s)/build(s)", len(gone))
                 except Exception:                   # noqa: BLE001
                     log.exception("sweep")
+            if ticks % 60 == 30:
+                # the daily model watch runs itself once it's due
+                asyncio.create_task(eng.watch_refresh())
             try:
                 # a swap that has finished: say how it went, once
                 await eng.settle_swap()
@@ -164,6 +167,11 @@ async def lifespan(app: FastAPI):
         except Exception:                           # noqa: BLE001
             log.exception("model discovery")
         await asyncio.sleep(5)
+        try:
+            # which models are out there, if it's been a day (eki/watch.py)
+            await eng.watch_refresh()
+        except Exception:                           # noqa: BLE001
+            log.exception("model watch")
         try:
             named = await eng.backfill_titles()
             if named:
@@ -526,6 +534,28 @@ def skill_delete(name: str) -> Any:
 @app.post("/api/skills/import")
 def skills_import(body: SkillImportBody) -> Any:
     return {**_skills_state(), "report": skills_mod.import_existing(body.names or None)}
+
+
+@app.get("/api/watch")
+def watched() -> Any:
+    """The vendors' ladders and the local models eki suggests (eki/watch.py)."""
+    from . import watch as watch_mod
+    return watch_mod.load()
+
+
+@app.post("/api/watch/refresh")
+async def watch_refresh() -> Any:
+    return await engine().watch_refresh(force=True)
+
+
+@app.post("/api/watch/take/{name}")
+async def watch_take(name: str) -> Any:
+    try:
+        return await engine().watch_take(name)
+    except KeyError:
+        raise HTTPException(404, f"{name} isn't a current suggestion")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
 
 @app.get("/api/observe")

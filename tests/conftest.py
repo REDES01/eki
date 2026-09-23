@@ -21,6 +21,10 @@ def private_skills(tmp_path, monkeypatch):
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")
+    from eki import watch
+    monkeypatch.setattr(watch, "HOME", root / "eki" / "watch")
+    monkeypatch.setattr(watch, "STATE", root / "eki" / "watch" / "state.json")
+    monkeypatch.setattr(watch, "_CACHE", {"mtime": None, "state": {}})
     from eki import observe
     monkeypatch.setattr(observe, "HOME", root / "eki" / "observe")
     from eki import builds

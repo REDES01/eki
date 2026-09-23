@@ -43,6 +43,7 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import watch as watch_mod
 from . import observe as observe_mod
 from . import workspace as workspace_mod
 from . import live
@@ -88,6 +89,7 @@ class Engine:
         self.runner = Runner(self.runs, self._dispatch)
         self.runner.on_error = self._on_run_error
         self._fixing = asyncio.Lock()
+        self._watching = asyncio.Lock()
         self._health: Dict[str, Tuple[float, Any]] = {}
         self._side_tasks: set = set()               # titles and the like
         self._folder_locks: Dict[str, asyncio.Lock] = {}
@@ -152,7 +154,8 @@ class Engine:
                              is_up=self._is_up,
                              reserved={self.settings["router_model"]}
                              if self.settings["router_model"] else set(),
-                             models_for=self.registry.for_provider)
+                             models_for=self.registry.for_provider,
+                             ladder_for=watch_mod.ladder)
         self._health = {}
 
     def _profile_models(self, providers: List[Provider]) -> None:
@@ -590,7 +593,15 @@ class Engine:
         # describe what it can't do; a harness does it. Picked by name, a
         # bare model still answers — that's the picker's business.
         wants_harness = not requested and label.task != "image" and not run["images"]
-        need = Need(repo=bool(run["cwd"]),
+        # the answer before this one was corrected, or failed and this is
+        # the second try: go up the vendor's ladder (eki/watch.py)
+        try:
+            before = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)] \
+                if cid else []
+            escalate = bool({"corrected", "recovered"} & set(learn_mod.signals(run["prompt"], before)))
+        except Exception:                           # noqa: BLE001
+            escalate = False
+        need = Need(repo=bool(run["cwd"]), escalate=escalate,
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
                     # research means looking things up: a provider with the web
@@ -817,6 +828,284 @@ class Engine:
                 task = asyncio.create_task(self._learn(seen, cid, backend.key))
                 self._side_tasks.add(task)
                 task.add_done_callback(self._side_tasks.discard)
+
+    # ---- which models are out there (eki/watch.py) --------------------------
+
+    def _watch_reader(self) -> Optional[Backend]:
+        """Who reads the pages and the charts: one that can see a picture —
+        Claude Code first — or the one setting `watch_reader` names."""
+        wanted = str(self.settings.get("watch_reader") or "")
+        order = [b for b in self.backends if b.key == wanted] if wanted else []
+        order += sorted((b for b in self.backends if b.info.capabilities.text
+                         and not self.options.get(b.key, {}).get("local_model")),
+                        key=lambda b: (b.info.kind != "claude_code", b.info.kind != "codex",
+                                       not b.info.capabilities.vision))
+        for b in order:
+            if b.info.kind not in ("claude_code", "codex") and self._is_up(b.key) is not True:
+                continue
+            return adapters.build(b.info, self.options.get(b.key, {}))
+        return None
+
+    async def _read(self, reader: Backend, prompt: str) -> Optional[Dict[str, Any]]:
+        kw: Dict[str, Any] = {"max_tokens": 3000, "temperature": 0.1}
+        if reader.info.kind in ("claude_code", "codex"):
+            watch_mod.HOME.mkdir(parents=True, exist_ok=True)
+            kw["cwd"] = str(watch_mod.HOME)
+        parts: List[str] = []
+
+        async def collect() -> None:
+            async for chunk in reader.stream([Message("user", prompt)], **kw):
+                if isinstance(chunk, str):
+                    parts.append(chunk)
+        try:
+            await asyncio.wait_for(collect(), timeout=300)
+        finally:
+            try:
+                await reader.close()
+            except Exception:                       # noqa: BLE001
+                pass
+        return watch_mod.parse_json("".join(parts))
+
+    def _local_current(self) -> List[str]:
+        """The local text models you run, biggest first, by their model id."""
+        out = []
+        for b in self.backends:
+            if b.info.kind in ("mlx", "llamacpp") and b.info.capabilities.text:
+                model = str(self.options.get(b.key, {}).get("model") or "")
+                if model:
+                    out.append(model)
+        return sorted(out, key=lambda m: -(watch_mod.params_of(m) or 0))
+
+    async def _program_models(self, b: Backend) -> Dict[str, Dict[str, str]]:
+        """What a program itself says it runs: for Claude Code, each alias
+        and the model it resolves to — from its handshake, no model asked."""
+        if b.info.kind != "claude_code":
+            return {}
+        import uuid
+        try:
+            session = live.LiveSession(b.live_argv(str(watch_mod.HOME), None, str(uuid.uuid4())),  # type: ignore[attr-defined]
+                                       str(watch_mod.HOME), None, "")
+            watch_mod.HOME.mkdir(parents=True, exist_ok=True)
+            await session.start()
+        except Exception:                           # noqa: BLE001
+            return {}
+        try:
+            out = {}
+            for m in session.models:
+                value = str(m.get("value") or "")
+                if not value or value == "default":
+                    continue
+                # the family alias ("fable", "opus") when the program names
+                # one, else its own value ("claude-fable-5-1[1m]")
+                name = str(m.get("displayName") or "").lower()
+                key = name if re.fullmatch(r"[a-z]+", name) else re.sub(r"\[.*\]$", "", value)
+                out[key] = {"resolved": str(m.get("resolvedModel") or ""),
+                            "label": str(m.get("description") or m.get("displayName") or "")}
+            return out
+        finally:
+            await session.close()
+
+    async def _program_version(self, c: Any, b: Backend) -> Dict[str, Any]:
+        binary = getattr(b, "bin", "") or ""
+        installed = ""
+        if binary:
+            try:
+                proc = await asyncio.create_subprocess_exec(binary, "--version",
+                                                            stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.DEVNULL)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+                installed = watch_mod.version_of(out.decode("utf-8", "replace"))
+            except Exception:                       # noqa: BLE001
+                pass
+        latest = ""
+        pkg = watch_mod.NPM.get(b.info.kind)
+        if pkg:
+            try:
+                r = await c.get(f"https://registry.npmjs.org/{pkg}/latest")
+                latest = str(r.json().get("version") or "") if r.status_code == 200 else ""
+            except Exception:                       # noqa: BLE001
+                pass
+        return {"installed": installed, "latest": latest,
+                "behind": watch_mod.behind(installed, latest),
+                "update": watch_mod.update_command(b.info.kind, binary)}
+
+    async def watch_refresh(self, force: bool = False) -> Dict[str, Any]:
+        """Once a day: the vendors' own guidance → a ladder per program, and
+        Ollama's popular models → suggestions for this Mac. Never raises."""
+        before = watch_mod.load()
+        if not force and not watch_mod.due(before):
+            return before
+        async with self._watching:
+            try:
+                return await self._watch(before)
+            except Exception as e:                  # noqa: BLE001
+                observe_mod.fault(e, source="watch")
+                return before
+
+    async def _watch(self, before: Dict[str, Any]) -> Dict[str, Any]:
+        import httpx
+        try:
+            await self.discover_models()            # what each program can run, today
+        except Exception:                           # noqa: BLE001
+            pass
+        state: Dict[str, Any] = {"at": int(time.time()), "vendors": dict(before.get("vendors") or {}),
+                                 "candidates": dict(before.get("candidates") or {}), "errors": []}
+        async with httpx.AsyncClient(timeout=30, headers=watch_mod.UA, follow_redirects=True) as c:
+            # ---- the vendors
+            for b in self.backends:
+                src = watch_mod.VENDORS.get(b.info.kind)
+                if src is None or self.options.get(b.key, {}).get("local_model"):
+                    continue
+                reader = self._watch_reader()
+                if reader is None:
+                    state["errors"].append("nothing to read the pages with")
+                    break
+                # what the program on this Mac runs — for Claude Code, which
+                # model each alias really is (an older CLI's "opus" is an older Opus)
+                said = await self._program_models(b)
+                for alias, info in said.items():
+                    if self.registry.get(b.key, alias) is None:
+                        self.registry.seen(b.key, alias, label=alias.title())
+                runnable = [{"id": r.model, "label": (said.get(r.model) or {}).get("label") or r.label,
+                             "resolved": (said.get(r.model) or {}).get("resolved", "")}
+                            for r in self.registry.for_provider(b.key) if r.model]
+                program = await self._program_version(c, b)
+                program["runs"] = {r["id"]: r["resolved"] for r in runnable if r.get("resolved")}
+                try:
+                    r = await c.get(src["url"])
+                    r.raise_for_status()
+                    answer = await self._read(reader, watch_mod.vendor_prompt(
+                        src["vendor"], watch_mod.text_of(r.text), runnable, b.info.kind))
+                except Exception as e:              # noqa: BLE001
+                    state["errors"].append(f"{src['vendor']}: {e}"[:200])
+                    observe_mod.note("failed", source="watch", what=f"couldn't read {src['url']}",
+                                     error=str(e)[:200])
+                    continue
+                if not answer:
+                    state["errors"].append(f"{src['vendor']}: the reader's answer wasn't JSON")
+                    continue
+                state["vendors"][b.key] = {
+                    "vendor": src["vendor"], "url": src["url"], "at": int(time.time()),
+                    "ladder": watch_mod.clean_ladder(answer, runnable),
+                    "guidance": str(answer.get("guidance") or "")[:500],
+                    "vendor_models": answer.get("vendor_models") or [],
+                    "not_offered": [str(x) for x in answer.get("not_offered") or []][:10],
+                    "program": {**program, "stale": watch_mod.stale(answer.get("vendor_models") or [],
+                                                                    program.get("runs") or {})}}
+            # ---- local models
+            current = self._local_current()
+            if current:
+                await self._watch_local(c, state, before, current[0])
+        state["suggestions"] = [dict(name=k, **v) for k, v in state["candidates"].items()
+                                if v.get("verdict") in ("suggest", "test")]
+        watch_mod.save(state)
+        said = watch_mod.news(before, state)
+        for line in said:
+            observe_mod.note("history", what="watch", news=line)
+        if said and self.settings.get("notify_learned", True):
+            await self._notify("models: " + said[0][:80], "; ".join(said[1:3]) or said[0])
+        return state
+
+    async def _watch_local(self, c: Any, state: Dict[str, Any], before: Dict[str, Any],
+                           current: str) -> None:
+        try:
+            r = await c.get(f"{watch_mod.OLLAMA}/search")
+            r.raise_for_status()
+            listed = watch_mod.parse_search(r.text)
+        except Exception as e:                      # noqa: BLE001
+            state["errors"].append(f"ollama: {e}"[:200])
+            return
+        if not listed:
+            state["errors"].append("ollama: the list had no models — has the page changed?")
+            return
+        ceiling = self.models.memory().ceiling_gb
+        fam, ver = watch_mod.family(current)
+        rows: Optional[List[Dict[str, Any]]] = None
+        for item in [m for m in listed if not m["cloud_only"]][:watch_mod.POPULAR]:
+            name = item["name"]
+            if watch_mod.norm(name) == watch_mod.norm(fam + ver):
+                continue                            # what you run (a variant of it is still news)
+            seen = (before.get("candidates") or {}).get(name) or {}
+            if seen and seen.get("updated") == item["updated"]:
+                continue                            # read already, unchanged since
+            entry: Dict[str, Any] = {"updated": item["updated"], "pulls": item["pulls"],
+                                     "about": item["about"], "at": int(time.time())}
+            state["candidates"][name] = entry
+            try:
+                page = watch_mod.parse_library((await c.get(f"{watch_mod.OLLAMA}/library/{name}")).text, name)
+            except Exception as e:                  # noqa: BLE001
+                entry.update(verdict="skip", why=f"couldn't read its page: {e}"[:160])
+                continue
+            tag = watch_mod.pick_tag(page, ceiling, watch_mod.params_of(current))
+            if tag is None:
+                entry.update(verdict="skip", why=f"no build fits in {ceiling:g} GB")
+                continue
+            entry["tag"] = tag
+            chart, comparison = await self._read_chart(c, name, tag["tag"], page)
+            entry["chart"] = chart
+            entry["comparison"] = comparison
+            v, why = watch_mod.verdict({"name": name}, current, comparison)
+            entry.update(verdict=v, why=why)
+            if v in ("suggest", "test"):
+                if rows is None:
+                    from . import suggest as suggest_mod
+                    try:
+                        rows = await suggest_mod.catalogue(c)
+                    except Exception:               # noqa: BLE001
+                        rows = []
+                entry["build"] = watch_mod.match_build(name, tag["tag"], rows) or ""
+                if not entry["build"]:
+                    entry["why"] += " (no MLX build of it on Hugging Face yet)"
+
+    async def _read_chart(self, c: Any, name: str, tag: str, page: Dict[str, Any]
+                          ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+        pics = watch_mod.charts(page["images"])
+        if not pics:
+            return {"is_chart": False}, None
+        folder = watch_mod.HOME / "charts" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for i, pic in enumerate(pics):
+            try:
+                r = await c.get(pic["url"])
+                if r.status_code == 200 and r.content:
+                    kind = (r.headers.get("content-type") or "image/png").split("/")[-1].split(";")[0]
+                    path = folder / f"{i}.{'jpg' if kind == 'jpeg' else kind}"
+                    path.write_bytes(r.content)
+                    paths.append(str(path))
+            except Exception:                       # noqa: BLE001
+                continue
+        reader = self._watch_reader()
+        if not paths or reader is None:
+            return {"is_chart": False}, None
+        try:
+            size = f"{watch_mod.params_of(tag):g}B" if watch_mod.params_of(tag) else ""
+            chart = await self._read(reader, watch_mod.chart_prompt(name, paths, page.get("readme", ""),
+                                                                     size)) or {}
+        except Exception:                           # noqa: BLE001
+            return {"is_chart": False, "error": "unreadable"}, None
+        if not chart.get("is_chart"):
+            return chart, None
+        labels_all = {k for b in chart.get("benchmarks") or [] for k in (b.get("scores") or {})}
+        subject = str(chart.get("subject") or "")
+        if subject not in labels_all:
+            subject = ""                            # a description, not a label: find it ourselves
+        if not subject:
+            size = watch_mod.params_of(tag)
+            labels = {k for b in chart.get("benchmarks") or [] for k in (b.get("scores") or {})}
+            f, v = watch_mod.family(name)
+            subject = next((l for l in labels if watch_mod._label_is(l, f, v, size)), "")
+        current = self._local_current()[0]
+        return chart, watch_mod.compare(chart, subject, current)
+
+    async def watch_take(self, name: str) -> Dict[str, str]:
+        """Download and set up a suggested local model (the usual Add Model run)."""
+        s = next((x for x in watch_mod.load().get("suggestions") or [] if x["name"] == name), None)
+        if s is None:
+            raise KeyError(name)
+        if not s.get("build"):
+            raise ValueError(f"no MLX build of {name} to download yet")
+        return await self.deploy(s["build"], label=f"{name} (local)")
 
     # ---- eki watching itself (eki/observe.py) -------------------------------
 

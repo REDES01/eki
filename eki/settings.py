@@ -60,6 +60,9 @@ DEFAULTS: Dict[str, Any] = {
     #: change that touches nothing protected is swapped in, watched, and
     #: rolled back if unhealthy — docs/self-build.md)
     "self_autonomy": "propose",
+    #: who reads the vendors' model pages and the benchmark charts each day
+    #: (eki/watch.py): "" = Claude Code if you have it (it can see a chart)
+    "watch_reader": "",
     #: a fault in eki's own code (eki/observe.py): "propose" — eki writes a
     #: fix as an `eki self` proposal (never applied), or "off"
     "self_fix": "propose",

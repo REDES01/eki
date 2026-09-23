@@ -243,7 +243,7 @@ def propose(request: str, *, root: Path, ask: Ask, base: str = "HEAD",
     p.protected = touches_protected(p.files)
     git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
         "commit", "-q", "-m",
-        f"self: {p.request[:68]}\n\nAsked through `eki self`; written by "
+        f"self: {p.request.splitlines()[0][:68]}\n\nAsked through `eki self`; written by "
         f"{p.backend or 'an agent'} in run {p.run or '?'}.\nNot merged by eki.")
     p.commit = git(where, "rev-parse", "HEAD")
 

@@ -96,9 +96,13 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       chat list show the project name" — and it is labelled as self-work and
       routed to a repo-capable agent on eki's own source, in a git worktree,
       never the checkout that's running
-- [ ] **Faults become requests too.** A run that failed inside eki's own code
+- [x] **Faults become requests too.** A run that failed inside eki's own code
       (a traceback, an adapter that stopped parsing a CLI's output after that
       CLI updated) opens a self-work run with the evidence attached
+      (8df9b37, `eki/observe.py`, `docs/observe.md`: faults from runs, engine
+      loops and request handlers; proposals only, never applied. Checked live:
+      a planted KeyError in a request handler, hit twice, became a fit fix
+      with a regression test, written by Claude Code)
 - [x] **A candidate has to prove itself.** (`eki/candidate.py`, 57e7209,
       merged into main in 70eb734; design in `docs/self-build.md`.
       The schema check is forwards-and-readable-by-the-old-build; the Swift app
@@ -312,6 +316,13 @@ Stage 1 is eki changing its code. This is the other half — what it knows:
 - [ ] eki takes the next unchecked item in this file as self-work (Stage 1),
       at whatever autonomy is set
 - [ ] eki keeps this file current: ticks what landed, with the commit
+- [x] A journal of what eki notices about itself — faults, provider
+      failures, friction, gaps, history — kept without a model (8df9b37,
+      `eki observe`)
+- [ ] A weekly note from the journal and this file: what eki noticed, and
+      two or three suggestions with their evidence. It suggests; you decide,
+      and what you pick becomes an item here or an `eki self` request.
+      Suggestions lean to adding a provider or server, not building a part
 
 ## Not planned
 

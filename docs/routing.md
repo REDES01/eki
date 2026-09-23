@@ -27,7 +27,7 @@ itself, no model run.
 | Explain, reason | "explain Python's GIL" | subscriptions → local |
 | Code change | "fix the failing test" | subscriptions → local with hands (small changes only) |
 | Big or hard code change | "refactor auth, update all callers", "create an RPG game" | subscriptions |
-| Retry after a correction or failure | "no, standard library only" | the top model → the default → the next subscription |
+| Retry after a failure | (the answer before failed) | the default → the top model → the next subscription |
 | Research on the web | "latest news on …" | subscriptions with web search |
 | Picture | "a watercolor fox" | image models |
 
@@ -66,20 +66,31 @@ words). What eki recognises as a message *for it* is narrow on purpose:
 short, not in a folder, an instruction or a question about routing naming a
 model or a kind of work. "use Claude's API in this script" goes to a model.
 
-## Tools decide the harness
+## A thread stays with the model that answers
 
-The line between a model directly and a harness (Claude Code, Codex, a local
-model with Codex's hands) is whether the request needs tools — files,
-commands, the screen, the web, a look at this Mac ("what is taking up space
-in my downloads folder"). A greeting, a haiku, an explanation need none, so
-the local model answers them directly: ~4 s for "hello" against ~37 s for
-the same model under Codex's instructions. A code change needs tools, so
-the local model is offered there only with Codex's hands, and only for small
-changes. A request that needs tools when nothing with tools can take it is
-told so, not handed to a model that can't act.
+The table routes a thread's **first** message. After that the thread stays
+with the model that answered — it has the context — and moves only when it
+must:
 
-`eki routing` shows each choice's typical time (the median of its recent
-requests).
+- **the model hands it over.** A model with no tools of its own (the local
+  one) is told what it can't do and given one thing it can: answer
+  `[[handoff: claude_code | a brief]]`, and eki moves the thread to that
+  harness with the brief (`eki/handoff.py`). Write a haiku: the local model.
+  Make it about snow: the local model again, in two seconds, with the haiku
+  in its context. How much disk space is free: handed to Claude Code.
+- **you pick another** ("use Claude", or a model by name) — it stays there.
+- **its answer failed** — the row's next choice (the "Retry after a
+  failure" row).
+- **it can't take this request** — out of quota, not running: the next in
+  the row.
+
+A program that keeps its own session (Claude Code, Codex) joining a thread
+others have spoken in is given the conversation so far first, so "now make
+an RPG around that haiku" knows the haiku. Setting `handoff` (on).
+
+Checked live on 2026-09-23: haiku and rewrite on the local model (2 s each),
+the disk question handed to Claude Code · Opus with a brief, the RPG idea
+built on the haiku by Opus, which had been given the thread.
 
 ## Order
 

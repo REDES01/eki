@@ -48,7 +48,7 @@ def test_the_default_table_for_a_claude_first_mac():
     assert t["quick"] == ["qwen", "claude_code@fast", "codex@fast"]
     assert t["writing"][0] == "qwen" and "codex-qwen" not in t["writing"]
     assert t["code"] == ["claude_code@default", "codex@default", "codex-qwen!easy"]
-    assert t["retry"][0] == "claude_code@top" and t["picture"] == ["flux"]
+    assert t["retry"][0] == "claude_code@default" and t["picture"] == ["flux"]
     assert t["research"] == ["claude_code@default", "codex@default"]
 
 
@@ -327,7 +327,7 @@ def test_putting_a_provider_first_never_says_it_twice_and_keeps_its_roles():
     rules = {"threads": {"c1": {"targets": ["claude_code"], "until": None, "said": "use Claude"}}}
     eff = table.effective(BASE, rules, "c1")
     assert eff["quick"]["targets"] == ["claude_code@fast", "qwen", "codex@fast"]
-    assert eff["retry"]["targets"][:2] == ["claude_code@top", "claude_code@default"]
+    assert eff["retry"]["targets"][:2] == ["claude_code@default", "claude_code@top"]
 
 
 def test_tools_decide_the_harness():

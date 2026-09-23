@@ -43,6 +43,7 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import handoff as handoff_mod
 from . import table as table_mod
 from . import capacity as capacity_mod
 from . import prefs as prefs_mod
@@ -597,38 +598,30 @@ class Engine:
         label = await self._label(run, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
         requested, _, wanted_model = (run["requested"] or "").partition(":")
-        # Under Auto nothing goes to a bare text model: every answer comes
-        # from a harness (Claude Code, Codex, a local model with Codex's
-        # hands) or, for a picture, an image model. A bare model would
-        # describe what it can't do; a harness does it. Picked by name, a
-        # bare model still answers — that's the picker's business.
         # Tools decide the harness: a request that needs tools — files,
         # commands, the screen, the web — goes to a harness (Claude Code,
         # Codex, a local model with Codex's hands); one that doesn't goes to
         # a model directly (a local one says "hello" in ~4 s, ~37 s under
         # Codex's instructions — runs.db, 2026-09-23).
         wants_harness = self._wants_harness(label, run["cwd"], bool(run["images"]), requested)
-        # the answer before this one was corrected, or failed and this is
-        # the second try: go up the vendor's ladder (eki/watch.py)
         try:
             before = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)] \
                 if cid else []
-            escalate = bool({"corrected", "recovered"} & set(learn_mod.signals(run["prompt"], before)))
         except Exception:                           # noqa: BLE001
-            escalate = False
-        # the routing table: which row this is, and that row's choices
-        row, row_why = table_mod.row_for(label.task, label.difficulty, escalate, run["prompt"],
-                                         table_mod.load().get("examples") or {})
-        cells = self.routing_table(cid)
+            before = []
+        row, row_why, targets, stays, escalate = self._plan(label, run, before, cid, requested)
+        if stays and self._bare(stays):
+            # staying with a model that has no tools: it decides itself, and
+            # hands the thread over when the request needs more (eki/handoff.py)
+            wants_harness = False
         need = Need(repo=bool(run["cwd"]), escalate=escalate,
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
                     # research means looking things up: a provider with the web
-                    web=label.task == "research" and not requested,
+                    web=label.task == "research" and not requested and not stays,
                     backend=requested or None,
                     task=label.task, difficulty=label.difficulty,
-                    row=row, row_title=table_mod.TITLES.get(row, row),
-                    targets=(cells.get(row) or {}).get("targets") or [])
+                    row=row, row_title=table_mod.TITLES.get(row, row), targets=targets)
         choice = self.router.choose(need)
         if requested and cid:
             self._learn_override(need, requested, cid)
@@ -657,6 +650,7 @@ class Engine:
             reason += "; paused a measurement to make way"
         model = self._local_for(choice.backend.key)
         meta_label = {**label.to_json(), "row": row, "row_why": row_why}
+        chosen_model = choice.model
         if model is not None and not model.running:
             reason += f"; starting {model.label}"
         yield {"backend": choice.backend.key, "reason": reason}
@@ -694,6 +688,17 @@ class Engine:
         ws: Optional[workspace_mod.Workspace] = None
         held: Optional[asyncio.Lock] = None
         work_run = run
+        # A program that keeps its own session (Claude Code, Codex) only ever
+        # sees what was said to it. Joining a thread others have spoken in —
+        # handed over, or picked — it is given the conversation so far first.
+        earlier = self._earlier_for(backend, cid, run) if cid else ""
+        if run.get("_handoff") or earlier:
+            ho = run.get("_handoff") or {}
+            asked = (f"{ho.get('brief')}\n\n(Their message: {run['prompt']})" if ho.get("brief")
+                     else run["prompt"])
+            work_run = {**work_run, "prompt": earlier + asked}
+            if history and history[-1].role == "user":
+                history = history[:-1] + [Message("user", work_run["prompt"])]
         if run["cwd"]:
             if self._folder_lock(run["cwd"]).locked():
                 yield {"backend": choice.backend.key,
@@ -701,7 +706,7 @@ class Engine:
             ws, held = await self._open_workspace(run, cid)
             kw["cwd"] = ws.path
             brief = workspace_mod.brief(ws)
-            work_run = {**run, "cwd": ws.path, "prompt": brief + run["prompt"]}
+            work_run = {**work_run, "cwd": ws.path, "prompt": brief + work_run["prompt"]}
             if brief and history and history[-1].role == "user":
                 history = history[:-1] + [Message("user", brief + history[-1].content)]
         # "make it bluer", said to a picture: the image model is handed the
@@ -746,7 +751,9 @@ class Engine:
         if resumed:
             kw["resume"] = resumed
 
-        meta: Dict[str, Any] = {"run": run["id"], "label": meta_label}
+        meta: Dict[str, Any] = {"run": run["id"], "label": meta_label, "model": chosen_model}
+        if run.get("_handoff"):
+            meta["handoff"] = run["_handoff"]
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
         if ws is not None and ws.mode == "worktree":
@@ -754,17 +761,28 @@ class Engine:
         if drawn:
             meta["image"] = drawn               # what a later "try again" repeats
         parts: List[str] = []
+        may_hand_off = self._bare(backend.key) and not requested and bool(cid) \
+            and self.settings.get("handoff", True) and bool(self._handoff_targets())
+        if may_hand_off:
+            history = [Message("system", handoff_mod.instructions(self._handoff_targets()))] + history
         if self._lives(backend):
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
             stream = self._skilled(backend, history, kw, meta)
         else:
             stream = backend.stream(history, **kw)
+        if may_hand_off:
+            stream = handoff_mod.watch(stream)
+        if run.get("_handoff"):
+            stream = self._with_note(stream, run["_handoff"])
+        handed: Optional[handoff_mod.HandOff] = None
         try:
             async for chunk in stream:
                 if isinstance(chunk, str):
                     parts.append(chunk)
                 yield chunk
+        except handoff_mod.HandOff as h:
+            handed = h
         except BackendError as e:
             line = self._keep_workspace(ws, run)
             if cid:
@@ -797,6 +815,16 @@ class Engine:
                 held.release()
             if ws is not None:
                 self._in_copy.discard(ws.tree)
+
+        if handed is not None:
+            # the model without tools passed it on: the same request, with its
+            # brief, to the harness it named (or the row's next with tools)
+            observe_mod.note("history", what="handoff", frm=backend.key, to=handed.target,
+                             run=run["id"], brief=handed.brief[:200])
+            async for piece in self._dispatch({**run, "_handoff": {
+                    "from": backend.key, "to": handed.target, "brief": handed.brief}}):
+                yield piece
+            return
 
         # the run's changes, from its copy back to the folder
         if ws is not None and ws.mode == "worktree":
@@ -914,6 +942,98 @@ class Engine:
         metered = [b.key for b in self.backends if b.info.kind in ("anthropic_api", "openai_compat")
                    and priors.class_of(b.info.kind, self.options.get(b.key, {}), b.info.capabilities) == "frontier_api"]
         return table_mod.defaults(subs, harness, images, web, metered, raw=raw)
+
+    # ---- staying with a model, and handing over (eki/handoff.py) -------------
+
+    def _bare(self, key: str) -> bool:
+        """A model with no tools of its own: it answers, or hands over."""
+        b = self.get(key)
+        return b is not None and b.info.capabilities.text and not b.info.capabilities.tools \
+            and b.info.kind not in ("claude_code", "codex")
+
+    def _handoff_targets(self) -> List[Tuple[str, str]]:
+        out = []
+        for b in self._subscriptions():
+            out.append((b.key, f"{b.info.label} — files, commands, the web, the screen, and "
+                               "building real software"))
+        return out
+
+    def _plan(self, label: Any, run: Dict[str, Any], before: List[Dict[str, Any]], cid: str,
+              requested: str) -> Tuple[str, str, List[str], str, bool]:
+        """(row, why, choices in order, the model the thread stays with, a retry).
+
+        A thread stays with the model that is answering — it has the context.
+        It moves when that model hands it over, when you pick another, when
+        its last answer failed, or when it can't take this request (no
+        quota, not running, no tools — the next choice in the row takes it).
+        A picture is always the image models' row."""
+        examples = table_mod.load().get("examples") or {}
+        failed = False
+        last = table_mod.last_answer(before)
+        if last is not None:
+            m = table_mod.meta_of(last)
+            failed = bool(m.get("failed") or m.get("stopped"))
+        row, why = table_mod.row_for(label.task, label.difficulty, failed, run["prompt"], examples)
+        cells = self.routing_table(cid)
+        targets = list((cells.get(row) or {}).get("targets") or [])
+        ho = run.get("_handoff")
+        if ho:
+            subs = [b.key for b in self._subscriptions()]
+            first = [(f"{ho['to']}@default" if watch_mod.ladder(ho["to"]) else ho["to"])] \
+                if ho.get("to") in subs else []
+            ahead = first + [t for t in targets if table_mod.parse_target(t)[0] in subs]
+            ahead += [f"{s}@default" for s in subs]
+            seen: List[str] = []
+            for t in ahead:
+                if t not in seen and table_mod.parse_target(t)[0] != ho.get("from"):
+                    seen.append(t)
+            return row, f"handed over by {ho.get('from')}", seen, "", False
+        if (last is None or requested or run["images"] or label.task == "image" or failed
+                or (cells.get(row) or {}).get("source") == "this thread"):
+            if failed and last is not None:
+                targets = [t for t in targets if table_mod.parse_target(t)[0] != last.get("backend")]
+            return row, why, targets, "", failed
+        key = last.get("backend") or ""
+        b = self.get(key)
+        if b is None or not b.info.capabilities.text:
+            return row, why, targets, "", False
+        was = table_mod.target_of(last, watch_mod.ladder(key))
+        return row, f"{why}; the thread stays with {was}", table_mod.to_front(targets, was), key, False
+
+    #: how much of the thread a program joining it is given
+    EARLIER_TURNS = 12
+    EARLIER_CHARS = 8000
+
+    def _earlier_for(self, backend: Backend, cid: str, run: Dict[str, Any]) -> str:
+        """The conversation so far, for a program that keeps its own session
+        and hasn't been part of this thread — empty when it has (it
+        remembers) or when there's nothing before."""
+        if backend.info.kind not in ("claude_code", "codex") or self.store.session(cid, backend.key):
+            return ""
+        turns = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)
+                 and t["role"] in ("user", "assistant") and (t.get("content") or "").strip()]
+        if not turns:
+            return ""
+        names = {b.key: b.info.label for b in self.backends}
+        lines = []
+        for t in turns[-self.EARLIER_TURNS:]:
+            who = "Person" if t["role"] == "user" else names.get(t.get("backend") or "", t.get("backend") or "Model")
+            body = t["content"].strip()
+            if len(body) > 1500:
+                body = body[:700] + " […] " + body[-700:]
+            lines.append(f"{who}: {body}")
+        text = "\n\n".join(lines)
+        if len(text) > self.EARLIER_CHARS:
+            text = "[…]\n" + text[-self.EARLIER_CHARS:]
+        return ("[eki: you're joining a conversation that other models have been part of. "
+                f"What was said so far:]\n\n{text}\n\n[eki: the new message follows.]\n\n")
+
+    async def _with_note(self, stream: AsyncIterator[Any], ho: Dict[str, Any]) -> AsyncIterator[Any]:
+        """The harness's answer, opened by a line saying who handed it over."""
+        frm = next((b.info.label for b in self.backends if b.key == ho.get("from")), ho.get("from"))
+        yield f"*{frm} handed this over: {ho.get('brief') or 'it needs tools'}*\n\n"
+        async for chunk in stream:
+            yield chunk
 
     def _local_with_tools(self) -> Dict[str, str]:
         """{local model: the Codex harness driving it}."""
@@ -1159,15 +1279,14 @@ class Engine:
             label = classify.rules(prompt, bool(folder))
         before = [t for t in self.store.turns(thread) if not before_turn or t["id"] < before_turn] \
             if thread else []
-        escalate = bool({"corrected", "recovered"} & set(learn_mod.signals(prompt, before)))
-        row, row_why = table_mod.row_for(label.task, label.difficulty, escalate, prompt,
-                                         table_mod.load().get("examples") or {})
+        row, row_why, targets, stays, escalate = self._plan(
+            label, {"prompt": prompt, "images": False, "cwd": folder}, before, thread, "")
         cells = self.routing_table(thread)
-        wants_harness = self._wants_harness(label, folder, False, "")
+        wants_harness = self._wants_harness(label, folder, False, "") and not (stays and self._bare(stays))
         need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
-                    images_out=label.task == "image", web=label.task == "research",
+                    images_out=label.task == "image", web=label.task == "research" and not stays,
                     task=label.task, difficulty=label.difficulty, row=row,
-                    row_title=table_mod.TITLES.get(row, row), targets=(cells.get(row) or {}).get("targets") or [])
+                    row_title=table_mod.TITLES.get(row, row), targets=targets)
         choice = self.router.choose(need)
         labels = self._target_labels()
         return {"prompt": prompt, "label": label.to_json(), "row": row, "row_title": need.row_title,

@@ -41,8 +41,7 @@ ROWS: List[Tuple[str, str, List[str]]] = [
                              "write a function that reverses a string"]),
     ("code_hard", "Big or hard code change", ["refactor auth and update all callers",
                                               "migrate the app to the new API"]),
-    ("retry", "Retry after a correction or failure", ["no, standard library only",
-                                                      "that didn't work, try again"]),
+    ("retry", "Retry after a failure", ["(the answer before failed or was stopped)"]),
     ("research", "Research on the web", ["latest news on Opus 5.5", "price of an M5 Mac mini"]),
     ("picture", "Picture", ["a watercolor fox", "make it bluer"]),
 ]
@@ -70,7 +69,7 @@ def row_for(task: str, difficulty: str, escalate: bool = False, prompt: str = ""
             examples: Optional[Dict[str, List[str]]] = None) -> Tuple[str, str]:
     """(row, why) for a labelled request."""
     if escalate:
-        return "retry", "the answer before was corrected, or failed"
+        return "retry", "the answer before failed"
     for row, said in (examples or {}).items():
         best = max((similar(prompt, e) for e in said), default=0.0)
         if best >= 0.6:
@@ -122,7 +121,7 @@ def defaults(subs: List[str], harness: Optional[str], images: List[str], web: Li
         "explain": row(at(s0, "default"), at(s1, "default"), raw, *m),
         "code": row(at(s0, "default"), at(s1, "default"), small, *m),
         "code_hard": row(at(s0, "default"), at(s1, "default"), *m),
-        "retry": row(at(s0, "top"), at(s0, "default"), at(s1, "default"), *m),
+        "retry": row(at(s0, "default"), at(s0, "top"), at(s1, "default"), *m),
         "research": row(*[f"{k}@default" for k in subs if k in web], *[f"{k}@default" for k in metered if k in web]),
         "picture": row(*images),
     }
@@ -299,3 +298,38 @@ class Labels(dict):
 
     def get(self, key: str, default: Any = None) -> str:           # type: ignore[override]
         return super().get(key) or label_of(key, self.names, self.ladders)
+
+
+
+# ---- staying with the model that answers -------------------------------------------------
+
+def last_answer(before: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The last answer a model gave in the thread (not eki's own)."""
+    for t in reversed(before):
+        if t.get("role") == "assistant" and t.get("backend") and t["backend"] != "eki":
+            return t
+    return None
+
+
+def meta_of(turn: Dict[str, Any]) -> Dict[str, Any]:
+    m = turn.get("meta")
+    if isinstance(m, dict):
+        return m
+    try:
+        return json.loads(m or "{}") or {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def target_of(turn: Dict[str, Any], ladder: Dict[str, str]) -> str:
+    """The table target for the model that wrote an answer: "claude_code@default"."""
+    key = turn.get("backend") or ""
+    model = meta_of(turn).get("model")
+    if model is None:                               # turns written before eki kept the model
+        m = re.match(r"^\S+ \(([^)]+)\)", turn.get("reason") or "")
+        model = m.group(1) if m else ""
+    lad = {k: v for k, v in (ladder or {}).items() if k in ("default", "top", "fast")}
+    if not lad:
+        return key
+    role = next((r for r in ("default", "top", "fast") if lad.get(r) == model), "" if model else "default")
+    return f"{key}@{role}" if role else key

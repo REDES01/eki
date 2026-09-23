@@ -61,6 +61,11 @@ class Health:
     detail: str = ""
 
 
+#: the agent programs eki drives through their official binaries: each keeps
+#: its own session, loads skills from its own folder, and has its own tools
+AGENT_CLIS = ("claude_code", "codex", "gemini_cli")
+
+
 class BackendError(RuntimeError):
     """Adapter failed. The router logs it and moves to the next candidate."""
 

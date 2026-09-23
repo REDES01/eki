@@ -2,13 +2,14 @@
 
 One set of skills for every backend. A skill is a folder with a `SKILL.md`
 (name and description in the frontmatter, instructions below, optional
-scripts and files beside it) — the Agent Skills format Claude Code and Codex
-both read. eki keeps the only copy; each backend gets a view.
+scripts and files beside it) — the Agent Skills format Claude Code, Codex and
+Gemini CLI all read. eki keeps the only copy; each backend gets a view.
 
 | Backend | How it sees a skill |
 |---|---|
 | Claude Code | a link in `~/.claude/skills/<name>` into the store |
 | Codex | a link in `~/.agents/skills/<name>` into the store (Codex's user folder) |
+| Gemini CLI | a link in `~/.gemini/skills/<name>` into the store |
 | Local and API models | eki is the loader: names and descriptions in the system prompt; the body only when used |
 
 ## Where things are
@@ -24,6 +25,10 @@ both read. eki keeps the only copy; each backend gets a view.
 
 - **Claude Code** — `/name`, or it picks one itself from the description.
 - **Codex** — `$name` (eki also turns `/name` into `$name`), or it picks one.
+- **Gemini CLI** — it picks one from the description (a release old enough
+  to have skills behind `experimental.skills` needs that turned on). Recent
+  releases also read `~/.agents/skills`, so a skill that is on for Codex can
+  reach Gemini there even when it is off for Gemini.
 - **Local / API models** — `/name` or `$name` hands the skill over outright.
   Otherwise the model sees the list and answers `[[skill:name]]` when one
   fits; eki holds that answer back and asks again with the skill's
@@ -41,7 +46,7 @@ eki skills                          # list, and any skill eki doesn't hold yet
 eki skills new NAME -d "when to use it" < body.md
 eki skills new NAME -f path/to/SKILL.md
 eki skills edit NAME                # $EDITOR, then commit and relink
-eki skills off NAME [--for codex]   # everywhere, or one backend
+eki skills off NAME [--for codex]   # everywhere, or one of claude, codex, gemini, local
 eki skills on NAME [--for local]
 eki skills import [NAME]            # take skills from the CLIs' folders in
 eki skills rm NAME                  # out of the store (still in git history)
@@ -85,11 +90,13 @@ with the run and conversation in the message — and a notification.
   note whose lesson is now a skill (new, or one that already said it) is
   moved out of Claude's memory to `~/.eki/learn/absorbed/` and dropped from
   its `MEMORY.md`. Notes that are facts about one project stay. A skill
-  folder an agent writes straight into `~/.claude/skills` or
-  `~/.agents/skills` is taken into the store (`take in NAME, written by
-  codex`). In `propose` mode nothing is moved out of Claude's memory, since
-  the skill is still off; with `skills_learn` off, both programs' own
-  memory is theirs again.
+  folder an agent writes straight into `~/.claude/skills`,
+  `~/.agents/skills` or `~/.gemini/skills` is taken into the store (`take
+  in NAME, written by codex`). In `propose` mode nothing is moved out of
+  Claude's memory, since the skill is still off; with `skills_learn` off,
+  both programs' own memory is theirs again. Gemini CLI isn't told yet: its
+  headless mode has no flag for an added instruction, and its `save_memory`
+  writes to `GEMINI.md`, which waits for the one standing context.
 - **Seeing and undoing:** `eki skills learned` lists what it learned and its
   latest reviews; `eki skills rm NAME` or `git -C ~/.eki/skills revert <c>`
   takes one back. `eki skills learn <conversation>` asks for a review of a
@@ -104,10 +111,13 @@ the work); `notify_learned`.
 ## Rules
 
 - Only links into the store are ever made or removed. A folder in
-  `~/.claude/skills` or `~/.agents/skills` that eki didn't make is left
-  alone; if it has the same name as one of eki's, the panel says so.
+  `~/.claude/skills`, `~/.agents/skills` or `~/.gemini/skills` that eki
+  didn't make is left alone; if it has the same name as one of eki's, the
+  panel says so.
 - Import moves a real folder into the store and links it back, so the
   program sees no difference.
 - `eki` — eki's own skill ("how to call eki") — is written at engine start
-  for Claude Code and Codex and kept current until you edit it; then it is
-  yours.
+  for Claude Code, Codex and Gemini CLI and kept current until you edit
+  it; then it is yours.
+- A backend eki learns to reach later (Gemini CLI was the first) gets every
+  skill you already have, except the ones you turn off for it.

@@ -11,7 +11,8 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(skills, "STORE", root / "eki" / "skills")
     monkeypatch.setattr(skills, "SIDECAR", root / "eki" / "skills.json")
     monkeypatch.setattr(skills, "VIEWS", {"claude": root / "claude" / "skills",
-                                          "codex": root / "agents" / "skills"})
+                                          "codex": root / "agents" / "skills",
+                                          "gemini": root / "gemini" / "skills"})
     monkeypatch.setattr(skills, "LEGACY", [root / "codex" / "skills"])
     monkeypatch.setattr(learn, "LOG", root / "eki" / "learn.json")
     monkeypatch.setattr(learn, "WORKDIR", root / "eki" / "learn")

@@ -31,6 +31,13 @@ TEMPLATES: List[Dict[str, Any]] = [
      # web: its hosted search, which eki turns on in config.toml (web_search = "live")
      "capabilities": {"context_tokens": 200000, "tools": True, "repo": True, "web": True},
      "options": {"binary": "codex", "sandbox": "read-only", "timeout_seconds": 900}},
+    {"id": "gemini_cli", "title": "Gemini CLI", "kind": "gemini_cli",
+     "blurb": "Your installed Gemini CLI, signed in with your own Google account.",
+     "needs": "binary", "binary": "gemini", "tier": 50, "note": "subscription",
+     # web: its built-in Google Search tool
+     "capabilities": {"context_tokens": 1000000, "tools": True, "repo": True, "vision": True,
+                      "web": True},
+     "options": {"binary": "gemini", "timeout_seconds": 900}},
     {"id": "anthropic", "title": "Anthropic API", "kind": "anthropic_api",
      "blurb": "Claude through the API, billed per token to your API key.",
      "needs": "key", "tier": 100, "note": "metered",

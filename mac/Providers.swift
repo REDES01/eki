@@ -41,6 +41,7 @@ struct ProviderDTO: Codable, Identifiable, Hashable {
         switch kind {
         case "claude_code": return "Claude Code CLI"
         case "codex": return "Codex CLI"
+        case "gemini_cli": return "Gemini CLI"
         case "anthropic_api": return "Anthropic API"
         case "openai_compat": return "OpenAI-compatible"
         case "mlx": return "MLX"

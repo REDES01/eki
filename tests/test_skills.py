@@ -13,7 +13,8 @@ from eki.adapters.base import Message
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(skills, "STORE", tmp_path / "eki" / "skills")
     monkeypatch.setattr(skills, "SIDECAR", tmp_path / "eki" / "skills.json")
-    views = {"claude": tmp_path / "claude" / "skills", "codex": tmp_path / "agents" / "skills"}
+    views = {"claude": tmp_path / "claude" / "skills", "codex": tmp_path / "agents" / "skills",
+             "gemini": tmp_path / "gemini" / "skills"}
     monkeypatch.setattr(skills, "VIEWS", views)
     monkeypatch.setattr(skills, "LEGACY", [tmp_path / "codex" / "skills"])
     return tmp_path
@@ -24,15 +25,15 @@ def _write(folder: Path, name: str, desc: str, body: str = "Do the thing.") -> N
     (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n\n{body}\n")
 
 
-def test_new_skill_is_linked_into_both_clis(home):
+def test_new_skill_is_linked_into_every_cli(home):
     skills.put("haiku", description="Write haikus when asked for a poem", body="5-7-5.")
     for root in skills.VIEWS.values():
         link = root / "haiku"
         assert link.is_symlink()
         assert (link / "SKILL.md").read_text().startswith("---\nname: haiku")
     s = skills.get("haiku")
-    assert s["views"] == {"claude": "linked", "codex": "linked"}
-    assert s["backends"] == ["claude", "codex", "local"]
+    assert s["views"] == {"claude": "linked", "codex": "linked", "gemini": "linked"}
+    assert s["backends"] == ["claude", "codex", "gemini", "local"]
 
 
 def test_turning_off_removes_the_link_not_the_skill(home):
@@ -70,6 +71,34 @@ def test_import_moves_in_and_links_back(home):
     assert (skills.VIEWS["codex"] / "deploy").is_symlink()
     assert skills.unmanaged() == []
     assert skills.get("review")["origin"].startswith("claude:")
+
+
+def test_skills_from_before_gemini_reach_it_until_turned_off(home):
+    import json
+    skills.put("haiku", description="poems", body="x")
+    skills.put("draft", description="drafts", body="x")
+    # the sidecar as an eki that knew only Claude Code and Codex wrote it:
+    # one skill on everywhere, one kept off Codex
+    skills._save_meta({"haiku": {"backends": ["claude", "codex", "local"], "enabled": True},
+                       "draft": {"backends": ["claude", "local"], "enabled": True}})
+    skills.sync()
+    assert skills.get("haiku")["backends"] == ["claude", "codex", "gemini", "local"]
+    assert skills.get("draft")["backends"] == ["claude", "gemini", "local"]
+    assert (skills.VIEWS["gemini"] / "haiku").is_symlink()
+    skills.set_enabled("haiku", False, "gemini")
+    assert not (skills.VIEWS["gemini"] / "haiku").exists()
+    assert skills.get("haiku")["backends"] == ["claude", "codex", "local"]
+    assert json.loads(skills.SIDECAR.read_text())["skills"]["haiku"]["offered"] == list(skills.BACKENDS)
+    skills.put("haiku", description="poems", body="y")      # an edit doesn't turn it back on
+    assert "gemini" not in skills.get("haiku")["backends"]
+
+
+def test_a_skill_gemini_wrote_itself_is_taken_in(home):
+    from eki import learn
+    _write(skills.VIEWS["gemini"] / "notes", "notes", "Keep notes")
+    assert learn.adopt_new_folders(0, "gemini", "gemini", "r1") == ["notes"]
+    assert (skills.VIEWS["gemini"] / "notes").is_symlink()
+    assert skills.get("notes")["origin"] == "agent:gemini"
 
 
 def test_every_change_is_a_commit(home):

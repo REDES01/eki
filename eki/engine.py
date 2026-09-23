@@ -1026,6 +1026,8 @@ class Engine(SelfLoop):
                 ws += ["claude", "claude code", "opus", "fable", "sonnet", "haiku"]
             elif kind == "codex" and not local:
                 ws += ["codex", "openai", "chatgpt", "gpt"]
+            elif kind == "gemini_cli":
+                ws += ["gemini", "gemini cli", "google"]
             elif local:
                 ws += ["local", "local model", "qwen"]
             elif kind in ("anthropic_api", "openai_compat"):
@@ -1038,7 +1040,7 @@ class Engine(SelfLoop):
     def _subscriptions(self) -> List[Backend]:
         """Subscriptions, the one with the most room first (eki/capacity.py);
         until room is known, the one being spent slowest against its window."""
-        subs = [b for b in self.backends if b.info.kind in ("claude_code", "codex")
+        subs = [b for b in self.backends if b.info.kind in adapters.AGENT_CLIS
                 and not self.options.get(b.key, {}).get("local_model") and not self.policy.is_disabled(b.key)]
         data = capacity_mod.load()
         paces = self.quota.pace() if self.quota else {}
@@ -1047,8 +1049,11 @@ class Engine(SelfLoop):
             reading = (self.quota.latest.get(b.info.quota_source or "") if self.quota else None)
             rooms[b.key] = capacity_mod.room(data, b.info.quota_source or "", reading.windows)["per_hour"] \
                 if reading is not None else None
-        if subs and all(rooms.get(b.key) is not None for b in subs):
-            return sorted(subs, key=lambda b: -rooms[b.key])
+        # a program eki reads no quota for (Gemini CLI) has no room to
+        # compare; it waits behind the ones whose room is known
+        tracked = [b for b in subs if b.info.quota_source]
+        if tracked and all(rooms.get(b.key) is not None for b in tracked):
+            return sorted(subs, key=lambda b: (rooms.get(b.key) is None, -(rooms.get(b.key) or 0)))
 
         def pace(b: Backend) -> float:
             p = paces.get(b.info.quota_source or "")
@@ -1079,7 +1084,7 @@ class Engine(SelfLoop):
         """A model with no tools of its own: it answers, or hands over."""
         b = self.get(key)
         return b is not None and b.info.capabilities.text and not b.info.capabilities.tools \
-            and b.info.kind not in ("claude_code", "codex")
+            and b.info.kind not in adapters.AGENT_CLIS
 
     def _handoff_targets(self, allowed: Optional[List[str]] = None) -> List[Tuple[str, str]]:
         """Who a model without tools may hand a thread to: the subscriptions'
@@ -1161,7 +1166,7 @@ class Engine(SelfLoop):
         """The conversation so far, for a program that keeps its own session
         and hasn't been part of this thread — empty when it has (it
         remembers) or when there's nothing before."""
-        if backend.info.kind not in ("claude_code", "codex") or self.store.session(cid, backend.key):
+        if backend.info.kind not in adapters.AGENT_CLIS or self.store.session(cid, backend.key):
             return ""
         turns = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)
                  and t["role"] in ("user", "assistant") and (t.get("content") or "").strip()]
@@ -1531,14 +1536,14 @@ class Engine(SelfLoop):
                         key=lambda b: (b.info.kind != "claude_code", b.info.kind != "codex",
                                        not b.info.capabilities.vision))
         for b in order:
-            if b.info.kind not in ("claude_code", "codex") and self._is_up(b.key) is not True:
+            if b.info.kind not in adapters.AGENT_CLIS and self._is_up(b.key) is not True:
                 continue
             return adapters.build(b.info, self.options.get(b.key, {}))
         return None
 
     async def _read(self, reader: Backend, prompt: str) -> Optional[Dict[str, Any]]:
         kw: Dict[str, Any] = {"max_tokens": 3000, "temperature": 0.1}
-        if reader.info.kind in ("claude_code", "codex"):
+        if reader.info.kind in adapters.AGENT_CLIS:
             watch_mod.HOME.mkdir(parents=True, exist_ok=True)
             kw["cwd"] = str(watch_mod.HOME)
         parts: List[str] = []
@@ -1944,7 +1949,7 @@ class Engine(SelfLoop):
         b = self.get(key)
         if b is None or not b.info.capabilities.text:
             return None
-        if b.info.kind not in ("claude_code", "codex") and self._is_up(key) is not True:
+        if b.info.kind not in adapters.AGENT_CLIS and self._is_up(key) is not True:
             return None
         return adapters.build(b.info, self.options.get(key, {}))
 
@@ -1977,7 +1982,7 @@ class Engine(SelfLoop):
         # notes in Claude Code's memory are looked at below
         since = float(run.get("created_at") or time.time()) - 2
         kind = self._kind_of(did)
-        view = {"claude_code": "claude", "codex": "codex"}.get(kind, "")
+        view = {"claude_code": "claude", "codex": "codex", "gemini_cli": "gemini"}.get(kind, "")
         adopted = await asyncio.to_thread(learn_mod.adopt_new_folders, since, view, did, rid) \
             if view else []
         # Claude Code's memory, only in the folder this run worked in
@@ -2011,7 +2016,7 @@ class Engine(SelfLoop):
         entry["backend"] = reviewer.info.key
         prompt = await asyncio.to_thread(learn_mod.build_prompt, turns, why, notes)
         kw: Dict[str, Any] = {"max_tokens": 1500, "temperature": 0.3}
-        if reviewer.info.kind in ("claude_code", "codex"):
+        if reviewer.info.kind in adapters.AGENT_CLIS:
             learn_mod.WORKDIR.mkdir(parents=True, exist_ok=True)
             kw["cwd"] = str(learn_mod.WORKDIR)
         parts: List[str] = []
@@ -2094,7 +2099,7 @@ class Engine(SelfLoop):
         """Claude Code and Codex load skills themselves (from the links eki
         keeps in their folders); a local or API model gets them from here."""
         caps = backend.info.capabilities
-        return (backend.info.kind not in ("claude_code", "codex") and caps.text
+        return (backend.info.kind not in adapters.AGENT_CLIS and caps.text
                 and bool(self.settings.get("skills_local", True)))
 
     async def _skilled(self, backend: Backend, history: List[Message], kw: Dict[str, Any],

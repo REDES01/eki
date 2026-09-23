@@ -77,7 +77,7 @@ def class_of(kind: str, options: Dict[str, Any], capabilities: Any = None) -> st
     if kind == "comfyui" or (capabilities is not None and getattr(capabilities, "images_out", False)
                              and not getattr(capabilities, "text", True)):
         return "image"
-    if kind in ("claude_code", "codex"):
+    if kind in ("claude_code", "codex", "gemini_cli"):
         return "frontier_agent"
     base = str(options.get("base_url", ""))
     if kind == "anthropic_api" or (kind == "openai_compat" and base and not _LOCAL.search(base)):

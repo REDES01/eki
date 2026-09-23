@@ -945,7 +945,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     k.add_argument("-d", "--description", default="", help="new: when a model should use it")
     k.add_argument("-f", "--file", default="", help="new: a SKILL.md to take as is")
     k.add_argument("--for", dest="backend", default="",
-                   help="on/off: only for claude, codex or local")
+                   help="on/off: only for claude, codex, gemini or local")
     k.add_argument("--backends", default="", help="new: comma list (default all)")
 
     g = sub.add_parser("agent", help="start the engine at login")

@@ -1496,7 +1496,7 @@ struct SkillsPanel: View {
     @State private var editing: SkillDraft?
 
     private static let backends: [(String, String)] = [("claude", "Claude"), ("codex", "Codex"),
-                                                      ("local", "Other models")]
+                                                      ("gemini", "Gemini"), ("local", "Other models")]
 
     private func matches(_ s: JSONValue) -> Bool {
         let q = filter.lowercased()
@@ -1591,7 +1591,8 @@ struct SkillsPanel: View {
                 }
                 if !conflicts.isEmpty {
                     Text("Another skill named \(folder) already sits in "
-                         + conflicts.map { $0 == "claude" ? "~/.claude/skills" : "~/.agents/skills" }
+                         + conflicts.map { ["claude": "~/.claude/skills", "gemini": "~/.gemini/skills"][$0]
+                                           ?? "~/.agents/skills" }
                             .joined(separator: " and ") + " — eki left it alone")
                         .font(.zoomed(size: 11)).foregroundStyle(Palette.warn)
                 }

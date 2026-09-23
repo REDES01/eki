@@ -9,6 +9,7 @@ copy of each in ~/.eki/skills/, under git, and gives each backend a view:
 - Claude Code reads ~/.claude/skills/<name>/ — an enabled skill is a
   symlink there into the store (the program follows it).
 - Codex reads ~/.agents/skills/<name>/ — the same.
+- Gemini CLI reads ~/.gemini/skills/<name>/ — the same.
 - Local and API models have no loader, so the engine is theirs: the names
   and descriptions go in the system prompt, and the body is handed over
   only when the skill is invoked (`/name` or `$name`) or the model asks
@@ -21,7 +22,7 @@ for, where it came from — lives in a sidecar, ~/.eki/skills.json, so the
 makes a skill the safest thing eki can change about itself: readable,
 revertible, no engine swap.
 
-Nothing already in ~/.claude/skills or ~/.agents/skills is touched unless
+Nothing already in the CLIs' own folders is touched unless
 you import it: a real folder there is moved into the store once and linked
 back. A link eki didn't make, or a folder of the same name, is left alone
 and reported as a conflict.
@@ -43,10 +44,14 @@ SIDECAR = HOME / "skills.json"
 VIEWS: Dict[str, Path] = {
     "claude": Path("~/.claude/skills").expanduser(),
     "codex": Path("~/.agents/skills").expanduser(),
+    "gemini": Path("~/.gemini/skills").expanduser(),
 }
 #: where Codex looked before ~/.agents/skills; only read, for import
 LEGACY = [Path("~/.codex/skills").expanduser()]
-BACKENDS = ("claude", "codex", "local")
+BACKENDS = ("claude", "codex", "gemini", "local")
+#: the backends there were before a sidecar entry said which ones it is on
+#: for; one added since is on for every skill until you turn it off
+FIRST_BACKENDS = ("claude", "codex", "local")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 #: what a model without a loader answers to ask for a skill's body
 PICK_RE = re.compile(r"^\s*\[\[skill:\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,63})\s*\]\]")
@@ -128,7 +133,19 @@ def _entry(meta: Dict[str, Dict[str, Any]], folder: str) -> Dict[str, Any]:
     if e is None:
         e = meta[folder] = {"backends": list(BACKENDS), "enabled": True,
                             "origin": "store", "added": int(time.time())}
+    else:
+        e["backends"] = _backends(e)
+    e["offered"] = list(BACKENDS)
     return e
+
+
+def _backends(e: Dict[str, Any]) -> List[str]:
+    """The backends a skill is on for: what its entry says, and any backend
+    eki learned to reach after the entry was written — a new program sees
+    the skills you already have, not an empty folder."""
+    offered = e.get("offered") or FIRST_BACKENDS
+    on = set(e.get("backends") or []) | {b for b in BACKENDS if b not in offered}
+    return [b for b in BACKENDS if b in on]
 
 
 # ---- git ------------------------------------------------------------------------
@@ -152,8 +169,8 @@ def _ensure_store() -> None:
         _git("init", "-q", "-b", "main")
         (STORE / "README.md").write_text(
             "# eki skills\n\nOne folder per skill, each with a SKILL.md. eki links the enabled\n"
-            "ones into ~/.claude/skills and ~/.agents/skills and hands them to local\n"
-            "models itself. Every change is a commit here: `eki skills log`, and\n"
+            "ones into ~/.claude/skills, ~/.agents/skills and ~/.gemini/skills and hands\n"
+            "them to local models itself. Every change is a commit here: `eki skills log`, and\n"
             "`git revert` undoes one.\n")
         _commit("start the skill store")
 
@@ -240,7 +257,7 @@ def list_skills() -> List[Dict[str, Any]]:
         if not s:
             continue
         e = meta.get(folder.name) or {"backends": list(BACKENDS), "enabled": True, "origin": "store"}
-        s.update({"backends": [b for b in BACKENDS if b in (e.get("backends") or [])],
+        s.update({"backends": _backends(e),
                   "enabled": bool(e.get("enabled", True)), "origin": e.get("origin", "store"),
                   "generated": bool(e.get("generated")), "uses": int(e.get("uses") or 0),
                   "learned": e.get("learned") if isinstance(e.get("learned"), dict) else None,
@@ -514,9 +531,9 @@ EKI_SKILL = "eki"
 def eki_skill_text() -> str:
     body = """\
 eki is the model hub on this Mac. It routes a request to the backend that
-fits — Claude Code, Codex, a local model (MLX / GGUF), a paid API, or the
-local image model — and keeps every run in its own history, so work you
-hand to it survives this session.
+fits — Claude Code, Codex, Gemini CLI, a local model (MLX / GGUF), a paid
+API, or the local image model — and keeps every run in its own history, so
+work you hand to it survives this session.
 
 Use it when the task wants a different model than you: a picture, an
 uncensored or long creative draft for a local model, a second agent on a
@@ -543,7 +560,7 @@ The `eki` MCP server gives the same through `eki_capabilities` (read it
 first), `eki_ask` and `eki_image`.
 """
     return render(EKI_SKILL, "Hand work to eki, the model hub on this Mac: route a prompt to "
-                  "another model (local LLM, Claude Code, Codex, API), generate an image, or "
+                  "another model (local LLM, Claude Code, Codex, Gemini CLI, API), generate an image, or "
                   "start a background run. Use when a task needs a different model, a picture, "
                   "or work that should keep running on its own.", body)
 
@@ -562,7 +579,8 @@ def ensure_builtin() -> None:
     except OSError:
         current = ""
     if e is None:
-        e = meta[EKI_SKILL] = {"backends": ["claude", "codex"], "enabled": True,
+        e = meta[EKI_SKILL] = {"backends": ["claude", "codex", "gemini"], "enabled": True,
+                               "offered": list(BACKENDS),
                                "origin": "eki", "generated": True, "added": int(time.time())}
         _save_meta(meta)
     if current != text:

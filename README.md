@@ -56,10 +56,10 @@ eki agent install          # keep the engine running from login (brew services)
 eki ask "hello"
 ```
 
-eki drives the Claude Code and Codex you already have, signed in as you; it
-holds no login of its own. `brew upgrade` updates it. A Homebrew install
-learns and keeps everything the same way (skills, routing, the lineup — all
-in `~/.eki`), but doesn't change its own code: to work on eki, clone this
+eki drives the Claude Code, Codex and Gemini CLI you already have, signed in
+as you; it holds no login of its own. `brew upgrade` updates it. A Homebrew
+install learns and keeps everything the same way (skills, routing, the lineup
+— all in `~/.eki`), but doesn't change its own code: to work on eki, clone this
 repo and run it from there (`./eki.sh`, then `bin/eki agent install`).
 
 ### The Mac app
@@ -76,8 +76,8 @@ On first launch eki offers to
 
 1. keep the engine running at login (a launch agent — the work outlives the
    window),
-2. add what it finds on this Mac: Claude Code, Codex, an MLX server, Ollama,
-   LM Studio, ComfyUI,
+2. add what it finds on this Mac: Claude Code, Codex, Gemini CLI, an MLX
+   server, Ollama, LM Studio, ComfyUI,
 3. install a `eki` command for the terminal.
 
 None of the three is required.
@@ -112,8 +112,8 @@ eki agent status
 
 ## Adding things
 
-**A provider** is anything that can answer: Claude Code, Codex, the Anthropic
-or OpenAI API, xAI, OpenRouter, an OpenAI-compatible URL (vLLM, llama.cpp,
+**A provider** is anything that can answer: Claude Code, Codex, Gemini CLI,
+the Anthropic or OpenAI API, xAI, OpenRouter, an OpenAI-compatible URL (vLLM, llama.cpp,
 Ollama, LM Studio), ComfyUI for images. *Models & routing → Add provider*
 finds what's already on the Mac, tests before saving, and puts any key in the
 Keychain.

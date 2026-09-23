@@ -161,7 +161,7 @@ def absorbs(answer: Dict[str, Any], notes: List[Dict[str, Any]]) -> List[Dict[st
 
 def adopt_new_folders(since: float, view: str, by: str = "", run: str = "") -> List[str]:
     """Skill folders the agent made itself in its own CLI's folder (`view`:
-    "claude" or "codex") during a run: taken into the store — one copy,
+    "claude", "codex" or "gemini") during a run: taken into the store — one copy,
     linked back, every backend — and treated as written for you, so eki
     never rewrites them."""
     if view not in skills.VIEWS:

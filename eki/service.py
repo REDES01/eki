@@ -638,12 +638,39 @@ def goals_board() -> Any:
 
 
 @app.get("/api/goals/items")
-def goals_items(folder: str) -> Any:
+def goals_items(folder: str, goal: str = "") -> Any:
     from . import goals as goals_mod
     try:
-        return engine().goals_items(folder)
+        return engine().goals_items(folder, goal)
     except goals_mod.GoalError as e:
         raise HTTPException(400, str(e))
+
+
+def _goal_call(fn, *args) -> Any:
+    from . import goals as goals_mod
+    try:
+        return fn(*args)
+    except goals_mod.GoalError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/goals/delete")
+def goals_delete(body: Dict[str, Any]) -> Any:
+    """A part, an item (stays deleted), or everything a goal made (and pause it)."""
+    return _goal_call(engine().goals_delete, str(body.get("folder") or ""), str(body.get("goal") or ""),
+                      str(body.get("item") or ""), str(body.get("part") or ""))
+
+
+@app.post("/api/goals/restore")
+def goals_restore(body: Dict[str, Any]) -> Any:
+    return _goal_call(engine().goals_restore, str(body.get("folder") or ""), str(body.get("goal") or ""),
+                      str(body.get("item") or ""), str(body.get("part") or ""))
+
+
+@app.post("/api/goals/pause")
+def goals_pause(body: Dict[str, Any]) -> Any:
+    return _goal_call(engine().goals_pause, str(body.get("folder") or ""), str(body.get("goal") or ""),
+                      bool(body.get("paused", True)))
 
 
 @app.get("/api/goals/file")

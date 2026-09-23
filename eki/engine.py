@@ -3063,7 +3063,7 @@ class Engine:
                       if (p.goal, p.item, p.part) == (job.get("goal"), job.get("item"), job.get("part"))),
                      None)
         if piece is None:
-            yield "already there\n"
+            yield "already there, deleted, or no longer in goals.yaml\n"
             return
         key = job["backend"]
         backend = self.get(key)
@@ -3135,34 +3135,72 @@ class Engine:
                             "line": piece.line})
             self.shift_wake.set()
 
+    def _shift_job(self) -> Dict[str, Any]:
+        """The piece the shift is making right now, or {}."""
+        if not self._shift_run or self._shift_run not in self.runner.running:
+            return {}
+        return json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
+
     def goals_view(self) -> Dict[str, Any]:
         rows = []
+        job = self._shift_job()
         for folder in goals_mod.projects():
             try:
                 spec = goals_mod.load(folder)
-                rows.append({"folder": folder, "goals": goals_mod.status(spec)})
             except goals_mod.GoalError as e:
                 rows.append({"folder": folder, "error": str(e)})
+                continue
+            goals = goals_mod.status(spec)
+            for g in goals:
+                working = job.get("folder") == spec.folder and job.get("goal") == g["goal"]
+                g["working"] = f"{job.get('item')}/{job.get('part')}" if working else ""
+                g["state"] = ("working" if working else "paused" if g["paused"]
+                              else "done" if g["done"] >= g["total"] else "queued")
+            rows.append({"folder": folder, "goals": goals})
         return {"mode": self._shift_mode(),
                 "when": str(self.settings.get("background_when", "resources")),
                 "shift": self._shift_state, "projects": rows}
 
-    def goals_items(self, folder: str) -> Dict[str, Any]:
+    def goals_items(self, folder: str, goal: str = "") -> Dict[str, Any]:
         spec = goals_mod.load(folder)
-        working = ""
-        if self._shift_run and self._shift_run in self.runner.running:
-            job = json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
-            if job.get("folder") == spec.folder:
-                working = f"{job.get('goal')}/{job.get('item')}/{job.get('part')}"
-        return {"folder": spec.folder, "working": working, "goals": goals_mod.items(spec)}
+        job = self._shift_job()
+        working = f"{job.get('goal')}/{job.get('item')}/{job.get('part')}" \
+            if job.get("folder") == spec.folder else ""
+        return {"folder": spec.folder, "working": working, "goals": goals_mod.items(spec, goal)}
+
+    def _step_out_of(self, folder: str, goal: str, item: str = "", why: str = "") -> None:
+        job = self._shift_job()
+        if (job.get("folder") == folder and job.get("goal") == goal
+                and (not item or job.get("item") == item)):
+            self._shift_step_out(why or "its piece was changed")
+
+    def goals_delete(self, folder: str, goal: str, item: str = "", part: str = "") -> Dict[str, Any]:
+        spec = goals_mod.load(folder)
+        self._step_out_of(spec.folder, goal, item, "you deleted it")
+        done = goals_mod.delete(spec, goal, item, part)
+        observe_mod.note("history", what="goal delete", piece="/".join(x for x in (goal, item, part) if x),
+                         moved=done.get("moved"))
+        self.shift_wake.set()
+        return done
+
+    def goals_restore(self, folder: str, goal: str, item: str, part: str = "") -> Dict[str, Any]:
+        spec = goals_mod.load(folder)
+        back = goals_mod.restore(spec, goal, item, part)
+        self.shift_wake.set()
+        return {"restored": back}
+
+    def goals_pause(self, folder: str, goal: str, paused: bool) -> Dict[str, Any]:
+        spec = goals_mod.load(folder)
+        if paused:
+            self._step_out_of(spec.folder, goal, "", "you paused its goal")
+        goals_mod.pause(spec.folder, goal, paused)
+        self.shift_wake.set()
+        return {"goal": goal, "paused": paused}
 
     def goals_redo(self, folder: str, goal: str, item: str, part: str, note: str = "") -> Dict[str, Any]:
         spec = goals_mod.load(folder)
         key = f"{goal}/{item}/{part}"
-        if self._shift_run and self._shift_run in self.runner.running:
-            job = json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
-            if job.get("folder") == spec.folder and job.get("item") == item and job.get("goal") == goal:
-                self._shift_step_out("its piece is being redone")
+        self._step_out_of(spec.folder, goal, item, "its piece is being redone")
         moved = goals_mod.redo(spec, goal, item, part, note)
         self._shift_rest.pop(spec.folder + ":" + key, None)
         observe_mod.note("history", what="goal redo", piece=key, moved=moved, note=note[:200])

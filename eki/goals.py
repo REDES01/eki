@@ -175,19 +175,49 @@ def load(folder: str) -> Spec:
     return Spec(str(root), [str(b) for b in bible], goals)
 
 
+# ---- what you've paused or deleted (the project's .eki/state.json) ----------------------
+
+def _state_path(folder: str) -> Path:
+    return Path(folder) / ".eki" / "state.json"
+
+
+def state(folder: str) -> Dict[str, List[str]]:
+    """{"paused": [goal], "deleted": ["goal/item" or "goal/item/part"]}"""
+    try:
+        raw = json.loads(_state_path(folder).read_text())
+    except (OSError, ValueError):
+        raw = {}
+    return {"paused": list(raw.get("paused") or []), "deleted": list(raw.get("deleted") or [])}
+
+
+def _save_state(folder: str, data: Dict[str, List[str]]) -> None:
+    path = _state_path(folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(path)
+
+
+def _deleted(st: Dict[str, List[str]], goal: str, item: str, part: str = "") -> bool:
+    gone = st["deleted"]
+    return f"{goal}/{item}" in gone or bool(part and f"{goal}/{item}/{part}" in gone)
+
+
 def _item_dir(spec: Spec, goal: Goal, item: str, n: int) -> Path:
     return Path(spec.folder) / goal.dir.format(id=item, item=item, n=n)
 
 
 def pieces(spec: Spec) -> List[Piece]:
-    """Every piece that's still missing, item by item, in dependency order."""
+    """Every piece that's still missing, item by item, in dependency order —
+    not ones you deleted (they stay deleted until you ask for them again)."""
     out = []
+    st = state(spec.folder)
     for goal in spec.goals:
         for n, item in enumerate(goal.items, 1):
             where = _item_dir(spec, goal, item, n)
             for part in goal.parts.values():
                 path = where / part.file
-                if path.exists():
+                if path.exists() or _deleted(st, goal.name, item, part.name):
                     continue
                 ready = all((where / goal.parts[d].file).exists() for d in part.after)
                 out.append(Piece(spec.folder, goal.name, item, n, part.name, part.kind, str(path),
@@ -197,12 +227,16 @@ def pieces(spec: Spec) -> List[Piece]:
 
 def status(spec: Spec) -> List[Dict[str, Any]]:
     rows = []
+    st = state(spec.folder)
     for goal in spec.goals:
-        total = len(goal.items) * len(goal.parts)
+        deleted = sum(_deleted(st, goal.name, i, p) for i in goal.items for p in goal.parts)
+        total = len(goal.items) * len(goal.parts) - deleted
         missing = [p for p in pieces(Spec(spec.folder, spec.bible, [goal]))]
+        kinds = sorted({p.kind for p in goal.parts.values()})
         rows.append({"goal": goal.name, "items": len(goal.items), "parts": list(goal.parts),
-                     "done": total - len(missing), "total": total,
-                     "ready": sum(p.ready for p in missing)})
+                     "kinds": kinds, "done": total - len(missing), "total": total,
+                     "ready": sum(p.ready for p in missing), "deleted": deleted,
+                     "paused": goal.name in st["paused"]})
     return rows
 
 
@@ -299,11 +333,14 @@ def _title(text: str) -> str:
     return ""
 
 
-def items(spec: Spec) -> List[Dict[str, Any]]:
+def items(spec: Spec, only: str = "") -> List[Dict[str, Any]]:
     """Every item with each part as it stands, for the board."""
     out = []
     pending = notes(spec.folder)
+    st = state(spec.folder)
     for goal in spec.goals:
+        if only and goal.name != only:
+            continue
         rows = []
         for n, item in enumerate(goal.items, 1):
             where = _item_dir(spec, goal, item, n)
@@ -313,7 +350,8 @@ def items(spec: Spec) -> List[Dict[str, Any]]:
                 path = where / part.file
                 entry: Dict[str, Any] = {"name": part.name, "kind": part.kind,
                                          "exists": path.exists(), "line": part.line,
-                                         "after": part.after,
+                                         "after": part.after, "file": part.file,
+                                         "deleted": _deleted(st, goal.name, item, part.name),
                                          "note": pending.get(f"{goal.name}/{item}/{part.name}", "")}
                 if entry["exists"]:
                     entry["path"] = str(path.relative_to(spec.folder))
@@ -324,8 +362,11 @@ def items(spec: Spec) -> List[Dict[str, Any]]:
                 else:
                     entry["ready"] = all((where / goal.parts[d].file).exists() for d in part.after)
                 parts.append(entry)
-            rows.append({"item": item, "n": n, "title": title or item, "parts": parts})
-        out.append({"goal": goal.name, "parts": list(goal.parts), "items": rows})
+            rows.append({"item": item, "n": n, "title": title or item, "parts": parts,
+                         "deleted": _deleted(st, goal.name, item),
+                         "dir": str(where.relative_to(spec.folder))})
+        out.append({"goal": goal.name, "parts": list(goal.parts), "items": rows,
+                    "paused": goal.name in st["paused"]})
     return out
 
 
@@ -342,30 +383,105 @@ def dependents(goal: Goal, part: str) -> List[str]:
     return out
 
 
-def redo(spec: Spec, goal_name: str, item: str, part: str, note: str = "") -> List[str]:
-    """Make a piece again — and what was made from it, which would no longer
-    match. The old files aren't deleted: they move to .eki/redone/ in the
-    project. `note` is added to the piece's prompt the next time it's made."""
-    goal = next((g for g in spec.goals if g.name == goal_name), None)
-    if goal is None or item not in goal.items or part not in goal.parts:
-        raise GoalError(f"no {goal_name}/{item}/{part}")
-    n = goal.items.index(item) + 1
-    where = _item_dir(spec, goal, item, n)
+def _goal(spec: Spec, name: str) -> Goal:
+    goal = next((g for g in spec.goals if g.name == name), None)
+    if goal is None:
+        raise GoalError(f"no goal {name!r}")
+    return goal
+
+
+def _trash(spec: Spec, paths: List[Path]) -> int:
+    """Into the project's .eki/trash/<when>/, keeping their places — never deleted."""
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    moved = []
-    for name in [part] + dependents(goal, part):
-        path = where / goal.parts[name].file
+    moved = 0
+    for path in paths:
         if not path.exists():
             continue
-        keep = Path(spec.folder) / ".eki" / "redone" / stamp / path.relative_to(spec.folder)
+        keep = Path(spec.folder) / ".eki" / "trash" / stamp / path.relative_to(spec.folder)
         keep.parent.mkdir(parents=True, exist_ok=True)
         path.replace(keep)
-        moved.append(f"{goal_name}/{item}/{name}")
+        moved += 1
+    return moved
+
+
+def _scope(goal: Goal, item: str, part: str) -> List[str]:
+    if part and part not in goal.parts:
+        raise GoalError(f"{goal.name} has no part {part!r}")
+    if item and item not in goal.items:
+        raise GoalError(f"{goal.name} has no item {item!r}")
+    return [part] + dependents(goal, part) if part else list(goal.parts)
+
+
+def redo(spec: Spec, goal_name: str, item: str, part: str, note: str = "") -> List[str]:
+    """Make a piece again — and what was made from it, which would no longer
+    match. The old files move to the project's .eki/trash/. `note` is added
+    to the piece's prompt the next time it's made."""
+    goal = _goal(spec, goal_name)
+    if not item or not part:
+        raise GoalError("say which item and part to redo")
+    names = _scope(goal, item, part)
+    where = _item_dir(spec, goal, item, goal.items.index(item) + 1)
+    had = [n for n in names if (where / goal.parts[n].file).exists()]
+    _trash(spec, [where / goal.parts[n].file for n in names])
+    restore(spec, goal_name, item, part)               # wanted again, if it had been deleted
     if note.strip():
         have = notes(spec.folder)
         have[f"{goal_name}/{item}/{part}"] = note.strip()[:500]
         _save_notes(spec.folder, have)
-    return moved
+    return [f"{goal_name}/{item}/{n}" for n in had]
+
+
+def delete(spec: Spec, goal_name: str, item: str = "", part: str = "") -> Dict[str, Any]:
+    """Remove what was made, and keep it removed.
+
+    A part (and what was made from it) or a whole item: its files go to the
+    trash and it isn't made again until you restore it. The whole goal: every
+    file it made goes to the trash and the goal is paused, so nothing is
+    remade until you resume it."""
+    goal = _goal(spec, goal_name)
+    st = state(spec.folder)
+    if not item:
+        paths = [_item_dir(spec, goal, i, n) / p.file
+                 for n, i in enumerate(goal.items, 1) for p in goal.parts.values()]
+        moved = _trash(spec, paths)
+        if goal.name not in st["paused"]:
+            st["paused"].append(goal.name)
+        _save_state(spec.folder, st)
+        return {"moved": moved, "paused": True}
+    names = _scope(goal, item, part)
+    where = _item_dir(spec, goal, item, goal.items.index(item) + 1)
+    moved = _trash(spec, [where / goal.parts[n].file for n in names])
+    keys = [f"{goal.name}/{item}"] if not part else [f"{goal.name}/{item}/{n}" for n in names]
+    st["deleted"] += [k for k in keys if k not in st["deleted"]]
+    _save_state(spec.folder, st)
+    return {"moved": moved, "deleted": keys}
+
+
+def restore(spec: Spec, goal_name: str, item: str, part: str = "") -> List[str]:
+    """Want a deleted item or part again: it's made on the next idle turn."""
+    goal = _goal(spec, goal_name)
+    names = _scope(goal, item, part)
+    st = state(spec.folder)
+    drop = {f"{goal.name}/{item}/{n}" for n in names}
+    if not part:
+        drop.add(f"{goal.name}/{item}")
+    back = [k for k in st["deleted"] if k in drop]
+    if back:
+        st["deleted"] = [k for k in st["deleted"] if k not in drop]
+        _save_state(spec.folder, st)
+    return back
+
+
+def pause(folder: str, goal_name: str, paused: bool) -> bool:
+    spec = load(folder)
+    _goal(spec, goal_name)
+    st = state(spec.folder)
+    if paused and goal_name not in st["paused"]:
+        st["paused"].append(goal_name)
+    if not paused:
+        st["paused"] = [g for g in st["paused"] if g != goal_name]
+    _save_state(spec.folder, st)
+    return paused
 
 
 def inside(folder: str, relative: str) -> Optional[Path]:
@@ -426,9 +542,11 @@ def backlog() -> List[Piece]:
     out: List[Piece] = []
     for folder in projects():
         try:
-            out += pieces(load(folder))
+            spec = load(folder)
         except GoalError:
             continue
+        paused = set(state(spec.folder)["paused"])
+        out += [p for p in pieces(spec) if p.goal not in paused]
     return out
 
 

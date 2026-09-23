@@ -6,107 +6,170 @@
 <title>eki · Goals</title>
 <style>
   :root {
-    --bg: #f6f5f2; --surface: #ffffff; --sunk: #efede8; --line: #e3e0d9;
+    --bg: #f6f5f2; --surface: #ffffff; --sunk: #efede8; --line: #e3e0d9; --line-2: #d6d2c9;
     --ink: #1d1c1a; --ink-2: #5d5a53; --ink-3: #8f8b82;
     --accent: #c9622b; --accent-soft: #f6e3d7;
-    --ok: #2f8f5b; --wait: #b7791f; --off: #8f8b82;
+    --ok: #2f8f5b; --ok-soft: #dcefe3; --wait: #b7791f; --wait-soft: #f6ead3;
+    --danger: #b3412f; --danger-soft: #f6dcd6;
     --radius: 12px; --shadow: 0 1px 2px rgba(20,18,15,.06), 0 2px 8px rgba(20,18,15,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1b1a18; --surface: #242320; --sunk: #2c2b27; --line: #36342f;
+      --bg: #1b1a18; --surface: #242320; --sunk: #2c2b27; --line: #36342f; --line-2: #45423c;
       --ink: #ecebe7; --ink-2: #b3afa6; --ink-3: #807c74;
       --accent: #e0834f; --accent-soft: #3b2a20;
-      --ok: #52b67f; --wait: #d9a23e; --off: #807c74;
+      --ok: #52b67f; --ok-soft: #1f3327; --wait: #d9a23e; --wait-soft: #372c19;
+      --danger: #e0715e; --danger-soft: #3d2320;
       --shadow: 0 1px 2px rgba(0,0,0,.3);
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  button { font: inherit; }
   header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
            backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-  .bar { max-width: 1400px; margin: 0 auto; padding: 14px 20px; display: flex; flex-wrap: wrap;
-         gap: 12px 20px; align-items: center; }
-  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
-  .projects { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
-          border-radius: 999px; padding: 3px 11px; font-size: 12.5px; cursor: pointer; }
-  .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .bar { max-width: 1400px; margin: 0 auto; padding: 12px 20px; display: flex; flex-wrap: wrap;
+         gap: 10px 20px; align-items: center; }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  h1 a { color: inherit; text-decoration: none; }
   .status { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px;
             min-width: 0; flex: 1 1 260px; }
-  .status span.text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); flex: none; }
+  .status .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
   .dot.working { background: var(--ok); animation: pulse 1.6s ease-in-out infinite; }
   .dot.waiting, .dot.stepped { background: var(--wait); }
   @keyframes pulse { 50% { opacity: .35; } }
   .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
-         background: var(--surface); }
-  .seg button { border: 0; background: none; padding: 5px 12px; font: inherit; font-size: 12.5px;
-                color: var(--ink-2); cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface); }
+  .seg button { border: 0; background: none; padding: 5px 12px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  label.away { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
-  .hint { max-width: 1400px; margin: 0 auto; padding: 0 20px 12px; color: var(--ink-3); font-size: 12px; }
-  main { max-width: 1400px; margin: 0 auto; padding: 18px 20px 60px; }
-  .goal-head { display: flex; align-items: baseline; gap: 14px; margin: 8px 0 14px; flex-wrap: wrap; }
-  .goal-head h2 { font-size: 15px; margin: 0; font-weight: 650; }
-  .progress { flex: 1 1 200px; max-width: 360px; height: 6px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
+  label.check { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .hint { max-width: 1400px; margin: 0 auto; padding: 0 20px 10px; color: var(--ink-3); font-size: 12px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 20px 20px 80px; }
+  .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 8px;
+         font-size: 12.5px; padding: 4px 11px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--line-2); color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--danger); }
+  .btn.danger:hover { border-color: var(--danger); }
+  .btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.small { font-size: 11.5px; padding: 2px 8px; border-radius: 7px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600;
+           padding: 2px 8px; border-radius: 99px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
+  .badge.working { background: var(--ok-soft); color: var(--ok); }
+  .badge.paused { background: var(--wait-soft); color: var(--wait); }
+  .badge.done { background: var(--sunk); color: var(--ink-2); }
+  .badge.deleted { background: var(--danger-soft); color: var(--danger); }
+  .progress { height: 6px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
   .progress i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
-  .count { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  input.search { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-                 border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12.5px; width: 200px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 16px; }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-          box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; }
+  .muted { color: var(--ink-3); }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+                   font-weight: 650; margin: 28px 0 10px; }
+  .section-label:first-child { margin-top: 0; }
+
+  /* overview */
+  .goals { display: flex; flex-direction: column; gap: 10px; }
+  .goal-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1fr) minmax(170px, 1fr) auto;
+              gap: 18px; align-items: center; background: var(--surface); border: 1px solid var(--line);
+              border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); cursor: pointer; }
+  .goal-row:hover { border-color: var(--line-2); }
+  .goal-row .name { font-weight: 650; font-size: 15px; }
+  .goal-row .where { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .goal-row .parts { font-size: 12.5px; color: var(--ink-2); }
+  .goal-row .prog { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .goal-row .acts { display: flex; gap: 8px; align-items: center; }
+  .projects { display: flex; flex-direction: column; gap: 6px; }
+  .project { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 12px;
+             border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+  .project code { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project .err { color: var(--danger); font-size: 12px; }
+  form.add { display: flex; gap: 8px; margin-top: 8px; }
+  input.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px;
+               padding: 6px 10px; font: inherit; font-size: 13px; flex: 1; min-width: 0; }
+  .err-line { color: var(--danger); font-size: 12.5px; margin-top: 6px; }
+  .empty { text-align: center; color: var(--ink-3); padding: 70px 20px; }
+  .empty code, .hint code { background: var(--sunk); padding: 1px 6px; border-radius: 5px; color: var(--ink-2); }
+
+  /* goal page */
+  .back { color: var(--ink-3); text-decoration: none; font-size: 13px; }
+  .back:hover { color: var(--ink); }
+  .goal-top { display: flex; gap: 16px 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin: 10px 0 18px; }
+  .goal-top h2 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+  .goal-top .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; color: var(--ink-3); font-size: 12.5px; }
+  .goal-top .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .toolbar .progress { width: 220px; }
+  .confirm { display: inline-flex; gap: 8px; align-items: center; background: var(--danger-soft); color: var(--danger);
+             border-radius: 9px; padding: 4px 6px 4px 10px; font-size: 12.5px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+          box-shadow: var(--shadow); overflow: hidden; cursor: pointer; display: flex; flex-direction: column; }
+  .card:hover { border-color: var(--line-2); }
   .card.working { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
-  .pic { position: relative; aspect-ratio: 1; background: var(--sunk); }
-  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .pic .redo-btn { position: absolute; top: 8px; right: 8px; background: rgba(20,18,15,.55); color: #fff;
-                   border: 0; }
-  .pending { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3);
-             font-size: 12.5px; text-align: center; padding: 16px; }
-  .pending.making { background: linear-gradient(100deg, var(--sunk) 30%, color-mix(in srgb, var(--sunk) 70%, var(--surface)) 50%, var(--sunk) 70%);
-                    background-size: 300% 100%; animation: shimmer 1.6s linear infinite; color: var(--ok); }
+  .card.gone { opacity: .55; }
+  .card .pic { aspect-ratio: 1; background: var(--sunk); position: relative; }
+  .card .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .cap { padding: 9px 12px 11px; }
+  .card .t { font-weight: 600; font-size: 13.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .s { font-size: 11.5px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+  .pending { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: 12px; padding: 12px; text-align: center; }
+  .making { background: linear-gradient(100deg, var(--sunk) 30%, color-mix(in srgb, var(--sunk) 70%, var(--surface)) 50%, var(--sunk) 70%);
+            background-size: 300% 100%; animation: shimmer 1.6s linear infinite; color: var(--ok); }
   @keyframes shimmer { to { background-position: -150% 0; } }
-  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
-  .title { font-weight: 650; font-size: 14.5px; line-height: 1.3; }
-  .id { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-  .part { border-top: 1px solid var(--line); padding-top: 9px; }
-  .part-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-  .part-name { text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
-  .redo-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 7px;
-              font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; }
-  .redo-btn:hover { color: var(--accent); border-color: var(--accent); }
-  .text { color: var(--ink-2); font-size: 13px; }
-  .text p { margin: 0 0 6px; }
+  .pips { display: inline-flex; gap: 3px; }
+  .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+  .pip.on { background: var(--accent); }
+  .pip.work { background: var(--ok); animation: pulse 1.6s infinite; }
+  .pip.gone { background: var(--danger); opacity: .6; }
+  .list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .row { display: grid; grid-template-columns: minmax(160px, 1fr) 2.2fr auto; gap: 16px; align-items: center;
+         padding: 11px 14px; cursor: pointer; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row:hover { background: var(--sunk); }
+  .row.gone { opacity: .55; }
+  .row.working { box-shadow: inset 3px 0 0 var(--ok); }
+  .row .t { font-weight: 600; font-size: 13.5px; }
+  .row .id { font-size: 11.5px; color: var(--ink-3); }
+  .row .prev { color: var(--ink-2); font-size: 12.5px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+  /* item panel */
+  .scrim { position: fixed; inset: 0; background: rgba(15,14,12,.28); z-index: 20; }
+  .panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); background: var(--surface);
+           border-left: 1px solid var(--line); z-index: 21; overflow-y: auto; box-shadow: -8px 0 30px rgba(0,0,0,.12); }
+  .panel-head { position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--line);
+                padding: 14px 18px; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; z-index: 1; }
+  .panel-head h3 { margin: 0; font-size: 17px; line-height: 1.3; }
+  .panel-head .sub { font-size: 12px; color: var(--ink-3); margin-top: 3px; word-break: break-all; }
+  .panel-body { padding: 16px 18px 40px; display: flex; flex-direction: column; gap: 18px; }
+  .x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--ink-3); cursor: pointer; padding: 2px 6px; }
+  .part-block .ph { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .part-name { text-transform: uppercase; letter-spacing: .07em; font-size: 11px; color: var(--ink-3); font-weight: 650; }
+  .part-block img { width: 100%; border-radius: 10px; display: block; background: var(--sunk); }
+  .part-block .text { color: var(--ink-2); font-size: 13.5px; }
+  .text p { margin: 0 0 8px; }
   .text ul { margin: 0; padding-left: 18px; }
-  .text li { margin-bottom: 4px; }
-  .clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
-  .missing { color: var(--ink-3); font-size: 12.5px; font-style: italic; }
-  .missing.making { color: var(--ok); font-style: normal; }
-  .note { font-size: 11.5px; color: var(--accent); }
-  form.redo { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; background: var(--sunk);
-              border-radius: 9px; padding: 8px; }
-  form.redo input { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-                    border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 12.5px; }
-  form.redo .row { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+  .text li { margin-bottom: 5px; }
+  .placeholder { background: var(--sunk); border-radius: 10px; padding: 18px; color: var(--ink-3); font-size: 12.5px; text-align: center; }
+  .placeholder.making { color: var(--ok); }
+  .note { font-size: 12px; color: var(--accent); margin-top: 6px; }
+  form.redo { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; background: var(--sunk); border-radius: 9px; padding: 8px; }
+  form.redo .r { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
   form.redo .also { color: var(--ink-3); font-size: 11.5px; margin-right: auto; }
-  form.redo button { border-radius: 7px; font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
-                     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
-  form.redo button.go { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .empty { text-align: center; color: var(--ink-3); padding: 80px 20px; }
-  .empty code { background: var(--sunk); padding: 2px 6px; border-radius: 5px; color: var(--ink-2); }
-  @media (max-width: 600px) { .bar { padding: 12px 16px; } main { padding: 14px 16px 40px; }
-    .grid { grid-template-columns: 1fr; } input.search { width: 100%; } }
+  @media (max-width: 760px) {
+    .bar { padding: 10px 16px; } main { padding: 16px 16px 60px; } .hint { padding: 0 16px 10px; }
+    .goal-row { grid-template-columns: 1fr; gap: 10px; }
+    .row { grid-template-columns: 1fr auto; } .row .prev { display: none; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
-    <h1>Goals</h1>
-    <div class="projects" id="projects"></div>
+    <h1><a href="#/">Goals</a></h1>
     <div class="status"><i class="dot" id="dot"></i><span class="text" id="status">Connecting…</span></div>
     <div class="controls">
       <div class="seg" id="mode" role="group" aria-label="What background work may use">
@@ -114,39 +177,50 @@
         <button data-mode="spare" title="Also a subscription for parts marked line: frontier — under pace, never the last 30%">Spare</button>
         <button data-mode="off" title="No background work">Off</button>
       </div>
-      <label class="away"><input type="checkbox" id="away"> Only when I'm away</label>
+      <label class="check"><input type="checkbox" id="away"> Only when I'm away</label>
     </div>
   </div>
   <div class="hint" id="hint"></div>
 </header>
 <main id="main"><div class="empty">Loading…</div></main>
+<div id="layer"></div>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const enc = encodeURIComponent;
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-let view = null, items = null, folder = store.get("eki.goals.folder"), lastItems = "", query = "";
-const open = new Set();   // expanded texts
+
+const S = { view: null, items: null, itemsKey: "", sig: "", error: "", addError: "",
+            confirm: "", redo: "", query: "", showDeleted: store.get("eki.goals.showDeleted") === "1" };
 
 const HINTS = {
-  local: "Local — only the models on this machine. No subscription is used.",
+  local: "Local — only the models on this machine; no subscription is used.",
   spare: "Spare — parts marked line: frontier may use a subscription, only while you're under pace for the week and never the last 30% of a window.",
   off: "Off — nothing runs in the background.",
 };
 
-async function get(path) { const r = await fetch(path); if (!r.ok) throw new Error(await r.text()); return r.json(); }
-async function post(path, body) {
-  const r = await fetch(path, { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(await r.text()); return r.json();
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} :
+    { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+  if (!r.ok) { let m = await r.text(); try { m = JSON.parse(m).detail || m; } catch {} throw new Error(m); }
+  return r.json();
 }
 
-function mdToHtml(text, dropTitle) {
-  const lines = String(text).split("\n");
-  let out = "", list = false, titleDropped = !dropTitle;
-  for (let raw of lines) {
+// ---- routes: #/  ·  #/g/<folder>/<goal>  ·  #/g/<folder>/<goal>/<item>
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  if (parts[0] === "g" && parts.length >= 3) return { page: "goal", folder: parts[1], goal: parts[2], item: parts[3] || "" };
+  return { page: "home" };
+}
+const goalHref = (f, g, i) => "#/g/" + enc(f) + "/" + enc(g) + (i ? "/" + enc(i) : "");
+
+function md(text, dropTitle) {
+  let out = "", list = false, dropped = !dropTitle;
+  for (const raw of String(text).split("\n")) {
     const line = raw.trim();
     if (!line) { if (list) { out += "</ul>"; list = false; } continue; }
-    if (/^#{1,6}\s/.test(line)) { if (!titleDropped) { titleDropped = true; continue; }
+    if (/^#{1,6}\s/.test(line)) { if (!dropped) { dropped = true; continue; }
       out += `<p><strong>${esc(line.replace(/^#+\s*/, ""))}</strong></p>`; continue; }
     const li = line.match(/^([*\-•]|\d+\.)\s+(.*)$/);
     if (li) { if (!list) { out += "<ul>"; list = true; } out += `<li>${esc(li[2])}</li>`; continue; }
@@ -155,156 +229,274 @@ function mdToHtml(text, dropTitle) {
   }
   return out + (list ? "</ul>" : "");
 }
+const plain = t => String(t || "").split("\n").map(l => l.replace(/^#+\s*|^[*\-•]\s+/, "").trim()).filter(Boolean);
 
-function renderHeader() {
-  if (!view) return;
-  const sh = view.shift || {};
-  const state = sh.state || "idle";
-  $("#dot").className = "dot " + (state === "stepped out" ? "stepped" : state);
-  const label = {working: "Working", waiting: "Waiting", idle: "Idle", off: "Off", "stepped out": "Stepped out"}[state] || state;
+function stateBadge(g) {
+  const label = {working: "Working", paused: "Paused", done: "Done", queued: g.ready ? "Queued" : "Waiting"}[g.state] || g.state;
+  return `<span class="badge ${esc(g.state)}">${label}</span>`;
+}
+const fileUrl = (folder, p) => `/api/goals/file?folder=${enc(folder)}&path=${enc(p.path)}&v=${p.mtime}`;
+const goalOf = r => (S.view?.projects || []).find(p => p.folder === r.folder)?.goals?.find(g => g.goal === r.goal);
+
+// ---- header -------------------------------------------------------------------------------
+function header() {
+  const v = S.view; if (!v) return;
+  const sh = v.shift || {}, st = sh.state || "idle";
+  $("#dot").className = "dot " + (st === "stepped out" ? "stepped" : st);
+  const label = {working: "Working", waiting: "Waiting", idle: "Idle", off: "Off", "stepped out": "Stepped aside"}[st] || st;
   $("#status").textContent = `${label} — ${sh.why || ""}`;
   $("#status").title = $("#status").textContent;
-  for (const b of $("#mode").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.mode === view.mode));
-  $("#away").checked = view.when === "away";
-  $("#hint").textContent = HINTS[view.mode] + (view.when === "away" ? " Runs only with nobody at the keyboard." :
-    " Runs whenever the machine has room; steps aside for you and other apps, and only on power.");
-  const ps = view.projects || [];
-  if (!folder || !ps.some(p => p.folder === folder)) folder = ps[0]?.folder || null;
-  $("#projects").innerHTML = ps.length > 1 ? ps.map(p =>
-    `<button class="chip" data-folder="${esc(p.folder)}" aria-pressed="${p.folder === folder}">${esc(p.folder.split("/").pop())}</button>`).join("") : "";
+  for (const b of $("#mode").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.mode === v.mode));
+  $("#away").checked = v.when === "away";
+  $("#hint").textContent = HINTS[v.mode] + (v.when === "away" ? " Runs only with nobody at the keyboard."
+    : " Runs whenever the machine has room; steps aside for you and other apps; only on power.");
 }
 
-function missingLabel(part, key, working, parts) {
-  if (key === working) return ["making", "Being made…"];
-  if (part.line === "frontier" && view.mode !== "spare") return ["", "Waits for Spare mode"];
-  if (part.ready) return ["", "Next up"];
-  const need = part.after.filter(a => !parts.find(p => p.name === a)?.exists);
-  return ["", `Waits for ${need.join(", ")}`];
+// ---- all goals --------------------------------------------------------------------------------
+function home() {
+  const v = S.view;
+  const projects = v?.projects || [];
+  const goals = projects.flatMap(p => (p.goals || []).map(g => ({...g, folder: p.folder})));
+  let h = "";
+  if (!goals.length) {
+    h += `<div class="empty">No goals yet.<br><br>Put a <code>goals.yaml</code> in a project folder — what should exist, and how to make it —<br>then add the folder below. eki makes what's missing whenever the machine has room.</div>`;
+  } else {
+    h += `<div class="section-label">Goals</div><div class="goals">`;
+    for (const g of goals) {
+      const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+      const now = g.state === "working" ? ` · making ${esc(g.working)}` : "";
+      h += `<div class="goal-row" data-open="${esc(goalHref(g.folder, g.goal))}">
+        <div><div class="name">${esc(g.goal)}</div><div class="where" title="${esc(g.folder)}">${esc(g.folder.split("/").pop())}</div></div>
+        <div class="parts">${g.items} × ${g.parts.map(esc).join(" · ")}</div>
+        <div class="prog"><div class="progress"><i style="width:${pct}%"></i></div>
+          <span>${g.done} of ${g.total} made${g.deleted ? ` · ${g.deleted} deleted` : ""}${now}</span></div>
+        <div class="acts">${stateBadge(g)}
+          <button class="btn small" data-pause="${g.paused ? "0" : "1"}" data-folder="${esc(g.folder)}" data-goal="${esc(g.goal)}">${g.paused ? "Resume" : "Pause"}</button></div>
+      </div>`;
+    }
+    h += `</div>`;
+  }
+  h += `<div class="section-label">Projects</div><div class="projects">`;
+  for (const p of projects) {
+    const k = "rm:" + p.folder;
+    h += `<div class="project"><code title="${esc(p.folder)}">${esc(p.folder)}</code>
+      ${p.error ? `<span class="err">${esc(p.error)}</span>` : ""}
+      ${S.confirm === k
+        ? `<span class="confirm">Stop working on this folder? Its files stay. <button class="btn small danger solid" data-rm="${esc(p.folder)}">Remove</button><button class="btn small" data-cancel>Cancel</button></span>`
+        : `<button class="btn small" data-ask="${esc(k)}">Remove</button>`}</div>`;
+  }
+  h += `</div><form class="add" id="add"><input class="text" name="folder" placeholder="Add a project folder with a goals.yaml — e.g. ~/games/ashfall" autocomplete="off">
+    <button class="btn primary" type="submit">Add</button></form>${S.addError ? `<div class="err-line">${esc(S.addError)}</div>` : ""}`;
+  return h;
 }
 
-function dependentsOf(goal, name) {
-  const out = []; let changed = true;
-  const parts = goal.items[0]?.parts || [];
+// ---- one goal ---------------------------------------------------------------------------------
+function pips(it, working) {
+  return `<span class="pips">${it.parts.map(p => `<i class="pip ${p.exists ? "on" : working === p.name ? "work" : p.deleted ? "gone" : ""}" title="${esc(p.name)}"></i>`).join("")}</span>`;
+}
+function itemState(it, working) {
+  if (it.deleted) return "deleted";
+  const made = it.parts.filter(p => p.exists).length, wanted = it.parts.filter(p => !p.deleted).length;
+  if (working) return "making " + working;
+  return made >= wanted ? `${made} of ${it.parts.length}` : `${made} of ${wanted} made`;
+}
+
+function goalPage(r) {
+  const g = goalOf(r), data = S.items;
+  if (!g) return `<a class="back" href="#/">← All goals</a><div class="empty">That goal isn't here any more.</div>`;
+  const goal = data?.goals?.[0];
+  const hasPic = goal && goal.items[0]?.parts.some(p => p.kind === "image");
+  const workingKey = data?.working || "";
+  const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+  const k = "all:" + r.folder + ":" + r.goal;
+  let h = `<a class="back" href="#/">← All goals</a>
+    <div class="goal-top"><div><h2>${esc(r.goal)}</h2>
+      <div class="meta">${stateBadge(g)}<span title="${esc(r.folder)}">${esc(r.folder)}</span><span>${g.items} × ${g.parts.map(esc).join(" · ")}</span></div></div>
+      <div class="tools">
+        <button class="btn" data-pause="${g.paused ? "0" : "1"}" data-folder="${esc(r.folder)}" data-goal="${esc(r.goal)}">${g.paused ? "Resume" : "Pause"}</button>
+        ${S.confirm === k
+          ? `<span class="confirm">Move all ${g.done} generated files to the project's .eki/trash and pause? <button class="btn small danger solid" data-delete-all>Delete all</button><button class="btn small" data-cancel>Cancel</button></span>`
+          : `<button class="btn danger" data-ask="${esc(k)}" ${g.done ? "" : "disabled"}>Delete everything it made…</button>`}
+      </div></div>
+    <div class="toolbar"><div class="progress"><i style="width:${pct}%"></i></div>
+      <span class="muted">${g.done} of ${g.total} made${g.deleted ? ` · ${g.deleted} deleted` : ""}</span>
+      <input class="text" id="filter" placeholder="Filter" value="${esc(S.query)}" style="max-width:220px">
+      ${g.deleted ? `<label class="check"><input type="checkbox" id="showDeleted" ${S.showDeleted ? "checked" : ""}> Show deleted</label>` : ""}
+    </div>`;
+  if (!goal) return h + `<div class="empty">Loading…</div>`;
+  const shown = goal.items.filter(it => (S.showDeleted || !it.deleted));
+  if (hasPic) {
+    h += `<div class="grid">` + shown.map(it => {
+      const img = it.parts.find(p => p.kind === "image");
+      const w = workingKey.startsWith(`${goal.goal}/${it.item}/`) ? workingKey.split("/").pop() : "";
+      const pic = img.exists ? `<img loading="lazy" alt="" src="${fileUrl(data.folder, img)}">`
+        : `<div class="pending ${w === img.name ? "making" : ""}">${it.deleted || img.deleted ? "Deleted" : w === img.name ? "Being made…" : "Not made yet"}</div>`;
+      return `<div class="card ${w ? "working" : ""} ${it.deleted ? "gone" : ""}" data-search="${esc(search(it))}" data-open="${esc(goalHref(r.folder, r.goal, it.item))}">
+        <div class="pic">${pic}</div><div class="cap"><div class="t">${esc(it.title)}</div>
+        <div class="s">${pips(it, w)}<span>${esc(itemState(it, w))}</span></div></div></div>`;
+    }).join("") + `</div>`;
+  } else {
+    h += `<div class="list">` + shown.map(it => {
+      const w = workingKey.startsWith(`${goal.goal}/${it.item}/`) ? workingKey.split("/").pop() : "";
+      const first = it.parts.find(p => p.exists && p.kind === "text");
+      const prev = first ? plain(first.text).slice(it.title !== it.item ? 1 : 0).join(" ") : "";
+      return `<div class="row ${w ? "working" : ""} ${it.deleted ? "gone" : ""}" data-search="${esc(search(it))}" data-open="${esc(goalHref(r.folder, r.goal, it.item))}">
+        <div><div class="t">${esc(it.title)}</div><div class="id">${esc(it.item)}</div></div>
+        <div class="prev">${esc(prev) || `<span class="muted">${w ? "Being made…" : "Not made yet"}</span>`}</div>
+        <div class="s">${pips(it, w)}</div></div>`;
+    }).join("") + `</div>`;
+  }
+  return h;
+}
+const search = it => (it.title + " " + it.item + " " + it.parts.map(p => p.text || "").join(" ")).toLowerCase();
+
+// ---- one item (the panel) -----------------------------------------------------------------
+function deps(goal, name) {
+  const out = []; let changed = true; const parts = goal.items[0]?.parts || [];
   while (changed) { changed = false;
     for (const p of parts) if (!out.includes(p.name) && (p.after.includes(name) || p.after.some(a => out.includes(a)))) { out.push(p.name); changed = true; } }
   return out;
 }
-
-function card(goal, it, working) {
-  const keyOf = name => `${goal.goal}/${it.item}/${name}`;
-  const image = it.parts.find(p => p.kind === "image");
-  const isWorking = it.parts.some(p => keyOf(p.name) === working);
-  let pic = "";
-  if (image) {
-    const k = keyOf(image.name);
-    pic = `<div class="pic">` + (image.exists
-      ? `<img loading="lazy" alt="${esc(it.title)}" src="/api/goals/file?folder=${encodeURIComponent(items.folder)}&path=${encodeURIComponent(image.path)}&v=${image.mtime}">
-         <button class="redo-btn" data-redo="${esc(image.name)}" data-item="${esc(it.item)}" data-goal="${esc(goal.goal)}">Redo</button>`
-      : (() => { const [cls, t] = missingLabel(image, k, working, it.parts); return `<div class="pending ${cls}">${esc(t)}</div>`; })())
-      + `</div>` + formFor(goal, it, image);
-  }
-  let body = `<div class="title">${esc(it.title)}</div><div class="id">${esc(it.item)}</div>`;
+function panel(r) {
+  const goal = S.items?.goals?.[0];
+  const it = goal?.items.find(x => x.item === r.item);
+  if (!it) return "";
+  const working = S.items.working || "";
+  const ik = "item:" + it.item;
+  const firstText = it.parts.find(p => p.kind === "text" && p.exists);
+  let body = "";
   for (const p of it.parts) {
-    if (p.kind === "image") continue;
-    const k = keyOf(p.name);
-    let inner;
+    const key = `${goal.goal}/${it.item}/${p.name}`;
+    const d = deps(goal, p.name);
+    let content, acts = "";
     if (p.exists) {
-      // the first text part is the long description: clamped until clicked
-      const first = p === it.parts.find(x => x.kind === "text");
-      const clamped = first && !open.has(k);
-      inner = `<div class="text ${clamped ? "clamp" : ""}" ${first ? `data-toggle="${esc(k)}"` : ""} title="${clamped ? "Click to read all" : ""}">${mdToHtml(p.text, first)}</div>`;
+      content = p.kind === "image" ? `<img alt="" src="${fileUrl(S.items.folder, p)}">`
+        : `<div class="text">${md(p.text, p === firstText)}</div>`;
+      acts = S.confirm === "part:" + key
+        ? `<span class="confirm">Delete the ${esc(p.name)}${d.length ? ` — and the ${esc(d.join(" and "))} made from it` : ""}? It won't be made again. <button class="btn small danger solid" data-del-part="${esc(p.name)}">Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
+        : `<button class="btn small" data-redo="${esc(p.name)}">Redo</button><button class="btn small danger" data-ask="part:${esc(key)}">Delete</button>`;
+    } else if (p.deleted || it.deleted) {
+      content = `<div class="placeholder">Deleted — it won't be made again</div>`;
+      acts = it.deleted ? "" : `<button class="btn small" data-restore="${esc(p.name)}">Make again</button>`;
     } else {
-      const [cls, t] = missingLabel(p, k, working, it.parts);
-      inner = `<div class="missing ${cls}">${esc(t)}</div>`;
+      const making = working === key;
+      const need = p.after.filter(a => !it.parts.find(x => x.name === a)?.exists);
+      const why = making ? "Being made…" : p.line === "frontier" && S.view.mode !== "spare" ? "Waits for Spare mode"
+        : need.length ? `Waits for ${need.join(", ")}` : S.view.mode === "off" ? "Background work is off" : goalOf(r)?.paused ? "The goal is paused" : "Next up";
+      content = `<div class="placeholder ${making ? "making" : ""}">${esc(why)}</div>`;
     }
-    const note = p.note ? `<div class="note">Next time: ${esc(p.note)}</div>` : "";
-    body += `<div class="part"><div class="part-head"><span class="part-name">${esc(p.name)}</span>
-      ${p.exists ? `<button class="redo-btn" data-redo="${esc(p.name)}" data-item="${esc(it.item)}" data-goal="${esc(goal.goal)}">Redo</button>` : ""}</div>
-      ${inner}${note}${formFor(goal, it, p)}</div>`;
+    const form = S.redo === key ? `<form class="redo" data-part="${esc(p.name)}"><input class="text" name="note" placeholder="What should change? (optional)" autocomplete="off">
+      <div class="r"><span class="also">${d.length ? "Also redoes " + esc(d.join(", ")) : ""}</span>
+      <button type="button" class="btn small" data-cancel>Cancel</button><button class="btn small primary" type="submit">Redo</button></div></form>` : "";
+    body += `<div class="part-block"><div class="ph"><span class="part-name">${esc(p.name)} <span class="muted">· ${esc(p.file)}</span></span><span>${acts}</span></div>
+      ${content}${p.note ? `<div class="note">Next time: ${esc(p.note)}</div>` : ""}${form}</div>`;
   }
-  return `<article class="card ${isWorking ? "working" : ""}" data-search="${esc((it.title + " " + it.item + " " + it.parts.map(p => p.text || "").join(" ")).toLowerCase())}">${pic}<div class="body">${body}</div></article>`;
+  const itemActs = it.deleted
+    ? `<button class="btn small" data-restore="">Make again</button>`
+    : S.confirm === ik
+      ? `<span class="confirm">Delete this item? Its files go to .eki/trash and it won't be made again. <button class="btn small danger solid" data-del-item>Delete</button><button class="btn small" data-cancel>Cancel</button></span>`
+      : `<button class="btn small danger" data-ask="${esc(ik)}">Delete item</button>`;
+  return `<div class="scrim" data-close></div><aside class="panel" role="dialog" aria-label="${esc(it.title)}">
+    <div class="panel-head"><div><h3>${esc(it.title)}</h3><div class="sub">${esc(it.item)} · ${esc(it.dir)}</div>
+      <div style="margin-top:8px">${itemActs}</div></div><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="panel-body">${body}</div></aside>`;
 }
 
-let editing = null;   // {goal, item, part}
-function formFor(goal, it, part) {
-  if (!editing || editing.goal !== goal.goal || editing.item !== it.item || editing.part !== part.name) return "";
-  const deps = dependentsOf(goal, part.name);
-  return `<form class="redo" data-goal="${esc(goal.goal)}" data-item="${esc(it.item)}" data-part="${esc(part.name)}">
-    <input name="note" placeholder="What should change? (optional)" autocomplete="off">
-    <div class="row"><span class="also">${deps.length ? "Also redoes " + esc(deps.join(", ")) : ""}</span>
-    <button type="button" data-cancel>Cancel</button><button class="go" type="submit">Redo</button></div></form>`;
-}
+// ---- drawing and refreshing ---------------------------------------------------------------
+function busy() { return S.redo || document.activeElement?.matches("input.text"); }
 
-function renderItems() {
-  const main = $("#main");
-  if (!view || !(view.projects || []).length) {
-    main.innerHTML = `<div class="empty">No projects yet.<br><br>Put a <code>goals.yaml</code> in a folder, then run <code>eki goals add &lt;folder&gt;</code>.</div>`;
-    return;
+function draw() {
+  header();
+  const r = route();
+  if (!S.view) return;
+  if (r.page === "home") { $("#main").innerHTML = home(); $("#layer").innerHTML = ""; }
+  else {
+    $("#main").innerHTML = goalPage(r);
+    $("#layer").innerHTML = r.item ? panel(r) : "";
+    applyFilter();
   }
-  if (!items) return;
-  let html = "";
-  for (const goal of items.goals) {
-    const total = goal.items.length * goal.parts.length;
-    const done = goal.items.reduce((n, it) => n + it.parts.filter(p => p.exists).length, 0);
-    html += `<section><div class="goal-head"><h2>${esc(goal.goal)}</h2>
-      <div class="progress"><i style="width:${total ? done / total * 100 : 0}%"></i></div>
-      <span class="count">${done} of ${total} made</span>
-      <input class="search" type="search" placeholder="Filter" value="${esc(query)}"></div>
-      <div class="grid">${goal.items.map(it => card(goal, it, items.working)).join("")}</div></section>`;
-  }
-  main.innerHTML = html;
-  applyFilter();
   const f = $("form.redo input"); if (f) f.focus();
 }
-
 function applyFilter() {
-  for (const c of document.querySelectorAll(".card"))
-    c.style.display = !query || c.dataset.search.includes(query.toLowerCase()) ? "" : "none";
+  const q = S.query.toLowerCase();
+  for (const c of document.querySelectorAll("[data-search]")) c.style.display = !q || c.dataset.search.includes(q) ? "" : "none";
 }
 
-async function refresh() {
+async function refresh(force) {
   try {
-    view = await get("/api/goals");
-    renderHeader();
-    if (folder) {
-      const fresh = await get("/api/goals/items?folder=" + encodeURIComponent(folder));
-      const text = JSON.stringify(fresh);
-      const busy = editing || document.activeElement?.matches("input.search");
-      if (text !== lastItems && !busy) { items = fresh; lastItems = text; renderItems(); }
-      else if (!items) { items = fresh; lastItems = text; renderItems(); }
-    } else renderItems();
+    const v = await api("/api/goals");
+    const r = route();
+    let items = S.items, key = "";
+    if (r.page === "goal") {
+      key = r.folder + "\n" + r.goal;
+      items = await api(`/api/goals/items?folder=${enc(r.folder)}&goal=${enc(r.goal)}`);
+    }
+    const sig = JSON.stringify([v, items, key]);
+    S.view = v; S.error = "";
+    if (force || sig !== S.sig) {
+      S.sig = sig; S.items = items; S.itemsKey = key;
+      if (force || !busy()) draw(); else header();
+    }
   } catch (e) {
     $("#dot").className = "dot"; $("#status").textContent = "The engine isn't answering — is eki running?";
   }
 }
+async function act(path, body) {
+  try { await api(path, body); } catch (e) { alertLine(e.message); }
+  S.confirm = ""; S.redo = ""; await refresh(true);
+}
+function alertLine(m) { $("#status").textContent = m; }
 
+// ---- events -------------------------------------------------------------------------------
 document.addEventListener("click", async e => {
-  const t = e.target;
+  const t = e.target, r = route();
   const m = t.closest("#mode button");
-  if (m) { await post("/api/goals/mode", {mode: m.dataset.mode}); return refresh(); }
-  const chip = t.closest(".chip");
-  if (chip) { folder = chip.dataset.folder; store.set("eki.goals.folder", folder); items = null; lastItems = ""; return refresh(); }
-  const r = t.closest("[data-redo]");
-  if (r) { editing = {goal: r.dataset.goal, item: r.dataset.item, part: r.dataset.redo}; return renderItems(); }
-  if (t.closest("[data-cancel]")) { editing = null; return renderItems(); }
-  const tog = t.closest("[data-toggle]");
-  if (tog) { const k = tog.dataset.toggle; open.has(k) ? open.delete(k) : open.add(k); tog.classList.toggle("clamp"); }
+  if (m) return act("/api/goals/mode", {mode: m.dataset.mode});
+  const pz = t.closest("[data-pause]");
+  if (pz) { e.stopPropagation(); return act("/api/goals/pause", {folder: pz.dataset.folder, goal: pz.dataset.goal, paused: pz.dataset.pause === "1"}); }
+  if (t.closest("[data-ask]")) { e.stopPropagation(); S.confirm = t.closest("[data-ask]").dataset.ask; S.redo = ""; return draw(); }
+  if (t.closest("[data-cancel]")) { S.confirm = ""; S.redo = ""; return draw(); }
+  const rm = t.closest("[data-rm]");
+  if (rm) { S.confirm = ""; await fetch(`/api/goals/projects?folder=${enc(rm.dataset.rm)}`, {method: "DELETE"}); return refresh(true); }
+  if (t.closest("[data-delete-all]")) return act("/api/goals/delete", {folder: r.folder, goal: r.goal});
+  if (t.closest("[data-del-item]")) return act("/api/goals/delete", {folder: r.folder, goal: r.goal, item: r.item});
+  const dp = t.closest("[data-del-part]");
+  if (dp) return act("/api/goals/delete", {folder: r.folder, goal: r.goal, item: r.item, part: dp.dataset.delPart});
+  const rs = t.closest("[data-restore]");
+  if (rs) return act("/api/goals/restore", {folder: r.folder, goal: r.goal, item: r.item, part: rs.dataset.restore});
+  const rd = t.closest("[data-redo]");
+  if (rd) { S.redo = `${r.goal}/${r.item}/${rd.dataset.redo}`; S.confirm = ""; return draw(); }
+  if (t.closest("[data-close]")) { location.hash = goalHref(r.folder, r.goal); return; }
+  const op = t.closest("[data-open]");
+  if (op && !t.closest("button")) { S.confirm = ""; S.redo = ""; location.hash = op.dataset.open; }
 });
 document.addEventListener("submit", async e => {
   e.preventDefault();
-  const f = e.target;
-  await post("/api/goals/redo", {folder, goal: f.dataset.goal, item: f.dataset.item, part: f.dataset.part,
-                                 note: f.note.value});
-  editing = null; lastItems = ""; refresh();
+  const f = e.target, r = route();
+  if (f.id === "add") {
+    try { await api("/api/goals/projects", {folder: f.folder.value.trim()}); S.addError = ""; }
+    catch (err) { S.addError = err.message; }
+    return refresh(true);
+  }
+  if (f.matches("form.redo")) return act("/api/goals/redo", {folder: r.folder, goal: r.goal, item: r.item, part: f.dataset.part, note: f.note.value});
 });
 document.addEventListener("input", e => {
-  if (e.target.matches("input.search")) { query = e.target.value; applyFilter(); }
+  if (e.target.id === "filter") { S.query = e.target.value; applyFilter(); }
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && editing) { editing = null; renderItems(); } });
-$("#away").addEventListener("change", async e => { await post("/api/goals/mode", {when: e.target.checked ? "away" : "resources"}); refresh(); });
+document.addEventListener("change", e => {
+  if (e.target.id === "showDeleted") { S.showDeleted = e.target.checked; store.set("eki.goals.showDeleted", S.showDeleted ? "1" : "0"); draw(); }
+  if (e.target.id === "away") act("/api/goals/mode", {when: e.target.checked ? "away" : "resources"});
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (S.redo || S.confirm) { S.redo = ""; S.confirm = ""; return draw(); }
+  const r = route(); if (r.item) location.hash = goalHref(r.folder, r.goal);
+});
+window.addEventListener("hashchange", () => { S.confirm = ""; S.redo = ""; S.query = r0(); refresh(true); });
+const r0 = () => route().page === "goal" ? S.query : "";
 
-refresh();
-setInterval(refresh, 3000);
+refresh(true);
+setInterval(() => refresh(false), 3000);
 </script>
 </body>
 </html>

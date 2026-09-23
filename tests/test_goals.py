@@ -321,7 +321,7 @@ def test_redo_keeps_the_old_files_and_remakes_what_came_from_them(game):
     moved = goals.redo(spec, "npcs", "npc-01", "bio", note="make her older")
     assert moved == ["npcs/npc-01/bio", "npcs/npc-01/portrait", "npcs/npc-01/lines"]
     assert not (d / "bio.md").exists() and not (d / "portrait.png").exists()
-    kept = list((game / ".eki" / "redone").rglob("bio.md"))
+    kept = list((game / ".eki" / "trash").rglob("bio.md"))
     assert kept and kept[0].read_text().startswith("# Mira")                   # nothing is lost
     piece = next(p for p in goals.pieces(goals.load(str(game))) if p.key == "npcs/npc-01/bio")
     assert goals.render(goals.load(str(game)), piece).endswith("This time: make her older")
@@ -355,4 +355,61 @@ async def test_a_redone_piece_is_made_again_with_the_note(eng, game):
     assert asked and asked[0].startswith("Invent character 2")
     assert goals.notes(str(game)) == {}                                         # used once
     assert (game / "npcs/npc-02/bio.md").read_text() == first                  # the fake writes the same
+    await eng.runner.stop()
+
+
+
+def test_a_deleted_item_stays_deleted_until_you_want_it_again(game):
+    made(game, 1)
+    goals.add(str(game))
+    spec = goals.load(str(game))
+    done = goals.delete(spec, "npcs", "npc-01")
+    assert done["moved"] == 3 and not (game / "npcs/npc-01/bio.md").exists()
+    assert not [p for p in goals.backlog() if p.item == "npc-01"]           # not remade
+    row = goals.status(goals.load(str(game)))[0]
+    assert row["deleted"] == 3 and row["total"] == 6 and row["done"] == 0
+    view = goals.items(goals.load(str(game)))[0]["items"][0]
+    assert view["deleted"] and all(p["deleted"] for p in view["parts"])
+    goals.restore(goals.load(str(game)), "npcs", "npc-01")
+    assert [p.part for p in goals.backlog() if p.item == "npc-01"] == ["bio", "portrait", "lines"]
+
+
+def test_deleting_a_part_takes_what_was_made_from_it(game):
+    made(game, 1)
+    goals.add(str(game))
+    goals.delete(goals.load(str(game)), "npcs", "npc-01", "bio")
+    assert not any((game / f"npcs/npc-01/{f}").exists() for f in ("bio.md", "portrait.png", "lines.md"))
+    assert not [p for p in goals.backlog() if p.item == "npc-01"]
+    goals.restore(goals.load(str(game)), "npcs", "npc-01", "portrait")        # just the portrait back…
+    back = [p for p in goals.backlog() if p.item == "npc-01"]
+    assert [(p.part, p.ready) for p in back] == [("portrait", False)]         # …waits for its bio
+
+
+def test_deleting_a_whole_goal_empties_it_and_pauses_it(game):
+    made(game, 1)
+    made(game, 2)
+    goals.add(str(game))
+    done = goals.delete(goals.load(str(game)), "npcs")
+    assert done == {"moved": 6, "paused": True}
+    assert goals.backlog() == []                                               # paused: nothing remade
+    assert goals.status(goals.load(str(game)))[0]["paused"]
+    goals.pause(str(game), "npcs", False)
+    assert len(goals.backlog()) == 9
+    assert len(list((game / ".eki" / "trash").rglob("*.*"))) == 6              # all kept
+
+
+@pytest.mark.asyncio
+async def test_the_view_says_what_each_goal_is_doing(eng, game):
+    goals.add(str(game))
+    Writer.delay = 2.0
+    await eng.shift_tick()
+    await asyncio.sleep(0.2)
+    g = eng.goals_view()["projects"][0]["goals"][0]
+    assert g["state"] == "working" and g["working"] == "npc-01/bio"
+    eng.goals_pause(str(game), "npcs", True)                                  # steps out of it
+    run = await settle(eng.runs, eng._shift_run, timeout=5)
+    assert run["state"] == "cancelled"
+    Writer.delay = 0.0
+    assert eng.goals_view()["projects"][0]["goals"][0]["state"] == "paused"
+    assert (await eng.shift_tick())["why"] == "nothing left to make"
     await eng.runner.stop()

@@ -230,8 +230,8 @@ a thread has to be able to move to another harness without losing its place.
       mid-run, the same request carries on in the row's next choice on
       another subscription — told what was written, in the same copy of the
       folder — and the thread says what moved and why (`eki/failover.py`,
-      docs/routing.md). *Still open:* moving *before* the wall when the
-      quota data says it's about to
+      docs/routing.md). Moving *before* the wall isn't needed: credits
+      carry a run past the plan, and a switch mid-run costs little
 - *Evolve:* merge conflicts, refusals that stopped a child run and
   handoffs that lost something are recorded as outcomes, and the policy and
   the summary rule are adjusted from them, visibly.

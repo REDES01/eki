@@ -137,9 +137,9 @@ screen (`docs/claude-code.md`).
 
 Open right now:
 
-- [ ] Commit the working tree: image follow-up edits, ComfyUI workflows as
+- [x] Commit the working tree: image follow-up edits, ComfyUI workflows as
       models (`eki/workflow.py`), gallery, picture sorting mode, app icon,
-      Claude Code panels + eki's in-process tools + the MCP registry
+      Claude Code panels + eki's in-process tools + the MCP registry *(eki: self/a92130fc)*
 - [ ] Confirm the hold-then-release swipe fix on a real trackpad
 - [ ] Cut 0.2.0 with the icon in the release
 

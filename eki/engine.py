@@ -2134,17 +2134,23 @@ class Engine(SelfLoop):
         `/name rest` (or `$name`) hands the skill over outright. Otherwise the
         model sees the names and descriptions, and answering `[[skill:name]]`
         asks for one: that start is held back, and the turn is asked again
-        with the skill's instructions. The body is only ever sent when used."""
+        with the skill's instructions. The body is only ever sent when used.
+        In a project, its `.eki/skills/` sit on top of the global set and its
+        `AGENTS.md` goes first, as the CLIs would read it themselves."""
+        folder = str(kw.get("cwd") or "")
         try:
-            catalog = await asyncio.to_thread(skills_mod.catalog_prompt, "local")
+            catalog = await asyncio.to_thread(skills_mod.catalog_prompt, "local", folder)
+            standing = await asyncio.to_thread(skills_mod.standing_prompt, folder)
         except OSError:
-            catalog = ""
+            catalog, standing = "", ""
+        if standing:
+            history = [Message("system", standing)] + history
         if not catalog or not history:
             async for chunk in backend.stream(history, **kw):
                 yield chunk
             return
         last = history[-1]
-        chosen, rest = skills_mod.invoked(last.content) if last.role == "user" else (None, "")
+        chosen, rest = skills_mod.invoked(last.content, "local", folder) if last.role == "user" else (None, "")
         if chosen is not None:
             meta["skill"] = chosen["name"]
             yield {"kind": "activity", "text": f"Using the {chosen['name']} skill"}  # type: ignore[misc]
@@ -2201,7 +2207,7 @@ class Engine(SelfLoop):
             if skills_mod.could_be_pick(held) and not skills_mod.PICK_RE.match(held):
                 continue
             deciding = False
-            pick = skills_mod.picked(held)
+            pick = skills_mod.picked(held, "local", folder)
             if pick is None:
                 yield held
                 continue

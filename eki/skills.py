@@ -623,9 +623,89 @@ def boot() -> Dict[str, Any]:
 
 # ---- the loader for backends that have none ------------------------------------
 
-def catalog_prompt(backend: str = "local") -> str:
+# ---- the project's layer -----------------------------------------------------------
+
+#: a project's own skills and standing context, on top of the global set
+PROJECT_SKILLS = Path(".eki") / "skills"
+PROJECT_CONTEXT = "AGENTS.md"
+CONTEXT_LIMIT = 24_000
+
+
+def project_root(folder: str) -> Optional[Path]:
+    """The project a run's folder belongs to: the nearest folder up that has
+    `.eki/` or `.git` — a worktree's `.git` file counts, so a run in eki's
+    copy sees the copy's layer. Never your home folder, whose `.eki` is the
+    global store; a folder in neither is its own project."""
+    if not folder:
+        return None
+    try:
+        start = Path(folder).expanduser().resolve()
+    except OSError:
+        return None
+    if not start.is_dir():
+        return None
+    home = Path.home().resolve()
+    for d in (start, *start.parents):
+        if d == home or d == Path(d.anchor):
+            break
+        if (d / ".eki").is_dir() or (d / ".git").exists():
+            return d
+    return start if start != home else None
+
+
+def project_skills(folder: str) -> List[Dict[str, Any]]:
+    """The skills in a project's `.eki/skills/`. They are the project's, in
+    its repo: no sidecar, no views, on for every backend."""
+    root = project_root(folder)
+    base = root / PROJECT_SKILLS if root else None
+    if base is None or not base.is_dir():
+        return []
+    try:
+        if base.resolve() == STORE.resolve():
+            return []
+    except OSError:
+        return []
+    out = []
+    for p in sorted(base.iterdir()):
+        if not p.is_dir() or p.name.startswith("."):
+            continue
+        s = read(p)
+        if s:
+            s.update({"backends": list(BACKENDS), "enabled": True, "origin": "project",
+                      "project": str(root)})
+            out.append(s)
+    return out
+
+
+def layered(backend: str = "local", folder: str = "") -> List[Dict[str, Any]]:
+    """The global skills on for a backend, with the project's on top: a
+    project skill of the same name replaces the global one there."""
+    mine = project_skills(folder)
+    taken = {k for s in mine for k in (s["folder"], s["name"])}
+    under = [s for s in enabled_for(backend) if s["folder"] not in taken and s["name"] not in taken]
+    return under + mine
+
+
+def standing_prompt(folder: str) -> str:
+    """The project's `AGENTS.md`, for a model with no loader of its own —
+    Codex reads it itself; a local model is handed it here."""
+    root = project_root(folder)
+    if root is None:
+        return ""
+    try:
+        text = (root / PROJECT_CONTEXT).read_text(errors="replace").strip()
+    except OSError:
+        return ""
+    if not text:
+        return ""
+    if len(text) > CONTEXT_LIMIT:
+        text = text[:CONTEXT_LIMIT] + "\n\n[…the rest of AGENTS.md is cut here]"
+    return f"Standing instructions for this project ({root / PROJECT_CONTEXT}):\n\n{text}"
+
+
+def catalog_prompt(backend: str = "local", folder: str = "") -> str:
     """The system-prompt section a model without a skill loader gets."""
-    skills = enabled_for(backend)
+    skills = layered(backend, folder)
     if not skills:
         return ""
     lines = [f"- {s['name']}: {s['description']}" for s in skills]
@@ -636,23 +716,24 @@ def catalog_prompt(backend: str = "local") -> str:
             "then answer. If none fits, answer normally and do not mention skills.")
 
 
-def invoked(prompt: str, backend: str = "local") -> Tuple[Optional[Dict[str, Any]], str]:
+def invoked(prompt: str, backend: str = "local",
+            folder: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
     """`/name rest` or `$name rest` naming an enabled skill: the skill, and the rest."""
     m = INVOKE_RE.match(prompt or "")
     if not m:
         return None, prompt
     name = m.group(1)
-    for s in enabled_for(backend):
+    for s in layered(backend, folder):
         if name in (s["folder"], s["name"]):
             return s, prompt[m.end():].strip()
     return None, prompt
 
 
-def picked(text: str, backend: str = "local") -> Optional[Dict[str, Any]]:
+def picked(text: str, backend: str = "local", folder: str = "") -> Optional[Dict[str, Any]]:
     m = PICK_RE.match(text or "")
     if not m:
         return None
-    for s in enabled_for(backend):
+    for s in layered(backend, folder):
         if m.group(1) in (s["folder"], s["name"]):
             return s
     return None
@@ -678,5 +759,6 @@ def loaded_prompt(skill: Dict[str, Any]) -> str:
     files = sorted(str(p.relative_to(folder)) for p in folder.rglob("*")
                    if p.is_file() and p.name != "SKILL.md" and ".git" not in p.parts)[:40]
     extra = ("\n\nFiles that come with it (in " + str(folder) + "): " + ", ".join(files)) if files else ""
-    used(skill["folder"])
+    if not skill.get("project"):
+        used(skill["folder"])
     return f"Use the skill \"{skill['name']}\" for this request. Its instructions:\n\n{body}{extra}"

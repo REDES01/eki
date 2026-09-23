@@ -232,3 +232,64 @@ def test_no_skills_no_change(home):
     b = FakeBackend([["plain"]])
     out, _ = _run(b, [Message("user", "hi")])
     assert out == ["plain"] and len(b.seen[0]) == 1
+
+
+# ---- the project's layer ------------------------------------------------------
+
+def _run_in(backend, history, folder):
+    from eki.engine import Engine
+    meta = {}
+
+    async def go():
+        return [c async for c in Engine._skilled(None, backend, history, {"cwd": str(folder)}, meta)]
+    return asyncio.run(go()), meta
+
+
+def test_project_skills_sit_on_top_of_the_global_set(home):
+    skills.put("haiku", description="global poems", body="Global body.")
+    skills.put("limerick", description="funny poems", body="x")
+    repo = home / "game"
+    (repo / ".git").mkdir(parents=True)
+    _write(repo / ".eki" / "skills" / "haiku", "haiku", "this game's poems", "Project body.")
+    _write(repo / ".eki" / "skills" / "npc", "npc", "write an NPC's lines")
+    sub = repo / "src"
+    sub.mkdir()
+    names = {s["name"]: s for s in skills.layered("local", str(sub))}
+    assert set(names) == {"haiku", "limerick", "npc"}
+    assert names["haiku"]["description"] == "this game's poems"
+    assert names["npc"]["project"] == str(repo.resolve())
+    assert skills.invoked("/npc a guard", "local", str(sub))[0]["name"] == "npc"
+    assert skills.invoked("/npc a guard")[0] is None            # not outside the project
+    assert "Project body." in skills.loaded_prompt(skills.picked("[[skill:haiku]]", "local", str(repo)))
+    assert "npc" not in skills._meta()                           # no sidecar for a project skill
+
+
+def test_project_agents_md_and_skills_reach_a_local_model(home):
+    repo = home / "game"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("Villagers never swear.\n")
+    _write(repo / ".eki" / "skills" / "npc", "npc", "write an NPC's lines", "Two lines each.")
+    b = FakeBackend([["[[skill:npc]]"], ["Hello, traveller."]])
+    out, meta = _run_in(b, [Message("user", "a blacksmith")], repo)
+    assert meta["skill"] == "npc"
+    assert "npc" in b.seen[0][0].content                  # the catalog
+    assert "Villagers never swear." in b.seen[0][1].content
+    assert "Villagers never swear." in b.seen[1][0].content and "Two lines each." in b.seen[1][-2].content
+
+
+def test_agents_md_alone_without_any_skills(home):
+    repo = home / "notes"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("British spelling.")
+    b = FakeBackend([["ok"]])
+    out, _ = _run_in(b, [Message("user", "hi")], repo)
+    assert out == ["ok"] and "British spelling." in b.seen[0][0].content
+
+
+def test_home_folder_is_never_a_project(home, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _write(home / ".eki" / "skills" / "x", "x", "global store, not a project")
+    work = home / "scratch"
+    work.mkdir()
+    assert skills.project_root(str(home)) is None
+    assert skills.project_skills(str(work)) == []

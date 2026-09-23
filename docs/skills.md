@@ -39,6 +39,22 @@ Gemini CLI all read. eki keeps the only copy; each backend gets a view.
 backend, an editor, import, and below them what Claude Code alone sees in
 that folder (plugins, project skills, synced ones).
 
+## A project's own
+
+A folder can carry skills of its own in `.eki/skills/` (same format, kept in
+the project's repo), and standing instructions in its `AGENTS.md`. The
+project is the nearest folder up from the run's folder with `.eki/` or
+`.git` — never your home folder, whose `.eki` is the global store.
+
+- **Local / API models** — eki layers them on: the project's skills join
+  the list (one with the same name as a global skill replaces it there), and
+  the project's `AGENTS.md` is handed over as a system message. A project
+  skill has no sidecar: it is on for every backend and its uses aren't
+  counted.
+- **Claude Code, Codex, Gemini CLI** — not yet. Codex reads `AGENTS.md`
+  itself; linking `.eki/skills/` into the CLIs' project folders waits for
+  Stage 5's projects and the one standing context.
+
 ## Command line
 
 ```

@@ -1035,16 +1035,30 @@ struct PermissionNeedCard: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text("Open System Settings › Privacy & Security › \(pane.title), turn on "
-                 + "“\(need.program.hasSuffix("eki-hid") ? "eki-hid" : "claude")” (or “Python”) — or add the "
-                 + "program with “+” if it isn't listed — then ask again.")
+            Text(need.program.hasSuffix("eki.app")
+                 ? "eki needs \(pane.title) and Accessibility to see and use the screen. Click “Ask macOS” — "
+                   + "macOS adds “eki” to both lists — switch it on in each, then ask again."
+                 : "Open System Settings › Privacy & Security › \(pane.title), turn on "
+                   + "“\(need.program.hasSuffix("eki-hid") ? "eki-hid" : "claude")” — or add the "
+                   + "program with “+” if it isn't listed — then ask again.")
                 .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                Button("Open \(pane.title) settings") {
-                    if let url = URL(string: pane.url) { NSWorkspace.shared.open(url) }
+                if need.program.hasSuffix("eki.app") {
+                    Button("Ask macOS") {
+                        Task { await model.requestScreenAccess() }
+                    }
+                    .buttonStyle(AccentButton())
+                    Button("Open \(pane.title) settings") {
+                        if let url = URL(string: pane.url) { NSWorkspace.shared.open(url) }
+                    }
+                    .buttonStyle(GhostButton())
+                } else {
+                    Button("Open \(pane.title) settings") {
+                        if let url = URL(string: pane.url) { NSWorkspace.shared.open(url) }
+                    }
+                    .buttonStyle(AccentButton())
                 }
-                .buttonStyle(AccentButton())
                 if !need.program.isEmpty {
                     Button("Show the program in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: need.program)])

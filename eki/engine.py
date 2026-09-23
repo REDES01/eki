@@ -2699,9 +2699,13 @@ class Engine:
                     elif kind in ("thinking", "mcp"):
                         yield {"kind": kind, **{k: v for k, v in ev.items() if k != "kind"}}
                     elif kind == "needs_permission":
+                        from . import launcher as launcher_mod
+                        # under the eki app, it's eki macOS must let in — not the tool below it
+                        program = str(launcher_mod.APP) if launcher_mod.running_under() else \
+                            (mcpbridge._helper() or "") if "eki-hid" in ev.get("text", "") \
+                            else self.claude_binary()
                         yield {"kind": kind, "what": ev["what"], "text": ev.get("text", ""),
-                               "program": (mcpbridge._helper() or "") if "eki-hid" in ev.get("text", "")
-                               else self.claude_binary()}
+                               "program": program}
                     elif kind == "checkpoint":
                         checkpoint = ev["uuid"]
                     elif kind == "cancel":

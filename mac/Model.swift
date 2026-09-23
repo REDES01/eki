@@ -610,6 +610,16 @@ final class AppModel: ObservableObject {
         return s
     }
 
+    /// macOS puts "eki" in Screen Recording and Accessibility with its own prompts.
+    func requestScreenAccess() async {
+        do {
+            try await client.requestScreenAccess()
+            say("macOS will ask — switch eki on in both lists, then ask again")
+        } catch {
+            say(plainError(error))
+        }
+    }
+
     func say(_ text: String) {
         notice = text
         Task { try? await Task.sleep(for: .seconds(4)); if notice == text { notice = "" } }

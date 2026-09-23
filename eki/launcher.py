@@ -87,6 +87,23 @@ LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/Laun
               "/Support/lsregister")
 
 
+def running_under() -> bool:
+    """This engine was started by the eki app — macOS asks in eki's name."""
+    import os
+    return bool(os.environ.get("EKI_LAUNCHER")) and current()
+
+
+def request_access() -> bool:
+    """Ask macOS, as eki, for Screen Recording and Accessibility: its prompts
+    add "eki" to both lists. Launched through Launch Services (`open -n`) so
+    the asking app is eki itself, not whatever ran this."""
+    if not current():
+        return False
+    out = subprocess.run(["open", "-n", "-a", str(APP), "--args", "--request-access"],
+                         capture_output=True, text=True, timeout=30)
+    return out.returncode == 0
+
+
 def register() -> None:
     """Tell macOS the app is here: it lives in a hidden folder nothing scans,
     and without this, Privacy & Security shows it without its icon."""

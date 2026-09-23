@@ -422,6 +422,14 @@ def cmd_agent(args) -> int:
         print(agent.uninstall())
     elif args.action == "restart":
         print(agent.restart())
+    elif args.action == "access":
+        from . import launcher
+        if launcher.request_access():
+            print("macOS will ask for Screen Recording and Accessibility for “eki” — switch it on in "
+                  "both, then `eki agent restart`")
+        else:
+            print("the eki app isn't built — `eki agent install` builds it", file=sys.stderr)
+            return 1
     else:
         print(agent.status())
     return 0
@@ -797,7 +805,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     g = sub.add_parser("agent", help="start the engine at login")
     g.add_argument("action", nargs="?", default="status",
-                   choices=["install", "uninstall", "restart", "status"])
+                   choices=["install", "uninstall", "restart", "status", "access"])
 
     sw = sub.add_parser("self", help="have eki change its own source, as a proposal")
     sw.add_argument("request", nargs="?", default="")

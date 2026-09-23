@@ -7,7 +7,19 @@
 // Code, Codex, a goal's agent, the model servers). This small app starts the
 // engine as its child and waits for it, so the name in those prompts, and in
 // System Settings → Privacy & Security, is "eki". Built by eki/launcher.py.
+import ApplicationServices
+import CoreGraphics
 import Foundation
+
+// `open -n eki.app --args --request-access`: ask macOS for the screen, as eki —
+// the prompts put "eki" in Screen Recording and Accessibility, ready to switch on
+if CommandLine.arguments.dropFirst().first == "--request-access" {
+    let screen = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+    let ask = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    let input = AXIsProcessTrustedWithOptions(ask)
+    print("screen=\(screen) accessibility=\(input)")
+    exit(0)
+}
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard !args.isEmpty else {

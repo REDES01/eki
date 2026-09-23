@@ -449,6 +449,12 @@ actor EngineClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    /// Ask macOS, as eki, for Screen Recording and Accessibility.
+    func requestScreenAccess() async throws {
+        struct R: Codable { let asked: Bool }
+        _ = try await decode(R.self, "POST", "api/access/request")
+    }
+
     // ---- work -----------------------------------------------------------
 
     /// Start a run. Returns as soon as the engine has written the question.

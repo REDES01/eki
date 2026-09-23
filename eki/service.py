@@ -601,6 +601,15 @@ def routing_forget(what: str) -> Any:
     return {"removed": gone}
 
 
+@app.post("/api/access/request")
+def access_request() -> Any:
+    """Ask macOS, as eki, for Screen Recording and Accessibility (eki/launcher.py)."""
+    from . import launcher
+    if not launcher.request_access():
+        raise HTTPException(409, "the engine isn't running under the eki app — `eki agent install` builds it")
+    return {"asked": True, "app": str(launcher.APP)}
+
+
 @app.get("/api/goals")
 def goals_view() -> Any:
     return engine().goals_view()

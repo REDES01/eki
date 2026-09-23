@@ -80,6 +80,8 @@ DEFAULTS: Dict[str, Any] = {
     "background_cpu": 0.6,
     "background_gpu": 0.35,
     "background_reserve": 0.3,
+    #: on a laptop, background work only while it's plugged in
+    "background_on_battery": False,
     #: a fault in eki's own code (eki/observe.py): "propose" — eki writes a
     #: fix as an `eki self` proposal (never applied), or "off"
     "self_fix": "propose",

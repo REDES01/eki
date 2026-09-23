@@ -100,7 +100,9 @@ def test_the_gate_waits_for_memory_cpu_and_gpu(monkeypatch):
     snap = memory.Snapshot(total_gb=64, available_gb=30, used_gb=30, level=60)
     monkeypatch.setattr(memory, "snapshot", lambda: snap)
     monkeypatch.setattr(shift, "cpu_busy", lambda exclude=(): 0.1)
+    monkeypatch.setattr(shift, "gpu_busy_others", lambda exclude=(), interval=1.0: None)
     monkeypatch.setattr(shift, "gpu_busy", lambda: 0.0)
+    monkeypatch.setattr(shift, "on_battery", lambda: False)
     assert shift.check(model_gb=20, model_loaded=False).ok
     assert "needs 40 GB" in shift.check(model_gb=40, model_loaded=False).why
     assert shift.check(model_gb=40, model_loaded=True).ok                  # already there
@@ -115,6 +117,7 @@ def test_the_gate_waits_for_memory_cpu_and_gpu(monkeypatch):
 
 
 def test_away_mode_waits_for_nobody_at_the_keyboard(monkeypatch):
+    monkeypatch.setattr(shift, "on_battery", lambda: False)
     monkeypatch.setattr(shift, "idle_seconds", lambda: 12.0)
     assert "you're here" in shift.check(when="away").why
 
@@ -275,3 +278,18 @@ async def test_off_is_off_and_no_room_means_waiting(eng, game, monkeypatch):
     assert state == {**state, "state": "waiting", "why": "the GPU is 80% busy"}
     assert not eng._shift_run
     await eng.runner.stop()
+
+
+def test_only_on_power_unless_you_say_otherwise(monkeypatch):
+    monkeypatch.setattr(shift, "on_battery", lambda: True)
+    assert shift.check().why == "on battery — waiting for power"
+    assert shift.must_stop().why == "on battery — waiting for power"      # a piece in progress stops
+
+
+def test_the_gpu_counts_other_apps_not_ekis_own_model(monkeypatch):
+    samples = iter([{1: 0, 2: 0}, {1: 900_000_000, 2: 100_000_000}])    # pid 1 is eki's model
+    monkeypatch.setattr(shift, "gpu_times", lambda: next(samples))
+    monkeypatch.setattr(shift.time, "sleep", lambda s: None)
+    ticks = iter([0.0, 1.0])
+    monkeypatch.setattr(shift.time, "monotonic", lambda: next(ticks))
+    assert shift.gpu_busy_others(exclude=[1]) == pytest.approx(0.1)

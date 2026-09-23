@@ -7,9 +7,11 @@ work goes on. It steps back when something needs them:
 
 - memory: a piece starts only if its model fits in what's free, and one in
   progress is cancelled (and redone later) if macOS reports memory pressure;
-- CPU and GPU: eki's own model makes the GPU look busy while it works, so
-  the check happens *between* pieces, when that model is idle — other apps
-  (a game, a build, an export) using a lot means the next piece waits.
+- CPU and GPU: what *other* processes use — eki's own model servers are
+  left out (the GPU from each Metal client's own counter), checked between
+  pieces — a game, a build or an export using a lot means the next piece waits;
+- power: on a laptop, only while it's plugged in (a piece in progress stops
+  when it's unplugged).
 
 `when: away` is for anyone who'd rather it only ran with nobody at the
 keyboard. Your own requests to eki always come first.
@@ -64,6 +66,48 @@ def gpu_busy() -> Optional[float]:
     return max(found) / 100 if found else None
 
 
+def gpu_times() -> Optional[dict]:
+    """{pid: GPU nanoseconds so far}, from each Metal client's own counter
+    (no admin rights needed), or None where the machine doesn't say."""
+    out = _run(["ioreg", "-r", "-c", "AGXDeviceUserClient", "-l"], timeout=5)
+    if "IOUserClientCreator" not in out:
+        return None
+    times: dict = {}
+    for entry in out.split("+-o ")[1:]:
+        who = re.search(r'"IOUserClientCreator"\s*=\s*"pid (\d+)', entry)
+        if not who:
+            continue
+        spent = sum(int(v) for v in re.findall(r'"accumulatedGPUTime"=(\d+)', entry))
+        pid = int(who.group(1))
+        times[pid] = times.get(pid, 0) + spent
+    return times
+
+
+def gpu_busy_others(exclude: Iterable[int] = (), interval: float = 1.0) -> Optional[float]:
+    """How much of the GPU other processes used over the last `interval`,
+    0..1 — eki's own model left out, so its work never makes it wait."""
+    skip = set(int(p) for p in exclude if p)
+    first = gpu_times()
+    if first is None:
+        return None
+    t0 = time.monotonic()
+    time.sleep(interval)
+    second = gpu_times() or {}
+    wall = (time.monotonic() - t0) * 1e9
+    used = sum(max(0, n - first.get(pid, n)) for pid, n in second.items() if pid not in skip)
+    return min(1.0, used / wall) if wall > 0 else None
+
+
+def on_battery() -> Optional[bool]:
+    """True on battery, False on AC power, None where there's no battery to ask."""
+    out = _run(["pmset", "-g", "batt"])
+    if "Battery Power" in out:
+        return True
+    if "AC Power" in out:
+        return False
+    return None
+
+
 def cpu_busy(exclude: Iterable[int] = ()) -> Optional[float]:
     """How much of all cores other processes are using, 0..1."""
     out = _run(["ps", "-A", "-o", "pid=,%cpu="])
@@ -86,8 +130,11 @@ def cpu_busy(exclude: Iterable[int] = ()) -> Optional[float]:
 
 def check(*, model_gb: float = 0.0, model_loaded: bool = True, when: str = "resources",
           exclude_pids: Iterable[int] = (), cpu_limit: float = CPU_BUSY,
-          gpu_limit: float = GPU_BUSY, measure_gpu: bool = True) -> Gate:
+          gpu_limit: float = GPU_BUSY, measure_gpu: bool = True,
+          on_battery_ok: bool = False) -> Gate:
     """May the next piece start? Checked between pieces."""
+    if not on_battery_ok and on_battery():
+        return Gate(False, "on battery — waiting for power")
     if when == "away":
         idle = idle_seconds()
         if idle is not None and idle < AWAY_SECONDS:
@@ -101,14 +148,18 @@ def check(*, model_gb: float = 0.0, model_loaded: bool = True, when: str = "reso
     if cpu is not None and cpu > cpu_limit:
         return Gate(False, f"other apps are using {round(cpu * 100)}% of the CPU")
     if measure_gpu:
-        gpu = gpu_busy()
+        gpu = gpu_busy_others(exclude_pids)
+        if gpu is None:
+            gpu = gpu_busy()                    # no per-app counters: the whole GPU
         if gpu is not None and gpu > gpu_limit:
             return Gate(False, f"the GPU is {round(gpu * 100)}% busy")
     return Gate(True)
 
 
-def must_stop() -> Gate:
-    """Checked while a piece is running: only memory can't wait."""
+def must_stop(on_battery_ok: bool = False) -> Gate:
+    """Checked while a piece is running: memory can't wait, nor a battery."""
+    if not on_battery_ok and on_battery():
+        return Gate(False, "on battery — waiting for power")
     snap = memory.snapshot()
     if snap.pressure != "normal":
         return Gate(False, f"memory pressure is {snap.pressure}")

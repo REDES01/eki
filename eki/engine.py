@@ -2992,7 +2992,7 @@ class Engine:
             if self._asks_running():
                 self._shift_step_out("your request comes first")
             else:
-                held = shift_mod.must_stop()
+                held = shift_mod.must_stop(bool(self.settings.get("background_on_battery", False)))
                 if not held.ok:
                     self._shift_step_out(held.why)
                     await self._shift_unload(held.why)
@@ -3032,8 +3032,10 @@ class Engine:
             model_loaded=bool(local and local.running),
             when=str(self.settings.get("background_when", "resources")), exclude_pids=pids,
             cpu_limit=float(self.settings.get("background_cpu", shift_mod.CPU_BUSY)),
-            gpu_limit=float(self.settings.get("background_gpu", shift_mod.GPU_BUSY)))
+            gpu_limit=float(self.settings.get("background_gpu", shift_mod.GPU_BUSY)),
+            on_battery_ok=bool(self.settings.get("background_on_battery", False)))
         if not gate.ok:
+            self._awake.let_go()
             if "memory" in gate.why:
                 await self._shift_unload(gate.why)
             self._shift_state = {"state": "waiting", "why": gate.why, "at": now, "next": piece.key}

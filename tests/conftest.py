@@ -21,6 +21,9 @@ def private_skills(tmp_path, monkeypatch):
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")
+    from eki import table, capacity
+    monkeypatch.setattr(table, "PATH", root / "eki" / "routing.json")
+    monkeypatch.setattr(capacity, "PATH", root / "eki" / "capacity.json")
     from eki import watch
     monkeypatch.setattr(watch, "HOME", root / "eki" / "watch")
     monkeypatch.setattr(watch, "STATE", root / "eki" / "watch" / "state.json")

@@ -43,6 +43,9 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import table as table_mod
+from . import capacity as capacity_mod
+from . import prefs as prefs_mod
 from . import watch as watch_mod
 from . import observe as observe_mod
 from . import workspace as workspace_mod
@@ -583,6 +586,12 @@ class Engine:
             return
 
         cid = run["conversation_id"]
+        talk = prefs_mod.addressed(run["prompt"], self._route_names(), has_folder=bool(run["cwd"])) \
+            if cid and not run["requested"] and not run["images"] else ""
+        if talk:
+            async for piece in self._routing_talk(run, cid, talk):
+                yield piece
+            return
         shown = self._picture_before(run)
         label = await self._label(run, after_image=bool(shown))
         # "claude" asks for the provider; "claude:opus" for one of its models
@@ -601,14 +610,22 @@ class Engine:
             escalate = bool({"corrected", "recovered"} & set(learn_mod.signals(run["prompt"], before)))
         except Exception:                           # noqa: BLE001
             escalate = False
+        # the routing table: which row this is, and that row's choices
+        row, row_why = table_mod.row_for(label.task, label.difficulty, escalate, run["prompt"],
+                                         table_mod.load().get("examples") or {})
+        cells = self.routing_table(cid)
         need = Need(repo=bool(run["cwd"]), escalate=escalate,
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
                     # research means looking things up: a provider with the web
                     web=label.task == "research" and not requested,
                     backend=requested or None,
-                    task=label.task, difficulty=label.difficulty)
+                    task=label.task, difficulty=label.difficulty,
+                    row=row, row_title=table_mod.TITLES.get(row, row),
+                    targets=(cells.get(row) or {}).get("targets") or [])
         choice = self.router.choose(need)
+        if requested and cid:
+            self._learn_override(need, requested, cid)
         if choice.backend is None and wants_harness and not run["cwd"]:
             # no harness can take it (none set up, or all out of quota): a
             # bare model is better than no answer, and says so in the reason
@@ -636,7 +653,7 @@ class Engine:
         if paused:
             reason += "; paused a measurement to make way"
         model = self._local_for(choice.backend.key)
-        meta_label = label.to_json()
+        meta_label = {**label.to_json(), "row": row, "row_why": row_why}
         if model is not None and not model.running:
             reason += f"; starting {model.label}"
         yield {"backend": choice.backend.key, "reason": reason}
@@ -828,6 +845,330 @@ class Engine:
                 task = asyncio.create_task(self._learn(seen, cid, backend.key))
                 self._side_tasks.add(task)
                 task.add_done_callback(self._side_tasks.discard)
+
+    # ---- the routing table (eki/table.py, docs/routing.md) ------------------
+
+    def _route_names(self) -> List[str]:
+        words: List[str] = []
+        for ws in self._provider_words().values():
+            words += ws
+        return words
+
+    def _provider_words(self) -> Dict[str, List[str]]:
+        """The words that name each provider, for reading "never use Codex"."""
+        out: Dict[str, List[str]] = {}
+        for b in self.backends:
+            ws = [b.key, b.key.replace("_", " "), (b.info.label or "").lower()]
+            kind = b.info.kind
+            local = bool(self.options.get(b.key, {}).get("local_model")) or kind in ("mlx", "llamacpp")
+            if kind == "claude_code":
+                ws += ["claude", "claude code", "opus", "fable", "sonnet", "haiku"]
+            elif kind == "codex" and not local:
+                ws += ["codex", "openai", "chatgpt", "gpt"]
+            elif local:
+                ws += ["local", "local model", "qwen"]
+            elif kind in ("anthropic_api", "openai_compat"):
+                ws += ["api", "api key", "api keys"]
+            if b.info.capabilities.images_out and not b.info.capabilities.text:
+                ws += ["image model", "flux", "comfyui"]
+            out[b.key] = [w for w in dict.fromkeys(ws) if w]
+        return out
+
+    def _subscriptions(self) -> List[Backend]:
+        """Subscriptions, the one with the most room first (eki/capacity.py);
+        until room is known, the one being spent slowest against its window."""
+        subs = [b for b in self.backends if b.info.kind in ("claude_code", "codex")
+                and not self.options.get(b.key, {}).get("local_model") and not self.policy.is_disabled(b.key)]
+        data = capacity_mod.load()
+        paces = self.quota.pace() if self.quota else {}
+        rooms = {}
+        for b in subs:
+            reading = (self.quota.latest.get(b.info.quota_source or "") if self.quota else None)
+            rooms[b.key] = capacity_mod.room(data, b.info.quota_source or "", reading.windows)["per_hour"] \
+                if reading is not None else None
+        if subs and all(rooms.get(b.key) is not None for b in subs):
+            return sorted(subs, key=lambda b: -rooms[b.key])
+
+        def pace(b: Backend) -> float:
+            p = paces.get(b.info.quota_source or "")
+            return p.factor if p is not None else 1.0
+        return sorted(subs, key=lambda b: (pace(b), self.policy.rank(b.key)))
+
+    def _base_table(self) -> Dict[str, List[str]]:
+        subs = [b.key for b in self._subscriptions()]
+        local = next((b.key for b in self.backends if b.info.kind == "codex"
+                      and self.options.get(b.key, {}).get("local_model")), None) or \
+            next((b.key for b in self.backends if b.info.kind in ("mlx", "llamacpp") and b.info.capabilities.text
+                  and b.key not in self.router.reserved), None)
+        images = [b.key for b in self.backends if b.info.capabilities.images_out and not b.info.capabilities.text]
+        web = [b.key for b in self.backends if b.info.capabilities.web]
+        metered = [b.key for b in self.backends if b.info.kind in ("anthropic_api", "openai_compat")
+                   and priors.class_of(b.info.kind, self.options.get(b.key, {}), b.info.capabilities) == "frontier_api"]
+        return table_mod.defaults(subs, local, images, web, metered)
+
+    def routing_table(self, thread: str = "") -> Dict[str, Dict[str, Any]]:
+        return table_mod.effective(self._base_table(), table_mod.load(), thread)
+
+    def _target_labels(self) -> "table_mod.Labels":
+        names = {b.key: b.info.label or b.key for b in self.backends}
+        ladders = {b.key: watch_mod.ladder(b.key) for b in self.backends}
+        out = table_mod.Labels(names, ladders)
+        for b in self.backends:
+            if watch_mod.ladder(b.key):
+                for role in ("default", "top", "fast"):
+                    t = f"{b.key}@{role}"
+                    out[t] = table_mod.label_of(t, names, ladders)
+            else:
+                out[b.key] = table_mod.label_of(b.key, names, ladders)
+        return out
+
+    def _learn_override(self, need: Need, requested: str, cid: str) -> None:
+        """You picked a model by name where the table would have picked
+        another: noted, and after the same pick for the same row in a few
+        threads, the row changes — said, and undoable."""
+        try:
+            auto = self.router.choose(Need(**{**need.__dict__, "backend": None}))
+            if auto.backend is None or auto.backend.key == requested or need.row == "picture":
+                return
+            rules = table_mod.load()
+            entry = {"row": need.row, "from": auto.backend.key, "to": requested,
+                     "conversation": cid, "at": int(time.time())}
+            rules["overrides"] = (rules.get("overrides") or [])[-299:] + [entry]
+            observe_mod.note("friction", signal="override", row=need.row, backend=auto.backend.key,
+                             to=requested, conversation=cid)
+            if table_mod.learnable(rules["overrides"], rules, need.row, requested):
+                cell = self.routing_table().get(need.row) or {}
+                first = f"{requested}@default" if watch_mod.ladder(requested) else requested
+                rest = [t for t in cell.get("targets") or [] if table_mod.parse_target(t)[0] != requested]
+                title = table_mod.TITLES.get(need.row, need.row)
+                said = f"you picked {requested} for {title.lower()} in {table_mod.LEARN_AFTER} threads"
+                table_mod.set_row(rules, need.row, [first] + rest, "learned", said)
+                observe_mod.note("history", what="routing learned", row=need.row, to=requested, why=said)
+                if self.settings.get("notify_learned", True):
+                    asyncio.create_task(self._notify(f"Learned: {title} goes to {requested} first",
+                                                     f"{said}. Undo: eki routing undo {need.row}"))
+            table_mod.save(rules)
+        except Exception:                           # noqa: BLE001
+            pass
+
+    async def _routing_talk(self, run: Dict[str, Any], cid: str, mode: str
+                            ) -> AsyncIterator[Union[str, Dict[str, Any]]]:
+        """A message for eki about routing, answered by eki in the thread."""
+        yield {"backend": "eki", "reason": "a message about routing, answered by eki"}
+        if mode == "show":
+            text = self.routing_text(cid)
+        elif mode == "why":
+            text = self._why_last(cid, run)
+        else:
+            text = await self._routing_edit(run, cid)
+        self.store.add_turn(cid, "assistant", text, "eki", "routing", meta={"run": run["id"], "routing": mode})
+        yield text
+
+    def _why_last(self, cid: str, run: Dict[str, Any]) -> str:
+        turns = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)]
+        last = next((t for t in reversed(turns) if t["role"] == "assistant" and t.get("backend")
+                     and t["backend"] != "eki"), None)
+        if last is None:
+            return "Nothing in this thread was routed yet."
+        try:
+            meta = json.loads(last.get("meta") or "{}")
+        except (TypeError, ValueError):
+            meta = {}
+        lab = meta.get("label") or {}
+        out = [f"It went to **{last['backend']}** — {last.get('reason') or 'no reason recorded'}."]
+        if lab.get("row"):
+            out.append(f"The prompt check read it as {lab.get('task')} · {lab.get('difficulty')} "
+                       f"({lab.get('row_why') or ''}), so it was in the row "
+                       f"**{table_mod.TITLES.get(lab['row'], lab['row'])}**.")
+            cell = self.routing_table(cid).get(lab["row"]) or {}
+            labels = self._target_labels()
+            out.append("That row now: " + " → ".join(labels.get(t, t) for t in cell.get("targets") or [])
+                       + (f" ({cell['source']}: {cell['said']})" if cell.get("source") != "default" else " (default)"))
+        out.append("To change it, say so — \"use Claude for code\", \"never use Codex\" — or see all of it with /routing.")
+        return "\n\n".join(out)
+
+    async def _routing_edit(self, run: Dict[str, Any], cid: str) -> str:
+        message = run["prompt"]
+        turns = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)]
+        previous = next((t["content"] for t in reversed(turns) if t["role"] == "user"), "")
+        edit = prefs_mod.plain(message, self._provider_words())
+        if edit is None:
+            reader = self._watch_reader()
+            if reader is None:
+                return ("I couldn't read that as a routing rule (no model to read it with). "
+                        "Plain forms always work: \"never use Codex\", \"only use Codex if Claude runs out\", "
+                        "\"for this thread use Claude\".")
+            labels = self._target_labels()
+            cells = self.routing_table(cid)
+            rows = [{"id": r, "title": t, "examples": ex,
+                     "labels": [labels.get(x, x) for x in (cells.get(r) or {}).get("targets") or []]}
+                    for r, t, ex in table_mod.ROWS]
+            try:
+                edit = await self._read(reader, prefs_mod.edit_prompt(
+                    message, rows, [{"target": k, "label": v} for k, v in labels.items()], previous)) or {}
+            except Exception as e:                  # noqa: BLE001
+                return f"I couldn't read that as a routing rule: {e}"[:300]
+        return self._apply_edit(edit, message, cid, previous)
+
+    def _apply_edit(self, edit: Dict[str, Any], message: str, cid: str, previous: str) -> str:
+        rules = table_mod.load()
+        action = str(edit.get("action") or "none")
+        labels = self._target_labels()
+        target = str(edit.get("target") or "")
+        key = table_mod.parse_target(target)[0]
+        known = {b.key for b in self.backends}
+        row = str(edit.get("row") or "")
+        rows = [r for r, _, _ in table_mod.ROWS if r != "picture"] if row == "all" else [row]
+        if action in ("first", "never", "backup", "thread") and key not in known:
+            return "I understood that as a routing rule, but not which model you meant. Try naming it: Claude, Codex, local."
+        name = next((b.info.label for b in self.backends if b.key == key), key)
+        if action == "first":
+            if not all(r in table_mod.TITLES for r in rows):
+                return "I couldn't tell which kind of work that's about. Try: code, writing, quick questions, research."
+            cells = self.routing_table()
+            drop = {table_mod.parse_target(str(x))[0] for x in edit.get("without") or []} - {key}
+            for r in rows:
+                ts = table_mod.to_front((cells.get(r) or {}).get("targets") or [], target)
+                table_mod.set_row(rules, r, [t for t in ts if table_mod.parse_target(t)[0] not in drop],
+                                  "you", message)
+        elif action in ("never", "backup"):
+            table_mod.add_rule(rules, action, key, "you", message)
+        elif action == "thread":
+            until = None
+            if edit.get("until") == "today":
+                lt = time.localtime()
+                until = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 23, 59, 59, 0, 0, -1))
+            rules.setdefault("threads", {})[cid] = {"targets": [target], "until": until, "said": message}
+        elif action == "example":
+            if row not in table_mod.TITLES or not previous:
+                return "I couldn't tell which request, or which kind of work, you meant."
+            table_mod.add_example(rules, row, previous)
+        elif action == "forget":
+            what = str(edit.get("forget") or "")
+            gone = table_mod.forget(rules, what if what != "thread" else cid)
+            table_mod.save(rules)
+            return ("Taken back: " + ", ".join(gone) + ".") if gone else "There was no rule like that to take back."
+        else:
+            return "That didn't read as a routing rule, so nothing changed. /routing shows the table."
+        table_mod.save(rules)
+        observe_mod.note("history", what="routing rule", said=message[:200], action=action)
+        reply = str(edit.get("reply") or {
+            "never": f"{name} won't be used automatically any more — still there when you pick it by name.",
+            "backup": f"{name} is now a backup: used only when nothing ahead of it can take the request.",
+            "thread": f"In this thread, {name} goes first" + (" until the end of today." if edit.get("until") else "."),
+            "example": f"Noted — requests like that one are {table_mod.TITLES.get(row, row).lower()}.",
+            "first": f"{name} goes first for {', '.join(table_mod.TITLES.get(r, r).lower() for r in rows)}.",
+        }.get(action, "Done."))
+        cells = self.routing_table(cid)
+        shown = rows if action in ("first", "example") else [r for r, _, _ in table_mod.ROWS if r != "picture"][:3]
+        lines = [f"- {table_mod.TITLES.get(r, r)}: " + " → ".join(labels.get(t, t) for t in (cells.get(r) or {}).get("targets") or [])
+                 for r in shown if r in cells]
+        return reply + "\n\n" + "\n".join(lines) + "\n\n(/routing shows all of it; \"forget that rule\" takes it back.)"
+
+    # ---- checking it -------------------------------------------------------
+
+    def routing_view(self, thread: str = "") -> Dict[str, Any]:
+        labels = self._target_labels()
+        cells = self.routing_table(thread)
+        rows = [{"id": r, "title": t, "examples": ex + ((table_mod.load().get("examples") or {}).get(r) or []),
+                 "targets": [{"target": x, "label": labels.get(x, x)} for x in (cells.get(r) or {}).get("targets") or []],
+                 "source": (cells.get(r) or {}).get("source"), "said": (cells.get(r) or {}).get("said")}
+                for r, t, ex in table_mod.ROWS]
+        data = capacity_mod.load()
+        subs = []
+        for b in self._subscriptions():
+            reading = self.quota.latest.get(b.info.quota_source or "") if self.quota else None
+            subs.append({"key": b.key, "label": b.info.label,
+                         **(capacity_mod.room(data, b.info.quota_source or "", reading.windows) if reading else {})})
+        rules = table_mod.load()
+        return {"order": ["what can do it (running, quota, able)", "your rules", "the vendor's ladder",
+                          "room left on each subscription"],
+                "rows": rows, "subscriptions": subs,
+                "rules": {"never": rules.get("never") or [], "backup": rules.get("backup") or [],
+                          "threads": rules.get("threads") or {}},
+                "ladders": {b.key: watch_mod.ladder(b.key) for b in self.backends if watch_mod.ladder(b.key)}}
+
+    def routing_text(self, thread: str = "") -> str:
+        v = self.routing_view(thread)
+        out = ["**Routing** — decided in this order: " + " → ".join(v["order"]) + ".", ""]
+        out.append("| Kind of work | 1st | 2nd | 3rd | set by |")
+        out.append("|---|---|---|---|---|")
+        for r in v["rows"]:
+            ts = [t["label"] for t in r["targets"]] + ["—", "—", "—"]
+            by = r["source"] if r["source"] == "default" else f"{r['source']}: “{(r['said'] or '')[:60]}”"
+            out.append(f"| {r['title']} | {ts[0]} | {ts[1]} | {ts[2]} | {by} |")
+        if v["subscriptions"]:
+            out += ["", "Room on each subscription (learned from what requests cost here):"]
+            for sub in v["subscriptions"]:
+                if sub.get("per_hour") is not None:
+                    out.append(f"- {sub['label']}: ~{sub['left']:g} requests left, {sub['per_hour']:g}/hour until reset")
+                else:
+                    seen = max((w.get("samples", 0) for w in sub.get("windows") or []), default=0)
+                    out.append(f"- {sub['label']}: still learning what a request costs ({seen} measured)")
+        rules = v["rules"]
+        extra = [f"never: {x['target']} (“{x['said']}”)" for x in rules["never"]] + \
+                [f"only as a backup: {x['target']} (“{x['said']}”)" for x in rules["backup"]]
+        if extra:
+            out += ["", "Your rules: " + "; ".join(extra)]
+        return "\n".join(out)
+
+    async def routing_explain(self, prompt: str, thread: str = "", folder: str = "",
+                              before_turn: int = 0) -> Dict[str, Any]:
+        """Where a request would go, and why — nothing runs. `before_turn`:
+        read the thread only up to that turn (a request replayed in place)."""
+        try:
+            label = await self.classifier.label(prompt, has_folder=bool(folder))
+        except Exception:                           # noqa: BLE001
+            label = classify.rules(prompt, bool(folder))
+        before = [t for t in self.store.turns(thread) if not before_turn or t["id"] < before_turn] \
+            if thread else []
+        escalate = bool({"corrected", "recovered"} & set(learn_mod.signals(prompt, before)))
+        row, row_why = table_mod.row_for(label.task, label.difficulty, escalate, prompt,
+                                         table_mod.load().get("examples") or {})
+        cells = self.routing_table(thread)
+        wants_harness = label.task != "image"
+        need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness,
+                    images_out=label.task == "image", web=label.task == "research",
+                    task=label.task, difficulty=label.difficulty, row=row,
+                    row_title=table_mod.TITLES.get(row, row), targets=(cells.get(row) or {}).get("targets") or [])
+        choice = self.router.choose(need)
+        labels = self._target_labels()
+        return {"prompt": prompt, "label": label.to_json(), "row": row, "row_title": need.row_title,
+                "row_why": row_why, "row_targets": [labels.get(t, t) for t in need.targets],
+                "row_source": (cells.get(row) or {}).get("source"),
+                "choice": choice.label, "reason": choice.reason, "rejected": choice.rejected}
+
+    async def routing_replay(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Your recent requests: where each went, where it would go now."""
+        out = []
+        for r in self.runs.recent(limit * 3):
+            if r.get("kind") != "ask" or not r.get("prompt") or not r.get("conversation_id") or not r.get("backend"):
+                continue
+            full = self.runs.get(r["id"]) or {}
+            if full.get("requested") or r["backend"] == "eki" or r["prompt"].lstrip().startswith("/"):
+                continue                            # picked by name, eki's own, or a program's command
+            now = await self.routing_explain(r["prompt"], thread=r["conversation_id"], folder=r.get("cwd") or "",
+                                             before_turn=int(full.get("user_turn") or 0))
+            then = r["backend"]
+            out.append({"run": r["id"], "prompt": r["prompt"][:120], "then": then,
+                        "now": now["choice"], "row": now["row_title"],
+                        "label": f"{now['label']['task']} · {now['label']['difficulty']}",
+                        "differs": then != now["choice"].split(" ")[0]})
+            if len(out) >= limit:
+                break
+        return out
+
+    def capacity_tick(self) -> None:
+        """Fold the latest quota readings into what a request costs."""
+        if not self.quota:
+            return
+        data = capacity_mod.load()
+        for source, reading in (self.quota.latest or {}).items():
+            keys = [b.key for b in self.backends if b.info.quota_source == source]
+            if not keys:
+                continue
+            capacity_mod.observe(data, source, reading.windows, self.runs.finished_count(keys))
+        capacity_mod.save(data)
 
     # ---- which models are out there (eki/watch.py) --------------------------
 
@@ -2142,7 +2483,7 @@ class Engine:
         Code's own (a session is opened ahead for the folder and kept for the
         first run) plus eki's panels; Codex's plus its panels; a model with no
         loader gets eki's skills. Auto picks nothing yet — commands shared by
-        every provider are a later, careful step (ROADMAP, Stage 4)."""
+        every provider are a later, careful step (ROADMAP, Stage 1)."""
         if not backend_key:
             return []
         chosen = self.get(backend_key.partition(":")[0])

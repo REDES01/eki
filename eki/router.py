@@ -33,6 +33,11 @@ class Need:
     difficulty: str = ""
     #: the answer before this one was corrected, or failed: go up the ladder
     escalate: bool = False
+    #: the routing table's row for this request, and its choices in order
+    #: (eki/table.py): the first that can take it gets it
+    row: str = ""
+    row_title: str = ""
+    targets: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -155,6 +160,14 @@ class Router:
         if not candidates:
             return Choice(None, "no backend can serve this request", rejected)
 
+        if need.targets:
+            picked = self._from_row(need, candidates, rejected, paces)
+            if picked is not None:
+                return picked
+            note_row = f"none of {need.row_title or need.row}'s choices could take it; "
+        else:
+            note_row = ""
+
         # Cheap is not the same as good enough. A labelled request keeps only
         # the backends with a model believed to handle that kind of work at
         # that difficulty; if none clears the bar, the best available wins
@@ -226,6 +239,8 @@ class Router:
         candidates.sort(key=lambda b: (paced(b), self.policy.rank(b.key)))
         pick = candidates[0]
         model = chosen.get(pick.key, ("", 0.0))[0]
+        if note_row:
+            rejected.insert(0, note_row.rstrip("; "))
         name = f"{pick.key} ({model})" if model else pick.key
         if pick.key in laddered:
             vendor = laddered[pick.key] or "the vendor"
@@ -250,6 +265,37 @@ class Router:
         if pick.info.cost.note:
             why += f", {pick.info.cost.note}"
         return Choice(pick, why, rejected, model=model)
+
+    ORDINAL = ("1st", "2nd", "3rd", "4th", "5th", "6th")
+
+    def _from_row(self, need: Need, candidates: List[Backend], rejected: List[str],
+                  paces: Dict[str, Any]) -> Optional[Choice]:
+        """The first of the row's choices that can take the request now."""
+        from .table import parse_target
+        by_key = {b.key: b for b in candidates}
+        passed: List[str] = []
+        for i, target in enumerate(need.targets):
+            key, role, only = parse_target(target)
+            b = by_key.get(key)
+            if b is None:
+                why = next((r.split(": ", 1)[1] for r in rejected if r.startswith(f"{key}: ")), "not set up")
+                passed.append(f"{key}: {why}")
+                continue
+            if only == "easy" and need.difficulty != "easy":
+                passed.append(f"{key}: small changes only")
+                continue
+            lad = self.ladder_for(key) if role else {}
+            pace = paces.get(b.info.quota_source or "") if b.info.quota_source else None
+            model = self._ladder_model(lad, role, pace) if lad else ""
+            rested = bool(lad) and role == "top" and model != lad.get("top", model)
+            name = f"{key} ({model})" if model else key
+            why = f"{name}: {need.row_title or need.row} → {self.ORDINAL[min(i, 5)]} choice"
+            if rested:
+                why += f" ({lad.get('top')}'s own window is being spent fast)"
+            if passed:
+                why += " — passed over " + "; ".join(passed)
+            return Choice(b, why, rejected, model=model)
+        return None
 
     #: a top model with its own window (Fable's week) spent this much faster
     #: than it lasts is given a rest: the default takes its work

@@ -109,6 +109,11 @@ async def lifespan(app: FastAPI):
                 # the daily model watch runs itself once it's due
                 asyncio.create_task(eng.watch_refresh())
             try:
+                # what a request costs on each subscription (eki/capacity.py)
+                await asyncio.to_thread(eng.capacity_tick)
+            except Exception:                       # noqa: BLE001
+                log.exception("capacity")
+            try:
                 # a swap that has finished: say how it went, once
                 await eng.settle_swap()
             except Exception:                       # noqa: BLE001
@@ -534,6 +539,39 @@ def skill_delete(name: str) -> Any:
 @app.post("/api/skills/import")
 def skills_import(body: SkillImportBody) -> Any:
     return {**_skills_state(), "report": skills_mod.import_existing(body.names or None)}
+
+
+class ExplainBody(BaseModel):
+    prompt: str
+    conversation: str = ""
+    folder: str = ""
+
+
+@app.get("/api/routing")
+def routing(thread: str = "") -> Any:
+    """The routing table, the rules, and the room on each subscription."""
+    eng = engine()
+    return {**eng.routing_view(thread), "text": eng.routing_text(thread)}
+
+
+@app.post("/api/routing/explain")
+async def routing_explain(body: ExplainBody) -> Any:
+    """Where a request would go and why — nothing runs."""
+    return await engine().routing_explain(body.prompt, body.conversation, body.folder)
+
+
+@app.get("/api/routing/replay")
+async def routing_replay(limit: int = 40) -> Any:
+    return await engine().routing_replay(limit)
+
+
+@app.post("/api/routing/forget/{what}")
+def routing_forget(what: str) -> Any:
+    from . import table as table_mod
+    rules = table_mod.load()
+    gone = table_mod.forget(rules, what)
+    table_mod.save(rules)
+    return {"removed": gone}
 
 
 @app.get("/api/watch")

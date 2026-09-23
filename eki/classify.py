@@ -165,7 +165,9 @@ _RESEARCH = re.compile(r"\b(latest|current(ly)?|right now|today|this week|recent
                        r"reviews?|price of|who is the current|look up|search|cite|sources|"
                        r"literature review|competitive landscape|due.diligence|research\b|"
                        r"weather|store hours|come out|what are people saying)\b", re.I)
-_CODE = re.compile(r"\b(python|javascript|typescript|swiftui|swift|rust|golang|goroutines?|java|"
+_CODE = re.compile(r"\b(refactor\w*|modules?|callers?|codebase|call sites?|unit tests?|linter|lint|"
+                   r"dependency injection|stack overflow|null pointer|segfault|"
+                   r"python|javascript|typescript|swiftui|swift|rust|golang|goroutines?|java|"
                    r"sql|regex|bash|shell|docker(file)?|kubernetes|git|css|html|div|react|"
                    r"api|endpoint|middleware|function|class|script|compile|stack trace|"
                    r"traceback|typeerror|npm|pip|pandas|node|express|postgres|schema|kernel|"
@@ -265,6 +267,10 @@ def rules(prompt: str, has_folder: bool = False, after_image: bool = False) -> L
         task = "image"
     elif after_image and image_followup(text):
         task = "image"
+    elif re.search(r"^\W*(please\s+)?translate\b|\btranslate (this|that|it|the following)\b|翻译|how do you say",
+                   text, re.I):
+        # saying "translate" outright beats a word like "today" in the text
+        task = "translate"
     elif _RESEARCH.search(text):
         task = "research"
     elif _CODE.search(text):

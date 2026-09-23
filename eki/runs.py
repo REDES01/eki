@@ -164,6 +164,17 @@ class RunStore:
                 " ORDER BY created_at DESC LIMIT 1", (conversation,)).fetchone()
         return dict(row) if row else None
 
+    def finished_count(self, backends: List[str]) -> int:
+        """Requests that have ever finished on these backends (a running count)."""
+        if not backends:
+            return 0
+        marks = ",".join("?" for _ in backends)
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM runs WHERE backend IN ({marks}) AND state IN ('done','failed')"
+                " AND kind = 'ask'", tuple(backends)).fetchone()
+        return int(row[0] or 0)
+
     def last_done(self, conversation: str) -> Optional[Dict[str, Any]]:
         """The newest run in a conversation that finished."""
         with self._lock:

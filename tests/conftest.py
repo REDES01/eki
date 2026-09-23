@@ -34,6 +34,11 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(builds, "BUILDS", root / "eki" / "builds")
     monkeypatch.setattr(builds, "SELF_HOME", root / "eki" / "self")
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
+    from eki import goals, shift
+    monkeypatch.setattr(goals, "PROJECTS", root / "eki" / "goals" / "projects.json")
+    monkeypatch.setattr(goals, "LOG", root / "eki" / "goals" / "log.jsonl")
+    # no test keeps this Mac awake
+    monkeypatch.setattr(shift.Awake, "hold", lambda self: None)
 
 
 @pytest.fixture(autouse=True)

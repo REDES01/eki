@@ -6,49 +6,65 @@ plan — if something here is wrong, fix it here.
 
 ## The vision
 
-**eki is the layer you own between you and every AI agent you rent.**
+**eki keeps the machine you own working for you around the clock, and rents
+frontier models only for what it can't do.**
 
-The providers own the models and the harnesses — Claude Code, Codex, Gemini
-CLI, the local models. What you build up while using them is yours: the
-skills you taught, the corrections you made, the tools you connected, what a
-project has decided, and the quota you pay for. Today all of that is split
-across the tools and locked inside each one. eki holds it once and brings it
-to whichever agent does the work. The lines change; the station stays.
+People buy serious machines for AI — a Mac Studio, a big MacBook Pro, a GPU
+box — and the machine sits idle most of the day: running local models well is
+fiddly, and nobody queues work for the hours they're away. Meanwhile the
+subscriptions they rent run out. eki is the station on that machine: always
+open, the local models are the local lines, Claude Code and Codex are the
+express. It keeps the right models on the hardware, sends each request to the
+cheapest line that can carry it, and — the part nothing else does — fills the
+idle capacity with work worth doing, from goals you declare, stepping out
+the moment you or another app need the room.
 
-**Who it's for.** Developers who use more than one coding agent — because a
-limit hit mid-task, because a different model wins this month, because the
-price changed. They repeat the same instructions to every tool, a lesson
-learned in one never reaches the other, a limit means a dead run, and
-switching means starting over.
+The first measurement, on the Mac eki is built on (2026-09-23): over three
+days the local models did about 55 minutes of work — about 1% of the time —
+while taking a third of the requests. That is the number to move.
 
-**The promise.** Switch agents without losing anything, and your setup gets
+**Who it's for.** People who own the hardware and make things with it:
+technical solo creators and small teams — a game with hundreds of NPCs,
+portraits and lines; a codebase with a backlog — and developers who pay for
+more than one agent. The pitch is honest where the grey market isn't: your
+subscription goes further because most work never needs it, your code never
+leaves your machine, and the model is the one it says it is.
+
+**The promise.** Your machine works while you don't, it never takes what you
+need (your attention, your memory, your subscription), and your setup gets
 better the more you use it.
 
-**The first public release** is Stages 1 and 2: an engine and a command line
-that run without the app, on macOS and Linux —
+**What makes it work:**
 
-1. one store of skills, context and MCP servers that every agent sees;
-2. runs that survive, each in its own worktree;
-3. failover with handoff — a limit hit in Claude Code carries on in Codex
-   with the context, and says so;
-4. learned skills — a correction becomes a skill every agent uses.
+1. *The machine* — the right local models for the hardware, started and
+   stopped as work needs, kept current (`eki lineup`).
+2. *The lines* — routing to the cheapest line that can do the job; a model
+   without tools hands over; a subscription that runs out carries on in the
+   next (Stage 2).
+3. *The idle shift* — declared goals turned into a backlog, worked through
+   whenever the machine has room, giving way when something needs it, within
+   a subscription budget that never touches the last of a window (Stage 3).
+4. *The neighborhood* — skills, corrections, the tools you connected and a
+   project's canon, held once and given to every model, so the unattended work
+   agrees with you (Stages 1, 7).
 
-Self-evolution is pitched to users as the fourth point: *it learns from you,
-and all your agents benefit.* eki building eki is how eki is made, not what
-someone installs it for.
+**The first public release** is Stages 1–3: an engine and a command line that
+run without the app, on macOS (Linux through Homebrew, untested).
 
 **Later**, one piece of work split across providers — an RPG with a frontier
 agent writing the code, a story model writing the lore, an image model making
 the icons, a 3D backend producing Blender assets, and one memory under all of
-them (Stages 3–7). The first release is what makes that believable.
+them (Stages 4–8).
 
-**Why a neutral layer can win.** No provider will make your memory portable to
-a competitor; eki's value is that it isn't one. Where a standard exists
-(`AGENTS.md`, MCP, Agent Skills) eki builds on it rather than beside it.
+**Why no one else builds this.** Providers want your work on their servers,
+not on your machine, and no provider makes your memory portable to a
+competitor. Where a standard exists (`AGENTS.md`, MCP, Agent Skills) eki builds
+on it rather than beside it. eki reaches subscriptions only through the
+official programs — never a relay, never a shared login.
 
 **What waits.** The Mac app is one front end, not the product. Redrawing more
-of the CLIs' own screens, pictures, and installing models all come after the
-first release unless it needs them.
+of the CLIs' own screens and new kinds of output come after the first release
+unless it needs them.
 
 ## What doesn't change
 
@@ -163,7 +179,7 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
 - [ ] **One standing context.** `AGENTS.md` is canonical, per project and
       globally; `CLAUDE.md` is an `@AGENTS.md` import plus what is truly
       Claude-only. The global files for both CLIs are generated from one
-      source. Stage 3's "how to use eki here" section lands in that source
+      source. Stage 4's "how to use eki here" section lands in that source
 - [x] **One tool registry.** MCP servers declared once in eki
       (`~/.eki/mcp.json`, the `/mcp` panel), rendered into Claude Code per
       session (`--mcp-config`) and a managed block of Codex's `config.toml`;
@@ -181,8 +197,8 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       to all of them — carefully, one command at a time
 - [x] **"How to call eki" is a skill**, installed for both CLIs (the
       `eki` skill, refreshed at engine start until you edit it). Generating
-      it from `eki capabilities` waits for that command (Stage 3)
-- [ ] **Per-project layer** once Stage 4 exists: `.eki/skills/` and the
+      it from `eki capabilities` waits for that command (Stage 4)
+- [ ] **Per-project layer** once Stage 5 exists: `.eki/skills/` and the
       project's `AGENTS.md` sit on top of the global set
 - [x] A Skills pane: `/skills` in any thread — eki's store with
       per-backend toggles, an editor, import; then what Claude Code alone
@@ -228,7 +244,7 @@ a thread has to be able to move to another harness without losing its place.
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
       and when to hand over a summary; who writes the summary; the summary is
-      kept in the thread and can be read. Project memory (Stage 6) builds on it
+      kept in the thread and can be read. Project memory (Stage 7) builds on it
 - [x] **Failover on a limit.** When a subscription run hits its limit
       mid-run, the same request carries on in the row's next choice on
       another subscription — told what was written, in the same copy of the
@@ -239,7 +255,32 @@ a thread has to be able to move to another harness without losing its place.
   handoffs that lost something are recorded as outcomes, and the policy and
   the summary rule are adjusted from them, visibly.
 
-## Stage 3 — The command line agents can use
+## Stage 3 — Work while you're away
+
+The machine works whenever it has room, on what you asked for, and gives way
+the moment you or another app need it.
+
+- [ ] **Goals.** A project declares what should exist (`goals.yaml`: 20 NPCs,
+      each with a bio, a portrait and three lines; a world bible every piece
+      reads). `eki goals` computes what's missing — the backlog is a diff, not
+      a guess — in dependency order (a portrait is drawn from its bio)
+- [ ] **The idle shift.** Work runs whenever the machine has room — you can
+      be typing. A piece starts only if its model fits in free memory and
+      other apps leave the CPU and GPU spare (read between pieces, when eki's
+      own model is idle); memory pressure mid-piece cancels it and unloads the
+      model. Your own requests always come first. `when: away` for anyone
+      who'd rather it only ran with nobody at the keyboard. The Mac is kept
+      awake while there's work (the screen may sleep)
+- [ ] **Budget modes.** `local` (default: only models on this machine, zero
+      subscription), `spare` (a subscription only while under pace for the
+      week, never the last 30% of any window), `off`
+- [ ] **The morning note.** What got made, what failed, what it cost — in
+      pieces, hours and subscription share
+- [ ] Measured: hours of useful local work a day, against the 1% baseline
+- *Evolve:* pieces you redo or delete count against the model and template
+  that made them; eki proposes the goals it sees you working toward.
+
+## Stage 4 — The command line agents can use
 
 So that the agent doing the work can ask eki for what it can't do itself.
 
@@ -255,7 +296,7 @@ So that the agent doing the work can ask eki for what it can't do itself.
 - *Evolve:* that section is generated from `eki capabilities`, so it changes
   when the Mac's backends do — nobody edits it by hand.
 
-## Stage 4 — Projects
+## Stage 5 — Projects
 
 A project is a folder, a roster of backends, and a shared memory. Chats become
 views into a project rather than the top of the tree.
@@ -267,7 +308,7 @@ views into a project rather than the top of the tree.
 - *Evolve:* a project keeps notes on what worked — which backend was redone,
   which wasn't — and its policy is adjusted from them, visibly.
 
-## Stage 5 — More kinds of work
+## Stage 6 — More kinds of work
 
 Routing is already by capability; this widens what a capability can be.
 
@@ -275,20 +316,20 @@ Routing is already by capability; this widens what a capability can be.
       what they need; routing is capability first, then quota and cost
 - [ ] A mesh backend that produces Blender assets into the project folder
 - [ ] Prose models chosen by the person for the kind of writing, not by benchmark
-- [ ] Text models asking for a picture mid-answer (through Stage 3's commands)
+- [ ] Text models asking for a picture mid-answer (through Stage 4's commands)
 - *Evolve:* a new kind of work gets measurement items where answers can be
   checked, and outcome signals where they can't.
 
-## Stage 6 — Project memory
+## Stage 7 — Project memory
 
 - [ ] `eki remember` / `eki recall`, scoped to the project, backed by FERNme
 - [ ] Canon, decisions and conventions in one graph every backend can query
 - [ ] Memory shown in the app: what's there, where it came from, remove it
 - *Evolve:* after a run, eki files what the run decided; stale entries decay.
 
-## Stage 7 — Orchestration
+## Stage 8 — Orchestration
 
-Only what Stages 1–6 prove is missing. A driving agent (Claude Code, Codex) with
+Only what Stages 1–7 prove is missing. A driving agent (Claude Code, Codex) with
 eki's commands is the first orchestrator; build a planner when it falls short.
 
 - [ ] A task graph over runs: inputs and outputs as files, fan-out, resume

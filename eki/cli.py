@@ -604,6 +604,63 @@ def cmd_builds(args) -> int:
     return 0
 
 
+def cmd_goals(args) -> int:
+    """Declared goals and the idle shift working on them (eki/goals.py)."""
+    if args.action == "add":
+        folder = os.path.abspath(os.path.expanduser(args.arg or "."))
+        got = call("POST", "/api/goals/projects", args.service, json={"folder": folder})
+        for g in got["goals"]:
+            print(f"{g['goal']}: {g['done']}/{g['total']} pieces there, {g['total'] - g['done']} to make")
+        print(f"added {got['folder']} — pieces are made whenever the machine has room")
+        return 0
+    if args.action == "remove":
+        folder = os.path.abspath(os.path.expanduser(args.arg or "."))
+        got = call("DELETE", "/api/goals/projects", args.service, params={"folder": folder})
+        print("removed" if got["removed"] else "it wasn't added")
+        return 0
+    if args.action == "mode":
+        if args.arg in ("resources", "away"):
+            body = {"when": args.arg}
+        elif args.arg in ("local", "spare", "off"):
+            body = {"mode": args.arg}
+        else:
+            print("eki goals mode local|spare|off   (which models background work may use)\n"
+                  "eki goals mode resources|away   (whenever there's room, or only when you're away)",
+                  file=sys.stderr)
+            return 2
+        call("POST", "/api/goals/mode", args.service, json=body)
+        args.action = "show"
+    if args.action == "report":
+        hours = float(args.arg or 24)
+        r = call("GET", "/api/goals/report", args.service, params={"hours": hours})
+        mins = round(r["working_seconds"] / 60)
+        print(f"last {hours:g} h: {r['made']} made, {r['failed']} failed, "
+              f"{r['stepped_out']} stepped out for you · {mins} min of work")
+        for key, b in r["by_backend"].items():
+            print(f"  {key:<22} {int(b['pieces'])} pieces, {round(b['seconds'] / 60)} min")
+        print(f"  on a subscription: {r['on_subscription']} pieces")
+        for f in r["failures"]:
+            print(f"  ! {f['piece']}: {f['error']}")
+        if r["recent"]:
+            print("  latest: " + ", ".join(r["recent"]))
+        return 0
+    v = call("GET", "/api/goals", args.service)
+    sh = v["shift"]
+    print(f"background: {v['mode']} · runs {'whenever there is room' if v['when'] == 'resources' else 'only when you are away'}")
+    print(f"now: {sh.get('state')} — {sh.get('why')}")
+    if not v["projects"]:
+        print("no projects — put a goals.yaml in a folder, then `eki goals add <folder>`")
+    for p in v["projects"]:
+        print(f"\n{p['folder']}")
+        if p.get("error"):
+            print(f"  ! {p['error']}")
+            continue
+        for g in p["goals"]:
+            print(f"  {g['goal']:<16} {g['done']}/{g['total']} pieces  ({g['items']} × "
+                  f"{', '.join(g['parts'])})")
+    return 0
+
+
 def cmd_swap(args) -> int:
     """Move the engine onto another build, through the supervisor."""
     from . import builds, candidate
@@ -733,6 +790,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--wait", type=int, default=600, help="seconds to wait for runs to finish")
     sp.add_argument("--watch", type=int, default=180, help="seconds it must stay healthy")
 
+    g = sub.add_parser("goals", help="what your projects want made, worked on while the machine has room")
+    g.add_argument("action", nargs="?", default="show",
+                   choices=["show", "add", "remove", "mode", "report"])
+    g.add_argument("arg", nargs="?", default="",
+                   help="a folder (add, remove); local|spare|off or resources|away (mode); hours (report)")
+
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
@@ -762,6 +825,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_routing(args)
     if args.cmd == "lineup":
         return cmd_watch(args)
+    if args.cmd == "goals":
+        return cmd_goals(args)
     if args.cmd == "swap":
         return cmd_swap(args)
     if args.cmd == "agent":

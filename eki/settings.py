@@ -69,6 +69,17 @@ DEFAULTS: Dict[str, Any] = {
     #: a subscription that runs out mid-run: the next choice in the row, on
     #: another subscription, carries on from where it stopped (eki/failover.py)
     "failover": True,
+    #: background work from projects' goals.yaml (eki/goals.py, eki/shift.py):
+    #: "local" — only models on this machine; "spare" — a subscription too,
+    #: for parts marked `line: frontier`, while under pace and never the last
+    #: 30% of a window; "off"
+    "background": "local",
+    #: "resources" — whenever there's memory, CPU and GPU to spare; "away" —
+    #: only with nobody at the keyboard
+    "background_when": "resources",
+    "background_cpu": 0.6,
+    "background_gpu": 0.35,
+    "background_reserve": 0.3,
     #: a fault in eki's own code (eki/observe.py): "propose" — eki writes a
     #: fix as an `eki self` proposal (never applied), or "off"
     "self_fix": "propose",

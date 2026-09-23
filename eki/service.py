@@ -219,6 +219,18 @@ async def lifespan(app: FastAPI):
                 log.exception("auto measure")
             await asyncio.sleep(600)
 
+    async def work_while_idle() -> None:
+        """The idle shift: the next missing piece of a declared goal, when
+        the machine has room for it (eki/goals.py, eki/shift.py)."""
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await eng.shift_tick()
+            except Exception:                       # noqa: BLE001
+                log.exception("idle shift")
+            await asyncio.sleep(8)
+
+    shift_task = asyncio.create_task(work_while_idle())
     reaper = asyncio.create_task(reap())
     fresh = asyncio.create_task(keep_claude_fresh())
     naming = asyncio.create_task(name_old_threads())
@@ -226,6 +238,8 @@ async def lifespan(app: FastAPI):
     clock = asyncio.create_task(keep_time())
     follower = asyncio.create_task(follow())
     yield
+    shift_task.cancel()
+    eng._awake.let_go()
     clock.cancel()
     follower.cancel()
     auto.cancel()
@@ -572,6 +586,46 @@ def routing_forget(what: str) -> Any:
     gone = table_mod.forget(rules, what)
     table_mod.save(rules)
     return {"removed": gone}
+
+
+@app.get("/api/goals")
+def goals_view() -> Any:
+    return engine().goals_view()
+
+
+@app.post("/api/goals/projects")
+def goals_add(body: Dict[str, Any]) -> Any:
+    from . import goals as goals_mod
+    try:
+        spec = goals_mod.add(str(body.get("folder") or ""))
+    except goals_mod.GoalError as e:
+        raise HTTPException(400, str(e))
+    return {"folder": spec.folder, "goals": goals_mod.status(spec)}
+
+
+@app.delete("/api/goals/projects")
+def goals_remove(folder: str) -> Any:
+    from . import goals as goals_mod
+    return {"removed": goals_mod.remove(folder)}
+
+
+@app.post("/api/goals/mode")
+def goals_mode(body: Dict[str, Any]) -> Any:
+    eng = engine()
+    changes = {}
+    if body.get("mode") in ("local", "spare", "off"):
+        changes["background"] = body["mode"]
+    if body.get("when") in ("resources", "away"):
+        changes["background_when"] = body["when"]
+    if not changes:
+        raise HTTPException(400, "mode is local, spare or off; when is resources or away")
+    eng.settings = settings_mod.save({**settings_mod.load(), **changes})
+    return eng.goals_view()
+
+
+@app.get("/api/goals/report")
+def goals_report(hours: float = 24.0) -> Any:
+    return engine().goals_report(hours)
 
 
 @app.get("/api/watch")

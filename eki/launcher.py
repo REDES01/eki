@@ -64,7 +64,8 @@ def build() -> Optional[Path]:
         return None
     icon = next((p for p in ICON_SOURCES if p.exists()), None)
     if icon:
-        shutil.copy2(icon, res / "AppIcon.icns")
+        shutil.copyfile(icon, res / "AppIcon.icns")
+        (res / "AppIcon.icns").chmod(0o644)       # readable by what draws it, not just its owner
     info = {"CFBundleName": "eki", "CFBundleDisplayName": "eki", "CFBundleIdentifier": IDENTIFIER,
             "CFBundleExecutable": "eki", "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
             "CFBundleShortVersionString": "1", "LSMinimumSystemVersion": "14.0",
@@ -78,4 +79,16 @@ def build() -> Optional[Path]:
     shutil.rmtree(APP, ignore_errors=True)
     APP.parent.mkdir(parents=True, exist_ok=True)
     tmp.rename(APP)
+    register()
     return binary()
+
+
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
+              "/Support/lsregister")
+
+
+def register() -> None:
+    """Tell macOS the app is here: it lives in a hidden folder nothing scans,
+    and without this, Privacy & Security shows it without its icon."""
+    if APP.exists() and Path(LSREGISTER).exists():
+        subprocess.run([LSREGISTER, "-f", str(APP)], capture_output=True, timeout=60)

@@ -135,7 +135,8 @@ def install(root: Path) -> str:
                 break
             time.sleep(0.1)
     from . import launcher
-    launcher.build()                        # best effort: without it, the engine runs as python
+    if launcher.build() is not None:        # best effort: without it, the engine runs as python
+        launcher.register()
     with PLIST.open("wb") as f:
         plistlib.dump(plist_for(root), f)
     from . import builds

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eki · Goals</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --surface: #ffffff; --sunk: #efede8; --line: #e3e0d9;
+    --ink: #1d1c1a; --ink-2: #5d5a53; --ink-3: #8f8b82;
+    --accent: #c9622b; --accent-soft: #f6e3d7;
+    --ok: #2f8f5b; --wait: #b7791f; --off: #8f8b82;
+    --radius: 12px; --shadow: 0 1px 2px rgba(20,18,15,.06), 0 2px 8px rgba(20,18,15,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --surface: #242320; --sunk: #2c2b27; --line: #36342f;
+      --ink: #ecebe7; --ink-2: #b3afa6; --ink-3: #807c74;
+      --accent: #e0834f; --accent-soft: #3b2a20;
+      --ok: #52b67f; --wait: #d9a23e; --off: #807c74;
+      --shadow: 0 1px 2px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
+           backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1400px; margin: 0 auto; padding: 14px 20px; display: flex; flex-wrap: wrap;
+         gap: 12px 20px; align-items: center; }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .projects { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+          border-radius: 999px; padding: 3px 11px; font-size: 12.5px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px;
+            min-width: 0; flex: 1 1 260px; }
+  .status span.text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); flex: none; }
+  .dot.working { background: var(--ok); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.waiting, .dot.stepped { background: var(--wait); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+         background: var(--surface); }
+  .seg button { border: 0; background: none; padding: 5px 12px; font: inherit; font-size: 12.5px;
+                color: var(--ink-2); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  label.away { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .hint { max-width: 1400px; margin: 0 auto; padding: 0 20px 12px; color: var(--ink-3); font-size: 12px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 18px 20px 60px; }
+  .goal-head { display: flex; align-items: baseline; gap: 14px; margin: 8px 0 14px; flex-wrap: wrap; }
+  .goal-head h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .progress { flex: 1 1 200px; max-width: 360px; height: 6px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .count { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  input.search { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+                 border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12.5px; width: 200px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+          box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; }
+  .card.working { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+  .pic { position: relative; aspect-ratio: 1; background: var(--sunk); }
+  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pic .redo-btn { position: absolute; top: 8px; right: 8px; background: rgba(20,18,15,.55); color: #fff;
+                   border: 0; }
+  .pending { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3);
+             font-size: 12.5px; text-align: center; padding: 16px; }
+  .pending.making { background: linear-gradient(100deg, var(--sunk) 30%, color-mix(in srgb, var(--sunk) 70%, var(--surface)) 50%, var(--sunk) 70%);
+                    background-size: 300% 100%; animation: shimmer 1.6s linear infinite; color: var(--ok); }
+  @keyframes shimmer { to { background-position: -150% 0; } }
+  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .title { font-weight: 650; font-size: 14.5px; line-height: 1.3; }
+  .id { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .part { border-top: 1px solid var(--line); padding-top: 9px; }
+  .part-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+  .part-name { text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
+  .redo-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 7px;
+              font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; }
+  .redo-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .text { color: var(--ink-2); font-size: 13px; }
+  .text p { margin: 0 0 6px; }
+  .text ul { margin: 0; padding-left: 18px; }
+  .text li { margin-bottom: 4px; }
+  .clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .missing { color: var(--ink-3); font-size: 12.5px; font-style: italic; }
+  .missing.making { color: var(--ok); font-style: normal; }
+  .note { font-size: 11.5px; color: var(--accent); }
+  form.redo { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; background: var(--sunk);
+              border-radius: 9px; padding: 8px; }
+  form.redo input { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+                    border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 12.5px; }
+  form.redo .row { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+  form.redo .also { color: var(--ink-3); font-size: 11.5px; margin-right: auto; }
+  form.redo button { border-radius: 7px; font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+                     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
+  form.redo button.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .empty { text-align: center; color: var(--ink-3); padding: 80px 20px; }
+  .empty code { background: var(--sunk); padding: 2px 6px; border-radius: 5px; color: var(--ink-2); }
+  @media (max-width: 600px) { .bar { padding: 12px 16px; } main { padding: 14px 16px 40px; }
+    .grid { grid-template-columns: 1fr; } input.search { width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Goals</h1>
+    <div class="projects" id="projects"></div>
+    <div class="status"><i class="dot" id="dot"></i><span class="text" id="status">Connecting…</span></div>
+    <div class="controls">
+      <div class="seg" id="mode" role="group" aria-label="What background work may use">
+        <button data-mode="local" title="Only models on this machine — no subscription">Local</button>
+        <button data-mode="spare" title="Also a subscription for parts marked line: frontier — under pace, never the last 30%">Spare</button>
+        <button data-mode="off" title="No background work">Off</button>
+      </div>
+      <label class="away"><input type="checkbox" id="away"> Only when I'm away</label>
+    </div>
+  </div>
+  <div class="hint" id="hint"></div>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+let view = null, items = null, folder = store.get("eki.goals.folder"), lastItems = "", query = "";
+const open = new Set();   // expanded texts
+
+const HINTS = {
+  local: "Local — only the models on this machine. No subscription is used.",
+  spare: "Spare — parts marked line: frontier may use a subscription, only while you're under pace for the week and never the last 30% of a window.",
+  off: "Off — nothing runs in the background.",
+};
+
+async function get(path) { const r = await fetch(path); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(await r.text()); return r.json();
+}
+
+function mdToHtml(text, dropTitle) {
+  const lines = String(text).split("\n");
+  let out = "", list = false, titleDropped = !dropTitle;
+  for (let raw of lines) {
+    const line = raw.trim();
+    if (!line) { if (list) { out += "</ul>"; list = false; } continue; }
+    if (/^#{1,6}\s/.test(line)) { if (!titleDropped) { titleDropped = true; continue; }
+      out += `<p><strong>${esc(line.replace(/^#+\s*/, ""))}</strong></p>`; continue; }
+    const li = line.match(/^([*\-•]|\d+\.)\s+(.*)$/);
+    if (li) { if (!list) { out += "<ul>"; list = true; } out += `<li>${esc(li[2])}</li>`; continue; }
+    if (list) { out += "</ul>"; list = false; }
+    out += `<p>${esc(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`;
+  }
+  return out + (list ? "</ul>" : "");
+}
+
+function renderHeader() {
+  if (!view) return;
+  const sh = view.shift || {};
+  const state = sh.state || "idle";
+  $("#dot").className = "dot " + (state === "stepped out" ? "stepped" : state);
+  const label = {working: "Working", waiting: "Waiting", idle: "Idle", off: "Off", "stepped out": "Stepped out"}[state] || state;
+  $("#status").textContent = `${label} — ${sh.why || ""}`;
+  $("#status").title = $("#status").textContent;
+  for (const b of $("#mode").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.mode === view.mode));
+  $("#away").checked = view.when === "away";
+  $("#hint").textContent = HINTS[view.mode] + (view.when === "away" ? " Runs only with nobody at the keyboard." :
+    " Runs whenever the machine has room; steps aside for you and other apps, and only on power.");
+  const ps = view.projects || [];
+  if (!folder || !ps.some(p => p.folder === folder)) folder = ps[0]?.folder || null;
+  $("#projects").innerHTML = ps.length > 1 ? ps.map(p =>
+    `<button class="chip" data-folder="${esc(p.folder)}" aria-pressed="${p.folder === folder}">${esc(p.folder.split("/").pop())}</button>`).join("") : "";
+}
+
+function missingLabel(part, key, working, parts) {
+  if (key === working) return ["making", "Being made…"];
+  if (part.line === "frontier" && view.mode !== "spare") return ["", "Waits for Spare mode"];
+  if (part.ready) return ["", "Next up"];
+  const need = part.after.filter(a => !parts.find(p => p.name === a)?.exists);
+  return ["", `Waits for ${need.join(", ")}`];
+}
+
+function dependentsOf(goal, name) {
+  const out = []; let changed = true;
+  const parts = goal.items[0]?.parts || [];
+  while (changed) { changed = false;
+    for (const p of parts) if (!out.includes(p.name) && (p.after.includes(name) || p.after.some(a => out.includes(a)))) { out.push(p.name); changed = true; } }
+  return out;
+}
+
+function card(goal, it, working) {
+  const keyOf = name => `${goal.goal}/${it.item}/${name}`;
+  const image = it.parts.find(p => p.kind === "image");
+  const isWorking = it.parts.some(p => keyOf(p.name) === working);
+  let pic = "";
+  if (image) {
+    const k = keyOf(image.name);
+    pic = `<div class="pic">` + (image.exists
+      ? `<img loading="lazy" alt="${esc(it.title)}" src="/api/goals/file?folder=${encodeURIComponent(items.folder)}&path=${encodeURIComponent(image.path)}&v=${image.mtime}">
+         <button class="redo-btn" data-redo="${esc(image.name)}" data-item="${esc(it.item)}" data-goal="${esc(goal.goal)}">Redo</button>`
+      : (() => { const [cls, t] = missingLabel(image, k, working, it.parts); return `<div class="pending ${cls}">${esc(t)}</div>`; })())
+      + `</div>` + formFor(goal, it, image);
+  }
+  let body = `<div class="title">${esc(it.title)}</div><div class="id">${esc(it.item)}</div>`;
+  for (const p of it.parts) {
+    if (p.kind === "image") continue;
+    const k = keyOf(p.name);
+    let inner;
+    if (p.exists) {
+      // the first text part is the long description: clamped until clicked
+      const first = p === it.parts.find(x => x.kind === "text");
+      const clamped = first && !open.has(k);
+      inner = `<div class="text ${clamped ? "clamp" : ""}" ${first ? `data-toggle="${esc(k)}"` : ""} title="${clamped ? "Click to read all" : ""}">${mdToHtml(p.text, first)}</div>`;
+    } else {
+      const [cls, t] = missingLabel(p, k, working, it.parts);
+      inner = `<div class="missing ${cls}">${esc(t)}</div>`;
+    }
+    const note = p.note ? `<div class="note">Next time: ${esc(p.note)}</div>` : "";
+    body += `<div class="part"><div class="part-head"><span class="part-name">${esc(p.name)}</span>
+      ${p.exists ? `<button class="redo-btn" data-redo="${esc(p.name)}" data-item="${esc(it.item)}" data-goal="${esc(goal.goal)}">Redo</button>` : ""}</div>
+      ${inner}${note}${formFor(goal, it, p)}</div>`;
+  }
+  return `<article class="card ${isWorking ? "working" : ""}" data-search="${esc((it.title + " " + it.item + " " + it.parts.map(p => p.text || "").join(" ")).toLowerCase())}">${pic}<div class="body">${body}</div></article>`;
+}
+
+let editing = null;   // {goal, item, part}
+function formFor(goal, it, part) {
+  if (!editing || editing.goal !== goal.goal || editing.item !== it.item || editing.part !== part.name) return "";
+  const deps = dependentsOf(goal, part.name);
+  return `<form class="redo" data-goal="${esc(goal.goal)}" data-item="${esc(it.item)}" data-part="${esc(part.name)}">
+    <input name="note" placeholder="What should change? (optional)" autocomplete="off">
+    <div class="row"><span class="also">${deps.length ? "Also redoes " + esc(deps.join(", ")) : ""}</span>
+    <button type="button" data-cancel>Cancel</button><button class="go" type="submit">Redo</button></div></form>`;
+}
+
+function renderItems() {
+  const main = $("#main");
+  if (!view || !(view.projects || []).length) {
+    main.innerHTML = `<div class="empty">No projects yet.<br><br>Put a <code>goals.yaml</code> in a folder, then run <code>eki goals add &lt;folder&gt;</code>.</div>`;
+    return;
+  }
+  if (!items) return;
+  let html = "";
+  for (const goal of items.goals) {
+    const total = goal.items.length * goal.parts.length;
+    const done = goal.items.reduce((n, it) => n + it.parts.filter(p => p.exists).length, 0);
+    html += `<section><div class="goal-head"><h2>${esc(goal.goal)}</h2>
+      <div class="progress"><i style="width:${total ? done / total * 100 : 0}%"></i></div>
+      <span class="count">${done} of ${total} made</span>
+      <input class="search" type="search" placeholder="Filter" value="${esc(query)}"></div>
+      <div class="grid">${goal.items.map(it => card(goal, it, items.working)).join("")}</div></section>`;
+  }
+  main.innerHTML = html;
+  applyFilter();
+  const f = $("form.redo input"); if (f) f.focus();
+}
+
+function applyFilter() {
+  for (const c of document.querySelectorAll(".card"))
+    c.style.display = !query || c.dataset.search.includes(query.toLowerCase()) ? "" : "none";
+}
+
+async function refresh() {
+  try {
+    view = await get("/api/goals");
+    renderHeader();
+    if (folder) {
+      const fresh = await get("/api/goals/items?folder=" + encodeURIComponent(folder));
+      const text = JSON.stringify(fresh);
+      const busy = editing || document.activeElement?.matches("input.search");
+      if (text !== lastItems && !busy) { items = fresh; lastItems = text; renderItems(); }
+      else if (!items) { items = fresh; lastItems = text; renderItems(); }
+    } else renderItems();
+  } catch (e) {
+    $("#dot").className = "dot"; $("#status").textContent = "The engine isn't answering — is eki running?";
+  }
+}
+
+document.addEventListener("click", async e => {
+  const t = e.target;
+  const m = t.closest("#mode button");
+  if (m) { await post("/api/goals/mode", {mode: m.dataset.mode}); return refresh(); }
+  const chip = t.closest(".chip");
+  if (chip) { folder = chip.dataset.folder; store.set("eki.goals.folder", folder); items = null; lastItems = ""; return refresh(); }
+  const r = t.closest("[data-redo]");
+  if (r) { editing = {goal: r.dataset.goal, item: r.dataset.item, part: r.dataset.redo}; return renderItems(); }
+  if (t.closest("[data-cancel]")) { editing = null; return renderItems(); }
+  const tog = t.closest("[data-toggle]");
+  if (tog) { const k = tog.dataset.toggle; open.has(k) ? open.delete(k) : open.add(k); tog.classList.toggle("clamp"); }
+});
+document.addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  await post("/api/goals/redo", {folder, goal: f.dataset.goal, item: f.dataset.item, part: f.dataset.part,
+                                 note: f.note.value});
+  editing = null; lastItems = ""; refresh();
+});
+document.addEventListener("input", e => {
+  if (e.target.matches("input.search")) { query = e.target.value; applyFilter(); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && editing) { editing = null; renderItems(); } });
+$("#away").addEventListener("change", async e => { await post("/api/goals/mode", {when: e.target.checked ? "away" : "resources"}); refresh(); });
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

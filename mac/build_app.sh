@@ -63,7 +63,7 @@ swiftc -O -target arm64-apple-macos14.0 \
   EkiApp.swift Client.swift Model.swift Theme.swift Scale.swift Markdown.swift \
   Artifacts.swift Gallery.swift Images.swift ImageViewer.swift Swipes.swift \
   Views.swift Downloads.swift Models.swift Live.swift ClaudeCode.swift Schedules.swift \
-  Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift
+  Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift Goals.swift
 
 # The input helper behind eki's screen tools (eki/mcpbridge.py): a tiny
 # CGEvent program, so the Python engine never links AppKit itself.

@@ -293,3 +293,66 @@ def test_the_gpu_counts_other_apps_not_ekis_own_model(monkeypatch):
     ticks = iter([0.0, 1.0])
     monkeypatch.setattr(shift.time, "monotonic", lambda: next(ticks))
     assert shift.gpu_busy_others(exclude=[1]) == pytest.approx(0.1)
+
+
+# ---- the review board --------------------------------------------------------------------
+
+def made(game, n, bio="# Mira, smith\nForges.", lines="* Hello."):
+    d = game / f"npcs/npc-0{n}"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "bio.md").write_text(bio)
+    (d / "portrait.png").write_bytes(b"png")
+    (d / "lines.md").write_text(lines)
+    return d
+
+
+def test_the_board_sees_each_item_as_it_stands(game):
+    made(game, 1)
+    goals.add(str(game))
+    view = goals.items(goals.load(str(game)))[0]
+    first, second = view["items"][0], view["items"][1]
+    assert first["title"] == "Mira, smith" and all(p["exists"] for p in first["parts"])
+    assert second["title"] == "npc-02" and [p.get("ready") for p in second["parts"]] == [True, False, False]
+
+
+def test_redo_keeps_the_old_files_and_remakes_what_came_from_them(game):
+    d = made(game, 1)
+    spec = goals.load(str(game))
+    moved = goals.redo(spec, "npcs", "npc-01", "bio", note="make her older")
+    assert moved == ["npcs/npc-01/bio", "npcs/npc-01/portrait", "npcs/npc-01/lines"]
+    assert not (d / "bio.md").exists() and not (d / "portrait.png").exists()
+    kept = list((game / ".eki" / "redone").rglob("bio.md"))
+    assert kept and kept[0].read_text().startswith("# Mira")                   # nothing is lost
+    piece = next(p for p in goals.pieces(goals.load(str(game))) if p.key == "npcs/npc-01/bio")
+    assert goals.render(goals.load(str(game)), piece).endswith("This time: make her older")
+    goals.forget_note(str(game), piece.key)
+    assert "This time" not in goals.render(goals.load(str(game)), piece)
+    assert goals.redo(spec, "npcs", "npc-01", "lines") == []                   # already gone
+    with pytest.raises(goals.GoalError):
+        goals.redo(spec, "npcs", "npc-99", "bio")
+
+
+def test_only_files_inside_a_project_are_served(game, tmp_path):
+    made(game, 1)
+    assert goals.inside(str(game), "npcs/npc-01/portrait.png") is None          # not added yet
+    goals.add(str(game))
+    assert goals.inside(str(game), "npcs/npc-01/portrait.png") is not None
+    (tmp_path / "secret.txt").write_text("no")
+    assert goals.inside(str(game), "../secret.txt") is None
+    assert goals.inside(str(game), "/etc/passwd") is None
+
+
+@pytest.mark.asyncio
+async def test_a_redone_piece_is_made_again_with_the_note(eng, game):
+    goals.add(str(game))
+    await work(eng)
+    first = (game / "npcs/npc-02/bio.md").read_text()
+    eng.goals_redo(str(game), "npcs", "npc-02", "bio", "make them a child")
+    assert not (game / "npcs/npc-02/lines.md").exists()
+    await work(eng)
+    assert (game / "npcs/npc-02/lines.md").exists()
+    asked = [s[-1] for s in Writer.seen if "make them a child" in s[-1]]
+    assert asked and asked[0].startswith("Invent character 2")
+    assert goals.notes(str(game)) == {}                                         # used once
+    assert (game / "npcs/npc-02/bio.md").read_text() == first                  # the fake writes the same
+    await eng.runner.stop()

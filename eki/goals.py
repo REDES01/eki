@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -256,7 +257,126 @@ def render(spec: Spec, piece: Piece) -> str:
         text = value(m.group(1))
         return text[:int(m.group(2))] if m.group(2) else text
 
-    return _FIELD.sub(fill, part.prompt).strip()
+    text = _FIELD.sub(fill, part.prompt).strip()
+    asked = notes(spec.folder).get(piece.key)
+    if asked:
+        text += f"\n\nThis time: {asked}"
+    return text
+
+
+# ---- reviewing (the board: eki/web/goals.html) -----------------------------------------
+
+def _notes_path(folder: str) -> Path:
+    return Path(folder) / ".eki" / "notes.json"
+
+
+def notes(folder: str) -> Dict[str, str]:
+    try:
+        return dict(json.loads(_notes_path(folder).read_text()))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_notes(folder: str, data: Dict[str, str]) -> None:
+    path = _notes_path(folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def forget_note(folder: str, key: str) -> None:
+    have = notes(folder)
+    if have.pop(key, None) is not None:
+        _save_notes(folder, have)
+
+
+def _title(text: str) -> str:
+    for line in text.splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line:
+            return line[:120]
+    return ""
+
+
+def items(spec: Spec) -> List[Dict[str, Any]]:
+    """Every item with each part as it stands, for the board."""
+    out = []
+    pending = notes(spec.folder)
+    for goal in spec.goals:
+        rows = []
+        for n, item in enumerate(goal.items, 1):
+            where = _item_dir(spec, goal, item, n)
+            parts = []
+            title = ""
+            for part in goal.parts.values():
+                path = where / part.file
+                entry: Dict[str, Any] = {"name": part.name, "kind": part.kind,
+                                         "exists": path.exists(), "line": part.line,
+                                         "after": part.after,
+                                         "note": pending.get(f"{goal.name}/{item}/{part.name}", "")}
+                if entry["exists"]:
+                    entry["path"] = str(path.relative_to(spec.folder))
+                    entry["mtime"] = int(path.stat().st_mtime)
+                    if part.kind == "text":
+                        entry["text"] = _read(path, 4000)
+                        title = title or _title(entry["text"])
+                else:
+                    entry["ready"] = all((where / goal.parts[d].file).exists() for d in part.after)
+                parts.append(entry)
+            rows.append({"item": item, "n": n, "title": title or item, "parts": parts})
+        out.append({"goal": goal.name, "parts": list(goal.parts), "items": rows})
+    return out
+
+
+def dependents(goal: Goal, part: str) -> List[str]:
+    """The parts made from `part`, directly or through another."""
+    out: List[str] = []
+    changed = True
+    while changed:
+        changed = False
+        for p in goal.parts.values():
+            if p.name not in out and (part in p.after or any(a in out for a in p.after)):
+                out.append(p.name)
+                changed = True
+    return out
+
+
+def redo(spec: Spec, goal_name: str, item: str, part: str, note: str = "") -> List[str]:
+    """Make a piece again — and what was made from it, which would no longer
+    match. The old files aren't deleted: they move to .eki/redone/ in the
+    project. `note` is added to the piece's prompt the next time it's made."""
+    goal = next((g for g in spec.goals if g.name == goal_name), None)
+    if goal is None or item not in goal.items or part not in goal.parts:
+        raise GoalError(f"no {goal_name}/{item}/{part}")
+    n = goal.items.index(item) + 1
+    where = _item_dir(spec, goal, item, n)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    moved = []
+    for name in [part] + dependents(goal, part):
+        path = where / goal.parts[name].file
+        if not path.exists():
+            continue
+        keep = Path(spec.folder) / ".eki" / "redone" / stamp / path.relative_to(spec.folder)
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        path.replace(keep)
+        moved.append(f"{goal_name}/{item}/{name}")
+    if note.strip():
+        have = notes(spec.folder)
+        have[f"{goal_name}/{item}/{part}"] = note.strip()[:500]
+        _save_notes(spec.folder, have)
+    return moved
+
+
+def inside(folder: str, relative: str) -> Optional[Path]:
+    """A file in a registered project, or None — nothing outside it is served."""
+    root = Path(folder).expanduser().resolve()
+    if str(root) not in [str(Path(f).resolve()) for f in projects()]:
+        return None
+    path = (root / relative).resolve()
+    if root not in path.parents or not path.is_file():
+        return None
+    return path
 
 
 def instructions(spec: Spec, piece: Piece) -> str:

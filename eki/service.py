@@ -629,6 +629,44 @@ def goals_mode(body: Dict[str, Any]) -> Any:
     return eng.goals_view()
 
 
+@app.get("/goals")
+def goals_board() -> Any:
+    """The review board: every item's pieces, redo with a note, the mode."""
+    from fastapi.responses import HTMLResponse
+    page = Path(__file__).with_name("web") / "goals.html"
+    return HTMLResponse(page.read_text(), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/goals/items")
+def goals_items(folder: str) -> Any:
+    from . import goals as goals_mod
+    try:
+        return engine().goals_items(folder)
+    except goals_mod.GoalError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/goals/file")
+def goals_file(folder: str, path: str) -> Any:
+    from fastapi.responses import FileResponse
+    from . import goals as goals_mod
+    found = goals_mod.inside(folder, path)
+    if found is None:
+        raise HTTPException(404, "not a file in a goals project")
+    return FileResponse(str(found), headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/goals/redo")
+def goals_redo(body: Dict[str, Any]) -> Any:
+    from . import goals as goals_mod
+    try:
+        return engine().goals_redo(str(body.get("folder") or ""), str(body.get("goal") or ""),
+                                   str(body.get("item") or ""), str(body.get("part") or ""),
+                                   str(body.get("note") or ""))
+    except goals_mod.GoalError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/goals/report")
 def goals_report(hours: float = 24.0) -> Any:
     return engine().goals_report(hours)

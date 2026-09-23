@@ -13,6 +13,7 @@ enum Pane: Hashable {
     case usage
     case models
     case artifacts
+    case goals
     case scheduled
 }
 
@@ -36,6 +37,7 @@ struct ContentView: View {
                 case .models: ModelsPane()
                 case .scheduled: SchedulesPane()
                 case .artifacts: GalleryPane()
+                case .goals: GoalsPane()
                 }
             }
             .frame(minWidth: 520, minHeight: 400)
@@ -110,6 +112,8 @@ struct Sidebar: View {
                             selected: pane == .models) { choose(.models) }
                     RailRow(icon: "square.on.square", title: "Artifacts",
                             selected: pane == .artifacts) { choose(.artifacts) }
+                    RailRow(icon: "square.grid.2x2", title: "Goals",
+                            selected: pane == .goals) { choose(.goals) }
                     RailRow(icon: "calendar.badge.clock", title: "Scheduled",
                             selected: pane == .scheduled) { choose(.scheduled) }
 

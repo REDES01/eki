@@ -3113,6 +3113,7 @@ class Engine:
                 tmp.write_text(text)
                 os.replace(tmp, target)
             state = "done"
+            goals_mod.forget_note(piece.folder, piece.key)          # it was for this making
             yield f"\n→ {target}\n"
         except (asyncio.CancelledError, GeneratorExit):
             state = "stepped out"
@@ -3145,6 +3146,28 @@ class Engine:
         return {"mode": self._shift_mode(),
                 "when": str(self.settings.get("background_when", "resources")),
                 "shift": self._shift_state, "projects": rows}
+
+    def goals_items(self, folder: str) -> Dict[str, Any]:
+        spec = goals_mod.load(folder)
+        working = ""
+        if self._shift_run and self._shift_run in self.runner.running:
+            job = json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
+            if job.get("folder") == spec.folder:
+                working = f"{job.get('goal')}/{job.get('item')}/{job.get('part')}"
+        return {"folder": spec.folder, "working": working, "goals": goals_mod.items(spec)}
+
+    def goals_redo(self, folder: str, goal: str, item: str, part: str, note: str = "") -> Dict[str, Any]:
+        spec = goals_mod.load(folder)
+        key = f"{goal}/{item}/{part}"
+        if self._shift_run and self._shift_run in self.runner.running:
+            job = json.loads((self.runs.get(self._shift_run) or {}).get("payload") or "{}")
+            if job.get("folder") == spec.folder and job.get("item") == item and job.get("goal") == goal:
+                self._shift_step_out("its piece is being redone")
+        moved = goals_mod.redo(spec, goal, item, part, note)
+        self._shift_rest.pop(spec.folder + ":" + key, None)
+        observe_mod.note("history", what="goal redo", piece=key, moved=moved, note=note[:200])
+        self.shift_wake.set()
+        return {"redone": moved}
 
     def goals_report(self, hours: float = 24.0) -> Dict[str, Any]:
         """What the shift made, what failed, and what it cost."""

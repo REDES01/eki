@@ -47,6 +47,7 @@ from . import learn as learn_mod
 from . import handoff as handoff_mod
 from . import failover as failover_mod
 from . import goals as goals_mod
+from . import goaledit
 from . import shift as shift_mod
 from . import models as models_mod
 from . import table as table_mod
@@ -3206,6 +3207,101 @@ class Engine:
         observe_mod.note("history", what="goal redo", piece=key, moved=moved, note=note[:200])
         self.shift_wake.set()
         return {"redone": moved}
+
+    # ---- goals themselves: new, changed, removed (eki/goaledit.py) --------------------------
+
+    def _goal_kinds(self) -> List[str]:
+        """What this machine can make in the background: text, and pictures if a local model draws."""
+        kinds = []
+        for kind in ("text", "image"):
+            probe = goals_mod.Piece("", "", "", 0, "", kind, "", [], "local", "", True)
+            if self._piece_backend(probe, "local")[0]:
+                kinds.append(kind)
+        return kinds
+
+    async def goals_draft(self, folder: str, description: str) -> Dict[str, Any]:
+        """A goal entry from a sentence, written by the local text model."""
+        if not description.strip():
+            raise goals_mod.GoalError("say what the goal should make")
+        folder = str(Path(folder).expanduser())
+        probe = goals_mod.Piece(folder, "", "", 0, "", "text", "", [], "local", "", True)
+        key, why = self._piece_backend(probe, "local")
+        if not key:
+            raise goals_mod.GoalError(f"no local model to draft with ({why})")
+        local = self._local_for(key)
+        if local is not None:
+            if not local.running:
+                message = await self.models.start(local.key, eager=True)
+                if not local.running:
+                    raise goals_mod.GoalError(message)
+            self.models.hold(local.key)
+        self._shift_step_out("drafting a goal")
+        subject = adapters.build(self.get(key).info, dict(self.options.get(key, {})))
+        prompt = goaledit.draft_prompt(description, folder, self._goal_kinds())
+        messages = [Message("user", prompt)]
+        try:
+            for attempt in range(2):
+                text = ""
+                async for chunk in subject.stream(messages):
+                    if isinstance(chunk, str):
+                        text += chunk
+                try:
+                    entry = goaledit.parse_draft(text)
+                    return {"entry": entry, "yaml": goaledit.dump(entry), "backend": key}
+                except goals_mod.GoalError as e:
+                    if attempt:
+                        raise goals_mod.GoalError(f"the draft didn't work out: {e}")
+                    messages = messages + [Message("assistant", text),
+                                           Message("user", f"That entry has a problem: {e}. "
+                                                           "Reply with the corrected entry only.")]
+        finally:
+            if local is not None:
+                self.models.release(local.key)
+            try:
+                await subject.close()
+            except Exception:                       # noqa: BLE001
+                pass
+        raise goals_mod.GoalError("no draft")
+
+    def goals_definition(self, folder: str, goal: str) -> Dict[str, Any]:
+        entry = goaledit.clean(goaledit.entry(folder, goal))
+        return {"entry": entry, "yaml": goaledit.dump(entry)}
+
+    def goals_preview(self, folder: str, old: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            clean = goaledit.clean(entry)
+            return {"ok": True, "yaml": goaledit.dump(clean), "entry": clean,
+                    "impact": goaledit.impact(folder, old, clean)}
+        except goals_mod.GoalError as e:
+            return {"ok": False, "error": str(e)}
+
+    def goals_save(self, folder: str, old: str, entry: Dict[str, Any],
+                   redo: Optional[List[str]] = None) -> Dict[str, Any]:
+        folder = str(Path(folder).expanduser())
+        clean = goaledit.clean(entry)
+        name = str(clean.get("name"))
+        if old:
+            self._step_out_of(folder, old, "", "its goal was changed")
+        spec = goaledit.put(folder, clean, old)
+        if old and old != name:                   # a rename carries its pause and deletions
+            st = goals_mod.state(folder)
+            st["paused"] = [name if g == old else g for g in st["paused"]]
+            st["deleted"] = [name + k[len(old):] if k.startswith(old + "/") else k for k in st["deleted"]]
+            goals_mod._save_state(folder, st)
+        moved = goaledit.redo_parts(folder, name, redo) if redo else 0
+        if spec.folder not in goals_mod.projects():
+            goals_mod.add(spec.folder)
+        observe_mod.note("history", what="goal saved", goal=name, was=old or "", redo=redo or [])
+        self.shift_wake.set()
+        return {"goal": name, "folder": spec.folder, "moved": moved,
+                "status": next(g for g in goals_mod.status(spec) if g["goal"] == name)}
+
+    def goals_remove(self, folder: str, goal: str, trash: bool = False) -> Dict[str, Any]:
+        folder = str(Path(folder).expanduser())
+        self._step_out_of(folder, goal, "", "its goal was removed")
+        done = goaledit.remove(folder, goal, trash)
+        observe_mod.note("history", what="goal removed", goal=goal, trash=trash, moved=done["moved"])
+        return done
 
     def goals_report(self, hours: float = 24.0) -> Dict[str, Any]:
         """What the shift made, what failed, and what it cost."""

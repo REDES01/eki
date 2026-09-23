@@ -158,6 +158,41 @@
   form.redo { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; background: var(--sunk); border-radius: 9px; padding: 8px; }
   form.redo .r { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
   form.redo .also { color: var(--ink-3); font-size: 11.5px; margin-right: auto; }
+
+  /* the goal editor */
+  .editor { max-width: 860px; }
+  .editor h2 { margin: 10px 0 4px; font-size: 22px; letter-spacing: -.01em; }
+  .editor .lede { color: var(--ink-3); margin: 0 0 18px; font-size: 13px; }
+  .box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
+         box-shadow: var(--shadow); margin-bottom: 14px; }
+  .box h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .field > span { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+  .field small { color: var(--ink-3); font-size: 11.5px; }
+  .field input.text { flex: none; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  textarea.text, select.text { font: inherit; font-size: 13px; }
+  textarea.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px;
+                  padding: 8px 10px; resize: vertical; min-height: 70px; width: 100%; }
+  textarea.mono, .yaml { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  select.text { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 8px; }
+  .radio { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .part-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--bg); }
+  .part-card .top { display: grid; grid-template-columns: 1fr 120px 1fr auto; gap: 10px; align-items: end; }
+  .froms { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+  .impact { border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+  .impact.warn { background: var(--wait-soft); color: var(--ink); }
+  .impact.bad { background: var(--danger-soft); color: var(--danger); }
+  .impact.okay { background: var(--ok-soft); color: var(--ink); }
+  .impact label { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--accent);
+             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .yaml { white-space: pre-wrap; background: var(--sunk); border-radius: 9px; padding: 10px 12px; color: var(--ink-2); margin: 0; }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
+  .danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+  @media (max-width: 760px) { .part-card .top { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 760px) {
     .bar { padding: 10px 16px; } main { padding: 16px 16px 60px; } .hint { padding: 0 16px 10px; }
     .goal-row { grid-template-columns: 1fr; gap: 10px; }
@@ -211,6 +246,8 @@ async function api(path, body) {
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   if (parts[0] === "g" && parts.length >= 3) return { page: "goal", folder: parts[1], goal: parts[2], item: parts[3] || "" };
+  if (parts[0] === "new") return { page: "edit", folder: parts[1] || "", goal: "" };
+  if (parts[0] === "edit" && parts.length >= 3) return { page: "edit", folder: parts[1], goal: parts[2] };
   return { page: "home" };
 }
 const goalHref = (f, g, i) => "#/g/" + enc(f) + "/" + enc(g) + (i ? "/" + enc(i) : "");
@@ -259,9 +296,10 @@ function home() {
   const goals = projects.flatMap(p => (p.goals || []).map(g => ({...g, folder: p.folder})));
   let h = "";
   if (!goals.length) {
-    h += `<div class="empty">No goals yet.<br><br>Put a <code>goals.yaml</code> in a project folder — what should exist, and how to make it —<br>then add the folder below. eki makes what's missing whenever the machine has room.</div>`;
+    h += `<div class="empty">No goals yet.<br><br>A goal says what should exist — twenty characters, fifty item descriptions, a set of icons —<br>and eki makes what's missing whenever the machine has room.<br><br><a class="btn primary" href="#/new">New goal</a></div>`;
   } else {
-    h += `<div class="section-label">Goals</div><div class="goals">`;
+    h += `<div class="toolbar" style="justify-content:space-between;margin-bottom:0"><div class="section-label" style="margin:0">Goals</div>
+      <a class="btn primary" href="#/new">New goal</a></div><div class="goals" style="margin-top:10px">`;
     for (const g of goals) {
       const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
       const now = g.state === "working" ? ` · making ${esc(g.working)}` : "";
@@ -313,6 +351,7 @@ function goalPage(r) {
     <div class="goal-top"><div><h2>${esc(r.goal)}</h2>
       <div class="meta">${stateBadge(g)}<span title="${esc(r.folder)}">${esc(r.folder)}</span><span>${g.items} × ${g.parts.map(esc).join(" · ")}</span></div></div>
       <div class="tools">
+        <a class="btn" href="#/edit/${enc(r.folder)}/${enc(r.goal)}">Edit goal</a>
         <button class="btn" data-pause="${g.paused ? "0" : "1"}" data-folder="${esc(r.folder)}" data-goal="${esc(r.goal)}">${g.paused ? "Resume" : "Pause"}</button>
         ${S.confirm === k
           ? `<span class="confirm">Move all ${g.done} generated files to the project's .eki/trash and pause? <button class="btn small danger solid" data-delete-all>Delete all</button><button class="btn small" data-cancel>Cancel</button></span>`
@@ -402,6 +441,256 @@ function panel(r) {
     <div class="panel-body">${body}</div></aside>`;
 }
 
+
+// ---- a goal's definition: new, edit, remove ---------------------------------------------------
+let uid = 0;
+const E = { key: "", folder: "", old: "", parts: [], name: "", mode: "count", count: 10, names: "", id: "", dir: "",
+            yaml: false, yamlText: "", describe: "", drafting: false, draftNote: "", shown: false,
+            preview: null, redo: new Set(), removing: false, trash: false, saving: false, error: "", kinds: ["text"] };
+
+function toParts(entry) {
+  const ps = Object.entries(entry.parts || {}).map(([name, p]) => ({ uid: ++uid, name, kind: p.kind || "text", file: p.file || "",
+    fromNames: [].concat(p.from || []), frontier: p.line === "frontier", backend: p.backend || "", prompt: p.prompt || "" }));
+  for (const p of ps) p.from = p.fromNames.map(n => ps.find(x => x.name === n)?.uid).filter(Boolean);
+  return ps;
+}
+function loadEntry(entry) {
+  E.name = entry.name || ""; E.parts = toParts(entry);
+  if (entry.items) { E.mode = "names"; E.names = entry.items.join("\n"); E.count = entry.items.length; }
+  else { E.mode = "count"; E.count = entry.count || 10; }
+  E.id = entry.id || ""; E.dir = entry.dir || ""; E.shown = true; E.yamlText = "";
+}
+function entryOf() {
+  const parts = {};
+  for (const p of E.parts) {
+    parts[p.name] = { kind: p.kind, file: p.file, prompt: p.prompt,
+      from: p.from.map(u => E.parts.find(x => x.uid === u)?.name).filter(Boolean) };
+    if (p.frontier) parts[p.name].line = "frontier";
+    if (p.backend) parts[p.name].backend = p.backend;
+  }
+  const e = { name: E.name.trim(), parts };
+  if (E.mode === "names") e.items = E.names.split("\n").map(x => x.trim()).filter(Boolean);
+  else { e.count = Number(E.count) || 0; if (E.id.trim()) e.id = E.id.trim(); }
+  if (E.dir.trim()) e.dir = E.dir.trim();
+  return e;
+}
+function blankPart(i) {
+  return { uid: ++uid, name: i ? "part" + (i + 1) : "text", kind: "text", file: i ? `part${i + 1}.md` : "text.md", from: [], frontier: false, backend: "", prompt: "" };
+}
+
+async function openEditor(r) {
+  const key = r.folder + "\n" + r.goal;
+  if (E.key === key) return;
+  Object.assign(E, { key, folder: r.folder, old: r.goal, parts: [], name: "", mode: "count", count: 10, names: "", id: "", dir: "",
+    yaml: false, yamlText: "", describe: "", drafting: false, draftNote: "", shown: false, preview: null, redo: new Set(),
+    removing: false, trash: false, saving: false, error: "" });
+  try { E.kinds = (await api("/api/goals/kinds")).kinds; } catch {}
+  if (!E.folder) E.folder = (S.view?.projects || [])[0]?.folder || "";
+  if (r.goal) {
+    try { loadEntry((await api(`/api/goals/definition?folder=${enc(r.folder)}&goal=${enc(r.goal)}`)).entry); }
+    catch (e) { E.error = e.message; }
+    preview();
+  }
+  drawEditor();
+}
+
+let previewTimer = null;
+function preview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const body = { folder: E.folder, old: E.old };
+    if (E.yaml) body.yaml = E.yamlText; else body.entry = entryOf();
+    try { E.preview = await api("/api/goals/preview", body); } catch (e) { E.preview = { ok: false, error: e.message }; }
+    const box = $("#impact"); if (box) box.innerHTML = impactHtml();
+    const y = $("#yaml-view"); if (y && E.preview?.yaml && !E.yaml) y.textContent = E.preview.yaml;
+  }, 350);
+}
+
+function impactHtml() {
+  const p = E.preview;
+  if (!p) return "";
+  if (!p.ok) return `<div class="impact bad">${esc(p.error)}</div>`;
+  const im = p.impact || {}; let h = "";
+  for (const c of im.changed || []) {
+    h += `<div class="impact warn">The <b>${esc(c.part)}</b> prompt changed — ${c.made} already made ${c.made === 1 ? "stays" : "stay"} as ${c.made === 1 ? "it was" : "they were"}${c.with.length ? `, and the ${esc(c.with.join(" and "))} made from ${c.made === 1 ? "it" : "them"}` : ""}.
+      <label><input type="checkbox" data-redo-part="${esc(c.part)}" ${E.redo.has(c.part) ? "checked" : ""}> Make ${c.made === 1 ? "it" : "them"} again with the new prompt (the old files go to the trash)</label></div>`;
+  }
+  if (im.orphaned) h += `<div class="impact warn">A file name or folder changed: ${im.orphaned} file${im.orphaned === 1 ? "" : "s"} already made won't be recognised, and will be made again under the new name.</div>`;
+  if (im.dropped_items) h += `<div class="impact warn">${im.dropped_items} item${im.dropped_items === 1 ? "" : "s"} fewer — their files stay, but aren't part of the goal any more.</div>`;
+  if (im.new_items) h += `<div class="impact okay">${im.new_items} new item${im.new_items === 1 ? "" : "s"} will be made.</div>`;
+  if (!h && !E.old) h = `<div class="impact okay">Ready. Once saved, it's made whenever the machine has room.</div>`;
+  return h;
+}
+
+// a part named in a prompt is made first, whatever the checkboxes say (eki/goals.py)
+function promptUses(p, other) { return new RegExp("\\{" + other.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(:\\d+)?\\}").test(p.prompt); }
+function partCard(p, i) {
+  const others = E.parts.filter(x => x.uid !== p.uid);
+  const names = E.parts.map(x => x.uid !== p.uid ? `{${x.name}}` : null).filter(Boolean);
+  return `<div class="part-card" data-part-uid="${p.uid}">
+    <div class="top">
+      <label class="field"><span>Part</span><input class="text" data-pk="name" value="${esc(p.name)}"></label>
+      <label class="field"><span>Kind</span><select class="text" data-pk="kind">
+        <option value="text" ${p.kind === "text" ? "selected" : ""}>Text</option>
+        <option value="image" ${p.kind === "image" ? "selected" : ""} ${E.kinds.includes("image") ? "" : "disabled"}>Image${E.kinds.includes("image") ? "" : " (no local image model)"}</option></select></label>
+      <label class="field"><span>File</span><input class="text" data-pk="file" value="${esc(p.file)}"></label>
+      <button type="button" class="btn small danger" data-rm-part="${p.uid}" style="margin-bottom:12px" ${E.parts.length > 1 ? "" : "disabled"}>Remove</button>
+    </div>
+    ${others.length ? `<div class="field"><span>Made from</span><div class="froms">${others.map(o => {
+      const used = promptUses(p, o);
+      return `<label title="${used ? "Its prompt uses {" + esc(o.name) + "}, so it's always made first" : ""}"><input type="checkbox" data-from="${o.uid}" ${p.from.includes(o.uid) || used ? "checked" : ""} ${used ? "disabled" : ""}> ${esc(o.name)}${used ? ` <span class="muted">(in the prompt)</span>` : ""}</label>`; }).join("")}</div></div>` : ""}
+    <label class="field"><span>Prompt</span><textarea class="text mono" data-pk="prompt" rows="${Math.min(10, Math.max(3, p.prompt.split("\n").length + 1))}">${esc(p.prompt)}</textarea>
+      <small>Fill-ins: ${["{others}", "{n}", "{id}"].concat(names).map(esc).join(" ")} — add :500 to cut a part to its first 500 characters. Every piece also reads the project's world bible.</small></label>
+    <label class="check"><input type="checkbox" data-pk="frontier" ${p.frontier ? "checked" : ""}> Worth a subscription (used only in Spare mode)</label>
+  </div>`;
+}
+
+function editorHtml() {
+  const projects = (S.view?.projects || []).map(p => p.folder);
+  const isNew = !E.old;
+  let h = `<div class="editor"><a class="back" href="${isNew ? "#/" : goalHref(E.folder, E.old)}">← ${isNew ? "All goals" : esc(E.old)}</a>
+    <h2>${isNew ? "New goal" : "Edit " + esc(E.old)}</h2>
+    <p class="lede">A goal says what should exist — a number of items, each made of parts — and how to make each part. It lives in the project's goals.yaml.</p>`;
+  if (E.error) h += `<div class="impact bad">${esc(E.error)}</div>`;
+  if (isNew) {
+    h += `<div class="box"><h3>Project</h3>
+      ${projects.length ? `<select class="text" id="ed-folder" style="width:100%">${projects.map(f => `<option value="${esc(f)}" ${f === E.folder ? "selected" : ""}>${esc(f)}</option>`).join("")}
+        <option value="" ${projects.includes(E.folder) ? "" : "selected"}>Another folder…</option></select>` : ""}
+      ${!projects.includes(E.folder) || !projects.length ? `<input class="text" id="ed-folder-path" placeholder="A folder — e.g. ~/games/ashfall (a goals.yaml is created if it has none)" value="${esc(projects.includes(E.folder) ? "" : E.folder)}" style="width:100%;margin-top:8px">` : ""}
+    </div>
+    <div class="box"><h3>Describe it</h3>
+      <textarea class="text" id="ed-describe" rows="3" placeholder="e.g. 30 weapons for this world, each with a name and short description, a longer lore entry, and an icon">${esc(E.describe)}</textarea>
+      <div class="actions"><button class="btn primary" data-draft ${E.drafting ? "disabled" : ""}>${E.drafting ? `<span class="spinner"></span>Drafting on your local model…` : "Draft it"}</button>
+        ${E.shown ? "" : `<button class="btn" data-blank>Start blank</button>`}
+        <span class="muted">${esc(E.draftNote)}</span></div></div>`;
+  }
+  if (!E.shown) return h + "</div>";
+  h += `<div class="box"><h3>Goal</h3>
+    <div class="cols"><label class="field"><span>Name</span><input class="text" data-ek="name" value="${esc(E.name)}" placeholder="weapons"></label>
+      <div class="field"><span>Items</span><div class="radio">
+        <label><input type="radio" name="mode" value="count" ${E.mode === "count" ? "checked" : ""}> How many</label>
+        <label><input type="radio" name="mode" value="names" ${E.mode === "names" ? "checked" : ""}> Named</label></div></div></div>
+    ${E.mode === "count"
+      ? `<div class="cols"><label class="field"><span>How many</span><input class="text" type="number" min="1" max="10000" data-ek="count" value="${esc(E.count)}"></label>
+         <label class="field"><span>Item names</span><input class="text" data-ek="id" value="${esc(E.id)}" placeholder="${esc((E.name || "item") + "-{n:02}")}"><small>{n} is the number; {n:02} pads it to 01, 02…</small></label></div>`
+      : `<label class="field"><span>One per line</span><textarea class="text" data-ek="names" rows="4" placeholder="innkeeper&#10;blacksmith&#10;ferryman">${esc(E.names)}</textarea></label>`}
+    <label class="field"><span>Where each item's files go</span><input class="text" data-ek="dir" value="${esc(E.dir)}" placeholder="${esc((E.name || "goal") + "/{id}")}"><small>Inside the project; {id} is the item's name.</small></label>
+    </div>
+    <div class="box"><h3>Parts</h3>${E.parts.map(partCard).join("")}
+      <button class="btn" data-add-part>Add a part</button></div>
+    <div id="impact">${impactHtml()}</div>
+    <details ${E.yaml ? "open" : ""} id="yaml-details"><summary>As YAML${E.yaml ? " (editing — the form is set aside)" : ""}</summary>
+      ${E.yaml ? `<textarea class="text mono" id="ed-yaml" rows="18">${esc(E.yamlText)}</textarea>`
+               : `<pre class="yaml" id="yaml-view">${esc(E.preview?.yaml || "")}</pre>`}
+      <div class="actions"><button class="btn small" data-yaml-mode>${E.yaml ? "Back to the form" : "Edit as YAML"}</button></div></details>
+    <div class="actions" style="margin-top:16px"><button class="btn primary" data-save ${E.saving ? "disabled" : ""}>${isNew ? "Save goal" : "Save changes"}</button>
+      <a class="btn" href="${isNew ? "#/" : goalHref(E.folder, E.old)}">Cancel</a></div>`;
+  if (!isNew) {
+    h += `<div class="box danger-zone" style="margin-top:28px"><h3>Remove this goal</h3>
+      ${E.removing ? `<div class="radio" style="margin-bottom:10px">
+          <label><input type="radio" name="trash" value="0" ${E.trash ? "" : "checked"}> Keep the files it made</label>
+          <label><input type="radio" name="trash" value="1" ${E.trash ? "checked" : ""}> Move them to the project's .eki/trash</label></div>
+        <div class="actions"><button class="btn danger solid" data-remove-goal>Remove ${esc(E.old)}</button><button class="btn" data-cancel-remove>Cancel</button></div>`
+      : `<p class="muted" style="margin:0 0 10px">Takes it out of goals.yaml. Nothing is made for it any more.</p><button class="btn danger" data-ask-remove>Remove goal…</button>`}</div>`;
+  }
+  return h + "</div>";
+}
+function drawEditor() { header(); $("#main").innerHTML = editorHtml(); $("#layer").innerHTML = ""; }
+
+function syncFroms(p) {
+  for (const o of E.parts) {
+    if (o.uid === p.uid) continue;
+    const box = document.querySelector(`[data-part-uid="${p.uid}"] [data-from="${o.uid}"]`);
+    if (!box) continue;
+    const used = promptUses(p, o);
+    box.disabled = used; box.checked = used || p.from.includes(o.uid);
+  }
+}
+function partOf(el) { const c = el.closest("[data-part-uid]"); return c && E.parts.find(p => p.uid === Number(c.dataset.partUid)); }
+
+document.addEventListener("input", e => {
+  if (route().page !== "edit") return;
+  const t = e.target;
+  if (t.id === "ed-describe") { E.describe = t.value; return; }
+  if (t.id === "ed-folder-path") { E.folder = t.value.trim(); return; }
+  if (t.id === "ed-yaml") { E.yamlText = t.value; return preview(); }
+  if (t.dataset.ek) { E[t.dataset.ek] = t.value; return preview(); }
+  const p = partOf(t);
+  if (p && t.dataset.pk === "prompt") { p.prompt = t.value; syncFroms(p); return preview(); }
+  if (p && t.dataset.pk && t.dataset.pk !== "frontier" && t.dataset.pk !== "kind") {
+    const was = p.name; p[t.dataset.pk] = t.value;
+    if (t.dataset.pk === "name" && was !== p.name) {
+      // a part's name shows in the others' "Made from": redraw those, keep focus here
+      for (const el of document.querySelectorAll(`[data-from="${p.uid}"]`)) el.parentElement.lastChild.textContent = " " + p.name;
+    }
+    preview();
+  }
+});
+document.addEventListener("change", e => {
+  if (route().page !== "edit") return;
+  const t = e.target, p = partOf(t);
+  if (t.id === "ed-folder") { E.folder = t.value; drawEditor(); return; }
+  if (t.name === "mode") { E.mode = t.value; drawEditor(); return preview(); }
+  if (t.name === "trash") { E.trash = t.value === "1"; return; }
+  if (t.dataset.redoPart) { t.checked ? E.redo.add(t.dataset.redoPart) : E.redo.delete(t.dataset.redoPart); return; }
+  if (p && t.dataset.pk === "frontier") { p.frontier = t.checked; return preview(); }
+  if (p && t.dataset.pk === "kind") {
+    p.kind = t.value;
+    if (p.kind === "image" && /\.md$/.test(p.file)) p.file = p.file.replace(/\.md$/, ".png");
+    if (p.kind === "text" && /\.png$/.test(p.file)) p.file = p.file.replace(/\.png$/, ".md");
+    drawEditor(); return preview();
+  }
+  if (p && t.dataset.from) {
+    const u = Number(t.dataset.from);
+    p.from = t.checked ? [...new Set([...p.from, u])] : p.from.filter(x => x !== u);
+    return preview();
+  }
+});
+document.addEventListener("click", async e => {
+  if (route().page !== "edit") return;
+  const t = e.target;
+  if (t.closest("[data-draft]")) {
+    if (!E.describe.trim()) { E.draftNote = "Say what it should make first."; return drawEditor(); }
+    if (!E.folder) { E.draftNote = "Choose the project folder first."; return drawEditor(); }
+    E.drafting = true; E.draftNote = "This usually takes under a minute."; drawEditor();
+    try {
+      const got = await api("/api/goals/draft", { folder: E.folder, description: E.describe });
+      loadEntry(got.entry); E.draftNote = `Drafted by ${got.backend}. Check it, change what you like, then save.`;
+    } catch (err) { E.draftNote = err.message; }
+    E.drafting = false; drawEditor(); preview(); return;
+  }
+  if (t.closest("[data-blank]")) { loadEntry({ name: "", count: 10, parts: {} }); E.parts = [blankPart(0)]; drawEditor(); return preview(); }
+  if (t.closest("[data-add-part]")) { E.parts.push(blankPart(E.parts.length)); drawEditor(); return preview(); }
+  const rp = t.closest("[data-rm-part]");
+  if (rp) { const u = Number(rp.dataset.rmPart); E.parts = E.parts.filter(p => p.uid !== u);
+            for (const p of E.parts) p.from = p.from.filter(x => x !== u); drawEditor(); return preview(); }
+  if (t.closest("[data-yaml-mode]")) {
+    if (E.yaml) {                     // back to the form: take what the YAML says, if it reads
+      try { const got = await api("/api/goals/preview", { folder: E.folder, old: E.old, yaml: E.yamlText });
+            if (!got.ok) throw new Error(got.error);
+            loadEntry(got.entry); } catch (err) { E.error = "The YAML doesn't read yet: " + err.message; drawEditor(); return; }
+      E.yaml = false; E.error = "";
+    } else { E.yaml = true; E.yamlText = E.preview?.yaml || ""; }
+    drawEditor(); return preview();
+  }
+  if (t.closest("[data-save]")) {
+    E.saving = true; E.error = ""; drawEditor();
+    const body = { folder: E.folder, old: E.old, redo: [...E.redo] };
+    if (E.yaml) body.yaml = E.yamlText; else body.entry = entryOf();
+    try {
+      const got = await api("/api/goals/save", body);
+      E.key = ""; location.hash = goalHref(got.folder, got.goal);
+    } catch (err) { E.error = err.message; E.saving = false; drawEditor(); }
+    return;
+  }
+  if (t.closest("[data-ask-remove]")) { E.removing = true; return drawEditor(); }
+  if (t.closest("[data-cancel-remove]")) { E.removing = false; return drawEditor(); }
+  if (t.closest("[data-remove-goal]")) {
+    try { await api("/api/goals/remove", { folder: E.folder, goal: E.old, trash: E.trash }); E.key = ""; location.hash = "#/"; }
+    catch (err) { E.error = err.message; drawEditor(); }
+  }
+});
+
 // ---- drawing and refreshing ---------------------------------------------------------------
 function busy() { return S.redo || document.activeElement?.matches("input.text"); }
 
@@ -409,6 +698,7 @@ function draw() {
   header();
   const r = route();
   if (!S.view) return;
+  if (r.page === "edit") { openEditor(r).then(() => { if (E.key) drawEditor(); }); return; }
   if (r.page === "home") { $("#main").innerHTML = home(); $("#layer").innerHTML = ""; }
   else {
     $("#main").innerHTML = goalPage(r);
@@ -431,8 +721,9 @@ async function refresh(force) {
       key = r.folder + "\n" + r.goal;
       items = await api(`/api/goals/items?folder=${enc(r.folder)}&goal=${enc(r.goal)}`);
     }
-    const sig = JSON.stringify([v, items, key]);
     S.view = v; S.error = "";
+    if (r.page === "edit") { header(); if (force) draw(); return; }
+    const sig = JSON.stringify([v, items, key]);
     if (force || sig !== S.sig) {
       S.sig = sig; S.items = items; S.itemsKey = key;
       if (force || !busy()) draw(); else header();

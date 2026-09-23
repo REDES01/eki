@@ -44,6 +44,28 @@ every other item (so the twentieth character isn't the first one again),
 `{id}` / `{n}` the item. Text pieces are written under a system prompt that
 carries the bible; a model's thinking never reaches the file.
 
+## Creating, changing, removing
+
+Nobody has to write the YAML by hand:
+
+- **New goal** on the board (or `eki goals new "30 weapons, each with a
+  description, lore and an icon"` in the project folder): describe it in words
+  and the local model drafts the entry — items, parts, files, prompts, what's
+  made from what. Check it in the form, change anything, save. *Start blank*
+  skips the draft.
+- **Edit goal** (or `eki goals edit <goal>`, which opens your editor on just
+  that entry): count, item names, parts, prompts. Before saving it says what
+  the change means for what's already made — a changed prompt leaves the
+  existing pieces as they were unless you tick *make them again*; a changed
+  file name means the old files won't be recognised; more items get made.
+- **Remove goal** (or `eki goals rm <goal> [--trash]`): out of goals.yaml,
+  keeping its files, or moving them to the trash.
+
+An edit rewrites only its own entry: your comments, the bible and the other
+goals stay exactly as written, and every save is checked by loading the file
+back (and undone if it doesn't load). A part named in another's prompt
+(`{bio}`) is always made first, whether or not `from:` lists it.
+
 ## When it runs
 
 Whenever there's room — you can keep working:

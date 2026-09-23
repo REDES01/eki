@@ -37,7 +37,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -604,8 +604,116 @@ def cmd_builds(args) -> int:
     return 0
 
 
+def _goal_folder(args, service: str) -> str:
+    if args.folder:
+        return os.path.abspath(os.path.expanduser(args.folder))
+    here = os.getcwd()
+    if os.path.exists(os.path.join(here, "goals.yaml")):
+        return here
+    projects = [p["folder"] for p in call("GET", "/api/goals", service)["projects"]]
+    if len(projects) == 1:
+        return projects[0]
+    raise SystemExit("which project? run it inside the folder, or pass --folder"
+                     + ("" if not projects else " (" + ", ".join(projects) + ")"))
+
+
+def _edit_text(text: str) -> str:
+    import shlex
+    import tempfile
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(text)
+        path = f.name
+    try:
+        subprocess.run(shlex.split(editor) + [path], check=False)
+        return open(path).read()
+    finally:
+        os.unlink(path)
+
+
+def _say_impact(im: Dict[str, Any]) -> List[str]:
+    redo = []
+    for c in im.get("changed") or []:
+        also = f" (and the {' and '.join(c['with'])} made from them)" if c["with"] else ""
+        answer = input(f"the {c['part']} prompt changed; {c['made']} already made{also}. make them again? [y/N] ")
+        if answer.strip().lower().startswith("y"):
+            redo.append(c["part"])
+    if im.get("orphaned"):
+        print(f"· a file name or folder changed: {im['orphaned']} made file(s) won't be recognised")
+    if im.get("new_items"):
+        print(f"· {im['new_items']} new item(s) will be made")
+    return redo
+
+
+def _goal_new_or_edit(args) -> int:
+    if args.action == "edit" or args.folder:
+        folder = _goal_folder(args, args.service)
+    else:
+        folder = os.getcwd()            # a new goal goes in the folder you're in
+    old = ""
+    if args.action == "new":
+        if not args.arg:
+            print('eki goals new "30 weapons, each with a description and an icon"', file=sys.stderr)
+            return 2
+        print("drafting on your local model…", file=sys.stderr, flush=True)
+        r = httpx.post(f"{args.service}/api/goals/draft", json={"folder": folder, "description": args.arg},
+                       timeout=600)
+        if r.status_code >= 400:
+            print(f"! {r.json().get('detail', r.text)}", file=sys.stderr)
+            return 1
+        text = r.json()["yaml"]
+        print(text)
+        if not args.yes:
+            answer = input(f"save it to {folder}/goals.yaml? [y]es / [e]dit first / [N]o ").strip().lower()
+            if answer.startswith("e"):
+                text = _edit_text(text)
+            elif not answer.startswith("y"):
+                return 0
+    else:
+        old = args.arg
+        if not old:
+            print("eki goals edit <goal>", file=sys.stderr)
+            return 2
+        text = call("GET", "/api/goals/definition", args.service,
+                    params={"folder": folder, "goal": old})["yaml"]
+        changed = _edit_text(text)
+        if changed.strip() == text.strip():
+            print("no change")
+            return 0
+        text = changed
+    while True:
+        pv = call("POST", "/api/goals/preview", args.service, json={"folder": folder, "old": old, "yaml": text})
+        if pv.get("ok"):
+            break
+        print(f"! {pv.get('error')}", file=sys.stderr)
+        if input("edit again? [Y/n] ").strip().lower().startswith("n"):
+            return 1
+        text = _edit_text(text)
+    redo = _say_impact(pv.get("impact") or {}) if old and not args.yes else []
+    got = call("POST", "/api/goals/save", args.service,
+               json={"folder": folder, "old": old, "yaml": text, "redo": redo})
+    st = got["status"]
+    print(f"saved {got['goal']} in {got['folder']}: {st['done']}/{st['total']} made — "
+          "the rest is made whenever the machine has room")
+    return 0
+
+
 def cmd_goals(args) -> int:
     """Declared goals and the idle shift working on them (eki/goals.py)."""
+    if args.action in ("new", "edit"):
+        return _goal_new_or_edit(args)
+    if args.action == "rm":
+        if not args.arg:
+            print("eki goals rm <goal> [--trash]", file=sys.stderr)
+            return 2
+        folder = _goal_folder(args, args.service)
+        what = "and move its files to the trash" if args.trash else "(its files stay)"
+        if not args.yes and not input(f"remove {args.arg} from {folder}/goals.yaml {what}? [y/N] ").strip().lower().startswith("y"):
+            return 0
+        got = call("POST", "/api/goals/remove", args.service,
+                   json={"folder": folder, "goal": args.arg, "trash": args.trash})
+        print(f"removed {got['removed']}" + (f"; {got['moved']} file(s) in .eki/trash" if got["moved"] else ""))
+        return 0
     if args.action == "add":
         folder = os.path.abspath(os.path.expanduser(args.arg or "."))
         got = call("POST", "/api/goals/projects", args.service, json={"folder": folder})
@@ -792,9 +900,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     g = sub.add_parser("goals", help="what your projects want made, worked on while the machine has room")
     g.add_argument("action", nargs="?", default="show",
-                   choices=["show", "add", "remove", "mode", "report"])
+                   choices=["show", "add", "remove", "mode", "report", "new", "edit", "rm"])
     g.add_argument("arg", nargs="?", default="",
-                   help="a folder (add, remove); local|spare|off or resources|away (mode); hours (report)")
+                   help="a folder (add, remove); local|spare|off or resources|away (mode); hours (report); "
+                        "what to make, in words (new); a goal's name (edit, rm)")
+    g.add_argument("-f", "--folder", default="", help="the project (default: this folder, or the only one)")
+    g.add_argument("--trash", action="store_true", help="rm: move its files to the project's .eki/trash too")
+    g.add_argument("-y", "--yes", action="store_true", help="don't ask")
 
     sv = sub.add_parser("serve", help="run the engine in the foreground")
     sv.add_argument("--host", default="127.0.0.1")

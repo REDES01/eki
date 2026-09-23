@@ -142,36 +142,71 @@ def load(folder: str) -> Spec:
         raise GoalError(f"no {FILE} in {root}")
     except yaml.YAMLError as e:
         raise GoalError(f"{path}: {e}")
+    return from_raw(raw, root)
+
+
+def goal_from_raw(g: Any) -> Goal:
+    """One goal entry, checked — what goals.yaml says, or what the board sends."""
+    if not isinstance(g, dict):
+        raise GoalError("a goal is a set of fields (name, count, parts…)")
+    name = str(g.get("name") or "").strip()
+    if not name or not re.fullmatch(r"[\w.-]+", name):
+        raise GoalError(f"a goal needs a plain name (letters, digits, - _ .), not {name!r}")
+    if g.get("items"):
+        items = [str(i).strip() for i in g["items"] if str(i).strip()]
+        if len(set(items)) != len(items):
+            raise GoalError(f"{name}: the same item is listed twice")
+    elif g.get("count"):
+        fmt = str(g.get("id") or name + "-{n:02}")
+        try:
+            count = int(g["count"])
+            items = [fmt.format(n=i + 1) for i in range(count)]
+        except (KeyError, ValueError, IndexError) as e:
+            raise GoalError(f"{name}: can't number the items with {fmt!r} ({e})")
+        if count < 1 or count > 10000:
+            raise GoalError(f"{name}: count is between 1 and 10000")
+        if len(set(items)) != len(items):
+            raise GoalError(f"{name}: the id {fmt!r} gives every item the same name — use {{n}} in it")
+    else:
+        raise GoalError(f"{name}: say how many (count) or which (items)")
+    parts: Dict[str, Part] = {}
+    for pname, p in (g.get("parts") or {}).items():
+        p = p or {}
+        if not re.fullmatch(r"[\w.-]+", str(pname)):
+            raise GoalError(f"{name}: a part needs a plain name, not {pname!r}")
+        kind = str(p.get("kind") or "text")
+        if kind not in KINDS:
+            raise GoalError(f"{name}.{pname}: kind is one of {', '.join(KINDS)}")
+        if not p.get("file") or not str(p.get("prompt") or "").strip():
+            raise GoalError(f"{name}.{pname}: needs a file and a prompt")
+        after = p.get("from") or []
+        parts[str(pname)] = Part(str(pname), kind, str(p["file"]), str(p["prompt"]),
+                                 [str(a) for a in ([after] if isinstance(after, str) else after)],
+                                 str(p.get("line") or "local"), str(p.get("backend") or ""))
+    if not parts:
+        raise GoalError(f"{name}: no parts")
+    # a part a prompt reads is made before it, whether or not `from` says so —
+    # otherwise {bio} could be filled in before there is a bio
+    for part in parts.values():
+        for ref, _ in _FIELD.findall(part.prompt):
+            if ref in parts and ref != part.name and ref not in part.after:
+                part.after.append(ref)
+    files = [p.file for p in parts.values()]
+    if len(set(files)) != len(files):
+        raise GoalError(f"{name}: two parts write the same file")
+    return Goal(name, items, "{item}", str(g.get("dir") or name + "/{id}"), _order(parts, name))
+
+
+def from_raw(raw: Dict[str, Any], root: Path) -> Spec:
     bible = raw.get("bible") or []
     if isinstance(bible, str):
         bible = [bible]
     goals = []
     for g in raw.get("goals") or []:
-        name = str(g.get("name") or "").strip()
-        if not name or not re.fullmatch(r"[\w.-]+", name):
-            raise GoalError(f"a goal needs a plain name, not {name!r}")
-        if g.get("items"):
-            items = [str(i) for i in g["items"]]
-        elif g.get("count"):
-            fmt = str(g.get("id") or name + "-{n:02}")
-            items = [fmt.format(n=i + 1) for i in range(int(g["count"]))]
-        else:
-            raise GoalError(f"{name}: say how many (count) or which (items)")
-        parts: Dict[str, Part] = {}
-        for pname, p in (g.get("parts") or {}).items():
-            kind = str(p.get("kind") or "text")
-            if kind not in KINDS:
-                raise GoalError(f"{name}.{pname}: kind is one of {', '.join(KINDS)}")
-            if not p.get("file") or not p.get("prompt"):
-                raise GoalError(f"{name}.{pname}: needs a file and a prompt")
-            after = p.get("from") or []
-            parts[str(pname)] = Part(str(pname), kind, str(p["file"]), str(p["prompt"]),
-                                     [str(a) for a in ([after] if isinstance(after, str) else after)],
-                                     str(p.get("line") or "local"), str(p.get("backend") or ""))
-        if not parts:
-            raise GoalError(f"{name}: no parts")
-        goals.append(Goal(name, items, "{item}", str(g.get("dir") or name + "/{id}"),
-                          _order(parts, name)))
+        goal = goal_from_raw(g)
+        if any(x.name == goal.name for x in goals):
+            raise GoalError(f"two goals are called {goal.name!r}")
+        goals.append(goal)
     return Spec(str(root), [str(b) for b in bible], goals)
 
 

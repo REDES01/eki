@@ -667,6 +667,56 @@ def goals_restore(body: Dict[str, Any]) -> Any:
                       str(body.get("item") or ""), str(body.get("part") or ""))
 
 
+@app.get("/api/goals/definition")
+def goals_definition(folder: str, goal: str) -> Any:
+    return _goal_call(engine().goals_definition, folder, goal)
+
+
+@app.get("/api/goals/kinds")
+def goals_kinds() -> Any:
+    return {"kinds": engine()._goal_kinds()}
+
+
+@app.post("/api/goals/draft")
+async def goals_draft(body: Dict[str, Any]) -> Any:
+    """A goal entry from a sentence, by the local model — shown, not saved."""
+    from . import goals as goals_mod
+    try:
+        return await engine().goals_draft(str(body.get("folder") or ""), str(body.get("description") or ""))
+    except goals_mod.GoalError as e:
+        raise HTTPException(400, str(e))
+
+
+def _entry_of(body: Dict[str, Any]) -> Dict[str, Any]:
+    """The entry from the form, or parsed from its YAML view."""
+    from . import goaledit
+    if body.get("yaml"):
+        return goaledit.parse_draft(str(body["yaml"]))
+    return dict(body.get("entry") or {})
+
+
+@app.post("/api/goals/preview")
+def goals_preview(body: Dict[str, Any]) -> Any:
+    from . import goals as goals_mod
+    try:
+        entry = _entry_of(body)
+    except goals_mod.GoalError as e:
+        return {"ok": False, "error": str(e)}
+    return engine().goals_preview(str(body.get("folder") or ""), str(body.get("old") or ""), entry)
+
+
+@app.post("/api/goals/save")
+def goals_save(body: Dict[str, Any]) -> Any:
+    return _goal_call(lambda: engine().goals_save(str(body.get("folder") or ""), str(body.get("old") or ""),
+                                                  _entry_of(body), list(body.get("redo") or [])))
+
+
+@app.post("/api/goals/remove")
+def goals_remove(body: Dict[str, Any]) -> Any:
+    return _goal_call(engine().goals_remove, str(body.get("folder") or ""), str(body.get("goal") or ""),
+                      bool(body.get("trash")))
+
+
 @app.post("/api/goals/pause")
 def goals_pause(body: Dict[str, Any]) -> Any:
     return _goal_call(engine().goals_pause, str(body.get("folder") or ""), str(body.get("goal") or ""),

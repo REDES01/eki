@@ -413,3 +413,43 @@ async def test_the_view_says_what_each_goal_is_doing(eng, game):
     assert eng.goals_view()["projects"][0]["goals"][0]["state"] == "paused"
     assert (await eng.shift_tick())["why"] == "nothing left to make"
     await eng.runner.stop()
+
+
+class Drafter(Writer):
+    replies = []
+
+    async def stream(self, messages, **kw):
+        Writer.seen.append([m.content for m in messages])
+        yield Drafter.replies.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_a_goal_drafted_from_a_sentence_then_saved(eng, game, monkeypatch):
+    from eki.adapters import base as adapters
+    monkeypatch.setattr(adapters, "build", lambda info, opts: (Painter if info.kind == "comfyui" else Drafter)(info, opts))
+    Drafter.replies = ["not yaml at all: [",
+                       "name: items\ncount: 3\nid: \"item-{n}\"\ndir: \"items/{id}\"\nparts:\n"
+                       "  desc: {kind: text, file: desc.md, prompt: \"An item. {others}\"}\n"]
+    got = await eng.goals_draft(str(game), "three magic items for Ashfall")
+    assert got["entry"]["name"] == "items" and got["backend"] == "qwen"
+    assert "three magic items" in Writer.seen[0][-1] and "Ashfall" in Writer.seen[0][-1]
+    assert "problem" in Writer.seen[1][-1]                                   # retried with the error
+    assert eng._goal_kinds() == ["text", "image"]
+    saved = eng.goals_save(str(game), "", got["entry"])
+    assert saved["status"]["total"] == 3 and str(game) in goals.projects()
+    eng.goals_pause(str(game), "items", True)
+    renamed = dict(got["entry"], name="relics")
+    eng.goals_save(str(game), "items", renamed)
+    assert goals.state(str(game))["paused"] == ["relics"]                    # the pause went with it
+    eng.goals_remove(str(game), "relics")
+    assert [g.name for g in goals.load(str(game)).goals] == ["npcs"]
+    await eng.runner.stop()
+
+
+def test_a_part_a_prompt_reads_is_made_first_even_without_from(tmp_path):
+    (tmp_path / "goals.yaml").write_text(
+        "goals:\n  - name: w\n    count: 1\n    parts:\n"
+        "      lore: {kind: text, file: lore.md, prompt: 'The story of {desc}.'}\n"
+        "      desc: {kind: text, file: desc.md, prompt: 'A weapon.'}\n")
+    todo = goals.pieces(goals.load(str(tmp_path)))
+    assert [(p.part, p.ready) for p in todo] == [("desc", True), ("lore", False)]

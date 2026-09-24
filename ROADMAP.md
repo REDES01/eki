@@ -149,12 +149,17 @@ questions (elicitation) are cards, the model's thinking shows, and the
 program gets eki's tools in-process — the other backends, pictures, the
 screen (`docs/claude-code.md`).
 
-**Next: measure the number the vision is about.** The release's first
-priority is *Measured: hours of useful local work a day* (Stage 3): the
-vision says the number to move is how much of the day the local models work,
-and today it is about 1% and shown nowhere but the weekly note — so nothing
-eki does can be seen to move it. Until it's measured and on the board and in
-`eki goals report`, the other items are guesses about what helps.
+**Left for the first release, in order** (Stages 1–3 come first in this
+file too, so the loop takes them before anything later):
+
+1. *Measured: hours of useful local work a day* (below) — landing
+2. *Handoff between backends on long threads* (Stage 2) — built as
+   self/a2a5b807, being applied
+3. *The top of the tree can do anything* (Stage 2)
+4. *Commands shared under Auto* (Stage 1) *(for a person)*
+
+An item that needs the person's decision or hands says *(for a person)*, so
+the loop never takes it.
 
 Open right now:
 
@@ -179,11 +184,8 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
       doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
-- [ ] **The harnesses people already use.** Claude Code and Codex now;
-      Gemini CLI and other agent CLIs next, each through its official
-      program and reading the same store
-- [ ] **Gemini CLI and other agent CLIs**, the same way: through the
-      official program, reading the same store
+- [x] **The harnesses people already use.** Claude Code and Codex, each
+      through its official program and reading the same store
 
 - [x] **One skill store.** `~/.eki/skills/`, under git (every change a
       commit), in the Agent Skills format both CLIs read (`eki/skills.py`,
@@ -211,9 +213,6 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       (`~/.eki/mcp.json`, the `/mcp` panel), rendered into Claude Code per
       session (`--mcp-config`) and a managed block of Codex's `config.toml`;
       servers Claude Code already has can be imported (`eki/mcpregistry.py`)
-- [ ] **Blender MCP server in the `/mcp` catalog**, so 3D work reaches
-      Blender like any other server — eki doesn't build a mesh backend of
-      its own (Stage 6)
 - [x] **eki's tools for both CLIs.** Claude Code gets them in-process
       (`eki/mcpbridge.py`, an SDK MCP server over the control channel);
       Codex runs `eki mcp`, the same handlers over stdio. Screen tools
@@ -266,12 +265,12 @@ a thread has to be able to move to another harness without losing its place.
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
       modes, and the harness the local models borrow *(eki: self/71242570)*
-- [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
+- [x] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
-      thread says what it wanted, with *allow and rerun*
-- [ ] **Roots eki starts on its own are not the person's.** Self-work opened
+      thread says what it wanted, with *allow and rerun* *(eki: self/857eadbf)*
+- [x] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
-      can't change alone stay that way at any level of the tree
+      can't change alone stay that way at any level of the tree *(eki: self/00cba77b)*
 - [ ] **Handoff between backends on long threads.** Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
@@ -336,11 +335,11 @@ So that the agent doing the work can ask eki for what it can't do itself.
 A project is a folder, a roster of backends, and a shared memory. Chats become
 views into a project rather than the top of the tree.
 
-- [ ] `.eki/` marker in a folder; calls made inside it belong to the project
+- [x] `.eki/` marker in a folder; calls made inside it belong to the project *(eki: self/b6057c8d)*
 - [ ] Project in the app: its chats, its artifacts, its files made by agents
       (16f0c12, self/29ac7283: files Claude Code or Codex write into a repo
       now reach the gallery; the project itself waits for the `.eki/` marker)
-- [ ] Per-project roster and policy: which backend does prose here, which does code
+- [x] Per-project roster and policy: which backend does prose here, which does code *(eki: self/a8af1724)*
 - *Evolve:* a project keeps notes on what worked — which backend was redone,
   which wasn't — and its policy is adjusted from them, visibly.
 
@@ -350,9 +349,10 @@ Routing is already by capability; this widens what a capability can be.
 
 - [x] Adapters declare what they produce (code, prose, image, mesh, audio) and
       what they need; routing is capability first, then quota and cost *(eki: self/d5757ace)*
-- 3D work goes to Blender through its MCP server, added in Stage 1's `/mcp`
-  catalog. eki builds no mesh backend: tools come from servers, not from eki.
-- [ ] Prose models chosen by the person for the kind of writing, not by benchmark
+- [ ] **Blender MCP server in the `/mcp` catalog** (Stage 1's registry), so
+      3D work reaches Blender like any other server — eki builds no mesh
+      backend: tools come from servers, not from eki. Not needed for the
+      first release, so it waits here
 - [ ] Text models asking for a picture mid-answer (through Stage 4's commands)
 - *Evolve:* a new kind of work gets measurement items where answers can be
   checked, and outcome signals where they can't.
@@ -540,6 +540,10 @@ The self-build track is eki changing its code. This is the other half — what i
   its MCP server in the `/mcp` catalog; eki doesn't build tools.
 - FERNme (a graph memory with decay) behind Stage 7. Shared memory only needs
   to be searchable notes, like Claude's.
+- Gemini CLI and other agent CLIs — the person uses Claude Code and Codex;
+  eki stays focused on those.
+- Prose models chosen by the person — covered by the routing table: kinds of
+  writing are rows with a preferred model.
 
 ## Keeping this file
 

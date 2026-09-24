@@ -3288,6 +3288,9 @@ class Engine(SelfLoop):
                             raise BackendError(str(ev.get("result") or f"{backend.info.label} reported an error")[:300])
                     elif kind == "exit":
                         self.live.pop(cid, None)
+                        if ev.get("cut_off"):
+                            # stopped for not reading its input: cut off, taken up again
+                            raise steps_mod.Interrupted(f"{backend.info.label} {ev.get('error', '')}"[:300])
                         raise BackendError(f"{backend.info.label} stopped: {ev.get('error', '')}"[:300])
                 # a local model that announced work and stopped — or whose
                 # tool call came out malformed and vanished — is told to go on

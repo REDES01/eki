@@ -16,17 +16,23 @@ Each case is one kind of work, cut off at one point:
                   turn, candidate check, merge-queue apply, go-live
     resolve       a change whose rebase conflicts, resolved by the agent
     models        a local model server eki started
+    launcher      the engine itself, under the eki app launchd starts —
+                  answering, and stuck (it never takes the TERM)
+    deaf worker   a program that stops reading its input, while the
+                  engine writes to it (no restart: the engine must go on
+                  answering)
 
-and after each it asks: did the work finish (nothing lost)? Did anything
-happen twice — two programs at once, a line said twice, a second commit?
+and after each it asks: did the work finish (nothing lost)? Is the old
+engine gone and the port the new one's? Did the engine keep answering?
+Did anything happen twice — two programs at once, a line said twice, a second commit?
 Was anything reported failed, or "couldn't resolve"? Is a step still shown
 working when nothing is? Does the thread say the engine restarted?
 
 Nothing of yours is touched. Every case runs in a sandbox: its own HOME
 (so every `~/.eki` path lands there), a spare port, a copy of eki's code as
 its "source", stub providers and the fake Claude Code and Codex from
-tests/, and a scratch launchd job — `launchctl kickstart -k` restarts it the
-way a swap restarts yours. The go-live's supervisor is the real one, pointed
+tests/, and a scratch launchd job run through the eki app, like yours —
+`launchctl kickstart -k` restarts it the way a swap restarts yours. The go-live's supervisor is the real one, pointed
 at the scratch job (EKI_JOB) with a short watch.
 
     python -m eki.drill               # the full drill: a table, exit 0 if all ok
@@ -268,13 +274,14 @@ def launchd_here() -> bool:
 
 class Launchd:
     """A scratch launchd job for the sandbox's engine, set up like yours
-    (eki/agent.py): kept alive, and its stop doesn't take the programs it
-    started (AbandonProcessGroup). A restart is `kickstart -k`, the way the
-    supervisor restarts yours."""
+    (eki/agent.py, `abandons`): kept alive, under the eki app, its process
+    group ended or left the way yours is. A restart is `kickstart -k`, the
+    way the supervisor restarts yours."""
 
     def __init__(self, label: str, argv: List[str], env: Dict[str, str], cwd: str, log: Path,
-                 plist: Path):
+                 plist: Path, abandon: bool = False):
         self.label, self.argv, self.env, self.cwd, self.log, self.plist = label, argv, env, cwd, log, plist
+        self.abandon = abandon
 
     @property
     def job(self) -> str:
@@ -284,7 +291,7 @@ class Launchd:
         with self.plist.open("wb") as f:
             plistlib.dump({"Label": self.label, "ProgramArguments": self.argv,
                            "WorkingDirectory": self.cwd, "RunAtLoad": True, "KeepAlive": True,
-                           "ThrottleInterval": 1, "AbandonProcessGroup": True,
+                           "ThrottleInterval": 1, "AbandonProcessGroup": self.abandon,
                            "StandardOutPath": str(self.log), "StandardErrorPath": str(self.log),
                            "EnvironmentVariables": self.env}, f)
         code, out = _launchctl("bootstrap", f"gui/{os.getuid()}", str(self.plist))
@@ -311,8 +318,8 @@ class Launchd:
 
 class Process:
     """The same, without launchd (the quick drill; a Mac without it): a
-    restart is what `kickstart -k` does to a job that abandons its process
-    group — TERM to the engine alone, then start it again."""
+    restart is TERM to the engine — the programs it started are in sessions
+    of their own — then start it again."""
 
     def __init__(self, argv: List[str], env: Dict[str, str], cwd: str, log: Path):
         self.argv, self.env, self.cwd, self.log = argv, env, cwd, log
@@ -424,6 +431,58 @@ def _port_open(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def launcher_for(code: Path, root: Path) -> str:
+    """The eki app the engine runs under (eki/launcher.py): yours, if it's
+    built from this code's source; else built into the sandbox. "" without
+    a Swift compiler — the engine then runs as a bare python."""
+    source = Path(code) / "eki" / "launcher.swift"
+    try:
+        from . import launcher
+        if launcher.current() and source.exists() and source.read_bytes() == launcher.SOURCE.read_bytes():
+            return str(launcher.binary())
+    except OSError:
+        pass
+    swiftc = shutil.which("swiftc")
+    if not swiftc or not source.exists():
+        return ""
+    out = root / "eki-launcher"
+    try:
+        got = subprocess.run([swiftc, "-O", "-o", str(out), str(source)], capture_output=True,
+                             text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return str(out) if got.returncode == 0 and out.exists() else ""
+
+
+def abandons(code: Path) -> bool:
+    """What the drilled code's launch agent says (eki/agent.py): does a stop
+    leave the engine's process group behind? The job is set up the same, so
+    a setting that strands the engine is caught here."""
+    try:
+        text = (Path(code) / "eki" / "agent.py").read_text()
+    except OSError:
+        return False
+    m = re.search(r'"AbandonProcessGroup":\s*(True|False)', text)
+    return bool(m) and m.group(1) == "True"
+
+
+def _command(pid: int) -> str:
+    try:
+        return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                              text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _parent(pid: int) -> int:
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return int(out) if out.isdigit() else 0
+
+
 def _listener(port: int) -> int:
     try:
         out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
@@ -438,7 +497,7 @@ class Sandbox:
     on a spare port, with stub and fake providers only."""
 
     def __init__(self, code: Path, python: str, *, launchd: bool = True, test_seconds: float = 4.0,
-                 watch: int = 15):
+                 watch: int = 15, env: Optional[Dict[str, str]] = None):
         self.code, self.python = Path(code).resolve(), python
         self.root = Path(tempfile.mkdtemp(prefix="eki-drill-", dir="/tmp")).resolve()
         self.home = self.root / "home"
@@ -452,11 +511,16 @@ class Sandbox:
         self.stub = Stub()
         self.test_seconds, self.watch = test_seconds, watch
         self._build()
-        env = self._env()
+        env = {**self._env(), **(env or {})}
         argv = [python, "-m", "eki.cli", "-c", str(self.config), "serve", "--port", str(self.port)]
+        #: the eki app launchd starts, the engine under it — as yours runs
+        self.launcher = launcher_for(self.code, self.root) if launchd else ""
+        if self.launcher:
+            argv = [self.launcher] + argv
         cwd = str(self.eki / "builds" / "current")
         self.job: Any = Launchd(f"local.eki.drill.{uuid.uuid4().hex[:8]}", argv, env, cwd, self.log,
-                                self.root / "job.plist") if launchd else Process(argv, env, cwd, self.log)
+                                self.root / "job.plist", abandon=abandons(self.code)) \
+            if launchd else Process(argv, env, cwd, self.log)
         if launchd:
             env["EKI_JOB"] = self.job.job
         self.pids: List[int] = []
@@ -613,6 +677,23 @@ class Sandbox:
     def work(self) -> List[workers.Worker]:
         return workers.scan(self.eki / "work")
 
+    def engines(self) -> List[int]:
+        """The sandbox's engines running now — the python, not the app it
+        runs under: one, or a restart left one behind."""
+        try:
+            out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True,
+                                 timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
+        found = []
+        for line in out.splitlines():
+            pid, _, cmd = line.strip().partition(" ")
+            cmd = cmd.strip()
+            if pid.isdigit() and str(self.config) in cmd and " serve" in cmd \
+                    and cmd.startswith(self.python):
+                found.append(int(pid))
+        return found
+
     def steps(self) -> Dict[str, Dict[str, Any]]:
         try:
             data = json.loads((self.eki / "self" / "steps.json").read_text())
@@ -630,6 +711,11 @@ class Sandbox:
         try:
             self.job.stop()
         finally:
+            for pid in self.engines():                    # one a stop left behind
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
             for w in self.work():                         # the programs the engine left
                 if w.alive(strict=False):
                     w.signal(signal.SIGKILL)
@@ -789,6 +875,12 @@ class Work:
     name = ""
     points: Tuple[str, ...] = ()
     within = 90.0
+    #: the point is a restart (else it's something that must not need one)
+    restarts = True
+    #: what else the sandbox's engine is started with
+    env: Dict[str, str] = {}
+    #: only under launchd and the eki app, like yours
+    needs_launcher = False
 
     def begin(self, sb: Sandbox) -> Dict[str, Any]:
         raise NotImplementedError
@@ -1058,6 +1150,141 @@ class Resolve(SelfWork):
         return []                                   # it counts twice on purpose: the change, then the resolve
 
 
+class Launcher(Work):
+    """The engine itself, as launchd runs yours: under the eki app. After a
+    restart the old engine must be gone and the port the new one's — even
+    for an engine too stuck to take the TERM (2026-09-24, 22:46–22:56: the
+    launcher went, the engine under it stayed on the port, and every new
+    engine died with "address already in use")."""
+    name = "launcher"
+    points = ("answering", "stuck")
+    within = 90.0
+    needs_launcher = True
+
+    def begin(self, sb: Sandbox) -> Dict[str, Any]:
+        pid = int(sb.health().get("pid") or 0)
+        return {"pid": pid, "under": bool(pid) and _parent(pid) == sb.job.pid()}
+
+    def at(self, sb: Sandbox, ctx: Dict[str, Any], point: str) -> bool:
+        if point == "stuck" and ctx["pid"]:
+            os.kill(ctx["pid"], signal.SIGSTOP)         # holds the port, answers nothing
+        return True
+
+    def cuts(self, point: str) -> bool:
+        return False
+
+    def finished(self, sb: Sandbox, ctx: Dict[str, Any]) -> Any:
+        h = sb.health()
+        return h if h.get("ok") and h.get("pid") != ctx["pid"] else None
+
+    def verify(self, sb: Sandbox, ctx: Dict[str, Any], end: Any) -> List[str]:
+        problems = []
+        old, new = ctx["pid"], int(end.get("pid") or 0)
+        if not ctx["under"]:
+            problems.append("the engine wasn't running under the eki app")
+        cmd = _command(old)
+        if cmd and str(sb.config) in cmd:
+            problems.append(f"the old engine (pid {old}) outlived the restart")
+            os.kill(old, signal.SIGKILL)                # not left to the next case
+        if _listener(sb.port) != new:
+            problems.append(f"the port is held by pid {_listener(sb.port)}, not the new engine {new}")
+        others = [p for p in sb.engines() if p != new]
+        if others:
+            problems.append(f"{len(others)} more engine(s) running: {others}")
+        if _parent(new) != sb.job.pid():
+            problems.append("the new engine isn't under the eki app")
+        return problems
+
+
+class Pulse:
+    """/api/health, asked every quarter second while a case runs: the
+    slowest answer, and how long it went without one."""
+
+    def __init__(self, sb: Sandbox, timeout: float = 10.0):
+        self.sb, self.timeout = sb, timeout
+        self.slowest = 0.0
+        self.missed = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set() and self.sb.root.exists():
+            began = time.time()
+            try:
+                ok = bool((_get(f"{self.sb.url}/api/health", timeout=self.timeout) or {}).get("ok"))
+            except (OSError, ValueError, urllib.error.URLError):
+                ok = False
+            self.slowest = max(self.slowest, time.time() - began)
+            self.missed += not ok
+            self._stop.wait(0.25)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=self.timeout + 1)
+
+
+class Deaf(Work):
+    """A program that stops reading its input while the engine writes to it
+    (2026-09-24: one blocking write to a full fifo and the whole engine
+    stopped answering). No restart: the engine must go on answering, stop
+    the program in time, and call the turn cut off, not failed."""
+    name = "deaf worker"
+    points = ("stops reading",)
+    within = 90.0
+    restarts = False
+    #: the keeper holds little and the engine waits briefly, so a prompt this
+    #: size fills everything and still has some waiting in the engine
+    env = {"EKI_WORKER_INPUT_CAP": str(256 * 1024), "EKI_WORKER_STALL": "5"}
+    size = 512 * 1024
+
+    def begin(self, sb: Sandbox) -> Dict[str, Any]:
+        got = sb.post("/api/ask", {"prompt": "[drill deaf] answer, then stop reading", "backend": "claude"})
+        return {"conversation": got["conversation"], "run": got["run"], "pulse": Pulse(sb), "second": ""}
+
+    def at(self, sb: Sandbox, ctx: Dict[str, Any], point: str) -> bool:
+        if ctx.get("sent"):
+            return True
+        if (sb.get(f"/api/runs/{ctx['run']}") or {}).get("state") != "done":
+            return False
+        ctx["sent"] = True
+        try:
+            got = sb.post("/api/ask", {"prompt": "[deaf] " + "x" * self.size, "backend": "claude",
+                                       "conversation": ctx["conversation"]})
+            ctx["second"] = got["run"]
+        except (OSError, ValueError, urllib.error.URLError):
+            pass                                        # it stopped answering: the pulse says so
+        return True
+
+    def cuts(self, point: str) -> bool:
+        return False
+
+    def finished(self, sb: Sandbox, ctx: Dict[str, Any]) -> Any:
+        if ctx["pulse"].missed:
+            return {"state": "unknown — the engine stopped answering"}
+        run = sb.get(f"/api/runs/{ctx['second']}") or {} if ctx["second"] else {}
+        return run if run.get("state") in TERMINAL else None
+
+    def verify(self, sb: Sandbox, ctx: Dict[str, Any], end: Any) -> List[str]:
+        pulse: Pulse = ctx["pulse"]
+        pulse.stop()
+        problems = []
+        if pulse.missed:
+            problems.append(f"the engine didn't answer /api/health {pulse.missed} time(s) "
+                            f"(slowest {pulse.slowest:.1f}s)")
+        elif pulse.slowest > 3:
+            problems.append(f"the engine took {pulse.slowest:.1f}s to answer /api/health")
+        if end.get("state") != "interrupted":
+            problems.append(f"the turn to the deaf program ended {end.get('state')}, not cut off: "
+                            f"{str(end.get('error') or '')[:120]}")
+        deaf = [w for w in sb.work() if w.spec.get("kind") == "claude" and w.alive(strict=False)]
+        if deaf:
+            problems.append("the program that stopped reading was left running")
+        if len(set(sb.pids)) > 1:
+            problems.append("the engine was restarted")
+        return problems
+
+
 class QuickChat(Chat):
     points = ("mid-answer",)
 
@@ -1074,7 +1301,7 @@ class QuickCheck(SelfWork):
         pass
 
 
-FULL: List[Work] = [Chat(), AgentChat(), Folder(), Models(), SelfWork(), Resolve()]
+FULL: List[Work] = [Chat(), AgentChat(), Folder(), Models(), Launcher(), Deaf(), SelfWork(), Resolve()]
 QUICK: List[Work] = [QuickChat(), QuickCheck()]
 
 
@@ -1088,7 +1315,10 @@ def drill_one(work: Work, point: str, code: Path, python: str, *, launchd: bool,
     res = Result(work.name, point)
     sb: Optional[Sandbox] = None
     try:
-        sb = Sandbox(code, python, launchd=launchd, test_seconds=test_seconds)
+        sb = Sandbox(code, python, launchd=launchd, test_seconds=test_seconds, env=work.env)
+        if work.needs_launcher and not sb.launcher:
+            res.problems.append("no eki app to run the engine under (no launchd, or no Swift compiler)")
+            return res
         sb.start()
         look = Watch(sb)
         ctx = work.begin(sb)
@@ -1098,7 +1328,8 @@ def drill_one(work: Work, point: str, code: Path, python: str, *, launchd: bool,
         except TimeoutError:
             res.problems.append(f"never reached “{point}” (the drill's timing, not a verdict)")
             return res
-        sb.restart()
+        if work.restarts:
+            sb.restart()
         try:
             end = look.until("finished", lambda: work.finished(sb, ctx), work.within,
                              also=lambda: work.during(sb, ctx))
@@ -1151,6 +1382,9 @@ def run(works: List[Work], code: Optional[Path] = None, python: Optional[str] = 
     out = []
     for work in works:
         if only and only not in work.name:
+            continue
+        if work.needs_launcher and not launchd:
+            say(f"{work.name} · skipped: it needs launchd")
             continue
         for point in work.points:
             say(f"{work.name} · restart {point}…")

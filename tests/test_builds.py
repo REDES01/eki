@@ -146,20 +146,32 @@ except OSError:
     bid = "dev"
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if os.path.exists(os.path.join(root, "hang")):
+            import time; time.sleep(30)            # a stuck engine: listening, not answering
         busy = os.path.exists(os.path.join(root, "busy"))
         body = json.dumps({"ok": True, "running": ["r1"] if busy else [], "build": bid}).encode()
         self.send_response(200); self.end_headers(); self.wfile.write(body)
     def log_message(self, *a): pass
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+import time
+for _ in range(100):                              # launchd would start it again and again
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
+        break
+    except OSError:
+        time.sleep(0.1)
+else:
+    sys.exit(1)
+server.serve_forever()
 '''
 
 LAUNCHCTL = r'''#!/bin/bash
 root="{root}"
 case "$1" in
   kickstart)
-    [ -f "$root/pid" ] && kill "$(cat "$root/pid")" 2>/dev/null
+    # "abandon": the old engine is left running, as a killed launcher left it
+    [ -f "$root/pid" ] && [ ! -f "$root/abandon" ] && kill "$(cat "$root/pid")" 2>/dev/null
     sleep 0.3
-    nohup "{python}" "$root/engine.py" "$root" {port} >/dev/null 2>&1 &
+    nohup "{python}" "$root/engine.py" "$root" {port} eki.cli serve >/dev/null 2>&1 &
     echo $! > "$root/pid" ;;
   print)
     if [ -f "$root/pid" ] && kill -0 "$(cat "$root/pid")" 2>/dev/null; then
@@ -191,6 +203,8 @@ def stage(tmp_path, src):
            "EKI_HEALTH_URL": f"http://127.0.0.1:{port}/api/health", "EKI_LAUNCHCTL": str(lc),
            "EKI_JOB": "test", "EKI_UP_SECONDS": "8"}
     yield {"root": root, "one": one, "two": two, "env": env, "port": port}
+    for f in ("abandon", "hang"):
+        (root / f).unlink(missing_ok=True)
     subprocess.run([str(lc), "kickstart"], capture_output=True)       # restart…
     pid = (root / "pid").read_text().strip()
     subprocess.run(["kill", pid], capture_output=True)               # …then stop it
@@ -263,6 +277,61 @@ def test_one_swap_at_a_time(stage):
     got = supervise(stage, stage["two"])
     assert got.returncode == 3
     assert Path(os.readlink(builds.BUILDS / "current")) == stage["one"]
+
+
+def _listening(port):
+    got = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                         capture_output=True, text=True)
+    return [int(p) for p in got.stdout.split()]
+
+
+@pytest.mark.real_processes
+def test_an_old_engine_left_holding_the_port_is_stopped_by_the_swap(stage):
+    """2026-09-24: `kickstart -k` killed the launcher, not the engine under
+    it; the old engine kept the port and every new one died. The swap now
+    makes sure the old engine is gone."""
+    time.sleep(0.5)
+    old = _listening(stage["port"])
+    assert old
+    (stage["root"] / "abandon").write_text("")
+    got = subprocess.run(["bash", str(builds.TEMPLATE), str(stage["two"]), "5", "2", "s1"],
+                         env={**stage["env"], "EKI_GONE_SECONDS": "2"},
+                         capture_output=True, text=True, timeout=90)
+    assert got.returncode == 0, got.stderr
+    assert "outlived the restart" in (builds.SELF_HOME / "swap.log").read_text()
+    assert not set(old) & set(_listening(stage["port"]))
+    assert health(stage)["build"] == stage["two"].name
+
+
+@pytest.mark.real_processes
+def test_the_watchdog_restarts_an_engine_that_stops_answering(stage):
+    env = {**stage["env"], "EKI_WATCHDOG_SECONDS": "1"}
+    watchdog = lambda: subprocess.run(["bash", str(builds.TEMPLATE), "--watchdog"], env=env,  # noqa: E731
+                                      capture_output=True, text=True, timeout=60)
+    time.sleep(0.5)
+    before = (stage["root"] / "pid").read_text().strip()
+    (stage["root"] / "hang").write_text("")
+    assert watchdog().returncode == 0                   # first seen now: perhaps just starting
+    assert (stage["root"] / "pid").read_text().strip() == before
+    log = builds.SELF_HOME / "swap.log"
+    assert "watchdog" not in (log.read_text() if log.exists() else "")
+    watchdog()                                          # still not answering a look later: restarted
+    (stage["root"] / "hang").unlink()
+    assert "didn't answer /api/health" in log.read_text()
+    assert (stage["root"] / "pid").read_text().strip() != before
+    time.sleep(0.8)
+    assert health(stage)["ok"]
+
+
+def test_the_watchdog_leaves_an_engine_mid_swap_alone(stage):
+    (builds.SELF_HOME).mkdir(parents=True, exist_ok=True)
+    (builds.SELF_HOME / "swap.lockdir").mkdir()
+    before = (stage["root"] / "pid").read_text().strip()
+    for _ in range(2):
+        subprocess.run(["bash", str(builds.TEMPLATE), "--watchdog"],
+                       env={**stage["env"], "EKI_HEALTH_URL": "http://127.0.0.1:9/none"},
+                       capture_output=True, timeout=30)
+    assert (stage["root"] / "pid").read_text().strip() == before
 
 
 # ---- the line: nothing the engine runs is dropped by the next build ---------------------

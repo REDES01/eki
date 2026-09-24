@@ -203,6 +203,14 @@ while True:
     if prompt.startswith("/compact"):
         out({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "manual", "pre_tokens": 1000}})
         result("")
+    elif "[drill deaf]" in prompt:
+        # the drill's worker that stops reading its input: it answers, then
+        # never reads another line
+        text("not reading any more")
+        result("not reading any more")
+        import time as _t
+        _t.sleep(600)
+        sys.exit(0)
     elif "[drill" in prompt:
         drill(prompt)
     elif "ask" in prompt:

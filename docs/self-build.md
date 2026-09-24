@@ -191,6 +191,19 @@ no change to eki can break it. `eki agent install` copies it to
    fast-forwards it into your checkout if nothing there is uncommitted or
    newer.
 
+After every restart it makes sure the old engine is gone — its pid from
+`/api/health`, or whoever listens on the port — and stops it if a restart
+left it behind; and the engine, started by launchd, does the same before it
+binds (`service.take_port`: only an `eki serve` is stopped). On 2026-09-24
+(22:46–22:56) a killed launcher left the engine under it holding the port,
+every new engine died with "address already in use", and the swap rolled
+back onto a build that failed the same way.
+
+**The watchdog.** launchd runs `eki-supervisor --watchdog` every 30 seconds
+(`local.eki.watchdog`, written by `eki agent install`): an engine that
+doesn't answer `/api/health` within 10 seconds, and was already there the
+look before, is noted in `swap.log` and restarted. Not during a swap.
+
 **Runs cut off by a swap** (or any restart) aren't cancelled — and mostly
 aren't even cut off. The programs doing the work are **workers**
 (`eki/workers.py`), not children of the engine: Claude Code and Codex, the
@@ -200,12 +213,16 @@ engine reads rather than a pipe it holds:
 
     ~/.eki/work/<id>/  spec.json (command, run, step, thread)
                        state.json (pid, start time, exit code once it ends)
-                       out, err, in (a fifo, for a program eki talks to)
+                       out, err, in (a fifo, for a program eki talks to:
+                       the keeper always drains it; the engine writes
+                       without waiting, and a program that takes none of
+                       it for a minute is stopped, its turn cut off)
                        read (how far the engine has read `out`)
 
-launchd leaves them when it stops the engine (`AbandonProcessGroup` in the
-plist `eki agent install` writes; `kickstart -k` and the supervisor's swap
-are such stops). The engine going away detaches from them (`Engine.close`)
+launchd's stop ends the engine's process group — the eki app and the
+engine under it — but not them: each is in a session of its own.
+(`AbandonProcessGroup` stays off: with it on, a stop that killed the
+launcher left the engine running.) The engine going away detaches from them (`Engine.close`)
 and the next one takes them up at start (`Engine.reattach_workers`):
 
 - a program still working is **followed again** — read on from where the

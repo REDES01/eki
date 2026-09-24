@@ -29,6 +29,7 @@ import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from . import steps
 from . import workers
 
 log = logging.getLogger("eki.live")
@@ -215,6 +216,9 @@ class LiveSession:
                                (f": {self.exit_error}" if self.exit_error else ""))
         try:
             self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        except workers.InputStalled as e:
+            # cut off, not failed: its step is taken up again (eki/steps.py)
+            raise steps.Interrupted(f"Claude Code stopped reading: {e}") from None
         except (BrokenPipeError, OSError) as e:
             raise RuntimeError(f"Claude Code is not reading: {e}")
 
@@ -420,7 +424,10 @@ class LiveSession:
         except Exception:                           # noqa: BLE001
             err = ""
         self.exit_error = err or f"exited with code {self.proc.returncode}"
-        self._events.put_nowait({"kind": "exit", "error": self.exit_error})
+        stalled = str(getattr(self.proc, "stalled", "") or "")
+        if stalled:
+            self.exit_error = f"stopped: {stalled}"
+        self._events.put_nowait({"kind": "exit", "error": self.exit_error, "cut_off": bool(stalled)})
         for fut in self._waiting.values():
             if not fut.done():
                 fut.set_exception(RuntimeError(self.exit_error))

@@ -225,3 +225,36 @@ def test_the_cli_asks_before_applying_a_protected_change(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert not cli._confirm_protected(c, yes=False)                       # nobody to ask
     assert "--yes" in capsys.readouterr().err
+
+
+def test_an_apply_being_resolved_says_eki_is_fixing_it_not_retry():
+    from eki import cli
+    said = cli._conflicts_said({"state": "conflicts", "resolving": "r123"})
+    assert "fixing the conflicts itself" in said and "eki watch r123" in said
+    assert "retry" not in said
+    assert "eki self retry" in cli._conflicts_said({"state": "conflicts"})   # resolving is off
+
+
+@pytest.mark.parametrize("argv, words, yes", [
+    (["self", "apply", "a582d8cd", "--yes"], ["apply", "a582d8cd"], True),
+    (["self", "apply", "--yes", "a582d8cd"], ["apply", "a582d8cd"], True),
+    (["self", "--yes", "apply", "a582d8cd"], ["apply", "a582d8cd"], True),
+    (["self", "discard", "-y", "a582d8cd"], ["discard", "a582d8cd"], True),
+    (["self", "retry", "--json", "ab12"], ["retry", "ab12"], False),
+    (["self", "make the chat", "--later", "calmer"], ["make the chat", "calmer"], False),
+])
+def test_self_flags_work_anywhere(monkeypatch, argv, words, yes):
+    from eki import cli
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_self", lambda a: seen.update(vars(a)) or 0)
+    assert cli.main(argv) == 0
+    assert seen["request"] == words and seen["yes"] == yes
+
+
+def test_an_unknown_flag_or_stray_word_is_still_an_error(monkeypatch):
+    from eki import cli
+    monkeypatch.setattr(cli, "cmd_self", lambda a: 0)
+    monkeypatch.setattr(cli, "cmd_runs", lambda a: 0)
+    for argv in (["self", "apply", "abc", "--bogus"], ["runs", "stray"]):
+        with pytest.raises(SystemExit):
+            cli.main(argv)

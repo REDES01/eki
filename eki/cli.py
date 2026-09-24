@@ -657,11 +657,22 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
                        "carry on in it), watches it, "
                        "and goes back if it isn't healthy (eki builds)",
            "applied": got.get("merged") or "applied",
-           "conflicts": "it no longer goes on top of your checkout — `eki self retry` lets eki try again",
+           "conflicts": _conflicts_said(got),
            "unfit": "it didn't pass its checks on top of your checkout",
            "discarded": "discarded", "not undone": f"not undone: {got.get('why')}"}
     print(say.get(got.get("state") or "", json.dumps(got)))
     return 0
+
+
+def _conflicts_said(got: Dict[str, Any]) -> str:
+    """An apply that conflicts usually isn't a failure: eki has the conflicts
+    fixed in a run of its own and applies it after. Retry is only worth
+    mentioning when no such run started (resolving is off)."""
+    rid = got.get("resolving")
+    if rid:
+        return (f"it conflicts with your checkout, so eki is fixing the conflicts itself and "
+                f"applies it when that's done — nothing for you to do (follow it: eki watch {rid})")
+    return "it no longer goes on top of your checkout — `eki self retry` lets eki try again"
 
 
 def _confirm_protected(c: Dict[str, Any], yes: bool) -> bool:
@@ -709,6 +720,18 @@ def _self_batch(args, asked: List[str]) -> int:
     print(f"{queued} queued — they start as room allows (`eki self` shows them)" if goal else
           f"{queued} queued — but eki isn't working on itself yet: `eki self on`")
     return 0
+
+
+def _intermixed(ap: argparse.ArgumentParser, args, extra: List[str]):
+    """`eki self apply --yes abc` puts the id after a flag, where argparse
+    stops filling `request` and leaves the rest over. For `eki self` those
+    leftover words carry on the request, in order, so flags work anywhere;
+    anything else left over (or an unknown flag) is still an error."""
+    unknown = [w for w in extra if w.startswith("-") and w != "-"]
+    if args.cmd != "self" or unknown:
+        ap.error("unrecognized arguments: " + " ".join(unknown or extra))
+    args.request = list(args.request or []) + extra
+    return args
 
 
 def cmd_self(args) -> int:
@@ -1222,7 +1245,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sv.add_argument("--port", type=int, default=8787)
     sub.add_parser("mcp", help="serve eki's tools over stdio (MCP) for Codex and other clients")
 
-    args = ap.parse_args(argv)
+    args, extra = ap.parse_known_args(argv)
+    if extra:
+        args = _intermixed(ap, args, extra)
 
     if args.cmd == "mcp":
         from . import mcpbridge

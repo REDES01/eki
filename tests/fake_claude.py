@@ -59,6 +59,29 @@ def result(s, err=False):
                                             "contextWindow": 200000}}})
 
 
+def drill(prompt):
+    """eki's restart drill (eki/drill.py): `[drill write NAME count N]` —
+    count slowly (`d1 d2 …`, long enough to be cut off in the middle), then
+    write NAME in the folder it works in: a change made, or a conflict
+    resolved (the whole file, no markers left)."""
+    import os as _os
+    import re as _re
+    import time as _t
+    m = _re.search(r"\[drill(?: write (\S+?))?(?: count (\d+))?\]", prompt)
+    name, n = (m.group(1), int(m.group(2) or 20)) if m else (None, 20)
+    out({"type": "stream_event", "event": {"type": "message_start"}})
+    for i in range(1, n + 1):
+        out({"type": "stream_event", "event": {"type": "content_block_delta",
+                                               "delta": {"type": "text_delta", "text": f"d{i} "}}})
+        _t.sleep(0.15)
+    if name:
+        with open(_os.path.join(_os.getcwd(), name), "w") as f:
+            f.write("written by the drill's agent\n")
+    whole = "".join(f"d{i} " for i in range(1, n + 1))
+    out({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": whole}]}})
+    result(whole)
+
+
 SDK_SERVERS = []
 SDK_TOOLS = {}
 AUTHED = False
@@ -180,6 +203,8 @@ while True:
     if prompt.startswith("/compact"):
         out({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "manual", "pre_tokens": 1000}})
         result("")
+    elif "[drill" in prompt:
+        drill(prompt)
     elif "ask" in prompt:
         out({"type": "assistant", "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": "tu1", "name": "AskUserQuestion",

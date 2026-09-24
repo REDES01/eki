@@ -76,6 +76,13 @@ the report; the first failure stops it.
 5. **can be left** — the running code opens that same copy afterwards. If
    the candidate migrated the schema somewhere the old build can't read,
    rollback would be a lie; this is where that shows.
+6. **restart** — the quick restart drill (`eki/drill.py`, below): the
+   checkout's engine, in a sandbox, restarted in the middle of a stub
+   model's answer and in the middle of a candidate check. Nothing may be
+   lost, doubled or reported failed. About fifteen seconds. A change that
+   breaks *a restart loses nothing* is never fit. (The drill's own
+   sandboxed engines skip it — `EKI_CHECK_SKIP=restart` — so a drill
+   never runs inside a drill.)
 
 Not checked yet: the Swift app (needs `mac/build_app.sh`, minutes and Xcode —
 a separate, optional check), and real providers (the stub stands in; a real
@@ -230,7 +237,9 @@ says so in its thread, and carries it on (`Engine._carry`,
   item points at the new run at once, so the loop never takes it up a second
   time; one cut off before its program had a session is started again from
   where its item stands;
-- a run that never began is simply asked again;
+- a run that never began is simply asked again — and so is an answer with
+  no folder and no session to carry on in (a model's words: asking again
+  repeats nothing);
 - a run with a folder and no session stays yours to retry — it may have made
   half its edits.
 
@@ -280,6 +289,70 @@ It lives outside `builds/`, is installed once, and eki's self-work is refused
 any diff that touches it, `agent.py`'s plist writer, or `secrets.py` and the
 quota bridges (the credentials rule). Those go to a person as a proposal
 whatever the autonomy setting says.
+
+## The restart drill  (built: `eki/drill.py`, `eki self drill`)
+
+*A restart loses nothing* is easy to break without noticing — a new code
+path that holds a pipe, a step not written down, a cut-off read as a
+failure. So it is tried, the only way that counts: a real engine, restarted
+in the middle of real work, and a look at what's left.
+
+Each case gets a sandbox of its own: a HOME under `/tmp/eki-drill-*` (every
+`~/.eki` path lands there), a spare port, a copy of eki's code as the
+source it works on (with a one-test suite that takes a few seconds, so a
+check can be cut off inside it), stub models, the fake Claude Code and Codex
+from `tests/`, and a scratch launchd job set up like yours — restarted with
+`launchctl kickstart -k`, the way a swap restarts yours. The go-live uses
+the real supervisor, pointed at the scratch job (`EKI_JOB`) with a short
+watch. Nothing of yours is touched and nothing appears on your screen
+(`EKI_NO_NOTIFY`).
+
+| work | restarted |
+|---|---|
+| chat — a model's answer, streamed | before the first word; mid-answer |
+| agent chat — Claude Code in a thread | as it starts; mid-turn |
+| folder — Codex in a folder | mid-turn |
+| models — a local server eki started | loaded; with eki's record of it lost |
+| self-work — one change, `--apply` | base check; agent turn; candidate check (its tests, its engine); merge-queue apply; go-live |
+| resolve — a change that conflicts | while the agent resolves it |
+
+After each: the work finished (nothing lost); nothing happened twice — no
+two copies of a program at once, no line of output said twice, one commit
+for the change; nothing reported failed, *couldn't resolve* or *✗*; no
+step still shown working with nothing going; the thread says the engine
+restarted wherever a run was cut off; a model server still up, the same
+process, and known as eki's. The report is a table, work × restart point →
+*ok* or what went wrong; exit code 0 only if every case is ok. A case that
+missed its moment says so (*the drill's timing, not a verdict*) rather than
+passing.
+
+```
+eki self drill            # the full drill, ~15 min; the result is kept for the weekly note
+eki self drill quick      # the candidate check's one (a stub run, a stub check)
+python -m eki.drill --only self-work --keep    # one kind; a failing case's sandbox kept
+```
+
+While eki works on itself (`eki self on`) the full drill runs once a week as
+the loop's housekeeping — a worker of its own, so a restart of your engine
+doesn't cut it off — and its table goes in the weekly note as it ran.
+Sandboxes a killed drill left behind are cleared by the next one.
+
+What the first runs found, and this change fixed:
+
+- **A model's answer cut off mid-stream waited for you.** A run with no
+  folder and no session only said words; it is now asked again
+  (`Engine._carry`), under the same question.
+- **An agent whose turn had ended was followed as if mid-turn.** A
+  self-work run cut off in its check (the agent long done) had the agent's
+  answer written into the thread a second time. A program's worker now says
+  whether a turn is open (`turn` in its spec), and only an open one is
+  followed (`Engine.reattach_workers`).
+- **A model server whose record was lost** was taken back as eki's only at
+  the first idle check, a minute on; now at start.
+
+Not drilled: a restart during the supervisor's watch window — there a new
+engine process *is* the sign of an unhealthy build, and it rolls back, on
+purpose.
 
 ## Self-work runs  (built: `eki/selfengine.py`)
 
@@ -479,7 +552,8 @@ the journal (faults, providers saying no, your corrections, requests nothing
 could take), the hours each backend worked (the local models' share of the
 week against the 1% baseline), its own changes and the roadmap — and two or
 three suggestions with their evidence, leaning to adding a provider or an MCP
-server. It suggests; you pick: *Ask eki to do it* (a queued request), *Add to
+server. The week's restart drill goes in too, as its table (*The restart
+drill*, above). It suggests; you pick: *Ask eki to do it* (a queued request), *Add to
 ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 
@@ -487,7 +561,8 @@ What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the
 (every change as it was judged), `changes.json` (where each stands now),
 `steps.json` (every step, and whether it's live), `train.json` (the release
 train), `ticks.json` (the ticks written), `notes/` (the weekly notes),
-`base-ok.json` / `base-bad.json` (bases that passed, or failed).
+`base-ok.json` / `base-bad.json` (bases that passed, or failed), `drill.json`
+(the last full restart drill).
 
 ```
 eki self                         what it's doing, what waits for you, what's next
@@ -502,6 +577,7 @@ eki self next
 eki self retry|drop|mine <item>
 eki self autonomy apply ROADMAP.md=apply docs/=apply
 eki self note [now]
+eki self drill [quick]           restart a sandboxed engine mid-work: is anything lost?
 ```
 
 ## Order of building

@@ -40,7 +40,8 @@ the machine has room ([docs/goals.md](docs/goals.md)). Where it's going:
 **eki works on itself** the same way. Turn it on (`eki self on`, or *Start*
 under Goals → Self) and, when the machine has room, it fixes what breaks in its
 own code, then takes the next open item in ROADMAP.md — each change in its own
-worktree, tested and started on a spare port before you see it; you apply it,
+worktree, tested, started on a spare port and restarted mid-work (a restart
+must lose nothing — `eki self drill`) before you see it; you apply it,
 or let it apply what passes, watched and rolled back if it isn't healthy.
 "eki, make the chat list show the project name" in any chat does the same, in
 that chat ([docs/self-build.md](docs/self-build.md)). This needs eki run from a

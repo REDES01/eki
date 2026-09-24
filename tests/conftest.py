@@ -71,6 +71,11 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(workers, "_held", {})
     monkeypatch.setattr(workers, "_orphan_since", {})
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
+    # the restart drill boots real engines: only the tests about it run one;
+    # and its result is kept in the test's home, not this Mac's
+    monkeypatch.setenv("EKI_CHECK_SKIP", "restart")
+    from eki import drill
+    monkeypatch.setattr(drill, "RESULT", root / "eki" / "self" / "drill.json")
     from eki import goals, shift, launcher
     # no test builds, or sees, this Mac's eki.app
     monkeypatch.setattr(launcher, "APP", root / "eki" / "bin" / "eki.app")

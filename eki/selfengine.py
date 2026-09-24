@@ -37,6 +37,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from . import builds as builds_mod
 from . import candidate
 from . import capacity as capacity_mod
+from . import drill
 from . import goals as goals_mod
 from . import observe as observe_mod
 from . import roadmap
@@ -401,6 +402,15 @@ class SelfLoop:
         c = selfwork.change(cid)
         return {"state": c["state"], "id": cid, "why": c.get("why") or ""}
 
+    async def self_drill_tick(self) -> str:
+        """The loop's housekeeping: while eki works on itself, the full
+        restart drill once a week (eki/drill.py) — proof that a restart at
+        any moment still loses nothing. Its table goes in the weekly note."""
+        g = self._self_goal()
+        if g is None or g.state != "active" or self._self_why_not():
+            return ""
+        return await asyncio.to_thread(drill.weekly, sys.executable, builds_mod.here())
+
     async def self_release(self, now: bool = False) -> Dict[str, Any]:
         """The release train leaves if it's time — or `now`, when a person
         asked: the newest applied build, carrying every change applied since
@@ -598,6 +608,10 @@ class SelfLoop:
             selfloop.update(it.id, state="queued", run="", note=str(e)[:300])
             raise
         text, suggestions = selfloop.parse_note("".join(parts))
+        # the week's restart drill, as it ran — not in a model's words
+        told = drill.for_note()
+        if told:
+            text = f"{text}\n\n{told}".strip()
         fresh = self.runs.get(run["id"]) or run                         # type: ignore[attr-defined]
         note = selfloop.save_note(text, suggestions, run=run["id"], conversation=run["conversation_id"],
                                   backend=fresh.get("backend") or "")
@@ -653,6 +667,8 @@ class SelfLoop:
             "providers": [{"key": b.key, "what": b.info.label, "tier": b.info.cost.tier}  # type: ignore[attr-defined]
                           for b in self.backends],                      # type: ignore[attr-defined]
             "mcp_servers": servers,
+            "restart_drill": [f"{r['work']} · {r['point']}: {'ok' if r.get('ok') else '; '.join(r.get('problems') or [])}"
+                              for r in drill.last().get("results") or []][:20],
         }
 
     # ---- the goal ------------------------------------------------------------------------

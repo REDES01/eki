@@ -799,6 +799,35 @@ async def test_the_weekly_note_and_what_you_do_with_its_suggestions(eng):
 
 
 @pytest.mark.asyncio
+async def test_the_weekly_note_carries_the_restart_drill_as_it_ran(eng):
+    from eki import drill
+    drill.save([drill.Result("chat", "mid-answer"),
+                drill.Result("resolve", "resolving", ["the thread says 'couldn't resolve'"])])
+    Agent.answers = ["A quiet week.\n\n```json\n[]\n```"]
+    started = await eng.self_note_now()
+    await settle(eng.runs, started["run"], timeout=20)
+    note = selfloop.latest_note()
+    assert note["text"].startswith("A quiet week.")
+    assert "**Restart drill**" in note["text"] and "1 not ok" in note["text"]
+    assert "resolving" in note["text"].split("**Restart drill**")[1]      # the table, not a model's words
+    assert '"restart_drill"' in Agent.seen[-1][1]                          # and the writer knew it
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_restart_drill_is_the_loops_weekly_housekeeping(eng, monkeypatch):
+    from eki import drill
+    started = []
+    monkeypatch.setattr(drill, "weekly", lambda python, code: started.append(code) or "started")
+    assert await eng.self_drill_tick() == ""                               # the loop isn't on
+    eng.self_on(True)
+    assert await eng.self_drill_tick() == "started" and len(started) == 1
+    eng.self_on(False)
+    assert await eng.self_drill_tick() == ""                               # paused: nothing new
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_the_view_says_what_it_is_doing_and_what_waits(eng):
     eng.self_on(True)
     Agent.edits = {"eki/thing.py": "VALUE = 2\n"}

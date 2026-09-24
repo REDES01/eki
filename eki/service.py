@@ -143,6 +143,12 @@ async def lifespan(app: FastAPI):
             except Exception:                       # noqa: BLE001
                 log.exception("self-work steps")
             try:
+                # the weekly restart drill, while eki works on itself (eki/drill.py)
+                if await eng.self_drill_tick() == "started":
+                    log.info("started the weekly restart drill")
+            except Exception:                       # noqa: BLE001
+                log.exception("restart drill")
+            try:
                 # finished work dirs after a week; a worker nobody took up, killed
                 await asyncio.to_thread(eng.sweep_workers)
             except Exception:                       # noqa: BLE001
@@ -203,6 +209,15 @@ async def lifespan(app: FastAPI):
             log.info("took up %d program(s) still working", kept)
     except Exception:                               # noqa: BLE001
         log.exception("reattaching workers")
+    try:
+        # the model servers eki started outlive it (a session of their own):
+        # taken back as eki's at once, even with the record of them lost —
+        # not only at the first idle check, a minute on (eki/drill.py)
+        claimed = await asyncio.to_thread(eng.models.claim_own)
+        if claimed:
+            log.info("took back model server(s) eki started: %s", ", ".join(claimed))
+    except Exception:                               # noqa: BLE001
+        log.exception("model servers")
     try:
         noted = eng.note_interruptions()
         if noted:

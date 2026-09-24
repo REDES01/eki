@@ -109,7 +109,11 @@ unless it needs them.
   engine is a manager, not a parent: the programs doing the work run on
   their own and a restart leaves them running — the next engine follows
   them again where it left off, and concludes what finished in the gap
-  (`eki/workers.py`). Only a person's cancel kills one.
+  (`eki/workers.py`). Only a person's cancel kills one. It stays true
+  because it is tried: a drill restarts a sandboxed engine in the middle of
+  each kind of work and looks for anything lost, doubled or reported
+  failed — a short one in every candidate check (*restart*), the full one
+  weekly, into the weekly note (`eki self drill`, `eki/drill.py`).
 - **Read what others know about models; don't work it out.** Which model
   a vendor recommends for what is on its own page; which local model
   people run and how its makers measured it is on Ollama. eki reads those

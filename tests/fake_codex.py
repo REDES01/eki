@@ -107,7 +107,18 @@ while True:
         turn = {"id": "turn-%d" % turns}
         out({"jsonrpc": "2.0", "id": rid, "result": {"turn": turn}})
         notify("turn/started", {"threadId": THREAD, "turn": turn})
-        if "ask" in text:
+        streamed = False
+        if "[drill" in text:
+            # eki's restart drill (eki/drill.py): a slow count, `d1 d2 …`
+            import re as _re
+            import time as _t
+            n = int((_re.search(r"count (\d+)", text) or [0, 20])[1])
+            notify("item/started", {"item": {"type": "agentMessage", "id": "m1", "text": "", "phase": "final_answer"}})
+            for i in range(1, n + 1):
+                notify("item/agentMessage/delta", {"itemId": "m1", "delta": f"d{i} "})
+                _t.sleep(0.15)
+            reply, streamed = "".join(f"d{i} " for i in range(1, n + 1)), True
+        elif "ask" in text:
             notify("item/started", {"item": {"type": "agentMessage", "id": "m0", "text": ""}})
             out({"jsonrpc": "2.0", "id": 0, "method": "item/tool/requestUserInput",
                  "params": {"threadId": THREAD, "turnId": turn["id"], "itemId": "call_1", "isBlocking": True,
@@ -137,10 +148,11 @@ while True:
             notify("item/started", {"item": {"type": "fileChange", "id": "f0",
                                              "changes": [{"path": "/tmp/x/a.py", "kind": {"type": "update"}}]}})
             reply = f"Echo: {text} ({model or 'default'})"
-        notify("item/started", {"item": {"type": "agentMessage", "id": "m1", "text": "", "phase": "final_answer"}})
-        half = len(reply) // 2
-        notify("item/agentMessage/delta", {"itemId": "m1", "delta": reply[:half]})
-        notify("item/agentMessage/delta", {"itemId": "m1", "delta": reply[half:]})
+        if not streamed:
+            notify("item/started", {"item": {"type": "agentMessage", "id": "m1", "text": "", "phase": "final_answer"}})
+            half = len(reply) // 2
+            notify("item/agentMessage/delta", {"itemId": "m1", "delta": reply[:half]})
+            notify("item/agentMessage/delta", {"itemId": "m1", "delta": reply[half:]})
         notify("item/completed", {"item": {"type": "agentMessage", "id": "m1", "text": reply}})
         usage = {"total": {"totalTokens": 100 * turns, "inputTokens": 90 * turns, "outputTokens": 10 * turns},
                  "last": {"totalTokens": 100, "inputTokens": 90, "outputTokens": 10},

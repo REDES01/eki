@@ -15,6 +15,8 @@ The checks, in order — the first failure stops the rest:
               conversations
   leavable    the code running now can still open that copy afterwards, so
               going back is possible
+  restart     a restart in the middle of a run and of a check loses nothing
+              (eki/drill.py, the quick drill)
 
 Nothing here touches your `~/.eki`, your logins or your quota. The candidate
 runs with HOME pointed at a throwaway directory, which is where every
@@ -54,8 +56,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import steps                                   # standard library only, too
 from . import workers                                 # and this
+from . import drill                                   # and this
 
-ORDER = ("tests", "app", "boots", "answers", "data", "leavable")
+ORDER = ("tests", "app", "boots", "answers", "data", "leavable", "restart")
 STUB_MODEL = "candidate-stub"
 TERMINAL = ("done", "failed", "cancelled", "interrupted")
 
@@ -414,6 +417,27 @@ def check_leavable(db: Path, expected: int) -> str:
     return "the running code still reads it"
 
 
+def check_restart(checkout: Path, python: str) -> str:
+    """The rule "a restart at any moment loses nothing", tried on this
+    checkout: its engine restarted in the middle of a stub run and of a
+    candidate check (eki/drill.py, `quick`). A change that breaks it is
+    never fit."""
+    began = time.time()
+    results = drill.quick(checkout, python)
+    bad = [r for r in results if not r.ok]
+    if bad:
+        raise RuntimeError("; ".join(f"{r.work}, restarted {r.point}: {'; '.join(r.problems)}"
+                                     for r in bad)[:600])
+    return (f"restarted mid-answer and mid-check: nothing lost or doubled "
+            f"({len(results)} cases, {time.time() - began:.0f}s)")
+
+
+def skipped_here() -> set:
+    """Checks this environment leaves out (EKI_CHECK_SKIP, comma-separated):
+    the drill's own sandboxed engines don't run a drill inside a drill."""
+    return {s.strip() for s in os.environ.get("EKI_CHECK_SKIP", "").split(",") if s.strip()}
+
+
 # ---- putting it together ---------------------------------------------------
 
 def default_db() -> Path:
@@ -447,7 +471,7 @@ def check(checkout: Path | str, *, python: Optional[str] = None,
     candidate — that is a report with `fit` false."""
     root = Path(checkout).expanduser().resolve()
     report = Report(checkout=str(root))
-    skipping = set(skip)
+    skipping = set(skip) | skipped_here()
     say = say or (lambda _line: None)
     stopped = False
 
@@ -530,6 +554,7 @@ def check(checkout: Path | str, *, python: Optional[str] = None,
 
                 step("data", with_data)
                 step("leavable", lambda: check_leavable(copy, expected))
+        step("restart", lambda: check_restart(root, py))
     finally:
         if keep:
             say(f"kept: {work}")

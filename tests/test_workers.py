@@ -155,6 +155,38 @@ def test_a_turn_that_ended_while_no_engine_was_up_is_concluded(tmp_path, monkeyp
     run(go())
 
 
+def test_a_program_whose_turn_had_ended_is_not_followed_again(tmp_path, monkeypatch):
+    # the restart drill (eki/drill.py): a self-work run whose agent had
+    # finished its turn was cut off in its check — the new engine took the
+    # idle program for one mid-turn, and wrote its answer into the thread twice
+    cfg = claude_config(tmp_path, monkeypatch)
+
+    async def go():
+        first = engine(cfg)
+        started = await first.ask("count slowly to 6", backend_key="claude")
+        rid, cid = started["run"], started["conversation"]
+        await until(lambda: (first.runs.get(rid) or {}).get("state") == "done")
+        w = first.live[cid].worker
+        assert w.spec["turn"] is False                   # its turn ended, and says so
+        # the run it served went on to something else (a check), still going
+        later = first.runs.create("go on", conversation=cid, requested="claude")
+        first.runs.update(later, state="running", backend="claude", started_at=1)
+        w.update(run=later)
+        await stop(first)
+
+        second, kept = await restarted(cfg)
+        assert kept == 1 and cid in second.live          # taken up, idle…
+        assert cid not in second._follow_on              # …not followed as if mid-turn
+        said = [t["content"] for t in second.store.turns(cid) if t["role"] == "assistant"]
+        assert sum(s.count("1 2 3 4 5 6") for s in said) == 1
+        assert not any("following it again" in s for s in said)
+        await second.quota.stop()
+        await second.runner.stop()
+        for s in second.live.values():
+            await s.close()
+    run(go())
+
+
 def test_a_persons_cancel_still_kills_the_program(tmp_path, monkeypatch):
     cfg = claude_config(tmp_path, monkeypatch)
 

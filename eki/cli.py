@@ -518,7 +518,7 @@ def cmd_agent(args) -> int:
 
 
 SELF_VERBS = ("apply", "discard", "undo", "diff", "show", "on", "off", "next", "note",
-              "autonomy", "retry", "drop", "mine", "parallel", "release")
+              "autonomy", "retry", "drop", "mine", "parallel", "release", "drill")
 
 
 def _ago(t: float) -> str:
@@ -780,6 +780,28 @@ def _intermixed(ap: argparse.ArgumentParser, args, extra: List[str]):
     return args
 
 
+def _self_drill(rest: List[str], as_json: bool) -> int:
+    """The restart drill (eki/drill.py): eki's engine restarted in the middle
+    of each kind of work, in a sandbox — nothing of yours is touched. Runs
+    here, not in the engine: it restarts engines. `quick`: the candidate
+    check's short one."""
+    from . import drill
+    quick = bool(rest) and rest[0] == "quick"
+    say = None if as_json else (lambda line: print(line, file=sys.stderr, flush=True))
+    if not as_json:
+        print("the restart drill — a sandboxed engine, restarted mid-work"
+              + (" (quick)" if quick else "; about 15 minutes") + "…", file=sys.stderr)
+    results = drill.run(drill.QUICK if quick else drill.FULL, launchd=False if quick else None,
+                        say=say, test_seconds=3.0 if quick else 4.0)
+    if not quick:
+        drill.save(results)                 # the weekly note says how the last one went
+    if as_json:
+        print(json.dumps([r.to_json() for r in results], indent=2))
+    else:
+        print("\n".join(drill.table(results)))
+    return 0 if results and all(r.ok for r in results) else 1
+
+
 def cmd_self(args) -> int:
     """eki, working on eki (eki/selfwork.py, eki/selfloop.py, docs/self-build.md)."""
     words = list(args.request or [])
@@ -788,6 +810,8 @@ def cmd_self(args) -> int:
         # several at once: the words given without a flag are one more
         return _self_batch(args, asked + ([" ".join(words).strip()] if words else []))
     verb = words[0].lower() if words else ""
+    if verb == "drill" and len(words) <= 2:
+        return _self_drill(words[1:], args.json)
     if verb in SELF_VERBS and (len(words) <= 2 or verb == "autonomy"):
         ensure_engine(args.service)
         return _self_verb(args, verb, words[1:])
@@ -1259,7 +1283,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     "eki self next                 what it would take next\n"
                                     "eki self retry|drop|mine <item>\n"
                                     "eki self autonomy propose|apply [path=apply …]\n"
-                                    "eki self note [now]           the weekly note: what it noticed, what it suggests",
+                                    "eki self note [now]           the weekly note: what it noticed, what it suggests\n"
+                                    "eki self drill [quick]        restart a sandboxed engine mid-work: does it lose anything?",
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     sw.add_argument("request", nargs="*", default=[])
     sw.add_argument("--later", action="store_true",

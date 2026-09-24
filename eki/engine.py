@@ -630,7 +630,8 @@ class Engine(SelfLoop):
         Codex), in the copy of the folder it left; "self" — a change to eki
         itself cut off before its program had a session, taken up again
         from where its item stands; "again" — it never began, so asking
-        again repeats nothing; "" — it waits for you (a run with a folder
+        again repeats nothing — nor does one with no folder and no session,
+        which only said words; "" — it waits for you (a run with a folder
         may have made half its edits, which is why `retry` is manual).
 
         A carrying-on that is itself lost carries on again only when the
@@ -658,6 +659,11 @@ class Engine(SelfLoop):
         if p.get("self_item") and p.get("handed_over"):
             return "self"
         if not run.get("started_at"):
+            return "again"
+        if not run.get("cwd") and not p.get("self_item"):
+            # an answer with no folder and no session to carry on in: asking
+            # again repeats nothing but words (the drill, eki/drill.py: a
+            # model's answer cut off mid-stream used to wait for you)
             return "again"
         return ""
 
@@ -2407,6 +2413,8 @@ class Engine(SelfLoop):
         return await self._learn(run, cid, run.get("backend") or "", manual=True)
 
     async def _notify(self, title: str, body: str) -> None:
+        if os.environ.get("EKI_NO_NOTIFY"):
+            return                                  # a sandboxed engine (eki/drill.py): not on your screen
         clean = lambda t: t.replace(chr(34), chr(39)).replace("\\", "/")[:200]   # noqa: E731
         try:
             await asyncio.create_subprocess_exec(
@@ -2664,7 +2672,10 @@ class Engine(SelfLoop):
             session.backend_key = str(spec.get("backend") or "")          # type: ignore[attr-defined]
             self.live[cid] = session
             run = str(spec.get("run") or "")
-            if run and any(r["id"] == run for r in self.runs.just_interrupted):
+            # followed only mid-turn: a program whose turn had ended (its run
+            # went on to a check, say) has nothing to follow — its answer is
+            # in the thread already, and saying it again doubled it (the drill)
+            if run and spec.get("turn", True) and any(r["id"] == run for r in self.runs.just_interrupted):
                 self._follow_on[cid] = run
             taken += 1
         return taken
@@ -3150,7 +3161,8 @@ class Engine(SelfLoop):
             # it is in the middle of — asking again would be a second turn
             send, model = False, ""
         if hasattr(session, "serve"):
-            session.serve(run=run["id"])
+            # a turn open until it ends: a new engine follows only an open one
+            session.serve(run=run["id"], turn=True)
         saved_session = ""
         if cid and session.session_id:
             # known from the handshake: a turn cut short can still be resumed
@@ -3253,6 +3265,8 @@ class Engine(SelfLoop):
             raise BackendError(str(e))
         finally:
             self.pending.pop(rid, None)
+            if hasattr(session, "serve") and not self.runner.stopping:
+                session.serve(turn=False)       # the engine going away leaves it open
         if context.get("used"):
             usage = {**usage, "context_used": context["used"], "context_window": context["window"]}
             self._learn_window(backend.key, model, context["window"])

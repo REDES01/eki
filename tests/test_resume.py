@@ -19,12 +19,12 @@ def engine(tmp_path, **settings):
     return eng
 
 
-def lost_run(eng, *, session=True, payload=""):
+def lost_run(eng, *, session=True, payload="", cwd=""):
     """A run the previous engine was in the middle of."""
     cid = eng.store.new_conversation("t")
     turn = eng.store.add_turn(cid, "user", "do the long thing")
     rid = eng.runs.create("do the long thing", conversation=cid, requested="echo",
-                          user_turn=turn, payload=payload)
+                          user_turn=turn, payload=payload, cwd=cwd)
     eng.runs.update(rid, state="running", backend="echo", started_at=1)
     if session:
         eng.store.set_session(cid, "echo", "sess-1")
@@ -48,14 +48,34 @@ async def test_a_run_with_a_session_carries_on_by_itself(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_without_a_session_it_waits_for_you(tmp_path):
+async def test_a_folder_run_without_a_session_waits_for_you(tmp_path):
     first = engine(tmp_path)
-    cid, _ = lost_run(first, session=False)
+    folder = tmp_path / "project"
+    folder.mkdir()
+    cid, _ = lost_run(first, session=False, cwd=str(folder))
     await first.runner.stop()
     second = engine(tmp_path)
     second.note_interruptions()
     assert second.store.turns(cid)[-1]["content"] == "*[interrupted — the engine restarted]*"
-    assert await second.resume_interrupted() == 0
+    assert await second.resume_interrupted() == 0       # it may have made half its edits
+    await second.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_answer_cut_off_with_no_folder_or_session_is_asked_again(tmp_path):
+    # the restart drill (eki/drill.py): a model's answer cut off mid-stream
+    # used to wait for you — asking again repeats nothing but words
+    first = engine(tmp_path)
+    cid, rid = lost_run(first, session=False)
+    await first.runner.stop()
+    second = engine(tmp_path)
+    second.note_interruptions()
+    assert "carrying on" in second.store.turns(cid)[-1]["content"]
+    assert await second.resume_interrupted() == 1
+    new = [r for r in second.runs.recent() if r["conversation_id"] == cid and r["id"] != rid][0]
+    run = await settle(second.runs, new["id"])
+    assert run["state"] == "done" and json.loads(run["payload"])["retry_of"] == rid
+    assert run["user_turn"] == first.runs.get(rid)["user_turn"]   # the question isn't asked twice
     await second.runner.stop()
 
 

@@ -824,9 +824,10 @@ def self_on(body: Dict[str, Any]) -> Any:
 
 @app.put("/api/self/settings")
 def self_settings(body: Dict[str, Any]) -> Any:
-    """How far it goes alone (autonomy, per area), how much waits for you, local models."""
-    return _self_call(engine().self_settings, **{k: body[k] for k in ("autonomy", "areas", "review_max", "local")
-                                                 if k in body})
+    """How far it goes alone (autonomy, per area), how much waits for you, local models,
+    how many at once."""
+    return _self_call(engine().self_settings, **{k: body[k] for k in ("autonomy", "areas", "review_max", "local",
+                                                                   "parallel") if k in body})
 
 
 @app.get("/api/self/changes/{cid}")

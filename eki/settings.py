@@ -66,6 +66,9 @@ DEFAULTS: Dict[str, Any] = {
     #: while this many fit changes wait for you, eki starts no new self-work
     #: of its own (what you ask for still goes ahead)
     "self_review_max": 3,
+    #: the most self-work going at once; each turn it's also held to what
+    #: the subscriptions' spare room carries (the local models: one between them)
+    "self_parallel": 2,
     #: eki's own code is worked on by your subscriptions' spare room; on,
     #: the local models (Qwen with Codex's hands) may take it too
     "self_local": False,

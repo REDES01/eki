@@ -191,8 +191,9 @@ def forge(tmp_path: Path) -> Path:
 
 
 class Agent(Backend):
-    """Edits the folder it's given, says what it did."""
-    edits, answers, seen, fit = {}, [], [], True
+    """Edits the folder it's given, says what it did. `per`: edits for a
+    request that says a word, for work going on side by side."""
+    edits, answers, seen, fit, per = {}, [], [], True, {}
 
     async def health(self):
         return Health(True)
@@ -200,7 +201,8 @@ class Agent(Backend):
     async def stream(self, messages, **kw):
         cwd = kw.get("cwd")
         Agent.seen.append((self.info.key, messages[-1].content, cwd))
-        for name, text in Agent.edits.items():
+        edits = next((e for word, e in Agent.per.items() if word in messages[-1].content), Agent.edits)
+        for name, text in edits.items():
             if cwd:
                 path = Path(cwd) / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,7 +241,7 @@ def eng(tmp_path, monkeypatch):
     swaps = []
     monkeypatch.setattr(builds, "swap", lambda target, **kw: swaps.append((Path(target), kw)) or {})
     e.swaps, e.root = swaps, root
-    Agent.edits, Agent.answers, Agent.seen, Agent.fit = {}, [], [], True
+    Agent.edits, Agent.answers, Agent.seen, Agent.fit, Agent.per = {}, [], [], True, {}
     return e
 
 
@@ -560,3 +562,169 @@ async def test_the_pictures_an_agent_took_are_shown_before_then_after(eng):
     said = eng._self_says(selfwork.change(c["id"]), selfloop.get(c["item"]), {})
     assert said.index("before-chat-light") < said.index("after-chat-light") and "**Before / after**" in said
     await eng.runner.stop()
+
+
+# ---- several at once ---------------------------------------------------------------------------
+
+FILES = {"engine.py": "eki/engine.py", "router.py": "eki/router.py", "views.swift": "mac/Views.swift",
+         "self-build.md": "docs/self-build.md"}
+
+
+def test_an_items_area_comes_from_the_files_and_words_it_names():
+    assert selfloop.area_of("make the sidebar in mac/Views.swift wider") == ["mac"]
+    assert selfloop.area_of("Views.swift: a bigger title", FILES) == ["mac"]          # a look at the repo
+    assert selfloop.area_of("routing should prefer the one with room; add tests") == ["routing"]
+    assert selfloop.area_of("KeyError in eki/engine.py:412 and eki/router.py:9") == ["engine", "routing"]
+    # docs and tests go with the code they're about; alone, they're a lane of their own
+    assert selfloop.area_of("fix eki/cli.py and keep docs/self-build.md in step") == ["cli"]
+    assert selfloop.area_of("reword docs/self-build.md") == ["docs"]
+    assert selfloop.area_of("tidy things up") == ["*"]                                 # nothing to go on
+    assert selfloop.area_of("") == ["note"]
+    assert selfloop.overlaps(["mac"], ["engine", "mac"]) and not selfloop.overlaps(["mac"], ["engine"])
+    assert selfloop.overlaps(["*"], ["docs"]) and not selfloop.overlaps(["note"], ["engine"])
+
+
+def test_several_items_are_worked_on_at_once_each_in_its_own_area():
+    app = selfloop.add("asked", "a bigger title", "mac/Views.swift: a bigger title")
+    again = selfloop.add("asked", "the sidebar", "and the SwiftUI sidebar")
+    route = selfloop.add("asked", "prefer room", "routing should prefer the one with room")
+    # (no roadmap here: its open items would go ahead in areas of their own)
+    it, why = selfloop.pick("", parallel=2)
+    assert it.id == app.id and it.area == ["mac"] and why == "you asked for it"
+    selfloop.update(app.id, state="working", run="r1")
+    # the next one asked for touches the Mac app too: it waits, the routing one goes ahead
+    it, _ = selfloop.pick("", parallel=2, live=["r1"])
+    assert it.id == route.id and it.area == ["routing"]
+    selfloop.update(route.id, state="working", run="r2")
+    got, why = selfloop.pick("", parallel=3, live=["r1", "r2"])
+    assert got is None and why.startswith("“the sidebar” waits: it touches the Mac app, like “a bigger title”")
+    got, why = selfloop.pick("", parallel=2, live=["r1", "r2"])
+    assert got is None and why == "working on 2 things at once: “a bigger title”, “prefer room”"
+    # a change waiting its turn in the merge queue takes no room, and holds no area
+    selfloop.update(app.id, phase="merging")
+    assert selfloop.pick("", parallel=2, live=["r1", "r2"])[0].id == again.id
+    # with one at a time, it's as it always was
+    selfloop.update(app.id, phase="")
+    assert selfloop.pick("", live=["r1", "r2"]) == (None, "working on 2 things at once: “a bigger title”, "
+                                                           "“prefer room”")
+
+
+def test_room_is_held_to_the_spare_room_and_the_machine_counts_apart():
+    # two subscriptions: one whose spare room carries two changes, one with none left
+    assert selfloop.room(4, {"claude": 2, "codex": 0}, {}) == (2, ["claude"])
+    assert selfloop.room(4, {"claude": 2, "codex": 0}, {"claude": 2}) == (0, [])
+    assert selfloop.room(2, {"claude": 5}, {"claude": 1}) == (1, ["claude"])            # the setting holds it
+    # the models on this machine: one self run between them, apart from the subscriptions
+    assert selfloop.room(4, {"claude": 1, "qwen": 1, "gemma": 1}, {"claude": 1}, local=["qwen", "gemma"]) \
+        == (1, ["qwen", "gemma"])
+    assert selfloop.room(4, {"claude": 2, "qwen": 1}, {"qwen": 1}, local=["qwen"]) == (2, ["claude"])
+
+
+def test_spare_room_leaves_the_part_kept_for_you():
+    from eki import capacity
+    w = [Window("five_hour", "5H", 0.4)]
+    assert capacity.spare({}, "claude", w, 0.3) is None                               # cost not known yet
+    data = {"claude": {"five_hour": {"cost": 0.02, "n": 4}}}
+    assert capacity.spare(data, "claude", w, 0.3) == 15.0                              # (0.7 - 0.4) / 0.02
+    assert capacity.spare(data, "claude", [Window("five_hour", "5H", 0.8)], 0.3) == 0.0
+
+
+def test_the_merge_queue_goes_in_the_order_changes_finished():
+    assert selfloop.merge_join("a", run="ra") == 0
+    assert selfloop.merge_join("b", run="rb") == 1
+    assert selfloop.merge_join("c", run="rc") == 2
+    assert selfloop.merge_join("a", run="ra2") == 0                     # carried on: keeps its place
+    live = ["ra2", "rb", "rc"]
+    assert selfloop.merge_turn("a", live) and not selfloop.merge_turn("b", live)
+    selfloop.merge_leave("a")
+    assert selfloop.merge_turn("b", live) and not selfloop.merge_turn("c", live)
+    # one whose run was cut off keeps its place, but doesn't hold up the rest
+    assert selfloop.merge_turn("c", ["rc"])
+    assert [r["change"] for r in selfloop.merge_queue()] == ["b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_the_loop_starts_several_when_theres_room_and_applies_them_one_by_one(eng):
+    from eki import capacity
+    eng.self_on(True)
+    eng.settings = {**eng.settings, "self_autonomy": "apply", "self_parallel": 2}
+    Agent.per = {"README": {"README.md": "eki, reworded\n"},
+                 "thing.py": {"eki/thing.py": "VALUE = 2\n"}}
+    await eng.self_ask("reword the README", when="later")
+    await eng.self_ask("make VALUE two in eki/thing.py", when="later")
+    # what a request costs on Claude isn't known yet: one change at a time there
+    state = await eng.shift_tick()
+    assert state["state"] == "working" and "more beside it" not in state["why"]
+    assert len([i for i in selfloop.items() if i.state == "working"]) == 1
+    await settle(eng.runs, eng._shift_run, timeout=20)
+    eng._goal_finished()
+    selfloop.items()
+    # known, and the spare room carries several: the next starts beside
+    capacity.save({"claude": {"five_hour": {"cost": 0.01, "n": 5}}})
+    for it in selfloop.items():
+        if it.state in ("review", "done"):
+            selfloop.update(it.id, state="dropped")
+    Agent.per = {"README": {"README.md": "eki, reworded again\n"},
+                 "thing.py": {"eki/thing.py": "COUNT = 2\n"}}
+    await eng.self_ask("rename VALUE in eki/thing.py", when="later")
+    await eng.self_ask("reword the README again", when="later")
+    state = await eng.shift_tick()
+    assert "and 1 more beside it" in state["why"]
+    working = [i for i in selfloop.items() if i.state == "working"]
+    assert len(working) == 2 and sorted(a for i in working for a in i.area) == ["docs", "engine"]
+    view = eng.self_view()
+    assert view["parallel"] == 2 and sorted(a for i in view["working"] for a in i["areas"]) == \
+        ["the docs", "the engine"]
+    for i in working:
+        await settle(eng.runs, i.run, timeout=30)
+    eng._goal_finished()
+    # both applied, one after the other, and the queue is empty again
+    states = {selfwork.change(selfloop.get(i.id).change)["state"] for i in working}
+    assert states == {"applied", "applying"} and not selfloop.merge_queue()
+    assert (eng.root / "README.md").read_text() == "eki, reworded again\n"   # documentation: merged
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_finished_change_waits_its_turn_to_be_applied_and_isnt_failed(eng, monkeypatch):
+    import asyncio
+    from eki import selfengine
+    monkeypatch.setattr(selfengine, "MERGE_POLL", 0.05)
+    # a change that finished first, still in line (its run going)
+    eng.runner.tasks["first"] = asyncio.create_task(asyncio.sleep(30))
+    selfloop.merge_join("before", title="finished first", run="first")
+    Agent.edits = {"README.md": "eki, reworded\n"}
+    started = await eng.self_ask("reword the README", apply=True)
+    for _ in range(200):
+        it = selfloop.get(started["item"])
+        if it.phase == "merging":
+            break
+        await asyncio.sleep(0.05)
+    assert it.state == "working" and it.phase == "merging"               # in line: waiting, not failed
+    assert [r["change"] for r in selfloop.merge_queue()] == ["before", it.change]
+    assert selfloop.pick("", parallel=1, live=eng.runner.running)[1].startswith("nothing to do")  # holds no room
+    assert eng.self_view()["merging"][1]["live"]
+    await asyncio.sleep(0.3)
+    assert selfwork.change(it.change)["state"] == "proposed"               # not before its turn
+    selfloop.merge_leave("before")                                        # the first one is through
+    eng.runner.tasks.pop("first").cancel()
+    assert (await settle(eng.runs, started["run"], timeout=20))["state"] == "done"
+    assert selfwork.change(it.change)["state"] == "applied" and not selfloop.merge_queue()
+    assert "1 change finished before it" in eng.runs.get(started["run"])["output"]
+    await eng.runner.stop()
+
+
+def test_several_changes_asked_for_at_once_from_the_command_line(monkeypatch, tmp_path):
+    from eki import cli, migrate
+    sent = []
+    monkeypatch.setattr(migrate, "run", lambda root: None)
+    monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
+    monkeypatch.setattr(cli, "call", lambda m, p, s, **kw: sent.append(kw["json"]) or {"queued": True, "goal": True})
+    assert cli.main(["self", "-r", "make the sidebar wider", "-r", "prefer room when routing"]) == 0
+    assert [b["request"] for b in sent] == ["make the sidebar wider", "prefer room when routing"]
+    assert {b["when"] for b in sent} == {"later"}
+    batch = tmp_path / "asks.txt"
+    batch.write_text("# this week\nfix the menu bar meter\nshow the area on the board\n")
+    sent.clear()
+    assert cli.main(["self", "--batch", str(batch), "and one more"]) == 0
+    assert [b["request"] for b in sent] == ["fix the menu bar meter", "show the area on the board", "and one more"]

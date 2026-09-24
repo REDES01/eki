@@ -3264,6 +3264,10 @@ class Engine(SelfLoop):
                     self._shift_step_out(held.why)
                     await self._shift_unload(held.why)
                     self._pressure = 0
+            if self._shift_state.get("state") == "working":
+                g = self._self_goal()
+                if g is not None and g.id == self._shift_goal:
+                    await self._self_beside(g)      # more self-work beside its turn, when there's room
             return self._shift_state
         if self._shift_run:
             self._goal_finished()
@@ -3354,7 +3358,7 @@ class Engine(SelfLoop):
         if local is not None and not local.running:
             self._shift_loaded.add(local.key)
         if self_item is not None:
-            started = await self._self_start(self_item, goal=g, allowed=allowed)
+            started = await self._self_start(self_item, goal=g, allowed=allowed, planned=key)
             rid = started["run"]
             goals_mod.update(g.id, conversation=started["conversation"], turns=g.turns + 1,
                              last_turn_at=now, note="")
@@ -3365,6 +3369,9 @@ class Engine(SelfLoop):
             task = self.runner.tasks.get(rid)
             if task is not None:
                 task.add_done_callback(lambda _t: self.shift_wake.set())
+            beside = await self._self_beside(g)
+            if beside:
+                self._shift_state["why"] += f" (and {len(beside)} more beside it)"
             return self._shift_state
         if not new_thread:
             cid = g.conversation

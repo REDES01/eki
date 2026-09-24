@@ -17,6 +17,13 @@ fault had happened twice. This is the loop around it:
          if unhealthy)
   plan   a roadmap item's change ticks the item, in the same commit
 
+Several at once (`self_parallel`, default 2), when there's room: each
+subscription carries only what its spare room allows, the models on this
+machine one between them; an item doesn't start beside another that works
+in the same area (area_of), and the Mac app is changed by one at a time.
+What they make is applied one after another, in the order it was finished
+(the merge queue) — each put on top of what landed before it.
+
 It never takes more of your attention than you give it: while
 `self_review_max` fit changes wait for you, it starts nothing new except what
 you asked for. And it doesn't try forever: an item whose change fails its
@@ -44,6 +51,8 @@ HOME = Path("~/.eki/self").expanduser()
 MAX_ATTEMPTS = 2
 #: fit changes waiting for you before the loop stops starting new ones
 REVIEW_MAX = 3
+#: the most self-work going at once (setting `self_parallel`)
+PARALLEL = 2
 #: the weekly note
 NOTE_EVERY = 7 * 86400
 SOURCES = ("asked", "fault", "note", "roadmap", "undo")
@@ -67,7 +76,8 @@ class Item:
     run: str = ""                   # the run working on it
     change: str = ""                # the change being made for it (selfwork id)
     changes: List[str] = field(default_factory=list)
-    phase: str = ""                 # while working: "" | "agent" | "checking"
+    phase: str = ""                 # while working: "" | "agent" | "checking" | "merging"
+    area: List[str] = field(default_factory=list)   # the lanes it's likely to touch (area_of)
     #: while working: the change in progress (a selfwork.Proposal), so a
     #: turn cut off — you came back, the engine restarted — carries on
     open: Dict[str, Any] = field(default_factory=dict)
@@ -168,39 +178,248 @@ SETTLED = ("working", "review", "done", "person", "gave up", "dropped")
 
 
 def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
-         live: Iterable[str] = (), home: Optional[Path] = None) -> Tuple[Optional[Item], str]:
+         live: Iterable[str] = (), home: Optional[Path] = None, parallel: int = 1,
+         files: Optional[Dict[str, str]] = None) -> Tuple[Optional[Item], str]:
     """The next piece of self-work, and why — or None and why not.
 
     `waiting`: fit changes waiting for you; `live`: runs still going (an item
-    whose run is one of them is being worked on already)."""
+    whose run is one of them is being worked on already); `parallel`: how
+    many may be worked on at once; `files`: the repo's files by name, for
+    guessing an item's area (repo_files). An item doesn't start beside one
+    whose area it shares; one whose change is only waiting its turn to be
+    applied ("merging") takes no room."""
     live = set(live)
     all_ = _load(home)
+    files = files or {}
     # something already begun, cut off (you came back, the engine restarted): carry on
     for it in all_:
-        if it.state == "working":
-            if it.run and it.run in live:
-                return None, f"working on “{it.title[:60]}”"
-            return it, "carrying on where it stopped"
+        if it.state == "working" and not (it.run and it.run in live):
+            return _with_area(it, roadmap_text, files, home), "carrying on where it stopped"
+    busy = [i for i in all_ if i.state == "working" and i.phase != "merging"]
+    if len(busy) >= max(1, parallel):
+        if len(busy) == 1:
+            return None, f"working on “{busy[0].title[:60]}”"
+        return None, f"working on {len(busy)} things at once: " + ", ".join(f"“{i.title[:40]}”" for i in busy)
+    areas = {i.id: i.area or area_of(text_of(i, roadmap_text), files) for i in busy}
+    held: List[Tuple[str, List[str], Item]] = []           # what waits for an area, and for whom
+
+    def free(title: str, area: List[str]) -> bool:
+        other = next((i for i in busy if overlaps(area, areas[i.id])), None)
+        if other is not None and not held:
+            held.append((title, area, other))
+        return other is None
+
     queued = [i for i in all_ if i.state == "queued"]
-    asked = [i for i in queued if i.source in ("asked", "undo")]
-    if asked:
-        return asked[0], "you asked for it"
+    for it in (i for i in queued if i.source in ("asked", "undo")):
+        area = it.area or area_of(text_of(it, roadmap_text), files)
+        if free(it.title, area):
+            return update(it.id, home, area=area), "you asked for it"
     if waiting >= review_max:
         return None, (f"{waiting} change{'s' if waiting != 1 else ''} waiting for you to look at "
                       "(Self, or `eki self`) — nothing new until then")
     for source, why in (("fault", "a fault in eki's own code"), ("note", "the weekly note is due")):
-        found = [i for i in queued if i.source == source]
-        if found:
-            return found[0], why
+        for it in (i for i in queued if i.source == source):
+            area = it.area or area_of(text_of(it, roadmap_text), files)
+            if free(it.title, area):
+                return update(it.id, home, area=area), why
     known = {i.key: i for i in all_ if i.source == "roadmap"}
     for entry in roadmap.workable(roadmap.parse(roadmap_text)):
         it = known.get(entry.key)
         if it is not None and it.state in SETTLED:
             continue
+        area = area_of(f"{entry.title}\n{entry.text}", files)
+        if not free(entry.title, area):
+            continue
         if it is None:
             it = add("roadmap", entry.title, key=entry.key, home=home)
-        return it, f"the next open item in ROADMAP.md ({entry.section.split(' — ')[0]})"
+        return update(it.id, home, area=area), \
+            f"the next open item in ROADMAP.md ({entry.section.split(' — ')[0]})"
+    if held:
+        title, area, other = held[0]
+        return None, (f"“{title[:60]}” waits: it touches {', '.join(lane_name(a) for a in area)}, "
+                      f"like “{other.title[:60]}”, being worked on now")
     return None, "nothing to do — ROADMAP.md has no open item eki may take, and nothing is queued"
+
+
+def _with_area(it: Item, roadmap_text: str, files: Dict[str, str], home: Optional[Path]) -> Item:
+    if it.area:
+        return it
+    return update(it.id, home, area=area_of(text_of(it, roadmap_text), files))
+
+
+# ---- side by side: areas, room, and the merge queue --------------------------------
+#
+# Two agents changing the same files make two changes that don't go on top
+# of each other. So before an item starts beside others, eki guesses where
+# it will work — from its words and the files it names — and waits while
+# that area is taken. The guess only has to be good enough: what does
+# collide is put on top of what landed first when it's applied, conflicts
+# resolved (the merge queue, eki/selfengine.py).
+
+#: path prefix → lane; the longest match wins, the rest of eki/ is the engine
+LANES = {
+    "mac/": "mac", "eki/web/": "board", "eki/cli.py": "cli", "docs/": "docs", "tests/": "tests",
+    "README.md": "docs", "ROADMAP.md": "docs", "AGENTS.md": "docs",
+    "eki/router.py": "routing", "eki/table.py": "routing", "eki/capacity.py": "routing",
+    "eki/priors.py": "routing", "eki/handoff.py": "routing", "eki/classify.py": "routing",
+    "eki/failover.py": "routing", "eki/policy.py": "routing", "eki/quota/": "routing",
+    "eki/self": "self", "eki/candidate.py": "self", "eki/builds.py": "self", "eki/roadmap.py": "self",
+    "eki/appbuild.py": "self", "eki/supervisor.sh": "self", "eki/": "engine",
+}
+LANE_NAMES = {"mac": "the Mac app", "board": "the board", "cli": "the command line", "docs": "the docs",
+              "tests": "the tests", "routing": "routing", "self": "self-work", "engine": "the engine",
+              "note": "the weekly note", "*": "anything (its area couldn't be told)"}
+#: words that say where a request works, when it names no file
+_WORDS = (
+    ("mac", re.compile(r"\b(mac app|eki\.app|the app|swift(ui)?|menu ?bar|dock icon|onboarding"
+                       r"|preferences window|settings window)\b", re.I)),
+    ("board", re.compile(r"\b(the board|goals board|self board|web page|goals\.html)\b", re.I)),
+    ("cli", re.compile(r"\b(cli|command line|--[a-z][\w-]+)\b|`eki [a-z]+", re.I)),
+    ("routing", re.compile(r"\b(rout(e|es|ed|ing|er)|capacity|quota|handoff|failover|spare room)\b", re.I)),
+    ("self", re.compile(r"\b(self[- ](work|build|loop)|eki self|works? on itself|merge queue"
+                        r"|candidate check|swaps?|builds?)\b", re.I)),
+    ("engine", re.compile(r"\b(engine|runner|shift|goals?|providers?|adapters?|skills?|mcp)\b", re.I)),
+    ("docs", re.compile(r"\b(docs?|documentation|readme)\b", re.I)),
+    ("tests", re.compile(r"\btests?\b", re.I)),
+)
+_PATH = re.compile(r"\b(?:eki|mac|docs|tests)/[\w./-]*[\w/]|\b(?:README|ROADMAP|AGENTS)\.md\b")
+_FILE = re.compile(r"\b([A-Za-z_]\w+\.(?:py|swift|md|html|sh))\b")
+
+
+def lane_of(path: str) -> str:
+    best = max((p for p in LANES if path == p or path.startswith(p)), key=len, default="")
+    return LANES[best] if best else "engine"
+
+
+def lane_name(lane: str) -> str:
+    return LANE_NAMES.get(lane, lane)
+
+
+def repo_files(root: Path) -> Dict[str, str]:
+    """A cheap look at the repo: its source files, by name (lower case)."""
+    out: Dict[str, str] = {}
+    for pattern in ("eki/*.py", "eki/*/*.py", "eki/web/*", "mac/*.swift", "docs/*.md"):
+        for p in sorted(Path(root).glob(pattern)):
+            out.setdefault(p.name.lower(), str(p.relative_to(root)))
+    return out
+
+
+def text_of(it: Item, roadmap_text: str = "") -> str:
+    """What an item says about itself: its title, its request, its roadmap entry."""
+    if it.source == "note":
+        return ""
+    entry = roadmap.find(roadmap_text, it.key) if it.source == "roadmap" and roadmap_text else None
+    return "\n".join(x for x in (it.title, it.request, entry.text if entry else "") if x)
+
+
+def area_of(text: str, files: Optional[Dict[str, str]] = None) -> List[str]:
+    """The lanes a piece of work is likely to touch: the paths and files it
+    names, then the words it uses. Docs and tests go with the code they're
+    about — they're a lane of their own only when nothing else is named.
+    Nothing to go on: ["*"], and it runs alone. The weekly note writes no
+    code: ["note"]."""
+    if not text.strip():
+        return ["note"]
+    files = files or {}
+    found = {lane_of(m.group(0)) for m in _PATH.finditer(text)}
+    for m in _FILE.finditer(text):
+        path = files.get(m.group(1).lower())
+        if path:
+            found.add(lane_of(path))
+    words = _FILE.sub(" ", _PATH.sub(" ", text))           # a path's words aren't what it's about
+    found |= {lane for lane, rx in _WORDS if rx.search(words)}
+    code = found - {"docs", "tests"}
+    return sorted(code or found) or ["*"]
+
+
+def overlaps(a: Iterable[str], b: Iterable[str]) -> bool:
+    a, b = set(a), set(b)
+    return bool(a and b) and ("*" in a or "*" in b or bool(a & b))
+
+
+def room(parallel: int, slots: Dict[str, int], busy: Dict[str, int],
+         local: Iterable[str] = ()) -> Tuple[int, List[str]]:
+    """How many more pieces of self-work may start now, and on which backends.
+
+    `slots`: how many self runs each subscription's spare room can carry
+    (capacity.spare) — never the part kept for you; `busy`: self runs on
+    each now. The models on this machine are counted apart: one self run
+    between them, whatever the subscriptions have."""
+    local = set(local)
+    on_machine = sum(n for k, n in busy.items() if k in local)
+    free, left = [], 0
+    for k, n in slots.items():
+        if k in local:
+            if on_machine < 1:
+                free.append(k)
+            continue
+        if n - busy.get(k, 0) > 0:
+            free.append(k)
+            left += n - busy.get(k, 0)
+    if on_machine < 1 and any(k in local for k in free):
+        left += 1
+    more = max(0, int(parallel) - sum(busy.values()))
+    return min(more, left), free
+
+
+def _merge_path(home: Optional[Path] = None) -> Path:
+    return (home or HOME) / "merge.json"
+
+
+def merge_queue(home: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Fit changes waiting their turn to be applied, in the order they were finished."""
+    try:
+        rows = json.loads(_merge_path(home).read_text()).get("queue") or []
+        return [r for r in rows if isinstance(r, dict) and r.get("change")]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def _save_merge(rows: List[Dict[str, Any]], home: Optional[Path] = None) -> None:
+    path = _merge_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"queue": rows}, indent=2, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def merge_join(change: str, *, item: str = "", title: str = "", run: str = "", area: Iterable[str] = (),
+               home: Optional[Path] = None) -> int:
+    """Into the merge queue, at the back — or where it already stood (a run
+    carried on after a restart keeps its place). Returns how many are ahead."""
+    with _lock:
+        rows = merge_queue(home)
+        mine = next((r for r in rows if r["change"] == change), None)
+        if mine is None:
+            rows.append({"change": change, "item": item, "title": title[:120], "run": run,
+                         "area": list(area), "at": int(time.time()), "applying": False})
+        else:
+            mine["run"] = run or mine.get("run", "")
+        _save_merge(rows, home)
+        return next(n for n, r in enumerate(rows) if r["change"] == change)
+
+
+def merge_turn(change: str, live: Iterable[str], home: Optional[Path] = None) -> bool:
+    """Is it this change's turn? The first in line whose run is still going
+    goes; one whose run was cut off keeps its place, and doesn't hold up the
+    rest until it's carried on."""
+    live = set(live)
+    first = next((r for r in merge_queue(home) if r.get("run") in live), None)
+    return first is not None and first["change"] == change
+
+
+def merge_mark(change: str, home: Optional[Path] = None, **fields: Any) -> None:
+    with _lock:
+        rows = merge_queue(home)
+        for r in rows:
+            if r["change"] == change:
+                r.update(fields)
+        _save_merge(rows, home)
+
+
+def merge_leave(change: str, home: Optional[Path] = None) -> None:
+    with _lock:
+        _save_merge([r for r in merge_queue(home) if r["change"] != change], home)
 
 
 # ---- what the agent is told -------------------------------------------------------

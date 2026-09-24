@@ -28,12 +28,14 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 from . import builds as builds_mod
 from . import candidate
+from . import capacity as capacity_mod
 from . import goals as goals_mod
 from . import observe as observe_mod
 from . import roadmap
 from . import selfloop
 from . import selfwork
 from . import settings as settings_mod
+from . import shift as shift_mod
 from .adapters.base import BackendError
 
 
@@ -46,6 +48,11 @@ class _NoItem:
 Piece = Union[str, Dict[str, str]]
 #: the goal with nothing to take waits this long before looking again (or until woken)
 IDLE_RECHECK = 900
+#: what one change to eki is reckoned to cost, in the requests capacity.py
+#: measures: an agent's long run, not one question
+SELF_COST = 3
+#: how often a change waiting in the merge queue looks whether it's its turn
+MERGE_POLL = 2.0
 
 
 def _payload(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,7 +119,7 @@ class SelfLoop:
         return {**await self._self_start(it), "item": it.id}
 
     async def _self_start(self, it: selfloop.Item, goal: Optional[goals_mod.Goal] = None,
-                          allowed: Optional[List[str]] = None) -> Dict[str, str]:
+                          allowed: Optional[List[str]] = None, planned: str = "") -> Dict[str, str]:
         """A run for this item, in its thread (a new one unless it has one).
         Returns at once; the run is the pipeline (`_self_work`)."""
         cid = it.conversation
@@ -125,7 +132,7 @@ class SelfLoop:
         payload: Dict[str, Any] = {"self_item": it.id, "route": it.title or it.request}
         if goal is not None:
             meta["goal"] = goal.id
-            payload.update(goal=goal.id, allowed=list(allowed or []))
+            payload.update(goal=goal.id, allowed=list(allowed or []), planned=planned)
         turn = self.store.add_turn(cid, "user", shown, meta=meta)       # type: ignore[attr-defined]
         rid = self.runs.create(shown, conversation=cid, user_turn=turn,  # type: ignore[attr-defined]
                                requested=it.backend, payload=json.dumps(payload))
@@ -218,30 +225,73 @@ class SelfLoop:
             prop.summary = selfwork.summary_of(answer)
             it = selfloop.update(it.id, phase="checking", open={
                 **prop.to_json(), "agent_state": state, "reason": selfloop.reason(answer)})
-        pending = await asyncio.to_thread(selfwork.changed, Path(prop.worktree)) \
-            if Path(prop.worktree).is_dir() else []
-        if pending and not selfwork.docs_only(pending):
-            yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
-        tick = None
-        if it.source == "roadmap" and prop.said in ("done", "already"):
-            key, mark = it.key, f"*(eki: self/{prop.id})*"
-            tick = lambda where: roadmap.tick_file(where, key, mark)   # noqa: E731
-        prop = await asyncio.to_thread(
-            selfwork.conclude, prop, {"state": state, "run": run["id"], "backend": prop.backend},
-            python=python, check=self.self_check, before_commit=tick)
+        merging = it.phase == "merging"
+        if merging:                                 # cut off while in the merge queue: back in line
+            c = selfwork.change(prop.id)
+            prop = selfwork.Proposal(**{k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__})
+        else:
+            pending = await asyncio.to_thread(selfwork.changed, Path(prop.worktree)) \
+                if Path(prop.worktree).is_dir() else []
+            if pending and not selfwork.docs_only(pending):
+                yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
+            tick = None
+            if it.source == "roadmap" and prop.said in ("done", "already"):
+                key, mark = it.key, f"*(eki: self/{prop.id})*"
+                tick = lambda where: roadmap.tick_file(where, key, mark)   # noqa: E731
+            prop = await asyncio.to_thread(
+                selfwork.conclude, prop, {"state": state, "run": run["id"], "backend": prop.backend},
+                python=python, check=self.self_check, before_commit=tick)
         applied: Dict[str, Any] = {}
         if prop.commit and prop.fit and not prop.protected:
-            mode = "apply" if it.apply else selfloop.autonomy_for(prop.files, self.settings)  # type: ignore[attr-defined]
+            mode = "apply" if it.apply or merging else \
+                selfloop.autonomy_for(prop.files, self.settings)       # type: ignore[attr-defined]
             if mode == "apply":
-                try:
-                    applied = await asyncio.to_thread(selfwork.apply, prop.id, python=python,
-                                                      check=self.self_check)
-                except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
-                    applied = {"state": "proposed", "why": str(e)[:300]}
-                if applied.get("state") == "conflicts":
-                    applied = await self._self_resolve_start(prop.id) or applied
+                # finished changes are applied one at a time, in the order they
+                # finished: in line, it takes no room from the work still going
+                ahead = selfloop.merge_join(prop.id, item=it.id, title=it.title, run=run["id"], area=it.area)
+                it = selfloop.update(it.id, phase="merging")
+                if ahead:
+                    yield (f"\n\n*eki: fit — {ahead} change{'s' if ahead != 1 else ''} finished before it; "
+                           "it's applied after, on top of what they bring…*\n")
+                applied = await self._self_merge(prop.id)
         async for piece in self._self_close(run, it, prop, applied):
             yield piece
+
+    async def _self_merge(self, cid: str) -> Dict[str, Any]:
+        """Its turn in the merge queue, then applied: put on top of what landed
+        before it, judged again, swapped in — its conflicts resolved first if
+        it no longer goes on top, and the next in line waits for that. Waiting
+        is never a failure."""
+        try:
+            while not selfloop.merge_turn(cid, self.runner.running):   # type: ignore[attr-defined]
+                await asyncio.sleep(MERGE_POLL)
+            selfloop.merge_mark(cid, applying=True)
+            applied = await self._self_apply_now(cid)
+            if applied.get("state") == "conflicts":
+                started = await self._self_resolve_start(cid)
+                task = self.runner.tasks.get(started["resolving"]) if started else None   # type: ignore[attr-defined]
+                if task is not None:
+                    await asyncio.wait([task])
+                    c = selfwork.change(cid)
+                    applied = {"state": c["state"], "id": cid, "why": c.get("why") or ""}
+                else:
+                    applied = started or applied
+            return applied
+        finally:
+            selfloop.merge_leave(cid)
+
+    async def _self_apply_now(self, cid: str, raising: bool = False) -> Dict[str, Any]:
+        """selfwork.apply, one at a time in this engine: two applies at once
+        would each build on a checkout without the other."""
+        lock = vars(self).setdefault("_self_applying", asyncio.Lock())
+        async with lock:
+            try:
+                return await asyncio.to_thread(selfwork.apply, cid, python=sys.executable,
+                                               check=self.self_check)
+            except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
+                if raising:
+                    raise
+                return {"state": "proposed", "id": cid, "why": str(e)[:300]}
 
     async def _self_close(self, run: Dict[str, Any], it: selfloop.Item, prop: selfwork.Proposal,
                           applied: Dict[str, Any]) -> AsyncIterator[Piece]:
@@ -436,28 +486,130 @@ class SelfLoop:
 
     async def _self_plan(self, g: goals_mod.Goal, now: int) -> Union[str, Tuple[Any, ...]]:
         """The goal's next turn: (goal, backend, allowed, item) — or why there's none."""
+        return await self._self_next(g)
+
+    def _self_parallel(self) -> int:
+        return max(1, min(8, int(self.settings.get("self_parallel", selfloop.PARALLEL))))   # type: ignore[attr-defined]
+
+    def _self_busy(self) -> Dict[str, int]:
+        """Self runs going now, by the backend each is on. A change waiting
+        its turn in the merge queue holds none."""
+        live = set(self.runner.running)                                 # type: ignore[attr-defined]
+        out: Counter = Counter()
+        for i in selfloop.items():
+            if i.state == "working" and i.phase != "merging" and i.run in live:
+                r = self.runs.get(i.run) or {}                          # type: ignore[attr-defined]
+                out[r.get("backend") or _payload(r).get("planned") or r.get("requested") or "?"] += 1
+        return dict(out)
+
+    def _self_slots(self, allowed: List[str]) -> Dict[str, int]:
+        """How many self runs each backend it may use can carry now. A
+        subscription: what its spare room holds, never the part kept for you
+        (capacity.spare) — one, until eki knows what a request costs there."""
+        reserve = float(self.settings.get("background_reserve", shift_mod.RESERVE))   # type: ignore[attr-defined]
+        data = capacity_mod.load()
+        out: Dict[str, int] = {}
+        for key in allowed:
+            b = self.get(key)                                           # type: ignore[attr-defined]
+            if b is None:
+                continue
+            if b.info.cost.tier == 0:
+                out[key] = 1
+                continue
+            quota = getattr(self, "quota", None)
+            reading = quota.latest.get(b.info.quota_source or "") if quota else None
+            left = capacity_mod.spare(data, b.info.quota_source or "", reading.windows, reserve) \
+                if reading is not None else None
+            out[key] = 1 if left is None else int(left // SELF_COST)
+        return out
+
+    def _self_sweep(self) -> None:
+        """Runs of self-work that ended in an error with nobody to notice (the
+        ones beside the goal's turn): their items are tried again, or given
+        up. And the merge queue forgets changes that aren't waiting any more."""
+        live = set(self.runner.running)                                 # type: ignore[attr-defined]
+        for i in selfloop.items():
+            if i.state != "working" or not i.run or i.run in live:
+                continue
+            r = self.runs.get(i.run) or {}                              # type: ignore[attr-defined]
+            if r.get("state") == "failed":
+                attempts = i.attempts + 1
+                selfloop.update(i.id, run="", attempts=attempts, open={}, phase="",
+                                state="gave up" if attempts >= selfloop.MAX_ATTEMPTS else "queued",
+                                note=(r.get("error") or "its run failed")[:300])
+        items = {i.id: i for i in selfloop.items()}
+        for row in selfloop.merge_queue():
+            it = items.get(row.get("item") or "")
+            if row.get("run") in live:
+                continue
+            if it is None or it.state != "working" or it.phase != "merging":
+                selfloop.merge_leave(row["change"])
+
+    async def _self_next(self, g: goals_mod.Goal, beside: bool = False) -> Union[str, Tuple[Any, ...]]:
+        """The next piece of self-work that may start now: (goal, backend,
+        allowed, item) — or why there's none. Held to `self_parallel`, to
+        the subscriptions' spare room, and to an area nobody is working in.
+        `beside`: next to the goal's turn — subscriptions only, since only
+        the goal's own turn gives way when you need the machine."""
         why = self._self_why_not()
         if why:
             return why
         await asyncio.to_thread(self._self_reconcile)
         if selfloop.note_due(since=g.created_at):
             selfloop.add("note", "eki's weekly note")
+        self._self_sweep()
+        root = self._self_root()
         review_max = int(self.settings.get("self_review_max", selfloop.REVIEW_MAX))   # type: ignore[attr-defined]
-        it, why = selfloop.pick(roadmap.read(self._self_root()), waiting=len(selfwork.waiting()),
-                                review_max=review_max, live=self.runner.running)   # type: ignore[attr-defined]
+        queued = {r["change"] for r in selfloop.merge_queue()}
+        waiting = [c for c in selfwork.waiting() if c["id"] not in queued]
+        it, why = selfloop.pick(roadmap.read(root), waiting=len(waiting), review_max=review_max,
+                                live=self.runner.running,               # type: ignore[attr-defined]
+                                parallel=self._self_parallel(),
+                                files=await asyncio.to_thread(selfloop.repo_files, root))
         if it is None:
             return why
         allowed = self._self_allowed(g, it)
-        folder = "" if it.source == "note" else str(self._self_root())
+        local = {b.key for b in self.backends if b.info.cost.tier == 0}     # type: ignore[attr-defined]
+        if beside:
+            allowed = [k for k in allowed if k not in local]
+        if allowed:
+            more, free = selfloop.room(self._self_parallel(), self._self_slots(allowed), self._self_busy(), local)
+            if more <= 0:
+                return "no more room beside what's running" if beside else \
+                    "what's working now takes all the spare room there is"
+            allowed = [k for k in allowed if k in free]
+        elif beside:
+            return "no more room beside what's running"
+        folder = "" if it.source == "note" else str(root)
         _, _, need, choice = await self._route(it.title, "", folder, allowed=allowed)   # type: ignore[attr-defined]
         if choice.backend is None:
-            if not allowed or not any(k not in {b.key for b in self.backends if b.info.cost.tier == 0}  # type: ignore[attr-defined]
-                                      for k in allowed):
+            if beside:
+                return "no more room beside what's running"
+            if not allowed or not any(k not in local for k in allowed):
                 if not (g.spare or self.settings.get("self_local", False)):     # type: ignore[attr-defined]
                     return "let it use your subscriptions' spare room (or the local models) to start"
                 return "your subscriptions have no spare room right now (under pace, the last 30% kept for you)"
             return f"nothing it may use can take “{it.title[:60]}” right now"
         return (g, choice.backend.key, allowed, it)
+
+    async def _self_beside(self, g: goals_mod.Goal) -> List[str]:
+        """While the goal has its turn, more self-work beside it — as much as
+        `self_parallel` and the spare room allow, each in its own area."""
+        if g.state != "active":
+            return []
+        started: List[str] = []
+        for _ in range(self._self_parallel() - 1):
+            plan = await self._self_next(g, beside=True)
+            if isinstance(plan, str):
+                break
+            _, key, allowed, it = plan
+            got = await self._self_start(it, goal=g, allowed=allowed, planned=key)
+            goals_mod.update(g.id, turns=goals_mod.get(g.id).turns + 1, last_turn_at=int(time.time()))
+            task = self.runner.tasks.get(got["run"])                    # type: ignore[attr-defined]
+            if task is not None:                    # the next starts the moment one ends
+                task.add_done_callback(lambda _t: self.shift_wake.set())   # type: ignore[attr-defined]
+            started.append(got["run"])
+        return started
 
     @staticmethod
     def _self_status(g: goals_mod.Goal) -> str:
@@ -548,7 +700,7 @@ class SelfLoop:
         return c
 
     async def self_apply(self, cid: str) -> Dict[str, Any]:
-        got = await asyncio.to_thread(selfwork.apply, cid, python=sys.executable, check=self.self_check)
+        got = await self._self_apply_now(cid, raising=True)
         if got.get("state") == "conflicts":
             # it no longer goes on top of your checkout: not handed back to
             # you — an agent resolves it, and eki applies it when that holds
@@ -637,11 +789,7 @@ class SelfLoop:
                 return
             yield "\n\n*eki: resolved — judging it again on top of your checkout, then applying it…*\n"
         selfwork.set_state(c["id"], "conflicts", resolving="", why="")
-        try:
-            applied = await asyncio.to_thread(selfwork.apply, c["id"], python=sys.executable,
-                                              check=self.self_check)
-        except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
-            applied = {"state": "proposed", "why": str(e)[:300]}
+        applied = await self._self_apply_now(c["id"])
         now = self._self_follow(c["id"])
         it = self._self_item_of(now) or _NoItem(now)
         text = self._self_says(now, it, applied)                        # type: ignore[arg-type]
@@ -662,7 +810,7 @@ class SelfLoop:
         p = await asyncio.to_thread(selfwork.undo, cid, python=sys.executable, check=self.self_check)
         if not p.commit or not p.fit:
             return {"state": "not undone", "why": p.verdict, "id": p.id}
-        got = await asyncio.to_thread(selfwork.apply, p.id, python=sys.executable, check=self.self_check)
+        got = await self._self_apply_now(p.id, raising=True)
         if got.get("state") == "applied":                              # documentation: no swap to wait for
             selfwork.set_state(selfwork.change(cid)["id"], "undone", by=p.id)
         self._self_follow(selfwork.change(cid)["id"])
@@ -717,6 +865,8 @@ class SelfLoop:
             keep["self_review_max"] = max(1, min(20, int(fields["review_max"])))
         if "local" in fields:
             keep["self_local"] = bool(fields["local"])
+        if "parallel" in fields:
+            keep["self_parallel"] = max(1, min(8, int(fields["parallel"])))
         self.settings = settings_mod.save({**settings_mod.load(), **keep})   # type: ignore[attr-defined]
         self._self_wake()
         return {k: self.settings.get(k) for k in keep}                  # type: ignore[attr-defined]
@@ -787,6 +937,7 @@ class SelfLoop:
             row = i.to_json()
             row.pop("open", None)
             row["live"] = i.run in live
+            row["areas"] = [selfloop.lane_name(a) for a in i.area]
             if i.change and i.change in by_id:
                 row["change_state"] = by_id[i.change]["state"]
             return row
@@ -794,7 +945,8 @@ class SelfLoop:
         goal = None
         if g is not None:
             goal = g.to_json()
-            goal["working"] = self._shift_goal == g.id and self._shift_run in live   # type: ignore[attr-defined]
+            goal["working"] = (self._shift_goal == g.id and self._shift_run in live) or \
+                any(i.state == "working" and i.run in live for i in items)   # type: ignore[attr-defined]
         return {
             "can": not why_not, "why_not": why_not, "root": str(root),
             "running": builds_mod.running(),
@@ -803,6 +955,9 @@ class SelfLoop:
             "areas": self.settings.get("self_autonomy_areas") or {},     # type: ignore[attr-defined]
             "review_max": int(self.settings.get("self_review_max", selfloop.REVIEW_MAX)),  # type: ignore[attr-defined]
             "local": bool(self.settings.get("self_local", False)),       # type: ignore[attr-defined]
+            "parallel": self._self_parallel(),
+            "merging": [{**r, "live": r.get("run") in live, "areas": [selfloop.lane_name(a) for a in r.get("area") or []]}
+                        for r in selfloop.merge_queue()],
             "working": [item_row(i) for i in items if i.state == "working"],
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],

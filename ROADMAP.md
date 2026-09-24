@@ -405,6 +405,14 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       install that (745807a: a change made before your checkout moved on is
       put on top of it and judged again before it's applied. Still open:
       offering one upstream as a pull request)
+- [x] **Several changes at once.** Up to `self_parallel` (2) pieces of
+      self-work side by side, held to the subscriptions' spare room (the
+      local models: one between them); an item waits while one in the same
+      area works — the Mac app one at a time — and finished changes are
+      applied one by one, in the order they finished, each rebased and
+      judged again (the merge queue). Ask for several with `eki self -r … -r …`
+      or `--batch`; `eki self` and the board show each item's area and the
+      queue (`selfloop.area_of`, `selfloop.room`, `selfengine._self_merge`)
 - [x] **Everything it did to itself is visible.** A Self pane: each change,
       who asked, which agent, the diff, the checks, and *Undo* (4909625:
       Goals → Self on the board, and `eki self`; each change has a page with

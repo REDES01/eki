@@ -24,6 +24,7 @@ Every ask is a run in the engine, not in this terminal: Ctrl-C stops
 
     eki self "change yourself so…"       eki works on its own source: a branch,
                                          a diff and a verdict — never a merge
+    eki self -r "…" -r "…"               several changes, queued; side by side as room allows
     eki self                             what it has proposed so far
     eki serve                            run the engine in the foreground
 """
@@ -476,7 +477,7 @@ def cmd_agent(args) -> int:
 
 
 SELF_VERBS = ("apply", "discard", "undo", "diff", "show", "on", "off", "next", "note",
-              "autonomy", "retry", "drop", "mine")
+              "autonomy", "retry", "drop", "mine", "parallel")
 
 
 def _ago(t: float) -> str:
@@ -497,25 +498,35 @@ def _self_status(service: str, limit: int) -> int:
             spend += " and the local models"
         print(f"eki works on itself: {'on' if g['state'] == 'active' else g['state']} — uses {spend}"
               + ("   (eki self off)" if g["state"] == "active" else "   (eki self on)"))
-        if g.get("working"):
-            now = next(iter(v["working"]), {})
-            print(f"now: working on “{now.get('title', '')}”")
-        elif g.get("note"):
+        if g.get("note") and not g.get("working"):
             print(f"now: {g['note']}")
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
-          + f" · at most {v['review_max']} waiting for you")
+          + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
+    working = [i for i in v["working"] if i.get("phase") != "merging"]
+    if working:
+        print("\nworking on:")
+        for i in working:
+            where = ", ".join(i.get("areas") or []) or "?"
+            print(f"  {i['source']:<7} {i['title'][:60]}  [{where}]"
+                  + ("" if i.get("live") else "  (carries on when there's room)"))
+    if v.get("merging"):
+        print("\nmerge queue (applied one at a time, in the order they finished):")
+        for n, r in enumerate(v["merging"], 1):
+            state = "applying now" if r.get("applying") else "waiting its turn" if r.get("live") \
+                else "back in line when it carries on"
+            print(f"  {n}. self/{r['change']}  {r.get('title', '')[:56]} — {state}")
     if v["waiting"]:
         print("\nwaiting for you:")
         for c in v["waiting"]:
             print(f"  self/{c['id']}  {c.get('source', ''):<7} {c['title'][:58]}"
                   f"\n              eki self diff {c['id']} · eki self apply {c['id']} · eki self discard {c['id']}")
-    ahead = v["working"] + v["queue"]
+    ahead = v["queue"]
     nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}" for n in v["roadmap"]["next"][:3]]
     if ahead or nexts:
         print("\nup next:")
         for i in ahead:
-            print(f"  {i['source']:<7} {i['title'][:70]}" + ("  (working)" if i["state"] == "working" else ""))
+            print(f"  {i['source']:<7} {i['title'][:70]}")
         for line in nexts:
             print(line)
     if v["left"]:
@@ -563,6 +574,13 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
             merged = {**(v.get("areas") or {}), **areas}
             body["areas"] = {k: m for k, m in merged.items() if m in ("apply", "propose")}
         print(json.dumps(call("PUT", "/api/self/settings", s, json=body)))
+        return 0
+    if verb == "parallel":
+        if not arg:
+            print(call("GET", "/api/self", s).get("parallel", 1))
+            return 0
+        got = call("PUT", "/api/self/settings", s, json={"parallel": int(arg)})
+        print(f"at most {got['self_parallel']} at once — fewer when your subscriptions' spare room is short")
         return 0
     if verb == "next":
         v = call("GET", "/api/self", s)
@@ -619,9 +637,42 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     return 0
 
 
+def _batch(args) -> List[str]:
+    """The requests given with -r/--request and --batch (a file, `-` for
+    standard input: one request per line, or paragraphs split by blank lines
+    when any request runs over several lines)."""
+    asked = [r.strip() for r in args.requests or [] if r.strip()]
+    if args.batch:
+        text = sys.stdin.read() if args.batch == "-" else Path(args.batch).expanduser().read_text()
+        parts = [x for x in text.split("\n\n")] if "\n\n" in text.strip() else text.splitlines()
+        asked += [" ".join(x.split()) for x in parts if x.strip() and not x.strip().startswith("#")]
+    return asked
+
+
+def _self_batch(args, asked: List[str]) -> int:
+    """Several changes at once: each queued as its own item; they start as
+    room allows, side by side where their areas don't overlap."""
+    ensure_engine(args.service)
+    queued, goal = 0, False
+    for request in asked:
+        got = call("POST", "/api/self", args.service,
+                   json={"request": request, "when": "later", "apply": args.apply,
+                         "backend": args.backend or ""})
+        goal = goal or bool(got.get("goal"))
+        queued += 1
+        print(f"  queued: {request.splitlines()[0][:70]}")
+    print(f"{queued} queued — they start as room allows (`eki self` shows them)" if goal else
+          f"{queued} queued — but eki isn't working on itself yet: `eki self on`")
+    return 0
+
+
 def cmd_self(args) -> int:
     """eki, working on eki (eki/selfwork.py, eki/selfloop.py, docs/self-build.md)."""
     words = list(args.request or [])
+    asked = _batch(args)
+    if asked:
+        # several at once: the words given without a flag are one more
+        return _self_batch(args, asked + ([" ".join(words).strip()] if words else []))
     verb = words[0].lower() if words else ""
     if verb in SELF_VERBS and (len(words) <= 2 or verb == "autonomy"):
         ensure_engine(args.service)
@@ -1013,6 +1064,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw = sub.add_parser("self", help="eki working on itself: ask for a change, see what it did, decide",
                         description="eki self                      what it's doing, what waits for you, what's next\n"
                                     "eki self \"change …\"           a change to eki, now (--later: when there's room)\n"
+                                    "eki self -r \"…\" -r \"…\"         several changes, queued; they start as room allows\n"
+                                    "eki self --batch FILE         the same, one request per line (- reads stdin)\n"
+                                    "eki self parallel [N]         the most self-work at once (default 2)\n"
                                     "eki self on|off               let eki work on itself whenever the machine has room\n"
                                     "eki self diff|show|apply|discard|undo <id>\n"
                                     "eki self next                 what it would take next\n"
@@ -1023,6 +1077,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw.add_argument("request", nargs="*", default=[])
     sw.add_argument("--later", action="store_true",
                     help="queue it: eki takes it when the machine has room (eki self on)")
+    sw.add_argument("-r", "--request", dest="requests", action="append", metavar="REQUEST",
+                    help="one of several changes to queue at once (repeat it)")
+    sw.add_argument("--batch", metavar="FILE",
+                    help="queue a change per line of FILE (blank-line paragraphs for longer ones; - is stdin)")
     sw.add_argument("-b", "--backend", help="the agent to use (default: routed)")
     sw.add_argument("--base", default="HEAD", help="commit or branch to start from")
     sw.add_argument("--anyway", action="store_true",

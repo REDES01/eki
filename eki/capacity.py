@@ -100,3 +100,19 @@ def room(data: Dict[str, Any], provider: str, windows: List[Any],
         out["per_hour"] = round(min(per_hours), 2)
         out["left"] = round(min(lefts), 1)
     return out
+
+
+def spare(data: Dict[str, Any], provider: str, windows: List[Any], reserve: float) -> Optional[float]:
+    """Requests this subscription can take before the part kept for you:
+    below `1 - reserve` of the tightest window. None until eki knows what a
+    request costs here — the caller decides what an unknown is worth."""
+    lefts = []
+    for w in windows:
+        if getattr(w, "kind", "window") != "window" or not getattr(w, "primary", True):
+            continue
+        rec = (data.get(provider) or {}).get(w.key) or {}
+        cost = rec.get("cost") if int(rec.get("n") or 0) >= MIN_SAMPLES else None
+        if not cost:
+            return None
+        lefts.append(max(0.0, (1.0 - reserve) - float(w.used)) / cost)
+    return round(min(lefts), 1) if lefts else None

@@ -222,6 +222,36 @@ because a broken eki hurts everything else. `self_local` lets the local
 models (Qwen with Codex's hands) take it too. The weekly note is writing:
 the local models may always write it.
 
+**Several at once.** Up to `self_parallel` (2) pieces of self-work go at
+once — `eki self parallel 3`, or *At most N at once* on the board. The first
+is the goal's turn; the rest start beside it, on subscriptions only (only the
+goal's own turn steps aside when you need the machine). Each turn the number
+is held to what the spare room carries: `capacity.spare` counts the requests a
+subscription can take before the part kept for you, and a change is reckoned
+at three of them; a subscription whose cost per request isn't known yet
+carries one. The local models are counted apart: one self run between them.
+
+**Lanes.** Before an item starts beside others, eki guesses where it will
+work (`selfloop.area_of`) — from the paths and files it names (a cheap look
+at the repo finds `Views.swift` is the Mac app) and then its words: *the Mac
+app*, *the board*, *the command line*, *routing*, *self-work*, *the engine*;
+docs and tests go with the code they're about, and are a lane of their own
+only when nothing else is named. An item with nothing to go on runs alone.
+An item doesn't start while one working shares its area — so the Mac app,
+of which there is one, is changed by one at a time — and a later item in
+another area goes ahead of it. The guess only has to be good enough: what
+collides anyway is resolved when it's applied.
+
+**The merge queue.** A change that is to be applied (its autonomy says so,
+or `--apply`) joins the queue when its checks finish; changes are applied
+one at a time, in the order they finished. Each is put on top of your
+checkout with whatever landed before it, its conflicts resolved if it no
+longer goes on top (the next in line waits for that), judged again, then
+swapped in. Waiting in line is never a failure, and takes no room from the
+work still going; one cut off by a restart keeps its place and doesn't hold
+up the rest. `eki self` and the board list it. A change you apply by hand
+isn't in the queue, but never overlaps one being applied.
+
 **Your attention is part of the budget.** While `self_review_max` (3) fit
 changes are waiting for you, the loop starts nothing new of its own; what you
 ask for still goes ahead. An item whose change fails its checks is tried once
@@ -282,7 +312,7 @@ server. It suggests; you pick: *Ask eki to do it* (a queued request), *Add to
 ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 
-What it keeps, all in `~/.eki/self/`: `work.json` (the items), `log.jsonl`
+What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the merge queue), `log.jsonl`
 (every change as it was judged), `changes.json` (where each stands now),
 `notes/` (the weekly notes), `base-ok.json` (bases that passed).
 
@@ -290,6 +320,8 @@ What it keeps, all in `~/.eki/self/`: `work.json` (the items), `log.jsonl`
 eki self                         what it's doing, what waits for you, what's next
 eki self on | off
 eki self "make eki runs show durations" [--later] [--apply]
+eki self -r "…" -r "…"           several at once, queued; --batch FILE: one per line
+eki self parallel [N]            the most at once (default 2)
 eki self diff|show|apply|discard|undo <id>
 eki self next
 eki self retry|drop|mine <item>

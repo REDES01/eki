@@ -445,9 +445,11 @@ function selfPage() {
   if (!v) return `<div class="empty">Loading…</div>`;
   if (!v.can) return `<div class="empty">${esc(v.why_not)}</div>`;
   const g = v.goal, on = !!g && g.state === "active", now = v.working[0];
+  const going = v.working.filter(i => i.phase !== "merging"), merging = v.merging || [];
   const status = !g ? "Off — eki changes itself only when you ask."
     : g.state === "paused" ? "Paused — nothing new starts."
     : g.state === "stuck" ? "Stopped: " + (g.note || "its turns kept failing")
+    : going.length > 1 ? `Working on ${going.length} changes at once`
     : now ? `Working on “${now.title}”` + (now.live ? "" : " — carries on when there's room")
     : g.note || "Waiting for room on the machine";
   let h = `<div class="card self-head">
@@ -465,7 +467,8 @@ function selfPage() {
     <div class="line">
       <label class="check" title="Under pace for the week, and never the last 30% of a window"><input type="checkbox" id="self-spare" ${!g || g.spare ? "checked" : ""} ${g ? "" : "disabled"}> Your subscriptions' spare room</label>
       <label class="check" title="Qwen with Codex's hands may take eki's own code too"><input type="checkbox" id="self-local" ${v.local ? "checked" : ""}> Local models too</label>
-      <label class="check">At most <input class="input" type="number" min="1" max="20" id="self-review" value="${esc(v.review_max)}" style="width:58px"> changes waiting for you</label></div>
+      <label class="check">At most <input class="input" type="number" min="1" max="20" id="self-review" value="${esc(v.review_max)}" style="width:58px"> changes waiting for you</label>
+      <label class="check" title="Fewer when your subscriptions' spare room is short; the Mac app is changed by one at a time">At most <input class="input" type="number" min="1" max="8" id="self-parallel" value="${esc(v.parallel || 1)}" style="width:58px"> at once</label></div>
     ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
   h += `<div class="card composer" style="margin:14px 0 0">
     <textarea class="big" id="self-text" rows="2" placeholder="What should eki change about itself?">${esc(S.selfDraft)}</textarea>
@@ -474,7 +477,19 @@ function selfPage() {
       <button class="btn primary" data-self-ask="now" ${S.selfDraft.trim() ? "" : "disabled"}>Do it now</button></div></div>`;
   if (v.waiting.length)
     h += `<div class="section"><div class="label">Waiting for you · ${v.waiting.length}</div><div class="goals">${v.waiting.map(changeCard).join("")}</div></div>`;
-  const ahead = [...v.working, ...v.queue], nexts = v.roadmap?.next || [];
+  if (going.length) {
+    h += `<div class="section"><div class="label">Working on · ${going.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${i.live ? "" : ` <span class="muted">— carries on when there's room</span>`}</span>
+      ${(i.areas || []).map(a => `<span class="chipk" title="The area it works in: nothing else starts there until it's done">${esc(a)}</span>`).join("")}</div>`;
+    h += `</div></div></div>`;
+  }
+  if (merging.length) {
+    h += `<div class="section"><div class="label">Merge queue · ${merging.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    merging.forEach((r, n) => h += `<div class="rowline"><span class="when">${n + 1}</span>${r.applying ? `<span class="spinner"></span>` : ""}<span class="grow" title="${esc(r.title)}">${esc(r.title)}</span>
+      <span class="muted" style="font-size:12.5px">${r.applying ? "being applied" : r.live ? "waiting its turn" : "back in line when it carries on"}</span></div>`);
+    h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes are applied one at a time, in the order they finished — each put on top of what landed before it and judged again.</div></div>`;
+  }
+  const ahead = v.queue, nexts = v.roadmap?.next || [];
   if (ahead.length || nexts.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
     for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}</span>
@@ -617,6 +632,7 @@ document.addEventListener("change", e => {
   if (t.id === "self-spare") return act(() => api("/api/self/on", "POST", { on: S.self?.goal?.state === "active", spare: t.checked }));
   if (t.id === "self-local") return act(() => api("/api/self/settings", "PUT", { local: t.checked }));
   if (t.id === "self-review") return act(() => api("/api/self/settings", "PUT", { review_max: Number(t.value) || 3 }));
+  if (t.id === "self-parallel") return act(() => api("/api/self/settings", "PUT", { parallel: Number(t.value) || 2 }));
   if (t.id === "new-spare") S.draft.spare = t.checked;
   if (t.id === "edit-spare") S.editDraft.spare = t.checked;
   if (t.id === "new-screen") { S.draft.screen = t.checked; return draw(); }

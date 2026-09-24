@@ -45,6 +45,7 @@ from . import imagespec
 from . import learn as learn_mod
 from . import handoff as handoff_mod
 from . import failover as failover_mod
+from . import files as files_mod
 from . import goals as goals_mod
 from . import grant as grant_mod
 from . import shift as shift_mod
@@ -979,6 +980,7 @@ class Engine(SelfLoop):
             if as_tool:
                 kw["tools"] = [handoff_mod.tool(hand_to)]
             history = [Message("system", handoff_mod.instructions(hand_to, as_tool))] + history
+        started = time.time()                   # what an in-place run wrote is what changed since
         if self._lives(backend) and not grant.narrowed:
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
@@ -1074,12 +1076,22 @@ class Engine(SelfLoop):
                 except workspace_mod.WorkspaceError as e:
                     result = {"state": "error", "why": str(e)[:200]}
             meta["worktree"].update(result)
+            if result.get("state") == "applied":
+                # the pictures and pages it wrote reach the gallery (eki/files.py)
+                made = files_mod.made([os.path.join(ws.repo, f) for f in result.get("files") or []])
+                if made:
+                    meta["made"] = made
             line = workspace_mod.summary(ws, result) if result.get("state") != "error" else \
                 f"eki: couldn't bring the changes back from `{ws.path}`: {result['why']}"
             if line:
                 chunk = f"\n\n*{line}*"
                 parts.append(chunk)
                 yield chunk
+        elif ws is not None:
+            # worked in place: no diff to read, so what changed while it ran
+            made = await asyncio.to_thread(files_mod.made_since, ws.path, started)
+            if made:
+                meta["made"] = made
 
         # usage is whatever the backend volunteered, normalised only in name:
         # an invented number would be worse than an absent one

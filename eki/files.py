@@ -75,3 +75,51 @@ def suggest(cwd: str, query: str, limit: int = 12) -> List[Dict[str, str]]:
             break
     out = (name_pre + path_pre + within)[:limit]
     return [{"path": p} for p in out]
+
+
+# ---- files a run made --------------------------------------------------------------
+
+# what the gallery can show: pictures, pages, drawings, diagrams — the same
+# kinds it finds written out in an answer
+MADE = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".html", ".htm", ".svg", ".mmd", ".mermaid"}
+MADE_LIMIT = 60
+
+
+def made(paths: List[str]) -> List[str]:
+    """The files among these the gallery can show and that are still there.
+
+    Claude Code and Codex write their work into the folder rather than into
+    the answer, so without this a page an agent built never reaches the
+    gallery."""
+    out: List[str] = []
+    for p in paths:
+        if os.path.splitext(p)[1].lower() in MADE and os.path.isfile(p) and p not in out:
+            out.append(p)
+            if len(out) >= MADE_LIMIT:
+                break
+    return out
+
+
+def made_since(folder: str, since: float) -> List[str]:
+    """What a run worked in place changed in the folder, by the clock: a
+    folder that isn't a git repo has no diff to read, and runs there take
+    turns, so what changed while it ran is what it wrote."""
+    if not folder or not os.path.isdir(folder):
+        return []
+    found: List[str] = []
+    seen = 0
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in SKIP and not d.startswith(".")]
+        for f in files:
+            seen += 1
+            if seen > LIMIT:
+                return made(found)
+            if os.path.splitext(f)[1].lower() not in MADE:
+                continue
+            p = os.path.join(root, f)
+            try:
+                if os.path.getmtime(p) >= since:
+                    found.append(p)
+            except OSError:
+                continue
+    return made(found)

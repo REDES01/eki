@@ -261,6 +261,23 @@ async def test_a_plain_folder_makes_runs_take_turns(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_page_an_agent_wrote_reaches_the_gallery(tmp_path, repo):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    eng = desk(tmp_path)
+    a = await eng.ask("index.html: <html><body>hi</body></html>", repo=str(repo), backend_key="scribe")
+    b = await eng.ask("fox.svg: <svg></svg>", repo=str(plain), backend_key="scribe")
+    c = await eng.ask("notes.txt: words", repo=str(plain), backend_key="scribe")
+    for s in (a, b, c):
+        await settle(eng.runs, s["run"], timeout=10)
+    files = {m["conversation_id"]: m["files"] for m in eng.store.made()}
+    assert files[a["conversation"]] == [str(Path(workspace.repo_of(str(repo))) / "index.html")]
+    assert files[b["conversation"]] == [str(plain / "fox.svg")]
+    assert c["conversation"] not in files                       # words aren't made things
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_worktrees_off_means_in_place_taking_turns(tmp_path, repo):
     eng = desk(tmp_path, worktrees=False)
     a = await eng.ask("a.txt: 1", repo=str(repo), backend_key="scribe")

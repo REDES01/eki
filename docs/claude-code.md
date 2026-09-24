@@ -80,7 +80,13 @@ requests. eki registers `eki` that way in every session, so the agent has:
   with a System Events fallback in a dev checkout. macOS asks for Screen
   Recording and Accessibility once, for Eki.
 
-Nesting stops at `EKI_MAX_DEPTH` (3): an agent asking eki asking an agent.
+Nesting stops at `EKI_MAX_DEPTH` (3): an agent asking eki asking an agent
+(eki/nesting.py). Every program eki starts for a run gets `EKI_DEPTH` (the
+run's depth plus one) and `EKI_RUN` (the run's id); `eki ask` and `eki mcp`
+read them, so a request from inside a run arrives one level down, and one at
+the limit is refused (`eki ask` exits 1 with HTTP 429). A nested run is routed
+like any other — live quota and pace apply — and takes the budget of the run
+it came from, so a goal's agent asking eki spends only what the goal may.
 
 Codex has no in-process channel, so it runs `eki mcp` — the same handlers
 over stdio, reaching the running engine through its HTTP API — declared for

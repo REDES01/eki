@@ -101,7 +101,11 @@ def call(method: str, path: str, service: str, **kw) -> Any:
         print(f"! lost the engine: {e}", file=sys.stderr)
         raise SystemExit(1)
     if r.status_code >= 400 and r.status_code != 409:
-        print(f"! {r.status_code} {r.text[:200]}", file=sys.stderr)
+        try:
+            said = str(r.json().get("detail") or r.text)
+        except ValueError:
+            said = r.text
+        print(f"! {r.status_code} {said[:300]}", file=sys.stderr)
         raise SystemExit(1)
     return r.json()
 
@@ -124,6 +128,11 @@ def cmd_ask(cfg, args) -> int:
         body.update(read_only=bool(getattr(args, "read_only", False)),
                     commands=getattr(args, "allow", None) or [],
                     paths=getattr(args, "write", None) or [])
+    from . import nesting
+    depth, parent_run = nesting.caller()
+    if depth or parent_run:
+        # an agent eki started, asking: one level down, tied to its run
+        body.update(depth=depth, parent_run=parent_run)
     started = call("POST", "/api/ask", args.service, json=body)
     if args.detach:
         print(started["run"])
@@ -1251,12 +1260,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "mcp":
         from . import mcpbridge
-        depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
+        from . import nesting
+        # started by an agent eki runs: its environment already says how deep
+        depth, parent = nesting.caller()
         from . import settings as settings_mod
         # EKI_SCREEN=0: started for a thread that mustn't use the screen (a goal's)
         screen = bool(settings_mod.load().get("claude_screen", True)) and os.environ.get("EKI_SCREEN") != "0"
-        bridge = mcpbridge.RemoteBridge(mcpbridge.RemoteEngine(args.service), depth=depth + 1,
-                                        screen=screen)
+        bridge = mcpbridge.RemoteBridge(mcpbridge.RemoteEngine(args.service), depth=depth,
+                                        screen=screen, parent=parent)
         asyncio.run(mcpbridge.serve_stdio(bridge))
         return 0
     if args.cmd == "serve":

@@ -20,6 +20,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from . import _codex_events as events
 from .. import grant as grant_mod
 from .. import learn
+from .. import nesting
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 
@@ -163,7 +164,7 @@ class CodexBackend(Backend):
         argv.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, env=grant_mod.env(grant),
+            *argv, cwd=cwd, env=nesting.child_env(grant_mod.env(grant)),
             # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
             # input instead of answering ("Reading additional input from stdin")
             stdin=asyncio.subprocess.DEVNULL,

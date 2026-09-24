@@ -21,6 +21,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import nesting
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id              TEXT PRIMARY KEY,
@@ -60,6 +62,14 @@ def unseen(seen: int, text: str, end: int) -> str:
         return ""
     start = end - len(text)
     return text[seen - start:] if start < seen else text
+
+
+def _depth_of(run: Dict[str, Any]) -> int:
+    """The run's nesting depth, from its payload; 0 for yours."""
+    try:
+        return int((json.loads(run.get("payload") or "{}") or {}).get("depth") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
 
 
 class RunStore:
@@ -316,6 +326,8 @@ class Runner:
 
     async def _execute(self, run: Dict[str, Any]) -> None:
         rid = run["id"]
+        # how deep this run is, for the programs it starts (nesting.child_env)
+        nesting.enter(_depth_of(run), rid)
         self._state(rid, "running", started_at=int(time.time()))
         stream = self.dispatch(run)
         # Every output event carries where it ends in the log. A watcher that

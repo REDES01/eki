@@ -294,8 +294,8 @@ So that the agent doing the work can ask eki for what it can't do itself.
       output written to a path and the path printed *(eki: self/9fb5fc6b)*
 - [ ] `eki capabilities`: what this Mac can do right now, for an agent to read
 - [ ] `eki submit` / `eki wait <id>` for work too slow to block a shell on
-- [ ] A depth guard (`EKI_DEPTH`) so an agent calling eki calling an agent
-      stops somewhere, and nested calls count against quota like any other
+- [x] A depth guard (`EKI_DEPTH`) so an agent calling eki calling an agent
+      stops somewhere, and nested calls count against quota like any other *(eki: self/a582d8cd)*
 - [x] eki writes a short "how to use eki here" section into a project's
       `CLAUDE.md` / `AGENTS.md`, and allowlists `eki` for Claude Code *(eki: self/acf331f7)*
 - *Evolve:* that section is generated from `eki capabilities`, so it changes

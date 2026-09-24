@@ -50,6 +50,7 @@ from . import goals as goals_mod
 from . import grant as grant_mod
 from . import shift as shift_mod
 from . import models as models_mod
+from . import nesting
 from . import table as table_mod
 from . import capacity as capacity_mod
 from . import prefs as prefs_mod
@@ -522,7 +523,8 @@ class Engine(SelfLoop):
                   image: Optional[Dict[str, Any]] = None,
                   attachments: Optional[List[str]] = None, via: str = "",
                   parent: Optional[Dict[str, Any]] = None,
-                  wants: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+                  wants: Optional[Dict[str, Any]] = None,
+                  depth: int = 0, parent_run: str = "") -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
@@ -533,7 +535,12 @@ class Engine(SelfLoop):
         An agent's request (`via="agent"`) is given what it asks for
         (`wants`: read_only, commands, paths), bounded by what the run
         asking has (`parent`, a grant) — never more (eki/grant.py).
+
+        `depth` and `parent_run` say an agent is asking from inside another
+        run (see nesting): refused past the limit before anything is
+        written, and the run takes its parent's budget.
         """
+        nesting.check(depth)
         cid = conversation or self.store.new_conversation()
         attached = [p for p in (attachments or []) if p and os.path.isfile(os.path.expanduser(p))]
         shown = prompt + "".join(f"\n\n![attachment]({p.replace(' ', '%20')})" for p in attached)
@@ -554,6 +561,14 @@ class Engine(SelfLoop):
             wanted = {k: v for k, v in (wants or {}).items() if k in ("read_only", "commands", "paths")}
             payload["grant"] = grant_mod.for_agent(grant_mod.load(parent), repo=bool(repo),
                                                    images=images or bool(image), **wanted).to_json()
+        if depth:
+            payload["depth"] = depth
+        if parent_run:
+            payload["parent"] = parent_run
+            # a goal's agent asking eki spends what the goal may, no more
+            allowed = _allowed_of(self.runs.get(parent_run) or {})
+            if allowed is not None:
+                payload["allowed"] = allowed
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
                                payload=json.dumps(payload) if payload else "")
@@ -2451,16 +2466,17 @@ class Engine(SelfLoop):
         eki's own tools served in-process (Settings → Claude tools)."""
         bridge = None
         if self.settings.get("claude_tools", True):
-            depth = int(os.environ.get("EKI_DEPTH", "0") or 0)
+            depth, parent = nesting.current()
             # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
             # built-in server needs an approval dialog only its own front
             # ends show, so it is opt-in beside these (claude_builtin_computer_use)
-            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid))
+            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid),
+                                      parent=parent)
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
                            if b.info.kind == "claude_code"), "") or ""
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
                                           learn_mod.agent_note(self.settings)) if x)
-        session = live.LiveSession(argv, cwd, None, prompt,
+        session = live.LiveSession(argv, cwd, nesting.child_env(), prompt,
                                    bridge=bridge,
                                    extra_servers=mcpregistry.builtin_for_claude(claude_bin))
         session.screen = self._screen_for(cid)                             # type: ignore[attr-defined]
@@ -2839,14 +2855,14 @@ class Engine(SelfLoop):
         local = bool(self.options.get(backend.key, {}).get("local_model"))
         guidance = "\n\n".join(x for x in (codex_live.LOCAL_INSTRUCTIONS if local else "",
                                             learn_mod.agent_note(self.settings)) if x)
-        session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
+        session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(), model=wanted,
                                           permissions=permissions, resume=resume or "",
                                           developer_instructions=guidance)
         try:
             await session.start()
         except RuntimeError as e:
             if resume:
-                session = codex_live.CodexSession(argv, cwd or None, None, model=wanted,
+                session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(), model=wanted,
                                                   permissions=permissions,
                                                   developer_instructions=guidance)
                 await session.start()

@@ -22,6 +22,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from .. import grant as grant_mod
 from .. import learn
 from .. import mcpregistry
+from .. import nesting
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 
@@ -166,7 +167,7 @@ class ClaudeCodeBackend(Backend):
         argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd, grant)
 
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, env=grant_mod.env(grant),
+            *argv, cwd=cwd, env=nesting.child_env(grant_mod.env(grant)),
             # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
             # input instead of answering ("Reading additional input from stdin")
             stdin=asyncio.subprocess.DEVNULL,

@@ -30,12 +30,13 @@ import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from . import grant as grant_mod
+from . import nesting
 
 log = logging.getLogger("eki.mcp")
 
 PROTOCOL = "2025-06-18"
-#: nested calls stop somewhere: an agent asking eki asking an agent…
-MAX_DEPTH = int(os.environ.get("EKI_MAX_DEPTH", "3"))
+#: nested calls stop somewhere: an agent asking eki asking an agent… (nesting)
+MAX_DEPTH = nesting.MAX_DEPTH
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+\.(?:png|jpe?g|webp|gif))\)", re.I)
 
 
@@ -81,10 +82,12 @@ class Bridge:
     name = "eki"
 
     def __init__(self, engine: Any = None, conversation: str = "", depth: int = 0,
-                 name: str = "eki", screen: bool = True):
+                 name: str = "eki", screen: bool = True, parent: str = ""):
         self.engine = engine
         self.conversation = conversation
+        #: the depth what these tools ask arrives at, and the run they ask from
         self.depth = depth
+        self.parent = parent
         self.name = name
         #: computer use — the screen tools — can be off while the rest stay
         self.screen = screen
@@ -250,6 +253,8 @@ class Bridge:
                     ) -> List[Dict[str, Any]]:
         if self.engine is None:
             return [text("eki engine not attached")]
+        if self.depth >= MAX_DEPTH:
+            return [text(f"eki_image refused: nesting depth {self.depth} reached")]
         content = await self._run(prompt, images=True,
                                   image={"width": width or None, "height": height or None,
                                          "batch": count if count and count > 1 else None})
@@ -266,7 +271,8 @@ class Bridge:
         """A run of its own in a fresh thread, waited for; the answer text.
         It gets what this server's run hands it, never more (eki/grant.py)."""
         started = await self.engine.ask(prompt, conversation="", via="agent",
-                                        parent=grant_mod.from_env().to_json(), **kw)
+                                        parent=grant_mod.from_env().to_json(),
+                                        depth=self.depth, parent_run=self.parent, **kw)
         rid = started["run"]
         runner = self.engine.runner
         q = runner.subscribe(rid)
@@ -495,7 +501,8 @@ class RemoteEngine:
                 "backend": kw.get("backend_key", "") or "", "images": bool(kw.get("images")),
                 "via": "agent", "repo": kw.get("repo") or "",
                 "parent": kw.get("parent") or {},
-                "read_only": bool(wants.get("read_only")), "commands": wants.get("commands") or []}
+                "read_only": bool(wants.get("read_only")), "commands": wants.get("commands") or [],
+                "depth": int(kw.get("depth") or 0), "parent_run": kw.get("parent_run") or ""}
         image = kw.get("image") or {}
         for k in ("width", "height", "batch"):
             if image.get(k):
@@ -528,7 +535,8 @@ class RemoteBridge(Bridge):
 
     async def _run(self, prompt: str, **kw: Any) -> str:
         started = await self.engine.ask(prompt, conversation="", via="agent",
-                                        parent=grant_mod.from_env().to_json(), **kw)
+                                        parent=grant_mod.from_env().to_json(),
+                                        depth=self.depth, parent_run=self.parent, **kw)
         run = await self.engine.wait(started["run"])
         if run.get("state") == "failed":
             raise RuntimeError(run.get("error") or "the run failed")

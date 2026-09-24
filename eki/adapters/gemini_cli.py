@@ -17,6 +17,7 @@ import json
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from .. import grant as grant_mod
+from .. import nesting
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 from .claude_code import _find_binary
@@ -105,7 +106,7 @@ class GeminiCliBackend(Backend):
         grant = kw.get("grant") or grant_mod.FULL
         argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd, grant)
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, env=grant_mod.env(grant),
+            *argv, cwd=cwd, env=nesting.child_env(grant_mod.env(grant)),
             # DEVNULL: with a pipe on stdin the CLI reads it as more prompt
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

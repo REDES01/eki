@@ -33,6 +33,7 @@ from . import catalog
 from . import mcpregistry
 from . import skills as skills_mod
 from . import standing
+from . import nesting
 from .adapters.base import BackendError
 from . import codex_host
 from . import config as config_mod
@@ -295,6 +296,9 @@ class AskBody(BaseModel):
     read_only: bool = False
     commands: List[str] = []
     paths: List[str] = []
+    #: how deep the asker is, and the run it asks from (see nesting)
+    depth: int = 0
+    parent_run: str = ""
 
 
 class AttachmentBody(BaseModel):
@@ -334,13 +338,17 @@ class PolicyBody(BaseModel):
 async def ask(body: AskBody) -> Any:
     if not body.prompt.strip():
         raise HTTPException(400, "empty prompt")
-    return await engine().ask(body.prompt, conversation=body.conversation,
-                              backend_key=body.backend, repo=body.repo,
-                              images=body.images,
-                              image={"width": body.width, "height": body.height, "batch": body.batch},
-                              attachments=body.attachments, via=body.via, parent=body.parent,
-                              wants={"read_only": body.read_only, "commands": body.commands,
-                                     "paths": body.paths})
+    try:
+        return await engine().ask(body.prompt, conversation=body.conversation,
+                                  backend_key=body.backend, repo=body.repo,
+                                  images=body.images,
+                                  image={"width": body.width, "height": body.height, "batch": body.batch},
+                                  attachments=body.attachments, via=body.via, parent=body.parent,
+                                  wants={"read_only": body.read_only, "commands": body.commands,
+                                         "paths": body.paths},
+                                  depth=body.depth, parent_run=body.parent_run)
+    except nesting.TooDeep as e:
+        raise HTTPException(429, str(e))
 
 
 @app.get("/api/runs")

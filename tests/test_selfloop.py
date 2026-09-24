@@ -323,9 +323,9 @@ async def test_the_loop_works_through_the_roadmap_and_ticks_what_landed(eng):
     assert state["state"] == "working" and "Commit the working tree" in state["why"]
     told = Agent.seen[-1][1]
     assert "the image edits" in told and "ITEM: done" in told and "Read ROADMAP.md first" in told
-    text = (eng.root / "ROADMAP.md").read_text()                            # applied: in your checkout
+    text = (eng.root / "ROADMAP.md").read_text()                            # ticked: in your checkout
     assert "- [x] **Commit the working tree:** the image edits. *(eki: self/" in text
-    assert git(eng.root, "log", "-1", "--format=%s") == "self: Commit the working tree"
+    assert git(eng.root, "log", "-1", "--format=%s").startswith("roadmap: tick “Commit the working tree”")
     assert not eng.swaps                                                    # documentation: no swap
     assert next(i for i in selfloop.items() if i.source == "roadmap").state == "done"
     # the item for a person is skipped; the next open one is taken
@@ -420,6 +420,25 @@ async def test_an_item_cut_off_after_its_change_was_judged_isnt_started_over(eng
     assert len(Agent.seen) == asked                                        # no second attempt
     it = selfloop.get(first.id)
     assert it.state == "person" and it.changes == [c["id"]] and not it.open
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_run_cut_off_after_its_base_passed_doesnt_check_a_new_one(eng, monkeypatch):
+    """A swap cut it off between the base check and the agent, and moved
+    main: it starts again from the base that passed, without testing again."""
+    passed = selfwork.git(eng.root, "rev-parse", "HEAD")
+    (eng.root / "README.md").write_text("eki, moved on\n")
+    git(eng.root, "commit", "-q", "-am", "landed meanwhile")
+    tested = []
+    monkeypatch.setattr(candidate, "check_tests", lambda where, python: tested.append(where))
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    it = selfloop.add("asked", "make VALUE two", "make VALUE two")
+    it = selfloop.update(it.id, open={"base_passed": passed})
+    started = await eng._self_start(it)
+    await settle(eng.runs, started["run"], timeout=20)
+    c = selfwork.changes()[0]
+    assert c["base"] == passed and tested == []
     await eng.runner.stop()
 
 
@@ -651,39 +670,34 @@ def _ticked_elsewhere(tmp_path, readme_too=False):
     return root, tick, was, onto
 
 
-def test_a_tick_that_conflicts_is_put_back_on_top_of_your_roadmap(tmp_path):
+def test_a_change_made_before_ticks_moved_loses_its_tick_before_it_goes_on_top(tmp_path):
+    """A change whose own commit ticks its item (made before the merge queue
+    wrote the ticks): the tick is taken out of it, so your rewording of the
+    same entry is no conflict — the tick comes afterwards, from the writer."""
     root, tick, was, onto = _ticked_elsewhere(tmp_path)
-    got, files = selfwork._rebase(root, "-q", onto, tick=tick)
-    assert got.returncode == 0 and files == [] and not selfwork.rebasing(root)
-    plan = git(root, "show", "HEAD:ROADMAP.md")
-    assert "- [x] **Commit the working tree:** the image edits and the icon. *(eki: self/c1)*" in plan
+    assert selfwork._untick_commit(root, git(root, "rev-parse", "main~1"))
+    assert "- [ ] **Commit the working tree:**" in git(root, "show", "HEAD:ROADMAP.md")
     assert git(root, "show", "HEAD:README.md") == "eki, the change's way"
-    # without a tick of its own to settle it with, it's a conflict like any other
-    git(root, "reset", "-q", "--hard", was)
     got, files = selfwork._rebase(root, "-q", onto)
-    assert got.returncode and files == ["ROADMAP.md"]
+    assert got.returncode == 0 and files == [] and not selfwork.rebasing(root)
+    assert "the image edits and the icon." in git(root, "show", "HEAD:ROADMAP.md")
+    assert not selfwork._untick_commit(root, onto)                    # nothing left to take out
 
 
-def test_the_tick_is_settled_first_and_the_agent_gets_the_rest(tmp_path):
-    root, tick, was, onto = _ticked_elsewhere(tmp_path, readme_too=True)
-    got, files = selfwork._rebase(root, "-q", onto, tick=tick)
-    assert files == ["README.md"] and selfwork.rebasing(root)
-    info = {"where": str(root), "onto": onto, "files": files, "commit": was, "tick": tick}
-    (root / "README.md").write_text("eki, both\n")
-    assert selfwork.continue_rebase(info) == [] and not selfwork.rebasing(root)
-    assert "- [x] **Commit the working tree:** the image edits and the icon." in git(root, "show", "HEAD:ROADMAP.md")
-
-
-def test_a_rebase_that_lost_the_tick_gets_it_back(tmp_path):
-    root, tick, was, onto = _ticked_elsewhere(tmp_path)
-    git(root, "reset", "-q", "--hard", onto)                             # as an agent resolving might leave it
-    (root / "README.md").write_text("eki, the change's way\n")
-    git(root, "commit", "-qam", "the change, resolved without its tick")
-    parent = git(root, "rev-parse", "HEAD~1")
-    assert selfwork.keep_tick(root, tick)
-    assert "- [x] **Commit the working tree:**" in git(root, "show", "HEAD:ROADMAP.md")
-    assert git(root, "rev-parse", "HEAD~1") == parent and git(root, "status", "--porcelain") == ""
-    assert not selfwork.keep_tick(root, tick) and not selfwork.keep_tick(root, None)
+def test_an_agents_own_tick_is_dropped_its_other_roadmap_edits_kept(tmp_path):
+    root = forge(tmp_path)
+    base = git(root, "rev-parse", "HEAD")
+    key = roadmap.parse(PLAN)[0].key
+    text = roadmap.tick(PLAN, key, roadmap.mark("c1")).replace("## Not planned", "## Not planned\n\nMore.")
+    (root / "ROADMAP.md").write_text(text)
+    assert selfwork.drop_ticks(root, base)
+    after = (root / "ROADMAP.md").read_text()
+    assert "- [ ] **Commit the working tree:** the image edits.\n" in after and "More." in after
+    assert not selfwork.drop_ticks(root, base)
+    # a request that asks for a tick keeps it; one that only mentions ticks doesn't
+    assert selfwork.asks_to_tick("Update ROADMAP.md only: tick 'Roots eki starts on its own'")
+    assert not selfwork.asks_to_tick("Changes no longer tick the roadmap; the merge queue writes the tick")
+    assert not selfwork.asks_to_tick("tick the item", source="roadmap")
 
 
 def test_only_a_change_that_finished_its_item_carries_a_tick():

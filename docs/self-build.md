@@ -144,6 +144,20 @@ dropping it (`builds.live` / `behind` / `base` / `catch_up`):
   merge alongside commits you made since). `eki swap` refuses a build that
   would still drop something (`--force` overrides).
 
+**The release train.** Applied changes don't each go live on their own
+(on 2026-09-24 that was six restarts in an hour, each cutting off what ran
+beside it). An applied change is built and *boards* the train
+(`builds.board`); at most once every `self_release_minutes` (15) the engine
+sends the newest build to the supervisor (`builds.depart`,
+`Engine.self_release`) — each car is built on top of the one before (the
+train counts as what runs, `builds.live`), so the newest carries them all.
+Jobs keep running and starting throughout; nothing waits for the train but
+the go-live itself. The first apply after a quiet window goes at once. When
+the go-live settles, every change it carried is applied (or rolled back)
+together. `eki self` and the Self board say *next go-live in N min,
+carrying: …*; `eki self apply <id> --now`, `eki self release` or *Go live
+now* on the board don't wait; `eki self release 30` changes the window.
+
 One swap at a time, newest wins: a swap still waiting is superseded (the new
 build contains it) **and its deadline stands** — the new one doesn't start a
 wait of its own, so a steady stream of applies can't hold the engine back.
@@ -191,6 +205,41 @@ resuming or retrying one already carried on does nothing). A carrying-on cut
 off by the next swap carries on again, up to five in a row; one lost to a
 crash (not handed over) isn't, so a crash can't loop.
 
+## A restart loses nothing  (built: `eki/steps.py`)
+
+Runs were carried on across a swap; the helper steps around them weren't.
+On 2026-09-24 a conflict-resolving agent killed by a restart (Claude Code,
+exit 143) was reported as "the agent couldn't resolve it", a test run cut
+off as "tests ✗" with a row of dots, and base checks started over. Now
+every piece of self-work is a **step**, written down in
+`~/.eki/self/steps.json` before it starts:
+
+| step | what | taken up again by |
+|---|---|---|
+| `begin` | the worktree, the base's own tests | the same worktree, the check run again |
+| `agent` | the agent's turn | the agent, in its session ("carry on where you left off") |
+| `check` | committed, then the candidate check | the check run again on that commit |
+| `apply` | the merge queue: on top, judged again, boarded | applied again — a rebase already done does nothing; its place in line kept |
+| `resolve` | conflicts resolved by an agent, mid-rebase | the agent in the worktree as it stands; a rebase already finished goes straight to applying |
+| `swap` | the go-live | the supervisor runs outside the engine; only one lost before it said how it went is asked for again |
+
+A step is *running*, then *succeeded*, *failed* or **interrupted**.
+Interrupted — the engine going away, a program killed by a signal (143,
+137, -15), a test run cut off, a child lost — is never failed: the check
+raises `steps.Interrupted` instead of a verdict, and a run cut off that way
+is marked interrupted, not failed. On start the new engine marks every step
+the old one left running interrupted (`steps.recover`) and takes each up
+again (`Engine.self_carry_on`, also every minute for a program lost while
+the engine stayed up) — **once**: a step is claimed by the one caller that
+takes it up (`steps.claim`), and one cut off five times in a row is failed,
+so a crash can't loop. `eki self` and the board show a spinner only for a
+step that is live in this engine; one cut off says *carries on by itself*.
+
+The base check is shared: runs that need the same base wait for one check
+of it (a lock per commit) instead of starting their own, a build that went
+live and stayed healthy counts as a base that passed, and a run cut off
+after its base passed starts again from that base without checking it.
+
 It lives outside `builds/`, is installed once, and eki's self-work is refused
 any diff that touches it, `agent.py`'s plist writer, or `secrets.py` and the
 quota bridges (the credentials rule). Those go to a person as a proposal
@@ -210,8 +259,8 @@ through four steps (`SelfLoop._self_work`):
    worktree: routed, streamed into the thread, resumable after a restart. It
    is told how to work on eki (`selfwork.brief`): read first, add tests, run
    them, commit nothing, ask nothing.
-3. **conclude** — eki commits what the agent did (with the ROADMAP tick, if
-   the item is done) and puts it through the candidate check. A change to
+3. **conclude** — eki commits what the agent did and puts it through the
+   candidate check. No ROADMAP tick goes in the change (see *The roadmap*). A change to
    documentation only (`*.md` outside `eki/`) needs no candidate engine.
 4. **then** — applied or proposed, by the autonomy setting; the thread gets a
    line from eki saying what came of it, and a notification if nobody asked
@@ -297,9 +346,20 @@ line of its answer:
 
 | `ITEM:` | what eki does |
 |---|---|
-| `done` | commits the change with the item ticked — `- [x] … *(eki: self/<id>)*` — so the tick lands exactly when the change does, and goes if you discard it |
-| `partial` | commits the slice without a tick; once it's applied the rest is *left for you*, taken again only if you reword the entry |
-| `already` | the file lagged the code: a commit that only ticks the item |
+| `done` | commits the change; once it has landed, the item is ticked — `- [x] … *(eki: self/<id>)*` |
+| `partial` | commits the slice, no tick; once it's applied the rest is *left for you*, taken again only if you reword the entry |
+| `already` | the file lagged the code: nothing to commit, the item is ticked |
+
+**One writer for ticks.** A change never ticks the roadmap in its own
+commit — ticks landing back to back used to conflict with each other. The
+merge queue writes the tick once the change has landed, as its own small
+commit in your checkout (`roadmap: tick “…” — self/<id> landed`,
+`selfwork.write_ticks`), and takes it back the same way if the change is
+undone. A tick an agent makes anyway is dropped when its change is
+committed (its other edits to ROADMAP.md are kept), and so is one in a
+change made before this; a request that asks for a tick ("tick the item …")
+keeps it. While your checkout has uncommitted edits to ROADMAP.md, the tick
+waits.
 | `person` | nothing to commit; the item is *left for you* with the agent's reason |
 
 An item that ends with no change — `ITEM: person`, or nothing said — is
@@ -359,12 +419,12 @@ change does and what your checkout gained in those files since. eki then
 finishes the rebase itself, refuses a result with markers left or not on top
 of your checkout (putting the change back exactly as it was, *conflicts*),
 judges it again and applies it. Apply is refused while that runs.
-The ROADMAP tick survives the rebase: a conflict in `ROADMAP.md` is settled as
-your checkout's file with the item ticked on it, and a rebase that ends
-without the tick gets it back in the change's last commit.
+A change carries no ROADMAP tick, so a tick is never what conflicts.
+A resolution cut off by a restart carries on in the worktree as it stands
+(*A restart loses nothing*, above).
 `self_resolve: false` turns it off. Documentation goes straight into your
-checkout (fast-forward); code becomes a build the supervisor swaps in within a
-couple of minutes (runs still going carry on in the new engine), watches, and rolls back if it isn't healthy — and a
+checkout (fast-forward); code becomes a build that boards the release train
+and is swapped in with the next go-live (runs still going carry on in the new engine), watches, and rolls back if it isn't healthy — and a
 healthy one is fast-forwarded into your checkout. Files you never added to git
 don't stop that; edits to tracked files do.
 
@@ -389,7 +449,9 @@ or *Dismiss*.
 
 What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the merge queue), `log.jsonl`
 (every change as it was judged), `changes.json` (where each stands now),
-`notes/` (the weekly notes), `base-ok.json` (bases that passed).
+`steps.json` (every step, and whether it's live), `train.json` (the release
+train), `ticks.json` (the ticks written), `notes/` (the weekly notes),
+`base-ok.json` / `base-bad.json` (bases that passed, or failed).
 
 ```
 eki self                         what it's doing, what waits for you, what's next
@@ -397,6 +459,8 @@ eki self on | off
 eki self "make eki runs show durations" [--later] [--apply]
 eki self -r "…" -r "…"           several at once, queued; --batch FILE: one per line
 eki self parallel [N]            the most at once (default 2)
+eki self release [N]             go live now; N: at most one go-live every N min (15)
+eki self apply <id> --now        applied and live at once, not with the next train
 eki self diff|show|apply|discard|undo <id>
 eki self next
 eki self retry|drop|mine <item>

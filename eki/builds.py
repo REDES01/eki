@@ -18,6 +18,11 @@ Swapping is never done by the engine to itself: the supervisor (a small
 shell script a person installs, eki/supervisor.sh) waits for the runs to
 finish, swaps, watches the new engine, and swaps back if it isn't healthy.
 The engine only asks for a swap and reads the outcome.
+
+Applied changes don't each go live on their own: they board the release
+train (`board`), and at most once every `self_release_minutes` (15) the
+engine sends the newest build — which carries every car before it — to the
+supervisor (`depart`). Work never pauses for it.
 """
 from __future__ import annotations
 
@@ -39,6 +44,8 @@ KEEP_DAYS = 7
 #: how long a swap waits for a quiet moment before it goes ahead anyway;
 #: runs still going are carried on by the new engine
 WAIT = 120
+#: at most one go-live this often (setting `self_release_minutes`)
+RELEASE_MINUTES = 15
 
 
 def here() -> Path:
@@ -280,8 +287,12 @@ def _g(src: Path, *a: str) -> subprocess.CompletedProcess:
 
 
 def live() -> Dict[str, Any]:
-    """What the engine runs — or is about to: a swap still waiting or
-    swapping counts as run, since it will be."""
+    """What the engine runs — or is about to: the newest build on the
+    release train, or a swap still waiting or swapping, counts as run,
+    since it will be."""
+    cars = train().get("cars") or []
+    if cars and Path(cars[-1].get("build") or "").is_dir():
+        return info(Path(cars[-1]["build"]))
     s = last_swap()
     if s.get("state") in ("waiting", "swapping") and s.get("target") and _swap_pid():
         return info(Path(s["target"]))
@@ -358,6 +369,71 @@ def last_swap() -> Dict[str, Any]:
         return {}
 
 
+# ---- the release train ------------------------------------------------------------
+#
+# On 2026-09-24 eki went live six times in an hour, once per applied change,
+# and every go-live cut off what was running beside it. Now an applied change
+# boards the train, and the train leaves at most once every
+# `self_release_minutes`, carrying everything applied since: each car's
+# build is made on top of the one before (`live` counts the train), so the
+# newest carries them all. A person's own apply can say "now".
+
+def train() -> Dict[str, Any]:
+    """{"cars": [{"self", "build", "commit", "at"}], "now": bool, "last": when
+    the last one left, "departed": {"at", "build", "cars": [ids]}}"""
+    try:
+        t = json.loads((SELF_HOME / "train.json").read_text())
+        return t if isinstance(t, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_train(t: Dict[str, Any]) -> None:
+    SELF_HOME.mkdir(parents=True, exist_ok=True)
+    tmp = SELF_HOME / "train.json.tmp"
+    tmp.write_text(json.dumps(t, indent=2))
+    tmp.replace(SELF_HOME / "train.json")
+
+
+def board(build: Path, *, self_id: str = "", now: bool = False) -> Dict[str, Any]:
+    """A build for the next go-live. The same change boarding again (a
+    restart made it apply again) takes its old seat, with the newer build."""
+    t = train()
+    cars = [c for c in t.get("cars") or [] if not self_id or c.get("self") != self_id]
+    cars.append({"self": self_id, "build": str(build), "commit": info(Path(build)).get("commit") or "",
+                 "at": int(time.time())})
+    t.update(cars=cars, now=bool(t.get("now")) or bool(now))
+    _save_train(t)
+    return t
+
+
+def departs_in(minutes: float = RELEASE_MINUTES, now: Optional[float] = None) -> Optional[int]:
+    """Seconds until the train leaves; None with nobody aboard."""
+    t = train()
+    if not t.get("cars"):
+        return None
+    if t.get("now"):
+        return 0
+    return max(0, int(float(t.get("last") or 0) + minutes * 60 - (now or time.time())))
+
+
+def depart(minutes: float = RELEASE_MINUTES, now: Optional[float] = None) -> Dict[str, Any]:
+    """The train leaves, if it's time: the newest build to the supervisor,
+    carrying every car. {} when it isn't time or nobody is aboard;
+    RuntimeError (from `swap`) leaves the cars aboard."""
+    left = departs_in(minutes, now)
+    if left is None or left > 0:
+        return {}
+    t = train()
+    cars = t["cars"]
+    last = cars[-1]
+    swap(Path(last["build"]), self_id=last.get("self") or "")
+    gone = {"at": int(now or time.time()), "build": last["build"], "commit": last.get("commit") or "",
+            "cars": [c.get("self") for c in cars if c.get("self")]}
+    _save_train({"cars": [], "now": False, "last": gone["at"], "departed": gone})
+    return gone
+
+
 def settle_swap() -> Dict[str, Any]:
     """Once, after a swap has an outcome: bring a healthy self-change into
     your checkout if it can go in cleanly (fast-forward only, nothing
@@ -367,8 +443,15 @@ def settle_swap() -> Dict[str, Any]:
         return {}
     done: Dict[str, Any] = {"state": s["state"], "self": s.get("self") or "",
                             "why": s.get("why") or "", "target": s.get("target")}
+    gone = train().get("departed") or {}
+    if gone.get("build") and gone["build"] == s.get("target"):
+        done["cars"] = list(gone.get("cars") or [])       # every change that train carried
     if s["state"] == "healthy" and s.get("self"):
         build = info(Path(s["target"]))
+        # its change passed the candidate check, and it has run healthy since:
+        # new work on this commit needn't test it all over again
+        from . import selfwork
+        selfwork.note_base_good(str(build.get("commit") or ""), SELF_HOME)
         src = Path(build.get("source") or source())
         done["merged"] = catch_up(src, build.get("commit") or "") or "merged into your checkout"
     s["seen"] = int(time.time())

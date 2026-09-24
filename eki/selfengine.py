@@ -7,9 +7,16 @@ whose payload names a self-work item:
     begin      its own worktree of eki's source; the base checked first
     the agent  an ordinary run in that worktree — routed, streamed, resumable
                — told how to work on eki (selfwork.brief)
-    conclude   committed (with the ROADMAP tick), then the candidate check
+    conclude   committed, then the candidate check
     then       applied or proposed, as the autonomy setting says; the thread
                says what came of it, in eki's own words
+
+Each of those is a step written down before it starts (eki/steps.py), and so
+are a conflict resolution and a go-live: a restart at any moment loses
+nothing — a step cut off is taken up again by the next engine, once
+(`self_carry_on`), and is never reported as failed. Applied changes go live
+together, at most once every `self_release_minutes` (`self_release`), and
+the roadmap is ticked once a change has landed, by one writer (`_self_ticks`).
 
 Started by a chat message that asks eki to change itself (in that thread, at
 once), by `eki self "…"` and the board (at once, or later), by a fault in
@@ -19,6 +26,7 @@ next item whenever the machine has room (Engine.shift_tick).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 import time
@@ -36,6 +44,7 @@ from . import selfloop
 from . import selfwork
 from . import settings as settings_mod
 from . import shift as shift_mod
+from . import steps
 from .adapters.base import BackendError
 
 
@@ -99,6 +108,34 @@ class SelfLoop:
     def _self_board(self, cid: str = "") -> str:
         return f"http://127.0.0.1:{self.port}/goals#/self" + (f"/{cid}" if cid else "")   # type: ignore[attr-defined]
 
+    @contextlib.contextmanager
+    def _step(self, kind: str, subject: str, **fields: Any) -> Any:
+        """A step of self-work, written down before it starts (eki/steps.py).
+        The body may say how it came out (`out["outcome"]`, `out["note"]`).
+        Cut off — steps.Interrupted, a program killed by a signal, the engine
+        going away — is interrupted, never failed; the engine going away
+        leaves it running, for the next engine to find cut off."""
+        steps.start(kind, subject, **fields)
+        out: Dict[str, str] = {"outcome": "succeeded", "note": ""}
+        stopping = lambda: getattr(self.runner, "stopping", False)   # noqa: E731  # type: ignore[attr-defined]
+        try:
+            yield out
+        except steps.Interrupted as e:
+            steps.end(kind, subject, "interrupted", str(e))
+            raise
+        except (asyncio.CancelledError, GeneratorExit):
+            if not stopping():
+                steps.end(kind, subject, "failed", "stopped")
+            raise
+        except BaseException as e:
+            if stopping() or steps.cut_off(e):
+                steps.end(kind, subject, "interrupted", str(e))
+            else:
+                steps.end(kind, subject, "failed", str(e))
+            raise
+        else:
+            steps.end(kind, subject, out["outcome"], out["note"])
+
     # ---- starting a piece of self-work ------------------------------------------------
 
     async def self_ask(self, request: str, *, when: str = "now", conversation: str = "",
@@ -129,7 +166,15 @@ class SelfLoop:
     async def _self_start(self, it: selfloop.Item, goal: Optional[goals_mod.Goal] = None,
                           allowed: Optional[List[str]] = None, planned: str = "") -> Dict[str, str]:
         """A run for this item, in its thread (a new one unless it has one).
-        Returns at once; the run is the pipeline (`_self_work`)."""
+        Returns at once; the run is the pipeline (`_self_work`). An item
+        already being carried on by a live run isn't started a second time."""
+        if it.state == "working":
+            try:
+                now = selfloop.get(it.id)
+            except KeyError:
+                now = it
+            if now.run and now.run in self.runner.running:          # type: ignore[attr-defined]
+                return {"run": now.run, "conversation": now.conversation}
         cid = it.conversation
         if not cid:
             title = f"eki · {it.title}"[:80]
@@ -194,7 +239,7 @@ class SelfLoop:
         if where and Path(where).is_dir():
             prop = selfwork.Proposal(**{k: v for k, v in it.open.items()
                                         if k in selfwork.Proposal.__dataclass_fields__})
-        elif it.open.get("id"):
+        elif it.open.get("id") and it.phase != "begin":
             # cut off after its change was judged (one with nothing in it leaves
             # no worktree): close that change rather than start the item over
             try:
@@ -207,41 +252,71 @@ class SelfLoop:
                 async for piece in self._self_close(run, it, done, {}):
                     yield piece
                 return
-        if prop is None:
+        if prop is None or it.phase == "begin":
+            # cut off (by a swap) after its base passed: start again from that
+            # base, not a new one that would need checking all over again; cut
+            # off during the check: the same worktree, checked again
+            passed = str(it.open.get("base_passed") or "")
+            check = it.check_base and not passed
             yield ("*eki: a change to eki itself — in a worktree of its own source"
-                   + (", once the source passes its own tests" if it.check_base else "") + "…*\n\n")
-            try:
-                prop = await asyncio.to_thread(
-                    selfwork.begin, selfloop.request_for(it, plan), root=root, base=it.base or "HEAD",
-                    python=python, check_base=it.check_base, source=it.source, item=it.id,
-                    conversation=cid, title=it.title, ticks=it.key if it.source == "roadmap" else "")
-            except selfwork.SelfWorkError as e:
-                selfloop.update(it.id, state="done" if it.source in ("asked", "undo") else "gave up",
-                                run="", note=str(e)[:300])
-                raise BackendError(str(e)) from None
+                   + (", once the source passes its own tests" if check else "") + "…*\n\n")
+            iid = it.id
+
+            def opened(q: selfwork.Proposal) -> None:
+                selfloop.update(iid, open={**q.to_json(), **({"base_passed": passed} if passed else {})},
+                                change=q.id, phase="begin")
+
+            def base_ok(sha: str) -> None:
+                selfloop.update(iid, open={**selfloop.get(iid).open, "base_passed": sha})
+
+            with self._step("begin", it.id, item=it.id, run=run["id"]) as out:
+                try:
+                    prop = await asyncio.to_thread(
+                        selfwork.begin, selfloop.request_for(it, plan), root=root,
+                        base=passed or it.base or "HEAD", python=python, check_base=check,
+                        passed=base_ok, opened=opened, resume=prop,
+                        source=it.source, item=it.id, conversation=cid, title=it.title,
+                        ticks=it.key if it.source == "roadmap" else "")
+                except selfwork.SelfWorkError as e:
+                    out.update(outcome="failed", note=str(e))
+                    selfloop.update(it.id, state="done" if it.source in ("asked", "undo") else "gave up",
+                                    run="", note=str(e)[:300], open={}, phase="")
+                    prop = None
+                    why = str(e)
+                if prop is not None and prop.verdict:
+                    out.update(outcome="failed", note=prop.verdict)
+            if prop is None:
+                raise BackendError(why)
             if prop.verdict:                            # the base didn't pass its own tests
                 async for piece in self._self_close(run, it, prop, {}):
                     yield piece
                 return
-            it = selfloop.update(it.id, open=prop.to_json(), change=prop.id, phase="agent")
+            it = selfloop.update(it.id, open={**prop.to_json(), "base_passed": prop.base},
+                                 change=prop.id, phase="agent")
             self.runs.update(run["id"], cwd=prop.worktree)              # type: ignore[attr-defined]
         state = str(it.open.get("agent_state") or "done")
         if it.phase in ("", "agent"):
             ask = selfwork.brief(prop.request, python, prop.worktree)
             if p.get("resume_of") or it.open.get("agent_began"):
                 ask = "Carry on where you left off. The change, again:\n\n" + ask
-            selfloop.update(it.id, open={**prop.to_json(), "agent_began": True})
+            selfloop.update(it.id, open={**it.open, **prop.to_json(), "agent_began": True})
             inner = {**run, "cwd": prop.worktree, "_self_inner": True, "_as": ask}
             parts: List[str] = []
             state = "done"
-            try:
-                async for piece in self._dispatch(inner):               # type: ignore[attr-defined]
-                    if isinstance(piece, str):
-                        parts.append(piece)
-                    yield piece
-            except BackendError as e:
-                state = "failed"
-                parts.append(f"\n[{e}]")
+            with self._step("agent", it.id, item=it.id, change=prop.id, run=run["id"]) as out:
+                try:
+                    async for piece in self._dispatch(inner):           # type: ignore[attr-defined]
+                        if isinstance(piece, str):
+                            parts.append(piece)
+                        yield piece
+                except BackendError as e:
+                    if steps.cut_off(e) or self.runner.stopping:        # type: ignore[attr-defined]
+                        # killed by a signal (exit 143) — a restart, not the
+                        # agent failing: carried on in its session
+                        raise steps.Interrupted(f"the agent was cut off: {e}") from None
+                    state = "failed"
+                    parts.append(f"\n[{e}]")
+                    out.update(outcome="failed", note=str(e))
             answer = "".join(parts)
             fresh = self.runs.get(run["id"]) or run                     # type: ignore[attr-defined]
             prop.run, prop.backend = run["id"], fresh.get("backend") or prop.backend
@@ -258,13 +333,14 @@ class SelfLoop:
                 if Path(prop.worktree).is_dir() else []
             if pending and not selfwork.docs_only(pending):
                 yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
-            tick = None
-            if it.source == "roadmap" and prop.said in ("done", "already"):
-                key, mark = it.key, roadmap.mark(prop.id)
-                tick = lambda where: roadmap.tick_file(where, key, mark)   # noqa: E731
-            prop = await asyncio.to_thread(
-                selfwork.conclude, prop, {"state": state, "run": run["id"], "backend": prop.backend},
-                python=python, check=self.self_check, before_commit=tick)
+            with self._step("check", it.id, item=it.id, change=prop.id, run=run["id"]) as out:
+                # a check cut off (steps.Interrupted) leaves the commit: done again,
+                # it judges that commit
+                prop = await asyncio.to_thread(
+                    selfwork.conclude, prop, {"state": state, "run": run["id"], "backend": prop.backend},
+                    python=python, check=self.self_check)
+                if not (prop.commit and prop.fit):
+                    out.update(outcome="failed", note=prop.verdict)
         applied: Dict[str, Any] = {}
         if prop.commit and prop.fit and not prop.protected:
             mode = "apply" if (it.apply and selfloop.owner(it) == "person") or merging else \
@@ -277,47 +353,122 @@ class SelfLoop:
                 if ahead:
                     yield (f"\n\n*eki: fit — {ahead} change{'s' if ahead != 1 else ''} finished before it; "
                            "it's applied after, on top of what they bring…*\n")
-                applied = await self._self_merge(prop.id)
+                with self._step("apply", it.id, item=it.id, change=prop.id, run=run["id"]) as out:
+                    applied = await self._self_merge(prop.id)
+                    if applied.get("state") not in ("applying", "applied"):
+                        out.update(outcome="failed", note=str(applied.get("why") or applied.get("state")))
         async for piece in self._self_close(run, it, prop, applied):
             yield piece
 
     async def _self_merge(self, cid: str) -> Dict[str, Any]:
         """Its turn in the merge queue, then applied: put on top of what landed
-        before it, judged again, swapped in — its conflicts resolved first if
-        it no longer goes on top, and the next in line waits for that. Waiting
-        is never a failure."""
+        before it, judged again, boarded for the next go-live — its conflicts
+        resolved first if it no longer goes on top, and the next in line waits
+        for that. Waiting is never a failure, and a change cut off here keeps
+        its place in line."""
+        keep = False
         try:
             while not selfloop.merge_turn(cid, self.runner.running):   # type: ignore[attr-defined]
                 await asyncio.sleep(MERGE_POLL)
             selfloop.merge_mark(cid, applying=True)
+            c = selfwork.change(cid)
+            if c["state"] in ("applying", "applied"):   # it went in before a restart cut this off
+                return {"state": c["state"], "id": cid}
+            if c.get("resolving") and steps.get("resolve", cid).get("state") in ("running", "interrupted"):
+                # its conflicts were being resolved when a restart cut both off:
+                # the resolve is carried on (self_carry_on), and applies it
+                return await self._self_resolved(cid)
             applied = await self._self_apply_now(cid)
             if applied.get("state") == "conflicts":
                 started = await self._self_resolve_start(cid)
-                task = self.runner.tasks.get(started["resolving"]) if started else None   # type: ignore[attr-defined]
-                if task is not None:
-                    await asyncio.wait([task])
-                    c = selfwork.change(cid)
-                    applied = {"state": c["state"], "id": cid, "why": c.get("why") or ""}
-                else:
-                    applied = started or applied
+                applied = await self._self_resolved(cid) if started else applied
             return applied
+        except BaseException as e:
+            keep = isinstance(e, steps.Interrupted) or self.runner.stopping   # type: ignore[attr-defined]
+            raise
         finally:
-            selfloop.merge_leave(cid)
+            if keep:
+                selfloop.merge_mark(cid, applying=False)
+            else:
+                selfloop.merge_leave(cid)
+
+    async def _self_resolved(self, cid: str) -> Dict[str, Any]:
+        """Wait for the change's conflicts to be resolved — by its resolve
+        run, or the one that carries it on after a cut — and say where it
+        stands then."""
+        while steps.get("resolve", cid).get("state") in ("running", "interrupted"):
+            await asyncio.sleep(MERGE_POLL)
+        c = selfwork.change(cid)
+        return {"state": c["state"], "id": cid, "why": c.get("why") or ""}
+
+    async def self_release(self, now: bool = False) -> Dict[str, Any]:
+        """The release train leaves if it's time — or `now`, when a person
+        asked: the newest applied build, carrying every change applied since
+        the last go-live, to the supervisor. At most one go-live every
+        `self_release_minutes`; work never pauses for it. {} when it stays."""
+        if now:
+            t = builds_mod.train()
+            if t.get("cars"):
+                builds_mod._save_train({**t, "now": True})
+        try:
+            gone = await asyncio.to_thread(builds_mod.depart, self._self_release_minutes())
+        except (RuntimeError, OSError, ValueError) as e:
+            # no supervisor to take it: the changes aboard wait for you, as proposed
+            t = builds_mod.train()
+            for car in t.get("cars") or []:
+                if car.get("self"):
+                    selfwork.set_state(car["self"], "proposed", why=f"not applied: {e}"[:300])
+                    self._self_follow(car["self"])
+            builds_mod._save_train({**t, "cars": [], "now": False})
+            return {"state": "proposed", "why": str(e)[:300]}
+        if gone:
+            steps.start("swap", Path(gone["build"]).name, change=(gone["cars"] or [""])[-1],
+                        cars=gone["cars"], target=gone["build"])
+        return gone
+
+    def _self_release_minutes(self) -> float:
+        return max(0.0, float(self.settings.get("self_release_minutes",   # type: ignore[attr-defined]
+                                                builds_mod.RELEASE_MINUTES)))
+
+    def _self_train(self) -> Dict[str, Any]:
+        """The next go-live, for `eki self` and the board: {"in": seconds,
+        "every": minutes, "carrying": [{"id", "title"}]} — {} with nobody aboard."""
+        left = builds_mod.departs_in(self._self_release_minutes())
+        if left is None:
+            return {}
+        rows = []
+        for car in builds_mod.train().get("cars") or []:
+            try:
+                c = selfwork.change(car.get("self") or "")
+                rows.append({"id": c["id"], "title": c.get("title") or ""})
+            except selfwork.SelfWorkError:
+                continue
+        return {"in": left, "every": self._self_release_minutes(), "carrying": rows}
 
     async def _self_apply_now(self, cid: str, raising: bool = False,
-                              by_person: bool = False) -> Dict[str, Any]:
+                              by_person: bool = False, now: bool = False) -> Dict[str, Any]:
         """selfwork.apply, one at a time in this engine: two applies at once
         would each build on a checkout without the other. `by_person` only
-        where a person asked — it's what lets a protected change in."""
+        where a person asked — it's what lets a protected change in. A
+        change applied boards the release train, which leaves if it's time
+        (`now`: a person wants it live at once). A check cut off
+        (steps.Interrupted) isn't a verdict: it goes up to the step."""
         lock = vars(self).setdefault("_self_applying", asyncio.Lock())
         async with lock:
             try:
-                return await asyncio.to_thread(selfwork.apply, cid, python=sys.executable,
-                                               check=self.self_check, by_person=by_person)
+                got = await asyncio.to_thread(selfwork.apply, cid, python=sys.executable,
+                                              check=self.self_check, by_person=by_person, now=now)
             except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
                 if raising:
                     raise
                 return {"state": "proposed", "id": cid, "why": str(e)[:300]}
+        if got.get("state") == "applying":
+            gone = await self.self_release()
+            if gone.get("state") == "proposed":
+                return {**got, **gone}
+        elif got.get("state") == "applied":
+            self._self_ticks()
+        return got
 
     async def _self_close(self, run: Dict[str, Any], it: selfloop.Item, prop: selfwork.Proposal,
                           applied: Dict[str, Any]) -> AsyncIterator[Piece]:
@@ -329,6 +480,7 @@ class SelfLoop:
             c["why"] = reason
         it = selfloop.after_change(it, c)
         selfloop.update(it.id, open={}, run="")
+        self._self_ticks()                          # an item found already done is ticked now
         if it.source == "fault" and it.key:
             observe_mod.mark(it.key, state="proposed" if c.get("commit") else "not proposed",
                              self=c["id"], branch=c.get("branch"), fit=c.get("fit"),
@@ -393,10 +545,10 @@ class SelfLoop:
             if failed:
                 lines.append(f"What failed: {str(failed.get('detail') or '')[:400]}")
         if c.get("ticks") and c.get("commit") and c.get("said") in ("done", "already"):
-            lines.append(f"It ticks the ROADMAP item “{it.title}”.")
+            lines.append(f"eki ticks the ROADMAP item “{it.title}” once it lands.")
         if state == "applying":
-            lines.append("The supervisor swaps it in within a couple of minutes — runs still going "
-                         "carry on in the new engine — watches it, and goes "
+            lines.append("It goes live with the next release train (`eki self` says when) — runs still going "
+                         "carry on in the new engine; the supervisor watches it and goes "
                          "back to what ran before if it isn't healthy.")
         elif state == "applied":
             lines.append(str(c.get("how") or c.get("merged") or "In your checkout."))
@@ -724,37 +876,54 @@ class SelfLoop:
             return None
 
     def _self_follow(self, cid: str) -> Dict[str, Any]:
-        """After a decision: the change's item follows it, and the loop looks again."""
+        """After a decision: the change's item follows it, the roadmap is
+        ticked if it landed, and the loop looks again."""
         c = selfwork.change(cid)
         it = self._self_item_of(c)
         if it is not None:
             selfloop.after_change(it, c)
+        self._self_ticks()
         self._self_wake()
         return c
 
-    async def self_apply(self, cid: str, confirmed: bool = False) -> Dict[str, Any]:
+    def _self_ticks(self) -> List[str]:
+        """ROADMAP.md ticks, written by one writer once a change has landed
+        (selfwork.write_ticks) — never a change's own commit."""
+        try:
+            wrote = selfwork.write_ticks(self._self_root())
+        except (selfwork.SelfWorkError, OSError, ValueError):
+            return []
+        for what in wrote:
+            observe_mod.note("history", what=f"roadmap: {what}")
+        return wrote
+
+    async def self_apply(self, cid: str, confirmed: bool = False, now: bool = False) -> Dict[str, Any]:
         """You apply a change (`eki self apply`, the board's Apply). One that
         touches what eki may not change alone goes in too — once you've
-        confirmed, having been shown which protected files it touches."""
+        confirmed, having been shown which protected files it touches.
+        `now`: it goes live at once, not with the next release train."""
         c = selfwork.change(cid)
         if c.get("protected") and not confirmed:
             raise selfwork.SelfWorkError(
                 "it touches what eki may not change alone: " + ", ".join(c["protected"])
                 + " — confirm to apply it (`eki self apply " + c["id"] + "`, or Apply on the board)")
-        got = await self._self_apply_now(cid, raising=True, by_person=True)
+        got = await self._self_apply_now(cid, raising=True, by_person=True, now=now)
         if got.get("state") == "conflicts":
             # it no longer goes on top of your checkout: not handed back to
             # you — an agent resolves it, and eki applies it when that holds
-            got = await self._self_resolve_start(got.get("id") or cid, person=True) or got
+            got = await self._self_resolve_start(got.get("id") or cid, person=True, now=now) or got
         self._self_follow(got.get("id") or cid)
         return got
 
     # ---- conflicts, resolved (eki/selfwork.py begin_rebase / finish_rebase) --------------
 
-    async def _self_resolve_start(self, cid: str, person: bool = False) -> Optional[Dict[str, Any]]:
+    async def _self_resolve_start(self, cid: str, person: bool = False, now: bool = False,
+                                  resume_of: str = "") -> Optional[Dict[str, Any]]:
         """A run that has the change's conflicts resolved and then applies it,
         in the change's own thread. None when resolving is off. `person`: you
-        asked for the apply, so it goes on as yours once resolved."""
+        asked for the apply, so it goes on as yours once resolved. The step
+        is written down before the run starts, so a restart that cuts it off
+        leaves something to carry on (`resume_of`: the run that was cut off)."""
         if not self.settings.get("self_resolve", True):                 # type: ignore[attr-defined]
             return None
         c = selfwork.change(cid)
@@ -763,13 +932,17 @@ class SelfLoop:
             title = f"eki · {c.get('title') or cid}"[:80]
             convo = self.store.new_conversation(title)                  # type: ignore[attr-defined]
             self.store.set_conversation(convo, title=title)             # type: ignore[attr-defined]
-        shown = f"[eki · self] Resolving conflicts: {c.get('title') or 'self/' + c['id']}"[:200]
+        shown = (f"[eki · self] {'Carrying on resolving' if resume_of else 'Resolving'} conflicts: "
+                 f"{c.get('title') or 'self/' + c['id']}")[:200]
         turn = self.store.add_turn(convo, "user", shown, meta={"self": c["id"]})  # type: ignore[attr-defined]
         wrote = c.get("backend") or ""
         rid = self.runs.create(shown, conversation=convo, user_turn=turn,  # type: ignore[attr-defined]
                                requested=wrote if self._self_can_resolve(wrote) else "",
                                payload=json.dumps({"self_resolve": c["id"], "route": "resolve git conflicts",
-                                                   "person": person}))
+                                                   "person": person, "now": now,
+                                                   **({"resume_of": resume_of} if resume_of else {})}))
+        steps.start("resolve", c["id"], change=c["id"], item=c.get("item") or "", run=rid,
+                    person=person, now=now)
         selfwork.set_state(c["id"], "conflicts", resolving=rid, resolving_at=int(time.time()),
                            why="eki is having its conflicts resolved")
         await self.runner.submit(rid)                                   # type: ignore[attr-defined]
@@ -783,48 +956,89 @@ class SelfLoop:
 
     async def _self_resolve(self, run: Dict[str, Any]) -> AsyncIterator[Piece]:
         """Put the change on top of your checkout; have an agent resolve what
-        conflicts, in the change's worktree; finish the rebase; apply."""
-        cid = str(_payload(run).get("self_resolve") or "")
+        conflicts, in the change's worktree; finish the rebase; apply. A step
+        (eki/steps.py): cut off anywhere — the agent killed by a restart, the
+        check after it — it is carried on, not reported as a failure, and
+        picks up where the worktree stands: mid-rebase, the agent is asked to
+        carry on; rebased, it goes straight to applying."""
+        pay = _payload(run)
+        cid = str(pay.get("self_resolve") or "")
         c = selfwork.change(cid)
         convo = run["conversation_id"]
+        with self._step("resolve", c["id"], change=c["id"], item=c.get("item") or "", run=run["id"],
+                        person=bool(pay.get("person")), now=bool(pay.get("now"))) as out:
+            async for piece in self._self_resolving(run, c, convo, pay, out):
+                yield piece
 
+    async def _self_resolving(self, run: Dict[str, Any], c: Dict[str, Any], convo: str,
+                              pay: Dict[str, Any], out: Dict[str, str]) -> AsyncIterator[Piece]:
         def give_up(why: str) -> str:
-            selfwork.set_state(c["id"], "conflicts", resolving="", why=why[:300])
+            out.update(outcome="failed", note=why)
+            selfwork.set_state(c["id"], "conflicts", resolving="", why=why[:300], rebase={})
             self._self_follow(c["id"])
             return f"**eki · change to itself: still conflicts with your checkout.**\n\n{why}\n\n" \
                    f"Read it with `eki self diff {c['id']}`; `eki self retry` has eki make it again."
-        yield "*eki: putting the change on top of your checkout…*\n\n"
-        try:
-            info = await asyncio.to_thread(selfwork.begin_rebase, c["id"])
-        except selfwork.SelfWorkError as e:
-            text = give_up(str(e))
+
+        def said(text: str) -> None:
             self.store.add_turn(convo, "assistant", text, "eki", "self-work",   # type: ignore[attr-defined]
                                 meta={"run": run["id"], "self": c["id"]})
-            yield text
+
+        if c["state"] in ("applying", "applied"):   # it went in before a restart cut this off
+            selfwork.set_state(c["id"], c["state"], resolving="", rebase={})
             return
+        saved = dict(c.get("rebase") or {})
+        carried = bool(saved.get("where")) and Path(saved["where"]).is_dir() and \
+            await asyncio.to_thread(selfwork.rebasing, Path(saved["where"]))
+        if carried:
+            # cut off mid-rebase: the agent's edits so far are in the worktree
+            info = saved
+            yield "*eki: carrying on with the conflicts where a restart cut it off…*\n\n"
+        else:
+            yield "*eki: putting the change on top of your checkout…*\n\n"
+            try:
+                info = await asyncio.to_thread(selfwork.begin_rebase, c["id"])
+            except selfwork.SelfWorkError as e:
+                text = give_up(str(e))
+                said(text)
+                yield text
+                return
+            selfwork.set_state(c["id"], "conflicts", rebase=info)
         if info["files"]:
-            yield (f"*eki: it conflicts in {', '.join(info['files'])} — having them resolved in its "
-                   "worktree…*\n\n")
+            if not carried:
+                yield (f"*eki: it conflicts in {', '.join(info['files'])} — having them resolved in its "
+                       "worktree…*\n\n")
             parts: List[str] = []
             failed, why = "", ""
+            # carried on with the markers already gone: the agent had finished
+            ask_agent = not carried or bool(await asyncio.to_thread(
+                selfwork.marked, Path(info["where"]), list(info["files"])))
             for _ in range(RESOLVE_ROUNDS):
-                landed = await asyncio.to_thread(selfwork.landed_since, c["id"], info["onto"], info["files"])
-                ask = selfwork.resolve_brief(c, info["files"], landed, sys.executable, info["where"],
-                                             info.get("step") or "")
-                inner = {**run, "cwd": info["where"], "_self_inner": True, "_as": ask}
-                try:
-                    async for piece in self._dispatch(inner):           # type: ignore[attr-defined]
-                        if isinstance(piece, str):
-                            parts.append(piece)
-                        yield piece
-                except BackendError as e:
-                    failed = f"the agent couldn't resolve it: {e}"
-                    break
+                if ask_agent:
+                    landed = await asyncio.to_thread(selfwork.landed_since, c["id"], info["onto"], info["files"])
+                    ask = selfwork.resolve_brief(c, info["files"], landed, sys.executable, info["where"],
+                                                 info.get("step") or "")
+                    if carried or pay.get("resume_of"):
+                        ask = "Carry on where you left off. The conflicts, again:\n\n" + ask
+                        carried = False
+                    inner = {**run, "cwd": info["where"], "_self_inner": True, "_as": ask}
+                    try:
+                        async for piece in self._dispatch(inner):       # type: ignore[attr-defined]
+                            if isinstance(piece, str):
+                                parts.append(piece)
+                            yield piece
+                    except BackendError as e:
+                        if steps.cut_off(e) or self.runner.stopping:    # type: ignore[attr-defined]
+                            # killed by a restart (exit 143): not the agent failing
+                            raise steps.Interrupted(f"the agent was cut off: {e}") from None
+                        failed = f"the agent couldn't resolve it: {e}"
+                        break
+                ask_agent = True
                 try:
                     more = await asyncio.to_thread(selfwork.continue_rebase, info)
                 except selfwork.SelfWorkError as e:
                     why = str(e)
                     break
+                selfwork.set_state(c["id"], "conflicts", rebase=info)
                 if not more:
                     break
                 # a later commit of the change conflicts too: back to the agent, same run
@@ -841,23 +1055,107 @@ class SelfLoop:
                 await asyncio.to_thread(selfwork._put_back, Path(info["where"]), info.get("commit") or "")
                 text = give_up(f"eki had its conflicts resolved, but it didn't hold: {why}"
                                if not failed else failed)
-                self.store.add_turn(convo, "assistant", text, "eki", "self-work",  # type: ignore[attr-defined]
-                                    meta={"run": run["id"], "self": c["id"]})
+                said(text)
                 yield "\n\n" + text
                 return
             yield "\n\n*eki: resolved — judging it again on top of your checkout, then applying it…*\n"
-        selfwork.set_state(c["id"], "conflicts", resolving="", why="")
-        applied = await self._self_apply_now(c["id"], by_person=bool(_payload(run).get("person")))
+        selfwork.set_state(c["id"], "conflicts", resolving="", why="", rebase={})
+        try:
+            applied = await self._self_apply_now(c["id"], by_person=bool(pay.get("person")),
+                                                 now=bool(pay.get("now")))
+        except BaseException:
+            # cut off while it was judged: it is still this step's to finish
+            selfwork.set_state(c["id"], selfwork.change(c["id"])["state"], resolving=run["id"])
+            raise
         now = self._self_follow(c["id"])
+        if now["state"] not in ("applying", "applied"):
+            out.update(outcome="failed", note=str(applied.get("why") or now["state"]))
         it = self._self_item_of(now) or _NoItem(now)
         text = self._self_says(now, it, applied)                        # type: ignore[arg-type]
-        self.store.add_turn(convo, "assistant", text, "eki", "self-work",   # type: ignore[attr-defined]
-                            meta={"run": run["id"], "self": c["id"]})
+        said(text)
         yield "\n\n" + text
         if self.settings.get("notify_learned", True):                   # type: ignore[attr-defined]
             head = {"applying": "Applying", "applied": "Applied"}.get(now["state"], "Still waiting")
             await self._notify(f"eki · {head}: {now.get('title') or 'self/' + now['id']}"[:120],  # type: ignore[attr-defined]
                                "its conflicts with your checkout were resolved"[:200])
+
+    # ---- a restart loses nothing (eki/steps.py) ------------------------------------------
+
+    async def self_carry_on(self) -> int:
+        """Every step of self-work that was cut off — by a restart, or by a
+        program lost while this engine stayed up — taken up again, once: an
+        item's pipeline from where it stands (the agent in its session, a
+        check run again), a conflict resolution in the change's worktree, a
+        go-live whose supervisor was lost. Called at start and every minute.
+        How many were taken up."""
+        if self._self_why_not():
+            return 0
+        started = 0
+        for s in steps.unfinished():
+            live = self.runner.running                                  # type: ignore[attr-defined]
+            try:
+                if s.get("kind") == "swap":
+                    started += await self._self_carry_swap(s)
+                elif not steps.waiting(s, live):
+                    continue
+                elif s.get("kind") == "resolve":
+                    started += bool(await self._self_carry_resolve(s))
+                else:
+                    started += bool(await self._self_carry_item(s))
+            except Exception as e:                  # noqa: BLE001 — one step never stops the rest
+                observe_mod.note("fault", what="carry on", step=f"{s.get('kind')}:{s.get('subject')}",
+                                 why=repr(e)[:300])
+        return started
+
+    async def _self_carry_item(self, s: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        try:
+            it = selfloop.get(str(s.get("item") or s.get("subject") or ""))
+        except KeyError:
+            steps.forget(s["kind"], s["subject"])
+            return None
+        if it.state != "working":
+            steps.forget(s["kind"], s["subject"])       # it moved on: nothing to carry on
+            return None
+        if it.run and it.run in self.runner.running:                   # type: ignore[attr-defined]
+            return None                                 # carried on already, by its session
+        if not steps.claim(s["kind"], s["subject"]):
+            return None
+        return await self._self_start(it)
+
+    async def _self_carry_resolve(self, s: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        cid = str(s.get("subject") or "")
+        try:
+            c = selfwork.change(cid)
+        except selfwork.SelfWorkError:
+            steps.forget("resolve", cid)
+            return None
+        if c["state"] != "conflicts" or not c.get("resolving"):
+            steps.forget("resolve", cid)                # applied, discarded, decided by hand
+            return None
+        if c["resolving"] in self.runner.running:                       # type: ignore[attr-defined]
+            return None
+        if not steps.claim("resolve", cid):
+            return None
+        return await self._self_resolve_start(cid, person=bool(s.get("person")), now=bool(s.get("now")),
+                                              resume_of=c["resolving"])
+
+    async def _self_carry_swap(self, s: Dict[str, Any]) -> int:
+        """A go-live runs outside the engine, so a restart doesn't cut it off
+        (a swap is what restarts it). Only a supervisor lost before it said
+        how it went — the Mac restarted mid-wait — is asked for again."""
+        if builds_mod.going_live():
+            return 0
+        sw = builds_mod.last_swap()
+        target = str(s.get("target") or "")
+        if sw.get("state") not in ("waiting", "swapping") or sw.get("target") != target \
+                or not Path(target).is_dir():
+            return 0
+        if s.get("boot") == steps.BOOT and time.time() - float(s.get("at") or 0) < steps.LOST_GRACE:
+            return 0
+        if not steps.claim("swap", s["subject"]):
+            return 0
+        await asyncio.to_thread(builds_mod.swap, Path(target), self_id=str(s.get("change") or ""))
+        return 1
 
     async def self_discard(self, cid: str) -> Dict[str, Any]:
         await asyncio.to_thread(selfwork.discard, cid)
@@ -878,13 +1176,19 @@ class SelfLoop:
         return selfwork.diff(cid)
 
     def self_settled(self, done: Dict[str, Any]) -> None:
-        """The supervisor's outcome for a swap that carried a self change."""
-        if not done.get("self"):
-            return
-        c = selfwork.settled(done["self"], done.get("state") or "", merged=done.get("merged") or "",
-                             why=done.get("why") or "")
-        if c:
-            self._self_follow(done["self"])
+        """The supervisor's outcome for a go-live that carried self changes:
+        every change aboard is applied, or rolled back, together — and the
+        go-live's step ends."""
+        target = str(done.get("target") or "")
+        if target:
+            steps.end("swap", Path(target).name, "succeeded" if done.get("state") == "healthy" else "failed",
+                      str(done.get("why") or ""))
+        ids = [x for x in (done.get("cars") or []) if x] or ([done["self"]] if done.get("self") else [])
+        for cid in ids:
+            c = selfwork.settled(cid, done.get("state") or "", merged=done.get("merged") or "",
+                                 why=done.get("why") or "")
+            if c:
+                self._self_follow(cid)
 
     def self_item_action(self, iid: str, action: str) -> Dict[str, Any]:
         """drop (off the queue) · retry (take it again) · person (leave it for me)."""
@@ -925,6 +1229,8 @@ class SelfLoop:
             keep["self_local"] = bool(fields["local"])
         if "parallel" in fields:
             keep["self_parallel"] = max(1, min(8, int(fields["parallel"])))
+        if "release_minutes" in fields:
+            keep["self_release_minutes"] = max(0, min(24 * 60, int(fields["release_minutes"])))
         self.settings = settings_mod.save({**settings_mod.load(), **keep})   # type: ignore[attr-defined]
         self._self_wake()
         return {k: self.settings.get(k) for k in keep}                  # type: ignore[attr-defined]
@@ -998,7 +1304,17 @@ class SelfLoop:
             row["areas"] = [selfloop.lane_name(a) for a in i.area]
             if i.change and i.change in by_id:
                 row["change_state"] = by_id[i.change]["state"]
+            step = steps.of_item(i.id) if i.state == "working" else {}
+            if step:
+                row["step"] = {"kind": step.get("kind"), "state": step.get("state"),
+                               "live": steps.live(step, live)}
             return row
+
+        # a spinner only for what is being worked on now: a resolve whose run
+        # a restart took with it is "carrying on", not "fixing"
+        for c in rows:
+            if c.get("resolving"):
+                c["resolving_live"] = c["resolving"] in live
 
         goal = None
         if g is not None:
@@ -1015,8 +1331,10 @@ class SelfLoop:
             "review_max": int(self.settings.get("self_review_max", selfloop.REVIEW_MAX)),  # type: ignore[attr-defined]
             "local": bool(self.settings.get("self_local", False)),       # type: ignore[attr-defined]
             "parallel": self._self_parallel(),
-            "merging": [{**r, "live": r.get("run") in live, "areas": [selfloop.lane_name(a) for a in r.get("area") or []]}
+            "merging": [{**r, "live": r.get("run") in live, "applying": bool(r.get("applying")) and r.get("run") in live,
+                         "areas": [selfloop.lane_name(a) for a in r.get("area") or []]}
                         for r in selfloop.merge_queue()],
+            "train": self._self_train(),                               # the next go-live, and what it carries
             "working": [item_row(i) for i in items if i.state == "working"],
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],

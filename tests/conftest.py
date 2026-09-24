@@ -63,6 +63,8 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(selfwork, "HOME", root / "eki" / "self")
     monkeypatch.setattr(selfwork, "SHOTS", root / "eki" / "shots")
     monkeypatch.setattr(selfloop, "HOME", root / "eki" / "self")
+    from eki import steps
+    monkeypatch.setattr(steps, "HOME", root / "eki" / "self")
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
     from eki import goals, shift, launcher
     # no test builds, or sees, this Mac's eki.app

@@ -258,3 +258,69 @@ def test_an_unknown_flag_or_stray_word_is_still_an_error(monkeypatch):
     for argv in (["self", "apply", "abc", "--bogus"], ["runs", "stray"]):
         with pytest.raises(SystemExit):
             cli.main(argv)
+
+
+# ---- the base check, once per commit ------------------------------------------------
+
+def test_runs_that_need_the_same_base_share_one_check(tmp_path):
+    """After a swap every run wants the new base at once: one runs the
+    tests, the others wait for it and take its answer."""
+    import threading
+    import time
+    home, calls = tmp_path / "self", []
+
+    def slow(where, python):
+        calls.append(where)
+        time.sleep(0.3)
+
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(
+        selfwork.check_base_once(tmp_path, "abc123", "py", home, tests=slow))) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert got == [""] * 5 and len(calls) == 1
+    assert selfwork.base_known_good("abc123", home)
+
+
+def test_a_failed_base_check_is_shared_with_those_waiting_but_tried_again_later(tmp_path):
+    import threading
+    import time
+    home, calls = tmp_path / "self", []
+
+    def broken(where, python):
+        calls.append(where)
+        time.sleep(0.3)
+        raise RuntimeError("1 failed")
+
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(
+        selfwork.check_base_once(tmp_path, "bad", "py", home, tests=broken))) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert got == ["1 failed"] * 3 and len(calls) == 1
+    # a run that starts after it failed (a flaky test, fixed since) checks again
+    assert selfwork.check_base_once(tmp_path, "bad", "py", home, tests=lambda w, p: None) == ""
+    assert selfwork.base_known_good("bad", home)
+
+
+def test_a_base_known_to_be_good_is_not_tested_again(tmp_path):
+    home = tmp_path / "self"
+    selfwork.note_base_good("abc123", home)
+
+    def never(where, python):
+        raise AssertionError("tested again")
+
+    assert selfwork.check_base_once(tmp_path, "abc123", "py", home, tests=never) == ""
+
+
+def test_begin_says_which_base_passed(tmp_path):
+    root, heard = repo(tmp_path), []
+    p = selfwork.begin("make VALUE two", root=root, home=tmp_path / "self", passed=heard.append)
+    assert heard == [p.base] and selfwork.base_known_good(p.base, tmp_path / "self")
+    broken, heard = repo(tmp_path / "b", passing=False), []
+    q = selfwork.begin("make VALUE two", root=broken, home=tmp_path / "self", passed=heard.append)
+    assert q.verdict and heard == []

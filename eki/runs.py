@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from . import nesting
+from .steps import Interrupted
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -363,6 +364,11 @@ class Runner:
                 self._state(rid, "cancelled", ended_at=int(time.time()))
             raise
         except Exception as e:                    # noqa: BLE001
+            if isinstance(e, Interrupted) or self.stopping:
+                # cut off, not failed (eki/steps.py): handed over, so it is
+                # carried on — by the next engine, or by this one if it stays
+                self._cut_off(rid, e)
+                return
             if self.on_error is not None:
                 try:
                     self.on_error(run, e)
@@ -376,6 +382,19 @@ class Runner:
         finally:
             self.tasks.pop(rid, None)
             self.activity.pop(rid, None)
+
+    def _cut_off(self, rid: str, e: BaseException) -> None:
+        """A run whose work was cut off from outside (a program killed by a
+        signal, a check stopped): never failed. While the engine goes away it
+        stays "running" for the next engine to find, like any run cut off by
+        a stop; otherwise it's interrupted now, and what it was doing — a
+        step of self-work — is taken up again from its ledger."""
+        self.store.hand_over(rid)
+        if self.stopping:
+            return
+        self.store.update(rid, error=f"cut off: {e}"[:500])
+        self._publish(rid, {"event": "error", "message": f"cut off: {e}"[:500]})
+        self._state(rid, "interrupted", ended_at=int(time.time()))
 
     async def stop(self) -> None:
         """Shutdown: nothing is left orphaned. Runs cut off here stay

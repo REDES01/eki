@@ -15,7 +15,8 @@ fault had happened twice. This is the loop around it:
   then   the autonomy setting, per area: propose (you apply it, on the board
          or with `eki self apply`) or apply (swapped in, watched, rolled back
          if unhealthy)
-  plan   a roadmap item's change ticks the item, in the same commit
+  plan   a roadmap item is ticked once its change has landed, as a commit
+         of its own (selfwork.write_ticks) — never in the change itself
 
 Several at once (`self_parallel`, default 2), when there's room: each
 subscription carries only what its spare room allows, the models on this

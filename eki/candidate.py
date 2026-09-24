@@ -53,6 +53,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from . import steps                                   # standard library only, too
+
 ORDER = ("tests", "app", "boots", "answers", "data", "leavable")
 STUB_MODEL = "candidate-stub"
 TERMINAL = ("done", "failed", "cancelled", "interrupted")
@@ -335,6 +337,10 @@ def check_tests(checkout: Path, python: str, timeout: float = 1200.0) -> str:
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"still running after {timeout:.0f}s") from None
     last = ([ln for ln in got.stdout.strip().splitlines() if ln.strip()] or ["no output"])[-1]
+    if steps.cut_off(got.returncode):
+        # stopped by a signal — the engine going away took it along: a check
+        # cut off, not tests that failed (2026-09-24: "tests ✗", a row of dots)
+        raise steps.Interrupted(f"the tests were cut off (exit {got.returncode})")
     if got.returncode != 0:
         failed = [ln for ln in got.stdout.splitlines() if ln.startswith(("FAILED", "ERROR"))]
         more = "; ".join(failed[:5]) or got.stderr.strip()[-300:]
@@ -445,6 +451,8 @@ def check(checkout: Path | str, *, python: Optional[str] = None,
         began = time.time()
         try:
             detail, ok = fn(), True
+        except steps.Interrupted:
+            raise                                     # cut off: no verdict at all
         except Exception as e:                        # noqa: BLE001 — a verdict, not a crash
             detail, ok = f"{type(e).__name__}: {e}" if not isinstance(e, RuntimeError) else str(e), False
         report.checks.append(Check(name, ok, detail, round(time.time() - began, 2)))
@@ -531,9 +539,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     quiet = args.json
-    report = check(args.checkout, python=args.python, db=args.db, skip=args.skip,
-                   keep=args.keep,
-                   say=None if quiet else (lambda line: print(line, file=sys.stderr, flush=True)))
+    try:
+        report = check(args.checkout, python=args.python, db=args.db, skip=args.skip,
+                       keep=args.keep,
+                       say=None if quiet else (lambda line: print(line, file=sys.stderr, flush=True)))
+    except steps.Interrupted as e:
+        print(f"cut off, not judged: {e}", file=sys.stderr)
+        return 3
     if args.json:
         print(json.dumps(report.to_json(), indent=2))
     else:

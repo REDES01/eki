@@ -408,10 +408,12 @@ const checksOf = c => (c.report?.checks || []).map(k =>
   `<span class="ck ${k.skipped ? "" : k.ok ? "ok" : "bad"}" title="${esc(k.detail)}">${esc(k.name)}${k.skipped ? " –" : k.ok ? " ✓" : " ✗"}</span>`).join("");
 const filesOf = c => { const n = (c.files || []).length; return n ? `${n} file${n === 1 ? "" : "s"}` : ""; };
 const byWhom = c => c.backend && c.backend !== "eki" ? "by " + esc(c.backend) : "by eki";
-// a conflicting change eki is fixing on its own: in hand, not blocked
+// a conflicting change eki is fixing on its own: in hand, not blocked — and
+// live, or cut off by a restart and carried on by itself (no spinner then)
 const fixing = c => c.state === "conflicts" && !!c.resolving;
-const stateOf = c => fixing(c) ? "Fixing conflicts" : CSTATE[c.state] || c.state;
-const badgeOf = c => fixing(c) ? "working" : CBADGE[c.state] || "";
+const fixingLive = c => fixing(c) && c.resolving_live !== false;
+const stateOf = c => fixingLive(c) ? "Fixing conflicts" : fixing(c) ? "Carrying on" : CSTATE[c.state] || c.state;
+const badgeOf = c => fixing(c) ? (fixingLive(c) ? "working" : "queued") : CBADGE[c.state] || "";
 const when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function changeActs(c, withDiff) {
@@ -420,7 +422,9 @@ function changeActs(c, withDiff) {
   const out = [];
   if (fixing(c)) {
     if (withDiff) out.push(`<a class="btn small" href="#/self/${enc(c.id)}">Read it</a>`);
-    out.push(`<span class="working-line"><span class="spinner"></span>eki is fixing the conflicts itself and applies it when done — follow it in its thread (run ${esc(c.resolving)})</span>`);
+    out.push(fixingLive(c)
+      ? `<span class="working-line"><span class="spinner"></span>eki is fixing the conflicts itself and applies it when done — follow it in its thread (run ${esc(c.resolving)})</span>`
+      : `<span class="muted" style="font-size:13px">A restart cut off fixing its conflicts — eki carries on where it stopped, by itself</span>`);
     return out.join("");
   }
   if (withDiff) out.push(`<a class="btn small" href="#/self/${enc(c.id)}">Read it</a>`);
@@ -464,6 +468,17 @@ function goingLive(g) {
     <span class="muted" style="font-size:12.5px">— runs still going then carry on in it</span></div>`;
 }
 
+// the release train: applied changes go live together, at most once every
+// few minutes — work keeps going meanwhile
+function nextGoLive(t) {
+  if (!t || !(t.carrying || []).length) return "";
+  const when = !t.in ? "now" : `in ${Math.max(1, Math.ceil(t.in / 60))} min`;
+  const what = t.carrying.map(c => `<span title="self/${esc(c.id)}">${esc(c.title)}</span>`).join(", ");
+  return `<div class="line"><span>Next go-live ${when}, carrying: ${what}</span>
+    <button class="btn small" data-release-now title="Don't wait for the train: swap it in now">Go live now</button>
+    <span class="muted" style="font-size:12.5px">— at most one every ${esc(t.every)} min</span></div>`;
+}
+
 function selfPage() {
   const v = S.self;
   if (!v) return `<div class="empty">Loading…</div>`;
@@ -482,6 +497,7 @@ function selfPage() {
       <span class="muted" style="flex:1 1 220px;min-width:0">${esc(status)}</span>
       <button class="btn ${on ? "" : "primary"}" data-self-on="${on ? 0 : 1}">${on ? "Pause" : g ? "Resume" : "Start"}</button></div>
     ${goingLive(v.going_live)}
+    ${nextGoLive(v.train)}
     <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the next open item in ROADMAP.md — each change in its own worktree, tested and started on a spare port before you see it.</div>
     <div class="line"><span class="muted">How far it goes alone</span>
       <div class="seg" role="group" aria-label="Autonomy"><button data-self-auto="propose" aria-pressed="${v.autonomy === "propose"}" title="A branch, a diff and its checks: you apply it">Propose</button><button data-self-auto="apply" aria-pressed="${v.autonomy === "apply"}" title="A change that passes is swapped in, watched, and rolled back if it isn't healthy">Apply here</button></div>
@@ -504,14 +520,14 @@ function selfPage() {
     h += `<div class="section"><div class="label">Waiting for you · ${v.waiting.length}</div><div class="goals">${v.waiting.map(changeCard).join("")}</div></div>`;
   if (going.length) {
     h += `<div class="section"><div class="label">Working on · ${going.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${i.live ? "" : ` <span class="muted">— carries on when there's room</span>`}</span>
+    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${i.live ? "" : i.step?.state === "interrupted" ? ` <span class="muted">— cut off by a restart; carries on by itself</span>` : ` <span class="muted">— carries on when there's room</span>`}</span>
       ${(i.areas || []).map(a => `<span class="chipk" title="The area it works in: nothing else starts there until it's done">${esc(a)}</span>`).join("")}</div>`;
     h += `</div></div></div>`;
   }
   if (merging.length) {
     h += `<div class="section"><div class="label">Merge queue · ${merging.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
     merging.forEach((r, n) => h += `<div class="rowline"><span class="when">${n + 1}</span>${r.applying ? `<span class="spinner"></span>` : ""}<span class="grow" title="${esc(r.title)}">${esc(r.title)}</span>
-      <span class="muted" style="font-size:12.5px">${r.applying ? "being applied" : r.live ? "waiting its turn" : "back in line when it carries on"}</span></div>`);
+      <span class="muted" style="font-size:12.5px">${r.applying ? "being applied" : r.live ? "waiting its turn" : "cut off — back in line when it carries on"}</span></div>`);
     h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes are applied one at a time, in the order they finished — each put on top of what landed before it and judged again.</div></div>`;
   }
   const ahead = v.queue, nexts = v.roadmap?.next || [];
@@ -686,6 +702,7 @@ document.addEventListener("click", async e => {
   const arm = t.closest("[data-area-rm]");
   if (arm) { const areas = { ...(S.self?.areas || {}) }; delete areas[arm.dataset.areaRm];
              return act(() => api("/api/self/settings", "PUT", { areas })); }
+  if (t.closest("[data-release-now]")) return act(() => api("/api/self/release", "POST", {}));
   const sAsk = t.closest("[data-self-ask]");
   if (sAsk && S.selfDraft.trim()) {
     const text = S.selfDraft;

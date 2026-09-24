@@ -518,7 +518,7 @@ def cmd_agent(args) -> int:
 
 
 SELF_VERBS = ("apply", "discard", "undo", "diff", "show", "on", "off", "next", "note",
-              "autonomy", "retry", "drop", "mine", "parallel")
+              "autonomy", "retry", "drop", "mine", "parallel", "release")
 
 
 def _ago(t: float) -> str:
@@ -544,6 +544,9 @@ def _self_status(service: str, limit: int) -> int:
     going = _going_live(v.get("going_live") or {})
     if going:
         print(going)
+    train = _next_go_live(v.get("train") or {})
+    if train:
+        print(train)
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
           + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
@@ -552,13 +555,17 @@ def _self_status(service: str, limit: int) -> int:
         print("\nworking on:")
         for i in working:
             where = ", ".join(i.get("areas") or []) or "?"
+            step = i.get("step") or {}
+            cut = step.get("state") == "interrupted" or (step and not step.get("live") and not i.get("live"))
             print(f"  {i['source']:<7} {i['title'][:60]}  [{where}]"
-                  + ("" if i.get("live") else "  (carries on when there's room)"))
+                  + ("" if i.get("live") else
+                     f"  (cut off at {step.get('kind')} — carries on by itself)" if cut else
+                     "  (carries on when there's room)"))
     if v.get("merging"):
         print("\nmerge queue (applied one at a time, in the order they finished):")
         for n, r in enumerate(v["merging"], 1):
             state = "applying now" if r.get("applying") else "waiting its turn" if r.get("live") \
-                else "back in line when it carries on"
+                else "cut off — back in line when it carries on"
             print(f"  {n}. self/{r['change']}  {r.get('title', '')[:56]} — {state}")
     if v["waiting"]:
         print("\nwaiting for you:")
@@ -626,6 +633,15 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
         got = call("PUT", "/api/self/settings", s, json={"parallel": int(arg)})
         print(f"at most {got['self_parallel']} at once — fewer when your subscriptions' spare room is short")
         return 0
+    if verb == "release":
+        if arg:
+            got = call("PUT", "/api/self/settings", s, json={"release_minutes": int(arg)})
+            print(f"applied changes go live together, at most once every {got['self_release_minutes']} min")
+            return 0
+        got = call("POST", "/api/self/release", s)
+        print(f"going live now, carrying {', '.join('self/' + x for x in got.get('cars') or []) or 'what was waiting'}"
+              if got.get("build") else got.get("why") or "nothing waiting to go live")
+        return 0
     if verb == "next":
         v = call("GET", "/api/self", s)
         for i in v["working"] + v["queue"]:
@@ -660,6 +676,8 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
         return 0
     body: Dict[str, Any] = {}
     if verb == "apply":
+        if getattr(args, "now", False):
+            body["now"] = True
         c = call("GET", f"/api/self/changes/{arg}", s)
         if c.get("protected"):
             if not _confirm_protected(c, getattr(args, "yes", False)):
@@ -680,9 +698,10 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     if r.status_code >= 400:
         print(f"! {got.get('detail') or r.text[:200]}", file=sys.stderr)
         return 1
-    say = {"applying": "applying — the supervisor swaps it in within a couple of minutes (runs still going "
-                       "carry on in it), watches it, "
-                       "and goes back if it isn't healthy (eki builds)",
+    say = {"applying": ("applying — it goes live " + ("now" if body.get("now") else
+                        "with the next release train (`eki self` says when; `--now` doesn't wait)")
+                        + ": the supervisor swaps it in (runs still going carry on in it), watches it, "
+                        "and goes back if it isn't healthy (eki builds)"),
            "applied": got.get("merged") or "applied",
            "conflicts": _conflicts_said(got),
            "unfit": "it didn't pass its checks on top of your checkout",
@@ -918,6 +937,17 @@ def cmd_observe(args) -> int:
             what = e.get("signal") or e.get("what") or e.get("signature") or e.get("error") or ""
             print(f"  {when}  {e['kind']:<8} {str(what)[:60]:<60} {e.get('backend', '')}")
     return 0
+
+
+def _next_go_live(t: Dict[str, Any]) -> str:
+    """"next go-live in N min, carrying: …" — the release train (builds.board)."""
+    if not t or not t.get("carrying"):
+        return ""
+    left = int(t.get("in") or 0)
+    when = "now" if left <= 0 else f"in {max(1, -(-left // 60))} min"
+    what = ", ".join(f"self/{c['id']} ({c.get('title', '')[:40]})" for c in t["carrying"][:6])
+    more = f" and {len(t['carrying']) - 6} more" if len(t["carrying"]) > 6 else ""
+    return f"next go-live {when}, carrying: {what}{more}   (go now: eki self release)"
 
 
 def _going_live(g: Dict[str, Any]) -> str:
@@ -1223,6 +1253,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     "eki self -r \"…\" -r \"…\"         several changes, queued; they start as room allows\n"
                                     "eki self --batch FILE         the same, one request per line (- reads stdin)\n"
                                     "eki self parallel [N]         the most self-work at once (default 2)\n"
+                                    "eki self release [N]          go live now with what's applied; N: at most one go-live every N min (15)\n"
                                     "eki self on|off               let eki work on itself whenever the machine has room\n"
                                     "eki self diff|show|apply|discard|undo <id>\n"
                                     "eki self next                 what it would take next\n"
@@ -1247,6 +1278,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw.add_argument("--json", action="store_true")
     sw.add_argument("-y", "--yes", action="store_true",
                     help="eki self apply: don't ask before applying a change that touches protected paths")
+    sw.add_argument("--now", action="store_true",
+                    help="eki self apply: go live at once, not with the next release train")
 
     ro = sub.add_parser("routing", help="the routing table; explain a request; replay recent ones")
     ro.add_argument("action", nargs="?", default="show", choices=["show", "explain", "replay", "undo", "forget"])

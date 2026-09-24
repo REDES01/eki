@@ -100,6 +100,12 @@ unless it needs them.
 - **Local first, nothing hidden.** Every answer says what produced it and why.
 - **Work outlives the window.** Everything is a run, written down before it
   starts, executed by the engine.
+- **A restart at any moment loses nothing.** eki replaces itself many times
+  a day. Every step of its work is resumable or safely re-runnable — an
+  agent's turn carries on in its session; a check, a git step or a
+  conflict resolution is taken up again from where it stands, once — and
+  *interrupted* is never *failed*: a program killed by a restart, a test run
+  cut off, is carried on, not reported as broken (`eki/steps.py`).
 - **Read what others know about models; don't work it out.** Which model
   a vendor recommends for what is on its own page; which local model
   people run and how its makers measured it is on Ollama. eki reads those

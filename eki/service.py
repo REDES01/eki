@@ -135,6 +135,13 @@ async def lifespan(app: FastAPI):
                 await eng.settle_swap()
             except Exception:                       # noqa: BLE001
                 log.exception("swap outcome")
+            try:
+                # self-work cut off while this engine stayed up (a program
+                # lost): taken up again; and the release train, if it's time
+                await eng.self_carry_on()
+                await eng.self_release()
+            except Exception:                       # noqa: BLE001
+                log.exception("self-work steps")
             if ticks % 5 == 2:
                 try:
                     # what the engine runs but your checkout missed: in, once it can go
@@ -190,6 +197,11 @@ async def lifespan(app: FastAPI):
         resumed = await eng.resume_interrupted()
         if resumed:
             log.info("carried on with %d interrupted run(s)", resumed)
+        # every step of self-work the last engine was in the middle of —
+        # a check, a conflict resolution — taken up again (eki/steps.py)
+        carried = await eng.self_carry_on()
+        if carried:
+            log.info("carried on with %d step(s) of self-work", carried)
     except Exception:                               # noqa: BLE001
         log.exception("interruptions")
 
@@ -280,7 +292,8 @@ PARENT_HEADER = "X-Eki-Parent"
 PERSON_ONLY = (("PUT", re.compile(r"^/api/(self/)?settings$")),
                ("PUT", re.compile(r"^/api/policy$")),
                ("POST", re.compile(r"^/api/self/on$")),
-               ("POST", re.compile(r"^/api/self/changes/[^/]+/(apply|undo)$")))
+               ("POST", re.compile(r"^/api/self/changes/[^/]+/(apply|undo)$")),
+               ("POST", re.compile(r"^/api/self/release$")))
 
 
 def person_only(method: str, path: str) -> bool:
@@ -889,7 +902,14 @@ def self_settings(body: Dict[str, Any]) -> Any:
     """How far it goes alone (autonomy, per area), how much waits for you, local models,
     how many at once."""
     return _self_call(engine().self_settings, **{k: body[k] for k in ("autonomy", "areas", "review_max", "local",
-                                                                   "parallel") if k in body})
+                                                                   "parallel", "release_minutes") if k in body})
+
+
+@app.post("/api/self/release")
+async def self_release() -> Any:
+    """Go live now: what's applied and waiting for the next release train
+    leaves at once, instead of at its time."""
+    return await _self_await(engine().self_release, now=True)
 
 
 @app.get("/api/self/changes/{cid}")
@@ -914,7 +934,8 @@ async def self_decide(cid: str, action: str, body: Optional[Dict[str, Any]] = No
     if fn is None:
         raise HTTPException(404, "apply, discard or undo")
     if action == "apply":
-        return await _self_await(fn, cid, confirmed=bool((body or {}).get("confirm")))
+        return await _self_await(fn, cid, confirmed=bool((body or {}).get("confirm")),
+                                 now=bool((body or {}).get("now")))
     return await _self_await(fn, cid)
 
 

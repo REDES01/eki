@@ -57,6 +57,7 @@ from . import prefs as prefs_mod
 from . import watch as watch_mod
 from . import observe as observe_mod
 from . import selfloop
+from . import steps as steps_mod
 from . import selfengine as selfengine_mod
 from .selfengine import SelfLoop
 from . import workspace as workspace_mod
@@ -635,6 +636,10 @@ class Engine(SelfLoop):
         if not self.settings.get("resume_interrupted", True) or not cid:
             return ""
         p = _payload(run)
+        if p.get("self_resolve"):
+            # a change's conflicts being resolved: its step is carried on, in
+            # the change's worktree where the rebase stands (eki/steps.py)
+            return "self"
         if (p.get("resume_of") or p.get("retry_of")) and \
                 (not p.get("handed_over") or int(p.get("carries") or 1) >= MAX_CARRIES):
             return ""
@@ -652,6 +657,9 @@ class Engine(SelfLoop):
         itself, that it is (`resume_interrupted`)."""
         noted = 0
         self._to_resume: List[Tuple[str, str]] = []
+        # the steps of self-work the previous engine left running were cut
+        # off with it: interrupted, to be taken up again (self_carry_on)
+        steps_mod.recover()
         for run in self.runs.just_interrupted:
             cid = run.get("conversation_id")
             if not cid or run.get("kind") != "ask":
@@ -687,11 +695,30 @@ class Engine(SelfLoop):
     async def _self_take_up(self, rid: str) -> Optional[Dict[str, str]]:
         """A change to eki itself cut off before its program had a session:
         its item is started again — in its thread and worktree, from where
-        it stood — unless something else has taken it up already."""
-        iid = str(_payload(self.runs.get(rid) or {}).get("self_item") or "")
-        if not self._self_on(iid, rid):
+        it stood — unless something else has taken it up already. A conflict
+        resolution cut off is carried on the same way (its step)."""
+        p = _payload(self.runs.get(rid) or {})
+        if p.get("self_resolve"):
+            cid = str(p["self_resolve"])
+            s = steps_mod.get("resolve", cid)
+            if not s:
+                # cut off by an engine from before steps were written down
+                steps_mod.start("resolve", cid, change=cid, run=rid, person=bool(p.get("person")))
+                s = steps_mod.end("resolve", cid, "interrupted", "the engine restarted")
+            return await self._self_carry_resolve(s)                # type: ignore[attr-defined]
+        iid = str(p.get("self_item") or "")
+        if not self._self_on(iid, rid) or not self._self_claim(iid):
             return None
         return await self._self_start(selfloop.get(iid))            # type: ignore[attr-defined]
+
+    @staticmethod
+    def _self_claim(iid: str) -> bool:
+        """The item's step cut off, taken up by the caller — and nobody else
+        (eki/steps.py). True too for an item with no step written down."""
+        s = steps_mod.of_item(iid)
+        if not s or s.get("state") not in ("running", "interrupted"):
+            return True
+        return steps_mod.claim(s["kind"], s["subject"])
 
     @staticmethod
     def _self_on(iid: str, rid: str) -> bool:
@@ -798,7 +825,8 @@ class Engine(SelfLoop):
             was = _payload(old)
             carried = {k: was[k] for k in ("self_item", "goal", "allowed", "route") if k in was} \
                 if was.get("self_item") else {}
-            if carried and not self._self_on(str(carried["self_item"]), rid):
+            if carried and not (self._self_on(str(carried["self_item"]), rid)
+                                and self._self_claim(str(carried["self_item"]))):
                 return None                         # its item has moved on, or is taken up already
             # carrying on is not a way out of what the run was handed, nor
             # does it change whose work it is

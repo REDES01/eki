@@ -69,6 +69,9 @@ DEFAULTS: Dict[str, Any] = {
     #: the most self-work going at once; each turn it's also held to what
     #: the subscriptions' spare room carries (the local models: one between them)
     "self_parallel": 2,
+    #: applied changes go live together, at most once this many minutes (the
+    #: release train); `eki self apply <id> --now` doesn't wait
+    "self_release_minutes": 15,
     #: eki's own code is worked on by your subscriptions' spare room; on,
     #: the local models (Qwen with Codex's hands) may take it too
     "self_local": False,

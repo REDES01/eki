@@ -12,7 +12,9 @@ visible in the chat list — with three things added around it:
                under ~/.eki/self/.
   a base check before any quota is spent, the base has to pass its own
                tests — a change to something already broken can't be judged.
-               A base that passed once is remembered for a day.
+               A base that passed once is remembered for a day, runs that
+               need the same base share one check, and a build that went
+               live and stayed healthy counts as passed.
   a verdict    when the agent is done, its work is committed to the branch
                and put through the candidate check (eki/candidate.py).
 
@@ -232,6 +234,8 @@ def brief(request: str, python: str, where: str = "") -> str:
         f"PNG in {shots}/ named before-<view>-<light|dark>.png and "
         "after-<view>-<light|dark>.png; eki shows them with your change.\n"
         "- Don't commit, push, or touch git branches; eki commits your work itself.\n"
+        "- Don't tick items in ROADMAP.md (`- [ ]` → `- [x]`); eki ticks an item itself, once "
+        "your change has landed.\n"
         "- Don't ask questions — nobody is watching. If something is ambiguous, take "
         "the smaller reading and say so in your final message.\n"
         "- Leave these alone unless the change is about them: "
@@ -408,16 +412,79 @@ def base_known_good(sha: str, home: Optional[Path] = None, now: Optional[float] 
 
 
 def note_base_good(sha: str, home: Optional[Path] = None) -> None:
+    """Remember `sha` passed its own tests — a check that passed, or a build
+    that went live and stayed healthy (its change passed the candidate check
+    before it was swapped in)."""
+    if not sha:
+        return
     path = (home or HOME) / "base-ok.json"
+    with _lock:
+        try:
+            seen = json.loads(path.read_text())
+        except (OSError, ValueError):
+            seen = {}
+        now = time.time()
+        seen = {k: v for k, v in seen.items() if now - float(v) < BASE_OK_SECONDS}
+        seen[sha] = int(now)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(seen))
+
+
+def _base_failed(sha: str, since: float, home: Optional[Path]) -> str:
+    """Why `sha` failed its check, if it failed one that ended after `since`."""
     try:
-        seen = json.loads(path.read_text())
+        got = json.loads(((home or HOME) / "base-bad.json").read_text()).get(sha) or {}
     except (OSError, ValueError):
-        seen = {}
-    now = time.time()
-    seen = {k: v for k, v in seen.items() if now - float(v) < BASE_OK_SECONDS}
-    seen[sha] = int(now)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(seen))
+        return ""
+    return str(got.get("why") or "") if float(got.get("at") or 0) >= since else ""
+
+
+def _note_base_bad(sha: str, why: str, home: Optional[Path]) -> None:
+    path = (home or HOME) / "base-bad.json"
+    with _lock:
+        try:
+            seen = json.loads(path.read_text())
+        except (OSError, ValueError):
+            seen = {}
+        now = time.time()
+        seen = {k: v for k, v in seen.items() if now - float(v.get("at") or 0) < BASE_OK_SECONDS}
+        seen[sha] = {"at": now, "why": why}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(seen))
+
+
+def check_base_once(where: Path, sha: str, python: str, home: Optional[Path] = None,
+               tests: Optional[Callable[[Path, str], Any]] = None) -> str:
+    """The base passing its own tests, checked once per commit: "" when it
+    passes, else why not. After a swap every run wants the same new base at
+    once (2026-09-24: five full test runs side by side, each slowing the
+    others); one takes the commit's lock and runs the check, the rest wait
+    for it and take its answer — a pass, or a failure that ended while they
+    waited. The lock is a file, so a CLI `eki self` waits too."""
+    import fcntl
+    tests = tests or candidate.check_tests
+    if base_known_good(sha, home):
+        return ""
+    since = time.time()
+    locks = (home or HOME) / "base-checks"
+    locks.mkdir(parents=True, exist_ok=True)
+    with open(locks / f"{sha}.lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            if base_known_good(sha, home):
+                return ""
+            why = _base_failed(sha, since, home)
+            if why:
+                return why
+            try:
+                tests(where, python)
+            except RuntimeError as e:
+                _note_base_bad(sha, str(e), home)
+                return str(e) or "its tests failed"
+            note_base_good(sha, home)
+            return ""
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ---- the steps -----------------------------------------------------------------------
@@ -429,10 +496,18 @@ Say = Optional[Callable[[str], None]]
 
 def begin(request: str, *, root: Path, base: str = "HEAD", python: Optional[str] = None,
           home: Optional[Path] = None, check_base: bool = True, say: Say = None,
-          **meta: Any) -> Proposal:
+          passed: Optional[Callable[[str], None]] = None,
+          opened: Optional[Callable[[Proposal], None]] = None,
+          resume: Optional[Proposal] = None, **meta: Any) -> Proposal:
     """Open a change: its worktree, and — before anything is spent — the base
     passing its own tests. A proposal that comes back with a verdict didn't
-    start (and is already written down)."""
+    start (and is already written down). `opened` hears the proposal as soon
+    as its worktree exists, and `resume` is that proposal again after a
+    restart cut the base check off: the check runs again in the same
+    worktree, nothing opened twice. `passed` hears the base once it has
+    passed (or wasn't checked), so a run cut off here — by a swap — can start
+    again from that base instead of checking a new one. A check cut off
+    raises steps.Interrupted: no verdict, the worktree kept."""
     say = say or (lambda _line: None)
     python = python or sys.executable
     if not request.strip():
@@ -441,33 +516,42 @@ def begin(request: str, *, root: Path, base: str = "HEAD", python: Optional[str]
     why = builds.cant_change_code(root)
     if why:
         raise SelfWorkError(why)
-    wid = uuid.uuid4().hex[:8]
-    known = {k: v for k, v in meta.items() if k in Proposal.__dataclass_fields__}
-    p = Proposal(id=wid, request=request.strip(), root=str(root), at=int(time.time()), **known)
-    where = open_worktree(root, wid, base, home)
-    p.branch, p.worktree = f"self/{wid}", str(where)
-    p.base = git(where, "rev-parse", "HEAD")
-    say(f"worktree: {where}  (branch {p.branch}, from {p.base[:10]})")
+    if resume is not None and resume.worktree and _ok(resume.worktree, "rev-parse", "--git-dir"):
+        p, where, wid = resume, Path(resume.worktree), resume.id
+        say(f"worktree: {where}  (branch {p.branch}, from {p.base[:10]}) — again, after a restart")
+    else:
+        wid = uuid.uuid4().hex[:8]
+        known = {k: v for k, v in meta.items() if k in Proposal.__dataclass_fields__}
+        p = Proposal(id=wid, request=request.strip(), root=str(root), at=int(time.time()), **known)
+        where = open_worktree(root, wid, base, home)
+        p.branch, p.worktree = f"self/{wid}", str(where)
+        p.base = git(where, "rev-parse", "HEAD")
+        say(f"worktree: {where}  (branch {p.branch}, from {p.base[:10]})")
+        if opened is not None:
+            opened(p)
     if check_base and not base_known_good(p.base, home):
         say("checking the base passes its own tests, before spending anything…")
-        try:
-            candidate.check_tests(where, python)
-        except RuntimeError as e:
+        why = check_base_once(where, p.base, python, home)
+        if why:
             close_worktree(root, where, wid)
             p.worktree = p.branch = ""
             p.verdict = (f"not started: the base ({p.base[:10]}) doesn't pass its own tests, "
-                         f"so a change to it can't be judged — {e}")[:500]
+                         f"so a change to it can't be judged — {why}")[:500]
             record(p, home)
             return p
-        note_base_good(p.base, home)
+    if passed is not None:
+        passed(p.base)
     return p
 
 
 def conclude(p: Proposal, got: Dict[str, str], *, python: Optional[str] = None,
              home: Optional[Path] = None, check: Callable[..., candidate.Report] = candidate.check,
-             say: Say = None, before_commit: Optional[Callable[[Path], None]] = None) -> Proposal:
-    """The agent is done: commit what it did and judge it. `before_commit`
-    may add to the change (the ROADMAP tick) before it's committed."""
+             say: Say = None) -> Proposal:
+    """The agent is done: commit what it did and judge it. Safe to do again:
+    a check cut off by a restart (steps.Interrupted) leaves the commit, and
+    the next try judges that commit rather than finding nothing to commit.
+    A tick the agent put in ROADMAP.md is taken out — the merge queue ticks
+    the item once the change lands."""
     say = say or (lambda _line: None)
     python = python or sys.executable
     root, where = Path(p.root), Path(p.worktree)
@@ -485,20 +569,25 @@ def conclude(p: Proposal, got: Dict[str, str], *, python: Optional[str] = None,
     if got.get("state") != "done":
         return finish(f"the agent's run ended {got.get('state') or 'without a state'}; "
                       "whatever it wrote is still in the worktree")
-    if before_commit is not None:
-        before_commit(where)
-    p.files = changed(where)
+    pending = changed(where)
+    if roadmap.NAME in pending and p.base and not asks_to_tick(p.request, p.source) and drop_ticks(where, p.base):
+        pending = changed(where)
+    if pending:
+        why = {"fault": "A fault eki observed in itself", "roadmap": "The next item in ROADMAP.md",
+               "note": "Picked from eki's weekly note", "undo": f"Taking back self/{p.reverts}"
+               }.get(p.source, "Asked through `eki self`")
+        git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
+            "commit", "-q", "--no-verify", "-m",
+            f"self: {p.headline.splitlines()[0][:68]}\n\n{why}; written by "
+            f"{p.backend or 'an agent'} in run {p.run or '?'}.\nNot merged by eki.")
+    head = git(where, "rev-parse", "HEAD")
+    # committed before a restart cut its check off: what it holds is the change
+    p.files = [f for f in git(where, "diff", "--name-only", p.base, head).splitlines() if f] \
+        if p.base and head != p.base else pending
     if not p.files:
         return finish("the agent changed nothing", keep=False)
     p.protected = touches_protected(p.files)
-    why = {"fault": "A fault eki observed in itself", "roadmap": "The next item in ROADMAP.md",
-           "note": "Picked from eki's weekly note", "undo": f"Taking back self/{p.reverts}"
-           }.get(p.source, "Asked through `eki self`")
-    git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
-        "commit", "-q", "--no-verify", "-m",
-        f"self: {p.headline.splitlines()[0][:68]}\n\n{why}; written by "
-        f"{p.backend or 'an agent'} in run {p.run or '?'}.\nNot merged by eki.")
-    p.commit = git(where, "rev-parse", "HEAD")
+    p.commit = head
 
     if docs_only(p.files):
         report = candidate.Report(str(where), [candidate.Check(
@@ -630,14 +719,15 @@ def _put_back(where: Path, commit: str) -> None:
         subprocess.run(["git", "-C", str(where), "reset", "-q", "--hard", commit], capture_output=True)
 
 
-# ---- the ROADMAP tick, kept through a rebase ------------------------------------
+# ---- the ROADMAP tick: never part of a change ------------------------------------
 #
-# A change that finishes a roadmap item ticks it in its own commit. Put on
-# top of a checkout whose ROADMAP.md moved on, that hunk can conflict, and an
-# agent resolving the rest can drop it — the change lands, the box stays
-# open. So the tick is taken from the change's record, not its diff: a
-# ROADMAP.md conflict is settled as the checkout's file with the tick put
-# back on top, and a rebase that finished without the tick gets it again.
+# A change used to tick its roadmap item in its own commit. Put on top of a
+# checkout whose ROADMAP.md had moved on — other changes' ticks, landing
+# back to back — that hunk conflicted, and an agent resolving the rest could
+# drop it. Now the tick is written once, by the merge queue, as its own
+# commit after the change lands (eki/selfengine.py `_self_ticks`); a change
+# carries only real edits to the file, and a tick in one (an agent's, or a
+# change made before this) is taken out before it's put on top.
 
 def tick_of(c: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     """(key, mark) of the roadmap item the change finishes, or None."""
@@ -646,39 +736,123 @@ def tick_of(c: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _retick(where: Path, tick: Optional[Tuple[str, str]]) -> bool:
-    """A rebase stopped on ROADMAP.md: the checkout's file, the item ticked
-    on it, staged. False when there's no tick of the change's to settle it with."""
-    if not tick or roadmap.NAME not in unmerged(where):
+#: a request that is itself about ticking the roadmap ("tick the item …"):
+#: its ticks are what it was asked for, and stay
+_TICK_ASKED = re.compile(r"\b(?:un)?tick(?:\s+off)?\s+(?:the\b|its\b|an?\b|items?\b|roadmap\b|['\"“‘*`])"
+                         r"|\bcheck off\b|\bmark (?:it|them|\w+ items?) (?:as )?done\b", re.I)
+
+
+_NOT = re.compile(r"(n't|\bnot|\bnever|\bno longer|\bwithout)\s+(\w+\s+)?$", re.I)
+
+
+def asks_to_tick(request: str, source: str = "asked") -> bool:
+    """Does a person's request ask for a tick ("tick 'Roots eki starts…'")
+    — not merely mention one ("don't tick", "no longer tick")? A roadmap
+    item's own request never does: its tick is the merge queue's to write."""
+    if source == "roadmap":
         return False
-    git(where, "checkout", "--ours", "--", roadmap.NAME)       # in a rebase, "ours" is what it goes onto
-    roadmap.tick_file(where, *tick)
-    git(where, "add", "--", roadmap.NAME)
+    text = request or ""
+    return any(not _NOT.search(text[max(0, m.start() - 24):m.start()])
+               for m in _TICK_ASKED.finditer(text))
+
+
+def drop_ticks(where: Path, base: str) -> bool:
+    """Items open at `base` and ticked in the worktree's ROADMAP.md, open
+    again — the file's other edits kept. True if the file changed."""
+    path = Path(where) / roadmap.NAME
+    try:
+        before = git(where, "show", f"{base}:{roadmap.NAME}")
+        after = path.read_text()
+    except (SelfWorkError, OSError):
+        return False
+    fixed = roadmap.without_new_ticks(before, after)
+    if fixed == after:
+        return False
+    path.write_text(fixed)
     return True
 
 
-def _rebase(where: Path, *args: str,
-            tick: Optional[Tuple[str, str]] = None) -> Tuple[subprocess.CompletedProcess, List[str]]:
-    """`git rebase <args>`, going on by itself past a ROADMAP.md conflict the
-    change's tick settles. What git said, and the files still conflicting."""
+def _untick_commit(where: Path, base: str) -> bool:
+    """A committed change that ticks ROADMAP.md: the tick taken out of its
+    last commit. True if it had one."""
+    if not drop_ticks(where, base):
+        return False
+    git(where, "add", "--", roadmap.NAME)
+    if not git(where, "diff", "--cached", "--name-only"):
+        return False
+    git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
+        "commit", "-q", "--amend", "--no-edit", "--no-verify")
+    return True
+
+
+def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
+    """The one writer of ROADMAP.md ticks. An item whose change has landed —
+    or that its agent found already done — is ticked in your checkout, as a
+    small commit of its own; one whose change was undone is opened again.
+    Each once (ticks.json). While your checkout has edits of its own to
+    ROADMAP.md, or git is mid-merge there, it waits. What it wrote, as
+    "tick self/<id>" / "untick self/<id>"."""
+    path = (home or HOME) / "ticks.json"
+    rows = [c for c in reversed(changes(home)) if tick_of(c)]          # oldest first
+    try:
+        done: Dict[str, str] = json.loads(path.read_text())
+    except (OSError, ValueError):
+        done = {}
+    wrote: List[str] = []
+    for c in rows:
+        was = done.get(c["id"], "")
+        landed = c["state"] == "applied" or (c["state"] == "no change" and not c.get("commit"))
+        if landed and not was:
+            act = "tick"
+        elif c["state"] == "undone" and was == "ticked":
+            act = "untick"
+        else:
+            continue
+        got = _roadmap_commit(Path(root), c, act)
+        if got is None:
+            break                                   # your checkout isn't ready: later
+        done[c["id"]] = act + "ed"
+        if got:
+            wrote.append(f"{act} self/{c['id']}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(done, indent=2))
+    return wrote
+
+
+def _roadmap_commit(root: Path, c: Dict[str, Any], act: str) -> Optional[str]:
+    """Tick (or untick) the change's item in `root`/ROADMAP.md and commit
+    just that file. The commit, "" when there was nothing to do, None when
+    the checkout isn't ready for it."""
+    key, mark = tick_of(c) or ("", "")
+    file = Path(root) / roadmap.NAME
+    try:
+        if git(root, "status", "--porcelain", "--", roadmap.NAME):
+            return None                             # your own edits to it come first
+        text = file.read_text()
+    except (SelfWorkError, OSError):
+        return None
+    after = roadmap.tick(text, key, mark) if act == "tick" else roadmap.untick(text, key, mark)
+    if after == text:
+        return ""
+    file.write_text(after)
+    title = (c.get("title") or key)[:60]
+    said = "landed" if act == "tick" else "was undone"
+    try:
+        git(root, "-c", "user.name=eki", "-c", "user.email=eki@localhost", "commit", "-q",
+            "--no-verify", "-m", f"roadmap: {act} “{title}” — self/{c['id']} {said}", "--", roadmap.NAME)
+    except SelfWorkError:
+        file.write_text(text)                       # mid-merge, say: as it was, and later
+        return None
+    return git(root, "rev-parse", "--short", "HEAD")
+
+
+def _rebase(where: Path, *args: str) -> Tuple[subprocess.CompletedProcess, List[str]]:
+    """`git rebase <args>`: what git said, and the files still conflicting."""
     cmd = ["git", "-C", str(where), "-c", "user.name=eki", "-c", "user.email=eki@localhost",
            "-c", "core.editor=true", "rebase"]
     env = {**os.environ, "GIT_EDITOR": "true"}
     got = subprocess.run(cmd + list(args), capture_output=True, text=True, env=env)
-    while got.returncode and rebasing(where) and _retick(where, tick) and not unmerged(where):
-        got = subprocess.run(cmd + ["--continue"], capture_output=True, text=True, env=env)
     return got, (unmerged(where) if got.returncode and rebasing(where) else [])
-
-
-def keep_tick(where: Path, tick: Optional[Tuple[str, str]]) -> bool:
-    """After a rebase: the item ticked again, in the change's last commit, if
-    the rebase lost it. True if it had to be put back."""
-    if not tick or not roadmap.tick_file(where, *tick):
-        return False
-    git(where, "add", "--", roadmap.NAME)
-    git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
-        "commit", "-q", "--amend", "--no-edit", "--no-verify")
-    return True
 
 
 def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
@@ -689,14 +863,14 @@ def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     where = ensure_worktree(c, home)
     onto = line(root)
     _put_back(where, "")                        # a rebase left stopped by an earlier try
-    tick = tick_of(c)
-    got, files = _rebase(where, "-q", onto, tick=tick)
+    if c.get("base") and not asks_to_tick(c.get("request") or "", c.get("source") or "") and _untick_commit(where, c["base"]):
+        c["commit"] = git(where, "rev-parse", "HEAD")
+    got, files = _rebase(where, "-q", onto)
     if got.returncode and not files:
         _put_back(where, c.get("commit") or "")
         why = (got.stderr.strip() or got.stdout.strip()).splitlines()
         raise SelfWorkError("it couldn't be put on top of your checkout: " + (why[-1] if why else "git failed"))
-    return {"where": str(where), "onto": onto, "files": files, "commit": c.get("commit") or "",
-            "tick": tick}
+    return {"where": str(where), "onto": onto, "files": files, "commit": c.get("commit") or ""}
 
 
 def landed_since(cid: str, onto: str, files: List[str], home: Optional[Path] = None) -> str:
@@ -772,7 +946,7 @@ def continue_rebase(info: Dict[str, Any]) -> List[str]:
         if left:
             raise SelfWorkError("still conflicting: " + ", ".join(left))
         info["resolved"] = sorted(set(info.get("resolved") or []) | set(info.get("files") or []))
-        got, more = _rebase(where, "--continue", tick=info.get("tick"))
+        got, more = _rebase(where, "--continue")
         if not rebasing(where):
             if got.returncode != 0:
                 raise SelfWorkError("the rebase didn't finish: "
@@ -807,8 +981,6 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
             still = marked(where, went)
             if still:
                 why = "conflict markers were committed in " + ", ".join(still)
-        if not why:
-            keep_tick(where, info.get("tick"))
     except SelfWorkError as e:
         why = str(e)
     if why:
@@ -824,11 +996,18 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
 
 def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None,
           check: Callable[..., candidate.Report] = candidate.check, say: Say = None,
-          swap: Optional[Callable[..., Any]] = None, by_person: bool = False) -> Dict[str, Any]:
+          swap: Optional[Callable[..., Any]] = None, by_person: bool = False,
+          now: bool = False) -> Dict[str, Any]:
     """Put a proposed change to work. If your checkout has moved on since it
     was made, it's put on top of it first and judged again. Documentation
-    goes straight into your checkout; code becomes a build the supervisor
-    swaps in — watched, and rolled back if it isn't healthy.
+    goes straight into your checkout; code becomes a build that boards the
+    release train (builds.board): the next go-live carries it, and everything
+    else applied since, and the supervisor swaps it in — watched, and rolled
+    back if it isn't healthy. `now`: a person wants it live at once.
+
+    Safe to do again after a restart: a rebase that already happened is a
+    rebase with nothing to do, and a check cut off (steps.Interrupted) is
+    simply run again.
 
     A change touching PROTECTED goes in only when a person asked for it
     (`by_person`): the protection keeps eki from applying those alone, not
@@ -856,16 +1035,18 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     p.worktree = str(where)
     if by_person:
         p.applied_by = "you"
+    if c.get("base") and not asks_to_tick(c.get("request") or "", c.get("source") or "") and _untick_commit(where, c["base"]):
+        commit = p.commit = git(where, "rev-parse", "HEAD")
+        p.files = [f for f in git(where, "diff", "--name-only", c["base"], commit).splitlines() if f]
     if not is_in(root, head, commit):
         say("your checkout has moved on since — putting the change on top of it…")
-        got, _ = _rebase(where, "-q", head, tick=tick_of(c))
+        got, _ = _rebase(where, "-q", head)
         if got.returncode != 0:
             subprocess.run(["git", "-C", str(where), "rebase", "--abort"], capture_output=True)
             why = (got.stderr.strip() or got.stdout.strip()).splitlines()
             set_state(cid, "conflicts", home, why="it doesn't go on top of your checkout as it is now: "
                       + (why[-1] if why else "a conflict")[:200])
             return {"state": "conflicts", "id": cid}
-        keep_tick(where, tick_of(c))
         p.commit, p.base = git(where, "rev-parse", "HEAD"), head
         p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
         p.protected = touches_protected(p.files)
@@ -896,7 +1077,10 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         return {"state": "proposed", "id": cid, "why": merged}
     from . import builds
     build = builds.make(root, p.commit, note=f"self/{cid}")
-    (swap or builds.swap)(build, self_id=cid)
+    if swap is not None:
+        swap(build, self_id=cid)
+    else:
+        builds.board(build, self_id=cid, now=now)
     set_state(cid, "applying", home, build=str(build))
     return {"state": "applying", "id": cid, "build": str(build)}
 

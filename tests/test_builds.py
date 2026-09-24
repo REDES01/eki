@@ -436,3 +436,24 @@ def test_eki_self_says_when_a_new_version_goes_live():
     assert _going_live({"state": "waiting", "self": "ab12", "in": 95}).startswith(
         "new version (self/ab12) going live in 2 min")
     assert _going_live({"state": "swapping", "in": 0}) == "new version going live now"
+
+
+def test_a_build_healthy_after_its_watch_is_a_known_good_base(src):
+    """Its change passed the candidate check before it went in: new work on
+    that commit doesn't run the tests all over again."""
+    from eki import selfwork
+    sh(src, "checkout", "-q", "-b", "self/abc")
+    (src / "README.md").write_text("v2\n")
+    sh(src, "commit", "-q", "-am", "self: v2")
+    sh(src, "checkout", "-q", "main")
+    b = builds.make(src, "self/abc", note="self/abc")
+    commit = sh(src, "rev-parse", "self/abc")
+    builds.SELF_HOME.mkdir(parents=True)
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps(
+        {"state": "rolled back", "target": str(b), "self": "abc", "at": 1}))
+    builds.settle_swap()
+    assert not selfwork.base_known_good(commit, builds.SELF_HOME)       # not a rolled-back one
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps(
+        {"state": "healthy", "target": str(b), "self": "abc", "at": 2}))
+    builds.settle_swap()
+    assert selfwork.base_known_good(commit, builds.SELF_HOME)

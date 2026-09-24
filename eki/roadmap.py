@@ -8,9 +8,12 @@ Work while you're away`) and, under them, items —
           indented lines carry the item on
 
 eki reads it to find the next thing to work on in itself, in the order the
-file gives, and ticks an item in the same commit as the change that
-finished it, naming that change. So a tick lands exactly when the work
-does, and a change you discard takes its tick with it.
+file gives, and ticks an item once the change that finished it has landed,
+naming that change — one small commit of its own, written by the merge queue
+alone (eki/selfengine.py, `_self_ticks`), and taken back if the change is
+undone. A change never carries a tick in its own commit (a tick an agent
+made anyway is dropped: `without_new_ticks`), so a tick is never what makes
+two changes conflict.
 
 Never taken: an item that says `(for a person)` anywhere in it, and
 anything under *Not planned* or *Keeping this file*. Not taken yet: an item
@@ -148,6 +151,40 @@ def tick(text: str, key: str, note: str) -> str:
     last = lines[item.end]
     body = last.rstrip("\r\n")
     lines[item.end] = f"{body} {note}{last[len(body):]}" if note else last
+    return "".join(lines)
+
+
+def untick(text: str, key: str, note: str = "") -> str:
+    """The item open again, `note` (or any eki mark) gone from its end — or
+    the text as it was if the item is gone or already open."""
+    item = find(text, key)
+    if item is None or not item.done:
+        return text
+    lines = text.splitlines(keepends=True)
+    lines[item.start] = re.sub(r"^- \[[xX]\]", "- [ ]", lines[item.start], count=1)
+    last = lines[item.end]
+    body = last.rstrip("\r\n")
+    trimmed = body.replace(f" {note}", "") if note else MARK.sub("", body)
+    lines[item.end] = trimmed + last[len(body):]
+    return "".join(lines)
+
+
+#: what a tick says after the item, whatever change it names
+MARK = re.compile(r"\s*\*\(eki: self/[0-9a-f]+\)\*")
+
+
+def without_new_ticks(before: str, after: str) -> str:
+    """`after`, with every item that was open in `before` and is ticked in
+    `after` as it was in `before` — the ticks a change made (with whatever
+    note it put after them) taken out, the rest of its edits to the file
+    kept."""
+    was = {i.key: i for i in parse(before) if not i.done}
+    old = before.splitlines(keepends=True)
+    lines = after.splitlines(keepends=True)
+    for item in sorted(parse(after), key=lambda i: -i.start):
+        if item.done and item.key in was:
+            open_ = was[item.key]
+            lines[item.start:item.end + 1] = old[open_.start:open_.end + 1]
     return "".join(lines)
 
 

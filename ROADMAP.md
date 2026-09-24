@@ -296,8 +296,8 @@ So that the agent doing the work can ask eki for what it can't do itself.
 - [ ] `eki submit` / `eki wait <id>` for work too slow to block a shell on
 - [ ] A depth guard (`EKI_DEPTH`) so an agent calling eki calling an agent
       stops somewhere, and nested calls count against quota like any other
-- [ ] eki writes a short "how to use eki here" section into a project's
-      `CLAUDE.md` / `AGENTS.md`, and allowlists `eki` for Claude Code
+- [x] eki writes a short "how to use eki here" section into a project's
+      `CLAUDE.md` / `AGENTS.md`, and allowlists `eki` for Claude Code *(eki: self/acf331f7)*
 - *Evolve:* that section is generated from `eki capabilities`, so it changes
   when the Mac's backends do — nobody edits it by hand.
 

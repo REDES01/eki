@@ -109,6 +109,7 @@ eki history -q kyoto    # search past conversations
 eki models              # what's loaded, what it costs in memory
 eki agent status
 eki context            # the one AGENTS.md Claude Code and Codex both read
+eki context use .       # a project: eki's section in AGENTS.md, `eki` allowed for Claude Code
 ```
 
 An agent calling `eki ask` hands the run only what it needs — read-only by

@@ -32,6 +32,15 @@ alone becomes the `AGENTS.md`, and `CLAUDE.md` starts with `@AGENTS.md`,
 anything else in it kept below as Claude-only. eki only does this when
 asked; it never writes into a project on its own.
 
+`eki context use [DIR]` is the same, plus what an agent working there needs
+to reach eki: eki's section (the one in the global file, between the same
+markers, so running it again only refreshes it) in the project's
+`AGENTS.md`, and `Bash(eki:*)` on the allow list of
+`.claude/settings.local.json` — the personal settings file, since eki is on
+this Mac and not necessarily a teammate's — so Claude Code there runs `eki`
+without asking. Other settings in that file are kept; one that isn't JSON
+is left alone and reported.
+
 ## Command line
 
 ```
@@ -40,4 +49,5 @@ eki context show [--claude]
 eki context edit [--claude] # $EDITOR on the source, then relink
 eki context import          # take the CLIs' own files in
 eki context project [DIR]   # AGENTS.md canonical, CLAUDE.md an import
+eki context use [DIR]       # that, eki's section, and `eki` allowed for Claude Code
 ```

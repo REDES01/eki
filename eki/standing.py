@@ -22,10 +22,13 @@ which of it is Claude-only — the original is kept under
 ~/.eki/context/imported/, and the link takes its place.
 
 A project follows the same rule (`eki context project DIR`): its AGENTS.md
-is canonical and its CLAUDE.md starts with `@AGENTS.md`.
+is canonical and its CLAUDE.md starts with `@AGENTS.md`. `eki context use
+DIR` goes one step further (ROADMAP, Stage 4): the project's AGENTS.md gets
+eki's section too, and Claude Code there may run `eki` without asking.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -37,6 +40,8 @@ CLAUDE_HOME = Path("~/.claude").expanduser()
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
 
 IMPORT = "@AGENTS.md"
+#: the rule that lets Claude Code run `eki …` in a project without a prompt
+ALLOW = "Bash(eki:*)"
 BEGIN = "<!-- eki: how to use eki here (kept current by eki; edit above or below) -->"
 END = "<!-- eki: end -->"
 
@@ -223,3 +228,44 @@ def project(folder: str) -> Dict[str, Any]:
         done.append("CLAUDE.md imports AGENTS.md")
     return {"folder": str(root), "done": done}
 
+
+
+def _allow_eki(root: Path) -> bool:
+    """`eki` on the allow list of the project's .claude/settings.local.json —
+    the personal file, not the shared one: eki is on this Mac, not on every
+    teammate's. Other settings and rules there are kept as they are."""
+    path = root / ".claude" / "settings.local.json"
+    text = _read(path)
+    try:
+        settings = json.loads(text) if text.strip() else {}
+    except ValueError:
+        raise ValueError(f"{path} isn't JSON; left alone")
+    if not isinstance(settings, dict):
+        raise ValueError(f"{path} isn't a settings object; left alone")
+    perms = settings.setdefault("permissions", {})
+    allow = perms.setdefault("allow", [])
+    if ALLOW in allow:
+        return False
+    allow.append(ALLOW)
+    return _write(path, json.dumps(settings, indent=2) + "\n")
+
+
+def use_here(folder: str) -> Dict[str, Any]:
+    """Tell the agents working in a project how to reach eki: the project
+    gets the AGENTS.md / CLAUDE.md shape, eki's section in its AGENTS.md
+    (between the markers, so a second run only refreshes it), and `eki` on
+    Claude Code's allow list there. Only when asked, like `project`."""
+    root = Path(folder).expanduser()
+    if not root.is_dir():
+        raise ValueError(f"no such folder: {root}")
+    agents = root / "AGENTS.md"
+    if agents.is_symlink() or (root / "CLAUDE.md").is_symlink():
+        return {"folder": str(root), "done": [], "note": "a link is there; left alone"}
+    done = list(project(str(root))["done"])
+    if _write(agents, _with_section(_read(agents))):
+        done.append("eki's section in AGENTS.md")
+    if not imports_agents(_read(root / "CLAUDE.md")):
+        done += project(str(root))["done"]
+    if _allow_eki(root):
+        done.append(f"{ALLOW} allowed in .claude/settings.local.json")
+    return {"folder": str(root), "done": done}

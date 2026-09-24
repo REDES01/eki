@@ -448,8 +448,8 @@ def cmd_context(args) -> int:
         if act == "sync":
             print(json.dumps(standing.sync(), indent=2))
             return 0
-        if act == "project":
-            r = standing.project(args.folder or ".")
+        if act in ("project", "use"):
+            r = (standing.use_here if act == "use" else standing.project)(args.folder or ".")
             print("; ".join(r["done"]) or r.get("note") or "already so")
             return 0
     except ValueError as e:
@@ -1065,8 +1065,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     cx = sub.add_parser("context", help="one AGENTS.md for Claude Code and Codex")
     cx.add_argument("action", nargs="?", default="status",
-                    choices=["status", "show", "edit", "import", "sync", "project"])
-    cx.add_argument("folder", nargs="?", default="", help="project: the folder (default here)")
+                    choices=["status", "show", "edit", "import", "sync", "project", "use"])
+    cx.add_argument("folder", nargs="?", default="",
+                    help="project/use: the folder (default here); use also adds eki's section "
+                         "and lets Claude Code run eki there")
     cx.add_argument("--claude", action="store_true", help="show/edit: the Claude-only part")
 
     g = sub.add_parser("agent", help="start the engine at login")

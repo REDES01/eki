@@ -2,6 +2,7 @@
 """One standing context: AGENTS.md is canonical, CLAUDE.md imports it, and
 each CLI's global file is a link into eki's source (conftest keeps all of
 it in a temporary home)."""
+import json
 import os
 
 import pytest
@@ -118,6 +119,40 @@ def test_a_project_s_claude_md_becomes_an_import(tmp_path):
     assert standing.project(str(empty))["done"] == [] and not list(empty.iterdir())
     with pytest.raises(ValueError):
         standing.project(str(tmp_path / "nowhere"))
+
+
+def test_use_here_adds_eki_s_section_and_allows_eki_for_claude(tmp_path):
+    empty = tmp_path / "e"
+    empty.mkdir()
+    r = standing.use_here(str(empty))
+    agents = (empty / "AGENTS.md").read_text()
+    assert agents == standing.eki_section()
+    assert (empty / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    settings = json.loads((empty / ".claude" / "settings.local.json").read_text())
+    assert settings["permissions"]["allow"] == [standing.ALLOW]
+    assert len(r["done"]) == 3
+    assert standing.use_here(str(empty))["done"] == []                  # already so
+
+    only_claude = tmp_path / "c"
+    (only_claude / ".claude").mkdir(parents=True)
+    (only_claude / "CLAUDE.md").write_text("# C\n\nRun make test.\n")
+    (only_claude / ".claude" / "settings.local.json").write_text(
+        '{"model": "opus", "permissions": {"allow": ["Bash(make:*)"], "deny": ["Read(.env)"]}}')
+    standing.use_here(str(only_claude))
+    agents = (only_claude / "AGENTS.md").read_text()
+    assert agents.startswith("# C\n\nRun make test.\n\n") and agents.endswith(standing.END + "\n")
+    assert (only_claude / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    settings = json.loads((only_claude / ".claude" / "settings.local.json").read_text())
+    assert settings == {"model": "opus", "permissions": {
+        "allow": ["Bash(make:*)", standing.ALLOW], "deny": ["Read(.env)"]}}
+
+
+def test_use_here_leaves_a_broken_settings_file_alone(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.local.json").write_text("{not json")
+    with pytest.raises(ValueError):
+        standing.use_here(str(tmp_path))
+    assert (tmp_path / ".claude" / "settings.local.json").read_text() == "{not json"
 
 
 def test_cli_status_and_show(capsys):

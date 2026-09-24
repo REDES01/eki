@@ -13,7 +13,9 @@ naming that change — one small commit of its own, written by the merge queue
 alone (eki/selfengine.py, `_self_ticks`), and taken back if the change is
 undone. A change never carries a tick in its own commit (a tick an agent
 made anyway is dropped: `without_new_ticks`), so a tick is never what makes
-two changes conflict.
+two changes conflict — and never takes one back either: a tick it would
+lose is put back before it lands (`keep_ticks`), and the merge queue ticks
+a landed item again whenever the file shows it open.
 
 Never taken: an item that says `(for a person)` anywhere in it, and
 anything under *Not planned* or *Keeping this file*. Not taken yet: an item
@@ -214,6 +216,22 @@ def without_new_ticks(before: str, after: str) -> str:
             open_ = was[item.key]
             lines[item.start:item.end + 1] = old[open_.start:open_.end + 1]
     return "".join(lines)
+
+
+def keep_ticks(before: str, after: str) -> str:
+    """`after`, with every item ticked in `before` and open in `after` ticked
+    again, with the eki mark it had in `before` — what a change carrying an
+    old copy of a ticked line (a docs edit made from an older checkout, a
+    conflict resolved to the older side) would otherwise take back. The
+    rest of the change's edits to those lines are kept."""
+    for item in parse(before):
+        if not item.done:
+            continue
+        now = find(after, item.key)
+        if now is not None and not now.done:
+            found = MARK.search(item.text)
+            after = tick(after, item.key, found.group(0).strip() if found else "")
+    return after
 
 
 def tick_file(root: Path, key: str, note: str) -> bool:

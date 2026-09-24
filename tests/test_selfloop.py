@@ -422,6 +422,88 @@ async def test_a_tick_survives_your_roadmap_moving_on_before_you_apply(eng):
     await eng.runner.stop()
 
 
+def test_an_old_copy_of_a_ticked_line_gets_its_tick_back_the_rest_kept():
+    key = roadmap.parse(PLAN)[0].key
+    ticked = roadmap.tick(PLAN, key, roadmap.mark("c1"))
+    old_copy = PLAN.replace("## Not planned", "- [ ] **A new item.** Added.\n\n## Not planned")
+    kept = roadmap.keep_ticks(ticked, old_copy)
+    assert "- [x] **Commit the working tree:** the image edits. *(eki: self/c1)*\n" in kept
+    assert "- [ ] **A new item.** Added." in kept and "- [x] **One skill store.**" in kept
+    assert roadmap.keep_ticks(ticked, kept) == kept
+    assert selfwork.asks_to_untick("Update ROADMAP.md: untick 'Commit the working tree'")
+    assert not selfwork.asks_to_untick("Update ROADMAP.md: tick 'Commit the working tree'")
+    assert not selfwork.asks_to_untick("a change must never untick the item it didn't finish")
+
+
+async def _landed_and_ticked(eng):
+    """"Commit the working tree", landed and ticked by the merge queue."""
+    eng.self_on(True)
+    Agent.edits = {"README.md": "eki, committed\n"}
+    Agent.answers = ["Committed.\nITEM: done"]
+    await turn(eng)
+    first = next(i for i in selfloop.items() if i.source == "roadmap")
+    assert (await eng.self_apply(first.change))["state"] == "applied"
+    assert roadmap.find((eng.root / "ROADMAP.md").read_text(), first.key).done
+    return first
+
+
+@pytest.mark.asyncio
+async def test_a_roadmap_only_change_carrying_an_old_ticked_line_lands_with_the_tick(eng):
+    first = await _landed_and_ticked(eng)
+    # a docs change written from an older copy of the file: the tick is gone from it
+    old_copy = PLAN.replace("## Not planned", "- [ ] **A new item.** Added.\n\n## Not planned")
+    Agent.edits, Agent.answers = {"ROADMAP.md": old_copy}, ["Added an item."]
+    started = await eng.self_ask("Update ROADMAP.md only (no code): add 'A new item'")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    assert selfwork.change(cid)["state"] == "proposed"
+    assert (await eng.self_apply(cid))["state"] == "applied"
+    text = (eng.root / "ROADMAP.md").read_text()
+    assert roadmap.find(text, first.key).done and roadmap.mark(first.change) in text
+    assert "- [ ] **A new item.** Added." in text
+    assert not git(eng.root, "log", "-1", "--format=%s").startswith("roadmap:")   # fixed in the change itself
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_tick_taken_back_in_your_checkout_is_put_back_and_the_item_not_taken(eng):
+    first = await _landed_and_ticked(eng)
+    # landed some other way (merged by hand, a conflict resolved to the older side)
+    (eng.root / "ROADMAP.md").write_text(PLAN.replace("## Not planned", "- [ ] **A new item.**\n\n## Not planned"))
+    git(eng.root, "commit", "-qam", "self: Update ROADMAP.md only")
+    assert "Commit the working tree" not in [e["title"] for e in eng.self_view()["roadmap"]["next"]]
+    Agent.answers = ["Nothing to do here.\nITEM: person"]
+    await turn(eng)
+    assert "CLAUDE.md imports it" in Agent.seen[-1][1]                     # the next one, not it again
+    text = (eng.root / "ROADMAP.md").read_text()
+    assert roadmap.find(text, first.key).done and "- [ ] **A new item.**" in text
+    assert git(eng.root, "log", "-1", "--format=%s").startswith("roadmap: tick again “Commit the working tree”")
+    assert eng._self_ticks() == []                                         # once is enough
+    await eng.runner.stop()
+
+
+def test_a_slice_ticked_by_hand_is_ticked_again_when_a_later_commit_opens_it(tmp_path, monkeypatch):
+    root = forge(tmp_path)
+    home = tmp_path / "self"
+    monkeypatch.setattr(selfwork, "HOME", home)
+    key = roadmap.parse(PLAN)[3].key
+    (root / "AGENTS.md").write_text("# eki\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "self: One standing context (a slice)")
+    commit = git(root, "rev-parse", "HEAD")
+    selfwork.record(selfwork.Proposal(id="c1", request="x", root=str(root), commit=commit, fit=True,
+                                      source="roadmap", said="partial", ticks=key), home)
+    selfwork.set_state("c1", "applied", home)
+    assert selfwork.write_ticks(root, home) == []                          # a slice: eki doesn't tick it
+    (root / "ROADMAP.md").write_text(roadmap.tick(PLAN, key, ""))
+    git(root, "commit", "-qam", "yours: tick it, it's enough")
+    (root / "ROADMAP.md").write_text(PLAN)
+    git(root, "commit", "-qam", "an old copy of the file")
+    assert selfwork.write_ticks(root, home) == ["retick self/c1"]
+    assert roadmap.find((root / "ROADMAP.md").read_text(), key).done
+    assert selfwork.landed_keys(selfwork.changes(home)) == [key]
+
+
 @pytest.mark.asyncio
 async def test_while_changes_wait_for_you_it_starts_nothing_new_but_what_you_asked(eng):
     eng.self_on(True)

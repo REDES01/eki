@@ -641,6 +641,7 @@ class SelfLoop:
         changes = [c for c in selfwork.changes() if float(c.get("at") or 0) >= now - week]
         plan = roadmap.read(self._self_root())
         items = roadmap.parse(plan)
+        landed = set(selfwork.landed_keys(selfwork.changes()))
         try:
             from . import mcpregistry
             servers = sorted(mcpregistry.load().keys())
@@ -663,7 +664,8 @@ class SelfLoop:
             "self_changes": Counter(c["state"] for c in changes),
             "self_change_titles": [f"{c['state']}: {c.get('title')}" for c in changes[:12]],
             "roadmap": {**roadmap.counts(items),
-                        "next": [f"{i.section.split(' — ')[0]}: {i.title}" for i in roadmap.workable(items)[:5]]},
+                        "next": [f"{i.section.split(' — ')[0]}: {i.title}" for i in roadmap.workable(items)
+                                 if i.key not in landed][:5]},
             "providers": [{"key": b.key, "what": b.info.label, "tier": b.info.cost.tier}  # type: ignore[attr-defined]
                           for b in self.backends],                      # type: ignore[attr-defined]
             "mcp_servers": servers,
@@ -761,7 +763,8 @@ class SelfLoop:
         review_max = int(self.settings.get("self_review_max", selfloop.REVIEW_MAX))   # type: ignore[attr-defined]
         queued = {r["change"] for r in selfloop.merge_queue()}
         waiting = [c for c in selfwork.waiting() if c["id"] not in queued]
-        landed = [c["ticks"] for c in selfwork.changes() if c.get("ticks") and c["state"] == "applied"]
+        await asyncio.to_thread(self._self_ticks)      # a tick taken back is put back first
+        landed = selfwork.landed_keys(selfwork.changes())
         it, why = selfloop.pick(roadmap.read(root), waiting=len(waiting), review_max=review_max,
                                 landed=landed,
                                 live=self.runner.running,               # type: ignore[attr-defined]
@@ -1308,9 +1311,9 @@ class SelfLoop:
         text = roadmap.read(root) if not why_not else ""
         plan = roadmap.parse(text)
         known = {i.key: i for i in items if i.source == "roadmap"}
-        landed = [c["ticks"] for c in selfwork.changes() if c.get("ticks") and c["state"] == "applied"]
-        upcoming = [e for e in roadmap.workable(plan)
-                    if e.key not in known or known[e.key].state not in selfloop.SETTLED][:5]
+        landed = set(selfwork.landed_keys(selfwork.changes()))
+        upcoming = [e for e in roadmap.workable(plan) if e.key not in landed
+                    and (e.key not in known or known[e.key].state not in selfloop.SETTLED)][:5]
         by_key = {e.key: e for e in plan}
 
         def waits(key: str) -> str:

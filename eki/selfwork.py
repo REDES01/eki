@@ -727,7 +727,11 @@ def _put_back(where: Path, commit: str) -> None:
 # drop it. Now the tick is written once, by the merge queue, as its own
 # commit after the change lands (eki/selfengine.py `_self_ticks`); a change
 # carries only real edits to the file, and a tick in one (an agent's, or a
-# change made before this) is taken out before it's put on top.
+# change made before this) is taken out before it's put on top. Nor does a
+# change take a tick back: one written from an older copy of the file (or
+# resolved to the older side) has the ticks of the checkout it lands on put
+# back first (`keep_ticks`), and the writer ticks any landed item it finds
+# open again (`write_ticks`).
 
 def tick_of(c: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     """(key, mark) of the roadmap item the change finishes, or None."""
@@ -754,6 +758,38 @@ def asks_to_tick(request: str, source: str = "asked") -> bool:
     text = request or ""
     return any(not _NOT.search(text[max(0, m.start() - 24):m.start()])
                for m in _TICK_ASKED.finditer(text))
+
+
+def asks_to_untick(request: str, source: str = "asked") -> bool:
+    """Does a person's request ask to open a ticked item again ("untick …")?
+    Only then may a change land with fewer ticks than the file it goes on."""
+    if source == "roadmap":
+        return False
+    text = request or ""
+    return any(m.group(0).lower().startswith("untick")
+               and not _NOT.search(text[max(0, m.start() - 24):m.start()])
+               for m in _TICK_ASKED.finditer(text))
+
+
+def keep_ticks(where: Path, onto: str) -> bool:
+    """The change's last commit, with every item ticked at `onto` (the
+    checkout it lands on) ticked in it too — an old copy of a ticked line,
+    carried by a docs edit or kept by a conflict resolution, is fixed before
+    it lands. True if it had to be."""
+    path = Path(where) / roadmap.NAME
+    try:
+        before = git(where, "show", f"{onto}:{roadmap.NAME}")
+        after = path.read_text()
+    except (SelfWorkError, OSError):
+        return False
+    fixed = roadmap.keep_ticks(before, after)
+    if fixed == after:
+        return False
+    path.write_text(fixed)
+    git(where, "add", "--", roadmap.NAME)
+    git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
+        "commit", "-q", "--amend", "--no-edit", "--no-verify", "--allow-empty")
+    return True
 
 
 def drop_ticks(where: Path, base: str) -> bool:
@@ -785,24 +821,43 @@ def _untick_commit(where: Path, base: str) -> bool:
     return True
 
 
+def landed(c: Dict[str, Any]) -> bool:
+    """The change is in: applied, or its agent found the item already done."""
+    return c["state"] == "applied" or (c["state"] == "no change" and not c.get("commit")
+                                       and c.get("said") in ("done", "already"))
+
+
+def landed_keys(rows: List[Dict[str, Any]]) -> List[str]:
+    """Keys of the roadmap items a change landed for — never taken again on
+    their own, whatever ROADMAP.md says about them."""
+    return [c["ticks"] for c in rows if c.get("ticks") and c["state"] == "applied"]
+
+
 def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
     """The one writer of ROADMAP.md ticks. An item whose change has landed —
     or that its agent found already done — is ticked in your checkout, as a
     small commit of its own; one whose change was undone is opened again.
     Each once (ticks.json). While your checkout has edits of its own to
     ROADMAP.md, or git is mid-merge there, it waits. What it wrote, as
-    "tick self/<id>" / "untick self/<id>"."""
+    "tick self/<id>" / "untick self/<id>" / "retick self/<id>".
+
+    Then every landed item's tick is asserted again: an item the file shows
+    open whose change is still in — ticked by this writer, or ticked by hand
+    since its change landed — is ticked again. A change that carried an old
+    copy of the line, or a conflict resolved to the older side, took it
+    back; nothing else may."""
     path = (home or HOME) / "ticks.json"
-    rows = [c for c in reversed(changes(home)) if tick_of(c)]          # oldest first
+    everything = list(reversed(changes(home)))                         # oldest first
+    rows = [c for c in everything if tick_of(c)]
     try:
         done: Dict[str, str] = json.loads(path.read_text())
     except (OSError, ValueError):
         done = {}
     wrote: List[str] = []
+    ready = True
     for c in rows:
         was = done.get(c["id"], "")
-        landed = c["state"] == "applied" or (c["state"] == "no change" and not c.get("commit"))
-        if landed and not was:
+        if landed(c) and not was:
             act = "tick"
         elif c["state"] == "undone" and was == "ticked":
             act = "untick"
@@ -810,20 +865,70 @@ def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
             continue
         got = _roadmap_commit(Path(root), c, act)
         if got is None:
+            ready = False
             break                                   # your checkout isn't ready: later
         done[c["id"]] = act + "ed"
         if got:
             wrote.append(f"{act} self/{c['id']}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(done, indent=2))
+    if ready:
+        wrote += _reassert_ticks(Path(root), everything, done)
     return wrote
 
 
-def _roadmap_commit(root: Path, c: Dict[str, Any], act: str) -> Optional[str]:
-    """Tick (or untick) the change's item in `root`/ROADMAP.md and commit
-    just that file. The commit, "" when there was nothing to do, None when
-    the checkout isn't ready for it."""
-    key, mark = tick_of(c) or ("", "")
+def _reassert_ticks(root: Path, rows: List[Dict[str, Any]], done: Dict[str, str]) -> List[str]:
+    """Landed items the file shows open, ticked again (see write_ticks)."""
+    wrote: List[str] = []
+    text = roadmap.read(root)
+    for c in rows:
+        key = c.get("ticks") or ""
+        if not key or not landed(c):
+            continue
+        item = roadmap.find(text, key)
+        if item is None or item.done:
+            continue
+        if tick_of(c):
+            if done.get(c["id"]) != "ticked":
+                continue
+        elif c["state"] != "applied" or not ticked_since(root, key, c.get("commit") or ""):
+            continue
+        got = _roadmap_commit(root, c, "retick", key=key)
+        if got is None:
+            break
+        if got:
+            wrote.append(f"retick self/{c['id']}")
+            text = roadmap.read(root)
+    return wrote
+
+
+def ticked_since(root: Path, key: str, since: str, limit: int = 200) -> bool:
+    """Was the item ticked in any ROADMAP.md your checkout has had since
+    `since` (a change's commit)? A slice a person ticked by hand counts as
+    landed from then on."""
+    if not since or not _ok(root, "cat-file", "-e", f"{since}^{{commit}}"):
+        return False
+    try:
+        shas = git(root, "log", f"-{limit}", "--format=%H", f"{since}..HEAD", "--", roadmap.NAME).split()
+    except SelfWorkError:
+        return False
+    for sha in shas:
+        try:
+            item = roadmap.find(git(root, "show", f"{sha}:{roadmap.NAME}"), key)
+        except SelfWorkError:
+            continue
+        if item is not None and item.done:
+            return True
+    return False
+
+
+def _roadmap_commit(root: Path, c: Dict[str, Any], act: str, key: str = "") -> Optional[str]:
+    """Tick (or untick, or tick again) the change's item in
+    `root`/ROADMAP.md and commit just that file. The commit, "" when there
+    was nothing to do, None when the checkout isn't ready for it."""
+    found = tick_of(c)
+    key = key or (found[0] if found else "")
+    mark = roadmap.mark(c["id"])
     file = Path(root) / roadmap.NAME
     try:
         if git(root, "status", "--porcelain", "--", roadmap.NAME):
@@ -831,15 +936,17 @@ def _roadmap_commit(root: Path, c: Dict[str, Any], act: str) -> Optional[str]:
         text = file.read_text()
     except (SelfWorkError, OSError):
         return None
-    after = roadmap.tick(text, key, mark) if act == "tick" else roadmap.untick(text, key, mark)
+    after = roadmap.untick(text, key, mark) if act == "untick" else roadmap.tick(text, key, mark)
     if after == text:
         return ""
     file.write_text(after)
     title = (c.get("title") or key)[:60]
-    said = "landed" if act == "tick" else "was undone"
+    said = {"tick": "landed", "untick": "was undone",
+            "retick": "landed; a later change had taken the tick back"}[act]
+    verb = "tick again" if act == "retick" else act
     try:
         git(root, "-c", "user.name=eki", "-c", "user.email=eki@localhost", "commit", "-q",
-            "--no-verify", "-m", f"roadmap: {act} “{title}” — self/{c['id']} {said}", "--", roadmap.NAME)
+            "--no-verify", "-m", f"roadmap: {verb} “{title}” — self/{c['id']} {said}", "--", roadmap.NAME)
     except SelfWorkError:
         file.write_text(text)                       # mid-merge, say: as it was, and later
         return None
@@ -1071,6 +1178,12 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
                 set_state(cid, "unfit", home, why="failed its checks once put on top of your checkout")
                 return {"state": "unfit", "id": cid}
         p.verdict = "fit to run on top of your checkout"
+        record(p, home)
+    if roadmap.NAME in p.files and c.get("source") != "undo" \
+            and not asks_to_untick(c.get("request") or "", c.get("source") or "") and keep_ticks(where, head):
+        say("it would have opened a ticked ROADMAP item again — the tick is kept")
+        p.commit = git(where, "rev-parse", "HEAD")
+        p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
         record(p, home)
     if docs_only(p.files):
         merged = fast_forward(root, p.commit)

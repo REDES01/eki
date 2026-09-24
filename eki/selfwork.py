@@ -48,6 +48,8 @@ from typing import Any, Callable, Dict, List, Optional
 from . import candidate
 
 HOME = Path("~/.eki/self").expanduser()
+#: screenshots an agent takes of the app it changed, by change id
+SHOTS = Path("~/.eki/shots").expanduser()
 
 #: a diff touching these is for a person to read, whatever the checks say
 PROTECTED = (
@@ -201,6 +203,7 @@ def brief(request: str, python: str, where: str = "") -> str:
     """What the agent is told. It knows it's working on eki, where the tests
     are, and that nobody is there to answer a question."""
     here = f" ({where} — make every change there)" if where else ""
+    shots = SHOTS / Path(where).name if where else SHOTS / "change"
     return (
         f"You are working on eki's own source code, in a git worktree made for this "
         f"one change{here}. eki is the program that sent you this request.\n\n"
@@ -213,6 +216,16 @@ def brief(request: str, python: str, where: str = "") -> str:
         "- If you change the Mac app (mac/), make sure it compiles: "
         f"`{python} -c \"from eki import appbuild; print(appbuild.typecheck('.'))\"` — every "
         "mac/*.swift file is part of the app, so new files need no build-script edit.\n"
+        "- If you change how the app looks, look at it — before you start and after, and "
+        "keep going until the difference shows. With eki's screen tools (eki_screenshot, "
+        "eki_click, eki_key): build this worktree's app to a scratch path "
+        "(`cd mac && EKI_APP_PATH=/tmp/eki-look.app ./build_app.sh`), open it as a second "
+        "window (`open -n /tmp/eki-look.app`, dark: `open -n /tmp/eki-look.app --args "
+        "-AppleInterfaceStyle Dark`), put the view you changed in front, and take a "
+        "screenshot; quit it (`pkill -f /tmp/eki-look.app`) before the next build. The "
+        "person's own Eki.app shows the old code — never judge by it. Save your pictures as "
+        f"PNG in {shots}/ named before-<view>-<light|dark>.png and "
+        "after-<view>-<light|dark>.png; eki shows them with your change.\n"
         "- Don't commit, push, or touch git branches; eki commits your work itself.\n"
         "- Don't ask questions — nobody is watching. If something is ambiguous, take "
         "the smaller reading and say so in your final message.\n"

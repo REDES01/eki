@@ -545,3 +545,18 @@ def test_a_long_reason_is_cut_at_a_sentence():
     said = ("I didn't change anything. " + "This needs a person at the trackpad. " * 30) + "\nITEM: person"
     got = selfloop.reason(said)
     assert len(got) <= 600 and got.endswith("trackpad.") and got.startswith("I didn't")
+
+
+@pytest.mark.asyncio
+async def test_the_pictures_an_agent_took_are_shown_before_then_after(eng):
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    started = await eng.self_ask("make VALUE two")
+    await settle(eng.runs, started["run"], timeout=20)
+    c = selfwork.changes()[0]
+    shots = selfwork.SHOTS / c["id"]
+    shots.mkdir(parents=True)
+    for name in ("after-chat-light.png", "before-chat-light.png"):
+        (shots / name).write_bytes(b"\x89PNG")
+    said = eng._self_says(selfwork.change(c["id"]), selfloop.get(c["item"]), {})
+    assert said.index("before-chat-light") < said.index("after-chat-light") and "**Before / after**" in said
+    await eng.runner.stop()

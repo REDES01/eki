@@ -304,6 +304,11 @@ class SelfLoop:
             who = f"written by {c.get('backend')}" if c.get("backend") and c.get("backend") != "eki" else "made by eki"
             lines.append(f"`self/{cid}` — {who}; {len(files)} file{'s' if len(files) != 1 else ''}: "
                          + ", ".join(f"`{f}`" for f in files[:6]) + (" …" if len(files) > 6 else ""))
+        pictures = sorted((selfwork.SHOTS / cid).glob("*.png")) if (selfwork.SHOTS / cid).is_dir() else []
+        if pictures:
+            # before first, then after — side by side is how a look is judged
+            pictures = sorted(pictures, key=lambda p: (not p.name.startswith("before"), p.name))[:8]
+            lines.append("**Before / after**\n\n" + "\n\n".join(f"![{p.stem}]({p})" for p in pictures))
         checks = (c.get("report") or {}).get("checks") or []
         if checks:
             lines.append("Checks: " + " · ".join(

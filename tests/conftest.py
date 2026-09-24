@@ -61,6 +61,7 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(appbuild, "STATE", root / "eki" / "app.json")
     # eki's changes to itself, and the loop's items and notes
     monkeypatch.setattr(selfwork, "HOME", root / "eki" / "self")
+    monkeypatch.setattr(selfwork, "SHOTS", root / "eki" / "shots")
     monkeypatch.setattr(selfloop, "HOME", root / "eki" / "self")
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
     from eki import goals, shift, launcher

@@ -169,3 +169,9 @@ def test_a_change_whose_swap_was_superseded_is_applied_with_the_build_that_carri
     assert selfwork.carried(root, later, home) == [p.id]
     c = selfwork.change(p.id, home)
     assert c["state"] == "applied" and "with a later change" in c["how"]
+
+
+def test_an_app_change_is_looked_at_and_its_pictures_go_where_eki_shows_them(tmp_path):
+    said = selfwork.brief("make the chat calmer", "python", str(tmp_path / "self" / "ab12cd34"))
+    assert "eki_screenshot" in said and "EKI_APP_PATH=/tmp/eki-look.app" in said
+    assert str(selfwork.SHOTS / "ab12cd34") in said and "before-<view>-<light|dark>.png" in said

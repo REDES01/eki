@@ -158,9 +158,9 @@ eki does can be seen to move it. Until it's measured and on the board and in
 
 Open right now:
 
-- [ ] **Measured: hours of useful local work a day**, against the 1% baseline
+- [x] **Measured: hours of useful local work a day**, against the 1% baseline
       (the weekly note carries the local models' share of the week since
-      745807a; not yet shown anywhere else)
+      745807a; not yet shown anywhere else) *(eki: self/d1b53b32)*
 - [x] Commit the working tree: image follow-up edits, ComfyUI workflows as
       models (`eki/workflow.py`), gallery, picture sorting mode, app icon,
       Claude Code panels + eki's in-process tools + the MCP registry *(eki: self/a92130fc)*

@@ -215,8 +215,11 @@ async def cmd_backends(cfg) -> int:
             ("repo", caps.get("repo")), ("tools", caps.get("tools")),
             ("vision", caps.get("vision")), ("images", caps.get("images_out")),
         ) if on) or "chat"
+        made = "+".join(caps.get("produces") or [])
+        if made:
+            flags += f" [{made}]"
         mark = "ok  " if b["ok"] else "down"
-        print(f"{mark} {b['key']:10} tier {b['tier']:<4} {flags:22} {b['detail']}")
+        print(f"{mark} {b['key']:10} tier {b['tier']:<4} {flags:34} {b['detail']}")
     await eng.close()
     return 0
 

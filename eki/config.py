@@ -55,6 +55,8 @@ def load(path: str | os.PathLike) -> Config:
                 repo=bool(caps.get("repo", False)),
                 images_out=bool(caps.get("images_out", False)),
                 streaming=bool(caps.get("streaming", True)),
+                produces=tuple(caps.get("produces") or ()),
+                needs=tuple(caps.get("needs") or ()),
             ),
             cost=Cost(tier=int(cost.get("tier", 50)), note=cost.get("note", "")),
             quota_source=entry.get("quota_source"),

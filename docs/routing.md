@@ -120,3 +120,19 @@ you chose it. Any other failure fails as before. Setting `failover` (on).
 What can do it (running, quota, able) → your rules → the vendor's ladder →
 room on each subscription. When nothing in a row can take a request, the
 older cheapest-fit logic still finds something and says so.
+
+## What a backend makes, and what it needs
+
+"Able" starts with what the answer is. Each adapter declares what it makes —
+`code`, `prose`, `image`, `mesh`, `audio` — and what a request must bring
+before it can start (an image-to-3D model needs a picture). A request for
+words skips a backend that only draws; a request for a mesh skips one that
+only draws, and one that needs a picture when none is attached. Only then
+do quota and cost decide. A provider's own row can say otherwise, for a
+ComfyUI workflow that makes something other than pictures:
+
+```yaml
+capabilities: {text: false, produces: [mesh], needs: [image]}
+```
+
+`eki backends` and `eki_capabilities` show what each one makes.

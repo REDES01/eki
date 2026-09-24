@@ -179,8 +179,9 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
       doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
-- [x] **The harnesses people already use.** Claude Code and Codex, each
-      through its official program and reading the same store
+- [ ] **The harnesses people already use.** Claude Code and Codex now;
+      Gemini CLI and other agent CLIs next, each through its official
+      program and reading the same store
 - [ ] **Gemini CLI and other agent CLIs**, the same way: through the
       official program, reading the same store
 
@@ -262,12 +263,12 @@ a thread has to be able to move to another harness without losing its place.
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
       modes, and the harness the local models borrow *(eki: self/71242570)*
-- [x] **A narrowed run is refused, not asked.** Nobody is watching a child
+- [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
-      thread says what it wanted, with *allow and rerun* (7a582e0) *(eki: self/4ba8cc0d)*
-- [x] **Roots eki starts on its own are not the person's.** Self-work opened
+      thread says what it wanted, with *allow and rerun*
+- [ ] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
-      can't change alone stay that way at any level of the tree (1bf1ac6) *(eki: self/00cba77b)*
+      can't change alone stay that way at any level of the tree
 - [ ] **Handoff between backends on long threads.** Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
@@ -450,6 +451,27 @@ still going carry over into the new version rather than holding it back
       `eki self` and the board show each item's area and the queue (543dfa2,
       c590bdb, 3ca2662: `selfloop.area_of`, `selfloop.room`,
       `selfengine._self_merge`)
+- [ ] **A change has to make eki better, not just keep it working.** Today
+      the checks ask only "does it still work" (tests, boots, answers a
+      stub), and rollback only catches an engine that isn't healthy. Once
+      *Measured* exists, every applied change records the score
+      before and after — the local share of work, faults, redos and
+      overrides; a change that makes it worse is flagged in its thread and
+      offered for undo, and the weekly note says which changes helped. The
+      candidate check also talks to a real Claude Code and Codex once — a
+      cheap smoke run within spare room — so a break in how eki drives them
+      is caught before a swap, not after. Depends on *Measured*
+- [ ] **Work is picked by impact, not file order.** The loop takes faults
+      and anything that moves the score first, then items in this file by
+      what they're worth for the next release, not where they sit here; it
+      says why it picked each one. It watches its own share too: when most
+      self-work in a week went into the self-build machinery itself, the
+      weekly note says so — building the builder is only worth it if the
+      rest moves
+- [ ] **A daily digest instead of a stream.** One short page a day — on the
+      board and as one notification — what changed, why, what helped, and
+      what waits for you, in plain words. Per-change notifications only for
+      what needs you, because a stream of them is noise nobody reads
 - [x] **Everything it did to itself is visible.** A Self pane: each change,
       who asked, which agent, the diff, the checks, and *Undo* (4909625:
       Goals → Self on the board, and `eki self`; each change has a page with

@@ -132,6 +132,11 @@ def intro(text: str, section: str) -> str:
     return " ".join(p for p in out if p).strip()
 
 
+def mark(cid: str) -> str:
+    """What a tick says after the item: the change that finished it."""
+    return f"*(eki: self/{cid})*"
+
+
 def tick(text: str, key: str, note: str) -> str:
     """The item ticked, `note` at its end — or the text as it was if the item
     is gone or already ticked."""

@@ -206,6 +206,7 @@ SETTLED = ("working", "review", "done", "person", "gave up", "dropped")
 
 def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
          live: Iterable[str] = (), home: Optional[Path] = None, parallel: int = 1,
+         landed: Iterable[str] = (),
          files: Optional[Dict[str, str]] = None, root: Optional[Path] = None) -> Tuple[Optional[Item], str]:
     """The next piece of self-work, and why — or None and why not.
 
@@ -216,8 +217,10 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     item doesn't start beside one whose area it shares; one whose change is
     only waiting its turn to be applied ("merging") takes no room. A roadmap
     item left for you after changing nothing comes back only once its entry
-    in ROADMAP.md reads differently."""
-    live = set(live)
+    in ROADMAP.md reads differently. `landed`: keys of roadmap items a change
+    was applied for — never taken again on their own, ticked or not, unless
+    left for you and reworded since."""
+    live, landed = set(live), set(landed)
     all_ = _load(home)
     files = files or {}
 
@@ -261,6 +264,8 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
         seen = entry_print(entry.text)
         again = it is not None and it.state == "person" and bool(it.seen) and it.seen != seen
         if it is not None and it.state in SETTLED and not again:
+            continue
+        if entry.key in landed and not again:
             continue
         area = guess(f"{entry.title}\n{entry.text}")
         if not free(entry.title, area):
@@ -629,9 +634,9 @@ def after_change(it: Item, change: Dict[str, Any], home: Optional[Path] = None) 
         if state == "conflicts":
             fields["note"] = change.get("why") or "it doesn't go on top of your checkout any more"
     elif state == "applied":
-        if it.source == "roadmap" and said_ == "partial":
-            fields.update(state="queued", attempts=0,
-                          note="a first slice landed; the rest is still open")
+        if it.source == "roadmap" and said_ == "partial":   # not taken again until its entry changes
+            fields.update(state="person", note="a first slice landed; what's left is yours — "
+                                               "reword its entry in ROADMAP.md to have eki take it again")
         else:
             fields["state"] = "done"
     elif state in ("discarded", "undone", "gone"):

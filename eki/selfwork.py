@@ -43,9 +43,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import candidate
+from . import candidate, roadmap
 
 HOME = Path("~/.eki/self").expanduser()
 #: screenshots an agent takes of the app it changed, by change id
@@ -630,6 +630,57 @@ def _put_back(where: Path, commit: str) -> None:
         subprocess.run(["git", "-C", str(where), "reset", "-q", "--hard", commit], capture_output=True)
 
 
+# ---- the ROADMAP tick, kept through a rebase ------------------------------------
+#
+# A change that finishes a roadmap item ticks it in its own commit. Put on
+# top of a checkout whose ROADMAP.md moved on, that hunk can conflict, and an
+# agent resolving the rest can drop it — the change lands, the box stays
+# open. So the tick is taken from the change's record, not its diff: a
+# ROADMAP.md conflict is settled as the checkout's file with the tick put
+# back on top, and a rebase that finished without the tick gets it again.
+
+def tick_of(c: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """(key, mark) of the roadmap item the change finishes, or None."""
+    if c.get("ticks") and c.get("said") in ("done", "already"):
+        return c["ticks"], roadmap.mark(c["id"])
+    return None
+
+
+def _retick(where: Path, tick: Optional[Tuple[str, str]]) -> bool:
+    """A rebase stopped on ROADMAP.md: the checkout's file, the item ticked
+    on it, staged. False when there's no tick of the change's to settle it with."""
+    if not tick or roadmap.NAME not in unmerged(where):
+        return False
+    git(where, "checkout", "--ours", "--", roadmap.NAME)       # in a rebase, "ours" is what it goes onto
+    roadmap.tick_file(where, *tick)
+    git(where, "add", "--", roadmap.NAME)
+    return True
+
+
+def _rebase(where: Path, *args: str,
+            tick: Optional[Tuple[str, str]] = None) -> Tuple[subprocess.CompletedProcess, List[str]]:
+    """`git rebase <args>`, going on by itself past a ROADMAP.md conflict the
+    change's tick settles. What git said, and the files still conflicting."""
+    cmd = ["git", "-C", str(where), "-c", "user.name=eki", "-c", "user.email=eki@localhost",
+           "-c", "core.editor=true", "rebase"]
+    env = {**os.environ, "GIT_EDITOR": "true"}
+    got = subprocess.run(cmd + list(args), capture_output=True, text=True, env=env)
+    while got.returncode and rebasing(where) and _retick(where, tick) and not unmerged(where):
+        got = subprocess.run(cmd + ["--continue"], capture_output=True, text=True, env=env)
+    return got, (unmerged(where) if got.returncode and rebasing(where) else [])
+
+
+def keep_tick(where: Path, tick: Optional[Tuple[str, str]]) -> bool:
+    """After a rebase: the item ticked again, in the change's last commit, if
+    the rebase lost it. True if it had to be put back."""
+    if not tick or not roadmap.tick_file(where, *tick):
+        return False
+    git(where, "add", "--", roadmap.NAME)
+    git(where, "-c", "user.name=eki", "-c", "user.email=eki@localhost",
+        "commit", "-q", "--amend", "--no-edit", "--no-verify")
+    return True
+
+
 def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     """Start putting the change on top of your checkout, and stop at its
     conflicts. {"where", "onto", "files"} — files [] means it went on cleanly."""
@@ -638,15 +689,14 @@ def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     where = ensure_worktree(c, home)
     onto = line(root)
     _put_back(where, "")                        # a rebase left stopped by an earlier try
-    got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
-                          "user.email=eki@localhost", "rebase", "-q", onto],
-                         capture_output=True, text=True)
-    files = unmerged(where) if got.returncode else []
+    tick = tick_of(c)
+    got, files = _rebase(where, "-q", onto, tick=tick)
     if got.returncode and not files:
         _put_back(where, c.get("commit") or "")
         why = (got.stderr.strip() or got.stdout.strip()).splitlines()
         raise SelfWorkError("it couldn't be put on top of your checkout: " + (why[-1] if why else "git failed"))
-    return {"where": str(where), "onto": onto, "files": files, "commit": c.get("commit") or ""}
+    return {"where": str(where), "onto": onto, "files": files, "commit": c.get("commit") or "",
+            "tick": tick}
 
 
 def landed_since(cid: str, onto: str, files: List[str], home: Optional[Path] = None) -> str:
@@ -722,16 +772,12 @@ def continue_rebase(info: Dict[str, Any]) -> List[str]:
         if left:
             raise SelfWorkError("still conflicting: " + ", ".join(left))
         info["resolved"] = sorted(set(info.get("resolved") or []) | set(info.get("files") or []))
-        got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
-                              "user.email=eki@localhost", "-c", "core.editor=true",
-                              "rebase", "--continue"],
-                             capture_output=True, text=True, env={**os.environ, "GIT_EDITOR": "true"})
+        got, more = _rebase(where, "--continue", tick=info.get("tick"))
         if not rebasing(where):
             if got.returncode != 0:
                 raise SelfWorkError("the rebase didn't finish: "
                                     + (got.stderr.strip() or got.stdout.strip())[-200:])
             return []
-        more = unmerged(where)
         if not more:
             raise SelfWorkError("the rebase stopped for another reason: "
                                 + (got.stderr.strip() or got.stdout.strip())[-200:])
@@ -761,6 +807,8 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
             still = marked(where, went)
             if still:
                 why = "conflict markers were committed in " + ", ".join(still)
+        if not why:
+            keep_tick(where, info.get("tick"))
     except SelfWorkError as e:
         why = str(e)
     if why:
@@ -810,15 +858,14 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         p.applied_by = "you"
     if not is_in(root, head, commit):
         say("your checkout has moved on since — putting the change on top of it…")
-        got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
-                              "user.email=eki@localhost", "rebase", "-q", head],
-                             capture_output=True, text=True)
+        got, _ = _rebase(where, "-q", head, tick=tick_of(c))
         if got.returncode != 0:
             subprocess.run(["git", "-C", str(where), "rebase", "--abort"], capture_output=True)
             why = (got.stderr.strip() or got.stdout.strip()).splitlines()
             set_state(cid, "conflicts", home, why="it doesn't go on top of your checkout as it is now: "
                       + (why[-1] if why else "a conflict")[:200])
             return {"state": "conflicts", "id": cid}
+        keep_tick(where, tick_of(c))
         p.commit, p.base = git(where, "rev-parse", "HEAD"), head
         p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
         p.protected = touches_protected(p.files)

@@ -128,7 +128,7 @@ def test_after_the_verdict():
     assert selfloop.after_change(it, {"id": "c1", "state": "proposed", "said": "done"}).state == "review"
     assert selfloop.after_change(it, {"id": "c1", "state": "applied", "said": "done"}).state == "done"
     part = selfloop.after_change(it, {"id": "c2", "state": "applied", "said": "partial"})
-    assert part.state == "queued" and part.changes == ["c1", "c2"]
+    assert part.state == "person" and part.changes == ["c1", "c2"]      # a slice landed: not re-taken
     unfit = {"id": "c3", "state": "unfit", "report": {"checks": [{"name": "tests", "ok": False,
                                                                    "skipped": False, "detail": "2 failed"}]}}
     once = selfloop.after_change(selfloop.get(it.id), unfit)
@@ -156,6 +156,21 @@ def test_an_item_left_for_you_comes_back_only_when_its_entry_changes():
     # one you said you'd do yourself (seen cleared) stays yours, whatever the file says
     selfloop.update(first.id, state="person", note="you're doing this one", seen="")
     assert selfloop.pick(PLAN.replace("the image edits.", "the edits."))[0].title == "One standing context"
+
+
+def test_an_item_whose_change_was_applied_isnt_taken_again_ticked_or_not():
+    first, _ = selfloop.pick(PLAN)
+    selfloop.update(first.id, state="queued")                             # say, put back by an old engine
+    got, _ = selfloop.pick(PLAN, landed=[first.key])
+    assert got.title == "One standing context"
+    selfloop.remove(first.id)                                             # no item left for it at all
+    assert selfloop.pick(PLAN, landed=[first.key])[0].title == "One standing context"
+    # a first slice landed and the rest was left for you: back only once you reword it
+    part, _ = selfloop.pick(PLAN)
+    selfloop.after_change(part, {"id": "c1", "state": "applied", "said": "partial"})
+    assert selfloop.pick(PLAN, landed=[part.key])[0].title == "One standing context"
+    reworded = PLAN.replace("the image edits.", "the image edits, and the rest.")
+    assert selfloop.pick(reworded, landed=[part.key])[0].id == part.id
 
 
 def test_a_chat_message_that_asks_eki_to_change_itself():
@@ -322,6 +337,29 @@ async def test_the_loop_works_through_the_roadmap_and_ticks_what_landed(eng):
     c = selfwork.change(second.change)
     assert c["state"] == "proposed" and c["said"] == "partial" and c["files"] == ["AGENTS.md"]
     assert goals.all_goals()[0].turns == 2
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_tick_survives_your_roadmap_moving_on_before_you_apply(eng):
+    eng.self_on(True)
+    Agent.edits = {"README.md": "eki, committed\n"}
+    Agent.answers = ["Committed.\nITEM: done"]
+    await turn(eng)
+    first = next(i for i in selfloop.items() if i.source == "roadmap")
+    cid = first.change
+    assert selfwork.change(cid)["state"] == "proposed"
+    (eng.root / "ROADMAP.md").write_text(PLAN.replace("the image edits.", "the image edits and the icon."))
+    git(eng.root, "commit", "-qam", "yours: the roadmap reworded")
+    got = await eng.self_apply(cid)
+    assert got["state"] == "applied"                                     # no conflict left to resolve
+    text = (eng.root / "ROADMAP.md").read_text()
+    assert f"- [x] **Commit the working tree:** the image edits and the icon. *(eki: self/{cid})*" in text
+    assert selfloop.get(first.id).state == "done"
+    selfloop.remove(first.id)                                            # even with its item gone
+    Agent.answers = ["Nothing to do here.\nITEM: person"]
+    await turn(eng)
+    assert "CLAUDE.md imports it" in Agent.seen[-1][1]                   # the next one, not it again
     await eng.runner.stop()
 
 
@@ -590,6 +628,69 @@ def test_continue_rebase_adds_what_the_agent_touched_and_stops_at_the_next_confl
     assert selfwork.continue_rebase(info) == [] and not selfwork.rebasing(root)
     assert info["resolved"] == ["NOTES.md", "README.md"]
     assert selfwork.is_in(root, onto, "HEAD") and git(root, "status", "--porcelain") == ""
+
+
+def _ticked_elsewhere(tmp_path, readme_too=False):
+    """A change that ticks "Commit the working tree", and your checkout
+    rewording that same entry meanwhile — their ROADMAP.md hunks conflict."""
+    root = forge(tmp_path)
+    key = roadmap.parse(PLAN)[0].key
+    tick = (key, roadmap.mark("c1"))
+    git(root, "checkout", "-qb", "change")
+    (root / "README.md").write_text("eki, the change's way\n")
+    roadmap.tick_file(root, *tick)
+    git(root, "commit", "-qam", "the change, ticked")
+    was = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    (root / "ROADMAP.md").write_text(PLAN.replace("the image edits.", "the image edits and the icon."))
+    if readme_too:
+        (root / "README.md").write_text("eki, yours\n")
+    git(root, "commit", "-qam", "yours, meanwhile")
+    onto = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "change")
+    return root, tick, was, onto
+
+
+def test_a_tick_that_conflicts_is_put_back_on_top_of_your_roadmap(tmp_path):
+    root, tick, was, onto = _ticked_elsewhere(tmp_path)
+    got, files = selfwork._rebase(root, "-q", onto, tick=tick)
+    assert got.returncode == 0 and files == [] and not selfwork.rebasing(root)
+    plan = git(root, "show", "HEAD:ROADMAP.md")
+    assert "- [x] **Commit the working tree:** the image edits and the icon. *(eki: self/c1)*" in plan
+    assert git(root, "show", "HEAD:README.md") == "eki, the change's way"
+    # without a tick of its own to settle it with, it's a conflict like any other
+    git(root, "reset", "-q", "--hard", was)
+    got, files = selfwork._rebase(root, "-q", onto)
+    assert got.returncode and files == ["ROADMAP.md"]
+
+
+def test_the_tick_is_settled_first_and_the_agent_gets_the_rest(tmp_path):
+    root, tick, was, onto = _ticked_elsewhere(tmp_path, readme_too=True)
+    got, files = selfwork._rebase(root, "-q", onto, tick=tick)
+    assert files == ["README.md"] and selfwork.rebasing(root)
+    info = {"where": str(root), "onto": onto, "files": files, "commit": was, "tick": tick}
+    (root / "README.md").write_text("eki, both\n")
+    assert selfwork.continue_rebase(info) == [] and not selfwork.rebasing(root)
+    assert "- [x] **Commit the working tree:** the image edits and the icon." in git(root, "show", "HEAD:ROADMAP.md")
+
+
+def test_a_rebase_that_lost_the_tick_gets_it_back(tmp_path):
+    root, tick, was, onto = _ticked_elsewhere(tmp_path)
+    git(root, "reset", "-q", "--hard", onto)                             # as an agent resolving might leave it
+    (root / "README.md").write_text("eki, the change's way\n")
+    git(root, "commit", "-qam", "the change, resolved without its tick")
+    parent = git(root, "rev-parse", "HEAD~1")
+    assert selfwork.keep_tick(root, tick)
+    assert "- [x] **Commit the working tree:**" in git(root, "show", "HEAD:ROADMAP.md")
+    assert git(root, "rev-parse", "HEAD~1") == parent and git(root, "status", "--porcelain") == ""
+    assert not selfwork.keep_tick(root, tick) and not selfwork.keep_tick(root, None)
+
+
+def test_only_a_change_that_finished_its_item_carries_a_tick():
+    assert selfwork.tick_of({"id": "c1", "ticks": "k", "said": "done"}) == ("k", "*(eki: self/c1)*")
+    assert selfwork.tick_of({"id": "c1", "ticks": "k", "said": "already"})
+    assert selfwork.tick_of({"id": "c1", "ticks": "k", "said": "partial"}) is None
+    assert selfwork.tick_of({"id": "c1", "ticks": "", "said": "done"}) is None
 
 
 @pytest.mark.asyncio

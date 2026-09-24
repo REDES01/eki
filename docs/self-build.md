@@ -298,7 +298,7 @@ line of its answer:
 | `ITEM:` | what eki does |
 |---|---|
 | `done` | commits the change with the item ticked — `- [x] … *(eki: self/<id>)*` — so the tick lands exactly when the change does, and goes if you discard it |
-| `partial` | commits the slice without a tick; the item comes back after it's applied |
+| `partial` | commits the slice without a tick; once it's applied the rest is *left for you*, taken again only if you reword the entry |
 | `already` | the file lagged the code: a commit that only ticks the item |
 | `person` | nothing to commit; the item is *left for you* with the agent's reason |
 
@@ -309,7 +309,8 @@ taken again on its own unless its entry in `ROADMAP.md` is reworded since;
 real hardware — trying something on a real trackpad — is asked to end as
 `person`, not be tried again. One you marked *Leave for me* stays yours
 whatever the file says. An item cut off by a restart after its change was
-judged is closed with that change, not started over.
+judged is closed with that change, not started over. An item a change was applied
+for is never taken again on its own, ticked or not.
 
 **How far it goes alone.** `self_autonomy` is *propose* (a branch, a diff and
 its checks; you apply it) or *apply* (a fit change that touches nothing
@@ -358,6 +359,9 @@ change does and what your checkout gained in those files since. eki then
 finishes the rebase itself, refuses a result with markers left or not on top
 of your checkout (putting the change back exactly as it was, *conflicts*),
 judges it again and applies it. Apply is refused while that runs.
+The ROADMAP tick survives the rebase: a conflict in `ROADMAP.md` is settled as
+your checkout's file with the item ticked on it, and a rebase that ends
+without the tick gets it back in the change's last commit.
 `self_resolve: false` turns it off. Documentation goes straight into your
 checkout (fast-forward); code becomes a build the supervisor swaps in within a
 couple of minutes (runs still going carry on in the new engine), watches, and rolls back if it isn't healthy — and a

@@ -260,7 +260,7 @@ class SelfLoop:
                 yield "\n\n*eki: judging the change — its tests, then a candidate engine on a spare port…*\n"
             tick = None
             if it.source == "roadmap" and prop.said in ("done", "already"):
-                key, mark = it.key, f"*(eki: self/{prop.id})*"
+                key, mark = it.key, roadmap.mark(prop.id)
                 tick = lambda where: roadmap.tick_file(where, key, mark)   # noqa: E731
             prop = await asyncio.to_thread(
                 selfwork.conclude, prop, {"state": state, "run": run["id"], "backend": prop.backend},
@@ -593,7 +593,9 @@ class SelfLoop:
         review_max = int(self.settings.get("self_review_max", selfloop.REVIEW_MAX))   # type: ignore[attr-defined]
         queued = {r["change"] for r in selfloop.merge_queue()}
         waiting = [c for c in selfwork.waiting() if c["id"] not in queued]
+        landed = [c["ticks"] for c in selfwork.changes() if c.get("ticks") and c["state"] == "applied"]
         it, why = selfloop.pick(roadmap.read(root), waiting=len(waiting), review_max=review_max,
+                                landed=landed,
                                 live=self.runner.running,               # type: ignore[attr-defined]
                                 parallel=self._self_parallel(),
                                 files=await asyncio.to_thread(selfloop.repo_files, root), root=root)

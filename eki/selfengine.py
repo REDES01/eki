@@ -180,9 +180,23 @@ class SelfLoop:
         python = sys.executable
         plan = roadmap.read(root)
         prop: Optional[selfwork.Proposal] = None
-        if it.open and Path(str(it.open.get("worktree") or "")).is_dir():
+        where = str(it.open.get("worktree") or "")
+        if where and Path(where).is_dir():
             prop = selfwork.Proposal(**{k: v for k, v in it.open.items()
                                         if k in selfwork.Proposal.__dataclass_fields__})
+        elif it.open.get("id"):
+            # cut off after its change was judged (one with nothing in it leaves
+            # no worktree): close that change rather than start the item over
+            try:
+                c = selfwork.change(str(it.open["id"]))
+            except selfwork.SelfWorkError:
+                c = None
+            if c is not None:
+                done = selfwork.Proposal(**{k: v for k, v in c.items()
+                                            if k in selfwork.Proposal.__dataclass_fields__})
+                async for piece in self._self_close(run, it, done, {}):
+                    yield piece
+                return
         if prop is None:
             yield ("*eki: a change to eki itself — in a worktree of its own source"
                    + (", once the source passes its own tests" if it.check_base else "") + "…*\n\n")
@@ -565,7 +579,7 @@ class SelfLoop:
         it, why = selfloop.pick(roadmap.read(root), waiting=len(waiting), review_max=review_max,
                                 live=self.runner.running,               # type: ignore[attr-defined]
                                 parallel=self._self_parallel(),
-                                files=await asyncio.to_thread(selfloop.repo_files, root))
+                                files=await asyncio.to_thread(selfloop.repo_files, root), root=root)
         if it is None:
             return why
         allowed = self._self_allowed(g, it)
@@ -836,7 +850,7 @@ class SelfLoop:
         elif action == "retry":
             it = selfloop.update(it.id, state="queued", attempts=0, note="", open={}, phase="", run="")
         elif action == "person":
-            it = selfloop.update(it.id, state="person", note="you're doing this one")
+            it = selfloop.update(it.id, state="person", note="you're doing this one", seen="")
         else:
             raise ValueError("drop, retry or person")
         self._self_wake()

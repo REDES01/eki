@@ -89,14 +89,14 @@ struct ModelsSheet: View {
     @State private var note = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.l) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Space.xs) {
                     Text(provider.map { "Models behind \($0.label)" } ?? "Every model").font(.hubTitle)
                     Text("What the router can pick from, and what each is good at. "
                          + "Bold is eki's own measurement, plain is the public boards, "
                          + "faint is a guess from the model's class.")
-                        .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+                        .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -105,39 +105,39 @@ struct ModelsSheet: View {
 
             // header row
             HStack(spacing: 0) {
-                Text("Model").font(.zoomed(size: 10.5, weight: .semibold))
+                Text("Model").font(.hubLabel)
                     .foregroundStyle(Palette.inkFaint)
                     .frame(width: nameWidth, alignment: .leading)
                 ForEach(shownTasks, id: \.self) { task in
-                    Text(task.uppercased()).font(.zoomed(size: 10, weight: .semibold))
+                    Text(task.uppercased()).font(.hubLabel)
                         .tracking(0.5).foregroundStyle(Palette.inkFaint)
                         .frame(width: 58, alignment: .trailing)
                 }
                 Spacer()
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Space.m)
 
             ScrollView {
-                VStack(spacing: 4) {
+                VStack(spacing: Space.xs) {
                     ForEach(models) { m in
                         row(m)
                     }
                     if models.isEmpty {
                         Text("Nothing listed yet — the provider is asked when it's reachable.")
-                            .font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
-                            .padding(.top, 8)
+                            .font(.hubCallout).foregroundStyle(Palette.inkFaint)
+                            .padding(.top, Space.s)
                     }
                 }
             }
 
             if !note.isEmpty {
-                Text(note).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text(note).font(.hubCaption).foregroundStyle(Palette.inkMuted)
             }
             Text(footer)
-                .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                .font(.hubCaption).foregroundStyle(Palette.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.all, 22)
+        .padding(.all, Space.xl)
         .frame(width: provider == nil ? 820 : 720, height: provider == nil ? 560 : 460)
         .task { await load() }
     }
@@ -169,7 +169,7 @@ struct ModelsSheet: View {
 
     private func row(_ m: RegistryModel) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s) {
                 Toggle("", isOn: Binding(
                     get: { m.enabled },
                     set: { on in Task {
@@ -181,10 +181,10 @@ struct ModelsSheet: View {
                     .disabled(m.isDefault)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title(m))
-                        .font(.zoomed(size: 12.5, weight: .medium))
+                        .font(.hubCallout.weighted(.medium))
                         .foregroundStyle(m.enabled ? Palette.ink : Palette.inkFaint)
                         .lineLimit(1)
-                    Text(sub(m)).font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                    Text(sub(m)).font(.hubCaption).foregroundStyle(Palette.inkFaint)
                         .lineLimit(1)
                 }
             }
@@ -201,7 +201,7 @@ struct ModelsSheet: View {
                     .buttonStyle(GhostButton())
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
+        .padding(.horizontal, Space.m).padding(.vertical, Space.s)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
     }
 
@@ -209,20 +209,20 @@ struct ModelsSheet: View {
     /// on: measured if eki has it, else the public boards, else the prior.
     private func cell(_ s: ModelScore?) -> some View {
         guard let s else {
-            return Text("–").font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
+            return Text("–").font(.hubCallout).foregroundStyle(Palette.inkFaint)
         }
         if let m = s.measured["hard"] ?? s.measured["medium"] ?? s.measured["easy"] {
             return Text(String(format: "%.2f", m.score))
-                .font(.zoomed(size: 12, weight: .bold).monospacedDigit())
+                .font(.hubCallout.weighted(.bold).monospacedDigit())
                 .foregroundStyle(Palette.ink)
         }
         if let p = s.public?["hard"] ?? s.public?["medium"] ?? s.public?["easy"] {
             return Text(String(format: "%.2f", p))
-                .font(.zoomed(size: 12).monospacedDigit())
+                .font(.hubCallout.monospacedDigit())
                 .foregroundStyle(Palette.ink)
         }
         return Text(String(format: "%.2f", s.prior))
-            .font(.zoomed(size: 12).monospacedDigit())
+            .font(.hubCallout.monospacedDigit())
             .foregroundStyle(Palette.inkFaint)
     }
 

@@ -282,21 +282,21 @@ struct PullPrompt: View {
     var body: some View {
         if let pull = stage.pull, let words = stage.promise(pull.swipe) {
             let hot = pull.armed && pull.swipe == .up
-            HStack(spacing: 8) {
-                Image(systemName: words.symbol).font(.zoomed(size: 13, weight: .semibold))
+            HStack(spacing: Space.s) {
+                Image(systemName: words.symbol).font(.hubHeading.weighted(.semibold))
                 Text(pull.armed ? words.armed : words.idle)
-                    .font(.zoomed(size: 13, weight: pull.armed ? .semibold : .regular))
+                    .font(.hubRow.weighted(pull.armed ? .semibold : .regular))
                     .lineLimit(1)
             }
-            .foregroundStyle(.white.opacity(pull.armed ? 1 : 0.75))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .foregroundStyle(Palette.onScrim.opacity(pull.armed ? 1 : 0.75))
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
             .background(hot ? Color(red: 0.80, green: 0.22, blue: 0.18).opacity(0.95)
-                            : Color.black.opacity(pull.armed ? 0.85 : 0.6), in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 1))
+                            : Palette.scrim.opacity(pull.armed ? 0.85 : 0.6), in: Capsule())
+            .overlay(Capsule().strokeBorder(Palette.onScrim.opacity(0.14), lineWidth: 1))
             .scaleEffect(pull.armed ? 1.06 : 1)
             .animation(.easeOut(duration: 0.12), value: pull.armed)
-            .padding(.all, 24)
+            .padding(.all, Space.xl)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: place(pull.swipe))
             .allowsHitTesting(false)
             .transition(.opacity)
@@ -321,30 +321,30 @@ struct NoticeView: View {
 
     var body: some View {
         if let notice = stage.notice {
-            HStack(spacing: 10) {
+            HStack(spacing: Space.m) {
                 Text(notice.text)
-                    .font(.zoomed(size: 12.5))
+                    .font(.hubCallout)
                     .lineLimit(2)
                 if notice.undoable {
                     Button("Undo") { stage.restore() }
                         .buttonStyle(.plain)
-                        .font(.zoomed(size: 12.5, weight: .semibold))
+                        .font(.hubCallout.weighted(.semibold))
                         .foregroundStyle(Palette.accent)
                     Text("↓")
-                        .font(.zoomed(size: 11, weight: .medium).monospaced())
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+                        .font(.hubCaption.weighted(.medium).monospaced())
+                        .padding(.horizontal, Space.xs).padding(.vertical, 1)
+                        .background(Palette.onScrim.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
                         .help("Swipe down with two fingers, or press ↓")
                 }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Color.black.opacity(0.82), in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
-            .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+            .foregroundStyle(Palette.onScrim)
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.s)
+            .background(Palette.scrim.opacity(0.82), in: Capsule())
+            .overlay(Capsule().strokeBorder(Palette.onScrim.opacity(0.12), lineWidth: 1))
+            .raised()
             .padding(.bottom, 54)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Space.xl)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(notice.id)
             .accessibilityLabel(notice.text)

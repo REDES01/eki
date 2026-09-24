@@ -142,13 +142,13 @@ struct OnboardingSheet: View {
     @State private var error = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome to eki").font(.zoomed(size: 22, weight: .semibold))
+        VStack(alignment: .leading, spacing: Space.xl) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Welcome to eki").font(.hubDisplay)
                 Text("One place to ask, whatever answers: models on this Mac, the CLIs "
                      + "you already pay for, APIs you bring a key for. eki picks the "
                      + "cheapest one that can actually do the job.")
-                    .font(.zoomed(size: 13))
+                    .font(.hubRow)
                     .foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -174,11 +174,11 @@ struct OnboardingSheet: View {
                 EmptyView()
             }
             if !found.isEmpty {
-                VStack(spacing: 6) {
+                VStack(spacing: Space.s) {
                     ForEach(found) { t in
-                        HStack(spacing: 10) {
-                            Text(t.title).font(.zoomed(size: 13, weight: .medium))
-                            Text(t.found ?? "").font(.zoomed(size: 11))
+                        HStack(spacing: Space.m) {
+                            Text(t.title).font(.hubHeading)
+                            Text(t.found ?? "").font(.hubCaption)
                                 .foregroundStyle(Palette.inkFaint).lineLimit(1)
                             Spacer()
                             if added.contains(t.id) {
@@ -190,7 +190,7 @@ struct OnboardingSheet: View {
                                     .buttonStyle(GhostButton())
                             }
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .padding(.horizontal, Space.m).padding(.vertical, Space.s)
                         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
@@ -214,16 +214,16 @@ struct OnboardingSheet: View {
                 }
             }
             if !cliNote.isEmpty {
-                Text(cliNote).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text(cliNote).font(.hubCaption).foregroundStyle(Palette.inkMuted)
             }
             if !error.isEmpty {
-                Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
+                Text(error).font(.hubCallout).foregroundStyle(Palette.danger)
             }
 
             Spacer()
             HStack {
                 Text("You can change all of this later in Settings.")
-                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkFaint)
+                    .font(.hubCaption).foregroundStyle(Palette.inkFaint)
                 Spacer()
                 Button("Start using eki") {
                     onboarded = true
@@ -247,15 +247,15 @@ struct OnboardingSheet: View {
 
     private func step<C: View>(number: Int, title: String, detail: String,
                                @ViewBuilder trailing: () -> C) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Space.m) {
             Text("\(number)")
-                .font(.zoomed(size: 12, weight: .semibold))
+                .font(.hubCallout.weighted(.semibold))
                 .foregroundStyle(Palette.accent)
                 .frame(width: 22, height: 22)
                 .background(Palette.accent.opacity(0.12), in: Circle())
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.zoomed(size: 14, weight: .medium))
-                Text(detail).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(title).font(.hubHeading)
+                Text(detail).font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)

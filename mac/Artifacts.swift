@@ -183,37 +183,37 @@ struct ArtifactCard: View {
                 stage.artifact = isOpen ? nil : artifact
             }
         } label: {
-            HStack(spacing: 11) {
+            HStack(spacing: Space.m) {
                 Image(systemName: artifact.symbol)
-                    .font(.zoomed(size: 15))
+                    .font(.hubBody)
                     .foregroundStyle(isOpen ? Palette.accent : Palette.inkMuted)
                     .frame(width: 34, height: 34)
-                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: 7))
-                VStack(alignment: .leading, spacing: 2) {
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: Radius.small))
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     Text(artifact.title)
-                        .font(.zoomed(size: 13, weight: .medium))
+                        .font(.hubHeading)
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Text("\(artifact.kindLabel) · \(artifact.lineCount) lines")
-                        .font(.zoomed(size: 11))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.inkFaint)
                 }
                 Spacer(minLength: 12)
                 Text(isOpen ? "Close" : "Open")
-                    .font(.zoomed(size: 11.5, weight: .medium))
+                    .font(.hubCaption.weighted(.medium))
                     .foregroundStyle(Palette.inkMuted)
                 Image(systemName: "sidebar.right")
-                    .font(.zoomed(size: 11.5))
+                    .font(.hubCaption)
                     .foregroundStyle(Palette.inkFaint)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.s)
             .frame(maxWidth: 420, alignment: .leading)
-            .background(hovering || isOpen ? Palette.fill.opacity(0.75) : Palette.surface,
-                        in: RoundedRectangle(cornerRadius: Metric.radius))
-            .overlay(RoundedRectangle(cornerRadius: Metric.radius)
+            .background(hovering || isOpen ? Palette.fill : Palette.surface,
+                        in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card)
                 .strokeBorder(isOpen ? Palette.accent.opacity(0.55) : Palette.hairline, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: Metric.radius))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -283,7 +283,7 @@ struct ArtifactPanel: View {
                     Text(artifact.source)
                         .font(.hubMono)
                         .textSelection(.enabled)
-                        .padding(.all, 14)
+                        .padding(.all, Space.l)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .background(Palette.surface)
@@ -297,12 +297,12 @@ struct ArtifactPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Image(systemName: artifact.symbol)
-                .font(.zoomed(size: 12))
+                .font(.hubCallout)
                 .foregroundStyle(Palette.inkMuted)
             Text(artifact.title)
-                .font(.zoomed(size: 12.5, weight: .semibold))
+                .font(.hubCallout.weighted(.semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
             Picker("", selection: $showingCode) {
@@ -327,15 +327,15 @@ struct ArtifactPanel: View {
                 withAnimation(.easeOut(duration: 0.18)) { stage.artifact = nil }
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 8)
+        .padding(.leading, Space.l)
+        .padding(.trailing, Space.s)
         .frame(height: 40)
     }
 
     private func icon(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.zoomed(size: 11.5, weight: .medium))
+                .font(.hubCaption.weighted(.medium))
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }

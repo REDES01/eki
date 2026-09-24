@@ -43,10 +43,10 @@ struct UsageRow: View {
     private var full: Bool { window.used >= 1.0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.xs) {
+        HStack(spacing: Space.m) {
             Text(window.label)
-                .font(.zoomed(size: 10.5, weight: .semibold))
+                .font(.hubLabel)
                 .tracking(0.5)
                 .foregroundStyle(window.isPrimary ? Palette.inkMuted : Palette.inkFaint)
                 .lineLimit(1)
@@ -70,11 +70,11 @@ struct UsageRow: View {
             .frame(height: 6)
             .help(paceHelp)
             Text(UsageFormat.percent(window.used))
-                .font(.zoomed(size: 12, weight: .semibold).monospacedDigit())
+                .font(.hubCallout.weighted(.semibold).monospacedDigit())
                 .foregroundStyle(full ? Color.red : Palette.ink)
                 .frame(width: 42, alignment: .trailing)
             Text(UsageFormat.until(window.resets_at) ?? "")
-                .font(.zoomed(size: 11).monospacedDigit())
+                .font(.hubCaption.monospacedDigit())
                 .foregroundStyle(Palette.inkFaint)
                 .frame(width: 70, alignment: .trailing)
                 .help(UsageFormat.clock(window.resets_at))
@@ -82,7 +82,7 @@ struct UsageRow: View {
         // money has a figure worth reading, not just a bar
         if let detail = window.detail, !detail.isEmpty {
             Text(detail + " spent")
-                .font(.zoomed(size: 10.5).monospacedDigit())
+                .font(.hubCaption.monospacedDigit())
                 .foregroundStyle(Palette.inkFaint)
                 .padding(.leading, 84)
         }
@@ -91,7 +91,7 @@ struct UsageRow: View {
                      ? "spent — on credits now, costed ×\(fmt(pace.factor)) for routing"
                      : pace.factor > 1 ? "ahead of pace — costed ×\(fmt(pace.factor)) for routing"
                                        : "behind pace — costed ×\(fmt(pace.factor)), spend it")
-                .font(.zoomed(size: 10.5).monospacedDigit())
+                .font(.hubCaption.monospacedDigit())
                 .foregroundStyle(pace.factor > 1 ? Color.orange : Palette.inkFaint)
                 .padding(.leading, 84)
         }
@@ -120,20 +120,20 @@ struct UsageCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 7 : 10) {
-            HStack(spacing: 7) {
+            HStack(spacing: Space.s) {
                 Dot(color: Palette.backend(usage.provider), size: 7)
-                Text(usage.label).font(.zoomed(size: compact ? 12.5 : 13.5, weight: .medium))
+                Text(usage.label).font(compact ? Face.hubCallout.weighted(.medium) : .hubHeading)
                 Spacer()
                 if let age = UsageFormat.age(usage.age_seconds) {
                     Text(age)
-                        .font(.zoomed(size: 10.5))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.inkFaint)
                         .help("When \(usage.label) last reported these numbers")
                 }
             }
             if usage.windows.isEmpty {
                 Text(explanation)
-                    .font(.zoomed(size: 11.5))
+                    .font(.hubCaption)
                     .foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 if isClaude && !bridgeOn && !compact {
@@ -149,16 +149,16 @@ struct UsageCard: View {
             }
             if !usage.error.isEmpty {
                 Text(usage.error)
-                    .font(.zoomed(size: 11))
+                    .font(.hubCaption)
                     .foregroundStyle(Palette.inkFaint)
                     .lineLimit(2)
             }
             if isClaude && bridgeOn && !compact {
-                HStack(spacing: 8) {
+                HStack(spacing: Space.s) {
                     if probing {
                         ProgressView().controlSize(.small)
                         Text("Reading /usage…")
-                            .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     } else {
                         Button("Refresh now") {
                             Task {
@@ -176,7 +176,7 @@ struct UsageCard: View {
                 }
                 if !probeNote.isEmpty {
                     Text(probeNote)
-                        .font(.zoomed(size: 11.5))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -184,8 +184,8 @@ struct UsageCard: View {
             }
         }
         .padding(compact ? 10 : 14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card)
             .strokeBorder(Palette.hairline, lineWidth: 1))
     }
 
@@ -208,12 +208,12 @@ struct UsagePane: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Space.l) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Usage").font(.zoomed(size: 20, weight: .semibold))
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("Usage").font(.hubDisplay)
                         Text("What each provider says you've used of its own limits.")
-                            .font(.zoomed(size: 12.5))
+                            .font(.hubCallout)
                             .foregroundStyle(Palette.inkMuted)
                     }
                     Spacer()
@@ -240,22 +240,22 @@ struct UsagePane: View {
                 }
                 if model.usage == nil {
                     Text("Asking the engine…")
-                        .font(.zoomed(size: 12))
+                        .font(.hubCallout)
                         .foregroundStyle(Palette.inkFaint)
                 }
 
                 if model.usage?.claude_bridge == true {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "info.circle").font(.zoomed(size: 11))
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        HStack(spacing: Space.s) {
+                            Image(systemName: "info.circle").font(.hubCaption)
                             Text("Claude's numbers update whenever you use Claude Code in a "
                                  + "terminal. eki stops reading them if you turn this off.")
-                                .font(.zoomed(size: 11.5))
+                                .font(.hubCaption)
                             Spacer()
                             Button("Turn off") { Task { await model.setClaudeBridge(false) } }
                                 .buttonStyle(GhostButton())
                         }
-                        Divider().opacity(0.4)
+                        Hairline()
                         Toggle(isOn: Binding(
                             get: { settings.claude_probe },
                             set: { on in
@@ -264,17 +264,17 @@ struct UsagePane: View {
                                     ?? settings }
                             })) {
                             Text("Keep it fresh while eki is open")
-                                .font(.zoomed(size: 12.5)).foregroundStyle(Palette.ink)
+                                .font(.hubCallout).foregroundStyle(Palette.ink)
                         }
                         .toggleStyle(AccentSwitch())
                         Text("Every \(settings.claude_probe_minutes) minutes while you have "
                              + "this open, eki opens Claude Code's /usage panel in a throwaway "
                              + "session and reads it — including per-model limits and usage "
                              + "credits. /usage doesn't ask a model anything, so it's free.")
-                            .font(.zoomed(size: 11.5))
+                            .font(.hubCaption)
                         if model.usage?.claude_probe_ready == false {
                             Text(model.usage?.claude_probe_hint ?? "")
-                                .font(.zoomed(size: 11.5))
+                                .font(.hubCaption)
                                 .foregroundStyle(Palette.inkFaint)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -309,35 +309,35 @@ struct MenuPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
             ForEach(shown) { usage in
                 UsageCard(usage: usage, compact: true)
             }
             if shown.isEmpty {
                 Text("No providers in the menu bar — pick some in Settings.")
-                    .font(.zoomed(size: 12))
+                    .font(.hubCallout)
                     .foregroundStyle(Palette.inkMuted)
             }
 
             let live = model.runs.filter(\.isLive)
             if !live.isEmpty {
-                SectionLabel(text: "Running · \(live.count)").padding(.top, 2)
+                SectionLabel(text: "Running · \(live.count)").padding(.top, Space.xxs)
                 ForEach(live.prefix(5)) { run in
-                    HStack(spacing: 7) {
+                    HStack(spacing: Space.s) {
                         Dot(color: Palette.ok, size: 6, pulsing: true)
                         Text(run.prompt.replacingOccurrences(of: "\n", with: " "))
-                            .font(.zoomed(size: 12))
+                            .font(.hubCallout)
                             .lineLimit(1)
                         Spacer()
                         if let backend = run.backend {
-                            Text(backend).font(.zoomed(size: 10.5))
+                            Text(backend).font(.hubCaption)
                                 .foregroundStyle(Palette.backend(backend))
                         }
                     }
                 }
             }
 
-            Divider().overlay(Palette.hairline)
+            Hairline()
             HStack {
                 Button("Open eki") {
                     NSApp.activate(ignoringOtherApps: true)
@@ -351,7 +351,7 @@ struct MenuPanel: View {
                     .help("Closes the window onto eki. Runs keep going in the engine.")
             }
         }
-        .padding(.all, 12)
+        .padding(.all, Space.m)
         .frame(width: 340)
         .background(Palette.canvas)
         .task { await model.refreshUsage(force: false) }

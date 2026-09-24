@@ -25,7 +25,7 @@ struct ModelsPane: View {
                     ForEach(model.providers) { provider in
                         ProviderCard(provider: provider)
                     }
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.s) {
                         Button { addingProvider = true } label: {
                             Label("Add provider", systemImage: "plus")
                         }
@@ -53,12 +53,12 @@ struct ModelsPane: View {
                         LocalModelCard(row: row)
                     }
                     if !model.modelMessage.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "info.circle").font(.zoomed(size: 11))
-                            Text(model.modelMessage).font(.zoomed(size: 12))
+                        HStack(spacing: Space.s) {
+                            Image(systemName: "info.circle").font(.hubCaption)
+                            Text(model.modelMessage).font(.hubCallout)
                         }
                         .foregroundStyle(Palette.inkMuted)
-                        .padding(.top, 2)
+                        .padding(.top, Space.xxs)
                     }
                 }
 
@@ -91,13 +91,13 @@ struct Group2<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
             SectionLabel(text: title)
             if !note.isEmpty {
                 Text(note)
-                    .font(.zoomed(size: 12))
+                    .font(.hubCallout)
                     .foregroundStyle(Palette.inkMuted)
-                    .padding(.bottom, 2)
+                    .padding(.bottom, Space.xxs)
                     .fixedSize(horizontal: false, vertical: true)
             }
             content()
@@ -113,7 +113,7 @@ struct MemoryCard: View {
             let other = memory.other_gb ?? 0
             let free = memory.available_gb ?? memory.free_gb
             Card(padding: 16) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Space.m) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Unified memory").font(.hubTitle)
                         if memory.pressure == "warning" || memory.pressure == "critical" {
@@ -121,13 +121,13 @@ struct MemoryCard: View {
                         }
                         Spacer()
                         Text("\(fmt(free)) GB free of \(fmt(memory.total_gb))")
-                            .font(.zoomed(size: 13, weight: .medium).monospacedDigit())
+                            .font(.hubHeading.monospacedDigit())
                             .foregroundStyle(Palette.inkMuted)
                     }
                     // one bar, three parts: eki's models, everything else, free
                     GeometryReader { geo in
                         let total = max(memory.total_gb, 1)
-                        HStack(spacing: 2) {
+                        HStack(spacing: Space.xxs) {
                             Capsule().fill(Palette.accent)
                                 .frame(width: max(memory.committed_gb > 0 ? 6 : 0,
                                                   geo.size.width * memory.committed_gb / total))
@@ -137,12 +137,12 @@ struct MemoryCard: View {
                         }
                     }
                     .frame(height: 9)
-                    HStack(spacing: 14) {
+                    HStack(spacing: Space.l) {
                         legend(Palette.accent, "eki models \(fmt(memory.committed_gb)) GB")
                         legend(Palette.inkFaint.opacity(0.55), "everything else \(fmt(other)) GB")
                         Spacer()
                         Text("models can take \(fmt(memory.free_gb)) GB more")
-                            .font(.zoomed(size: 11.5))
+                            .font(.hubCaption)
                             .foregroundStyle(Palette.inkFaint)
                             .help("The smaller of what's under MLX's \(fmt(memory.ceiling_gb)) GB "
                                   + "ceiling and what the Mac can hand out, keeping 4 GB back")
@@ -150,7 +150,7 @@ struct MemoryCard: View {
                     if let holders = memory.holders, !holders.isEmpty {
                         Text(holders.map { "\($0.name) \(fmt($0.gb)) GB" }
                                 .joined(separator: " · "))
-                            .font(.zoomed(size: 11))
+                            .font(.hubCaption)
                             .foregroundStyle(Palette.inkFaint)
                             .lineLimit(1)
                             .help("The biggest things holding memory right now. eki never "
@@ -162,9 +162,9 @@ struct MemoryCard: View {
     }
 
     private func legend(_ colour: Color, _ text: String) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Space.xs) {
             Circle().fill(colour).frame(width: 7, height: 7)
-            Text(text).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+            Text(text).font(.hubCaption).foregroundStyle(Palette.inkMuted)
         }
     }
 
@@ -179,12 +179,12 @@ struct LocalModelCard: View {
 
     var body: some View {
         Card {
-            HStack(spacing: 12) {
+            HStack(spacing: Space.m) {
                 Dot(color: row.running ? Palette.ok : Palette.inkFaint.opacity(0.5),
                     size: 8, pulsing: model.busyModel == row.key)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.label).font(.zoomed(size: 13.5, weight: .medium))
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text(row.label).font(.hubHeading)
+                    HStack(spacing: Space.s) {
                         Text(":\(row.port)")
                         if let engine = row.engine {
                             Text(engine == "llamacpp" ? "llama.cpp" : engine == "mlx" ? "mlx_lm" : engine)
@@ -194,11 +194,11 @@ struct LocalModelCard: View {
                         if !row.note.isEmpty { Text(row.note) }
                         if let fate { Text(fate) }
                     }
-                    .font(.zoomed(size: 11.5))
+                    .font(.hubCaption)
                     .foregroundStyle(Palette.inkMuted)
                     if let profile = row.profile, let summary = profile.summary {
                         Text(summary)
-                            .font(.zoomed(size: 11.5))
+                            .font(.hubCaption)
                             .foregroundStyle(Palette.inkFaint)
                             .help("Read from the build's own files (\(profile.repo)) each time "
                                   + "eki loads its models — nothing here is typed in.")
@@ -253,11 +253,11 @@ extension LocalModelCard {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Space.xs) {
                 Text(summary)
-                Image(systemName: "chevron.down").font(.zoomed(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.hubGlyph)
             }
-            .font(.zoomed(size: 11.5))
+            .font(.hubCaption)
             .foregroundStyle(window.fits == false ? Palette.warn : Palette.inkFaint)
         }
         .menuStyle(.borderlessButton)
@@ -302,7 +302,7 @@ extension LocalModelCard {
                 set: { _ in Task { await model.setIdle(row.key, minutes: 0) } }))
         } label: {
             Image(systemName: row.pinned == true ? "pin.fill" : "timer")
-                .font(.zoomed(size: 12, weight: .medium))
+                .font(.hubCallout.weighted(.medium))
                 .foregroundStyle(row.pinned == true ? Palette.accent : Palette.inkMuted)
                 .frame(width: 22, height: 22)
         }
@@ -328,18 +328,18 @@ struct RoutingCard: View {
 
     var body: some View {
         Card {
-            HStack(spacing: 12) {
+            HStack(spacing: Space.m) {
                 Dot(color: Palette.backend(backend.key), size: 8)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    HStack(spacing: Space.s) {
                         Text(backend.label)
-                            .font(.zoomed(size: 13.5, weight: .medium))
+                            .font(.hubHeading)
                             .foregroundStyle(enabled ? Palette.ink : Palette.inkFaint)
                         if isFirst { Tag(text: "first choice", color: Palette.accent) }
                         if !backend.ok { Tag(text: "down", color: Palette.danger) }
                     }
                     Text(detail)
-                        .font(.zoomed(size: 11.5))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.inkMuted)
                         .lineLimit(1)
                 }

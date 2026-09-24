@@ -31,7 +31,7 @@ struct PictureViewer: View {
             let width = geo.size.width
             let at = CGSize(width: stage.lean.width + slide.width, height: stage.lean.height + slide.height)
             ZStack {
-                Color.black.opacity(0.88).ignoresSafeArea()
+                Palette.scrim.opacity(0.88).ignoresSafeArea()
                     .onTapGesture { close() }
                 SwipeCatcher(active: { Stage.shared.sorting },
                              act: { perform($0, size: geo.size) },
@@ -54,26 +54,26 @@ struct PictureViewer: View {
                 } else if missing {
                     Text("This picture isn't where it was\n\(picture.source)")
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(Palette.onScrim.opacity(0.7))
                 } else {
                     ProgressView().controlSize(.large)
                 }
                 if let cover { still(cover) }
 
-                VStack(spacing: 8) {
+                VStack(spacing: Space.s) {
                     bar
                     Spacer()
                     if !picture.alt.isEmpty {
                         Text(picture.alt)
-                            .font(.zoomed(size: 12))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .font(.hubCallout)
+                            .foregroundStyle(Palette.onScrim.opacity(0.8))
                             .lineLimit(2)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(.black.opacity(0.45), in: Capsule())
+                            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+                            .background(Palette.scrim.opacity(0.45), in: Capsule())
                     }
                     if stage.sorting { legend }
                 }
-                .padding(.bottom, 16)
+                .padding(.bottom, Space.l)
 
                 if stage.canStep {
                     HStack {
@@ -81,7 +81,7 @@ struct PictureViewer: View {
                         Spacer()
                         arrow("chevron.right") { perform(.left, size: geo.size) }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, Space.l)
                 }
 
                 PullPrompt().padding(.top, 46)
@@ -116,34 +116,34 @@ struct PictureViewer: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(maxWidth: image.size.width, maxHeight: image.size.height)
-            .padding(.all, 28)
+            .padding(.all, Space.xl)
             .padding(.top, 46)
             .allowsHitTesting(false)
     }
 
     private var legend: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Space.l) {
             key("←  →", "browse")
             key("↑", "move to Trash")
             key("↓", "recover")
             Text("two fingers, or the arrow keys")
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Palette.onScrim.opacity(0.45))
         }
-        .font(.zoomed(size: 11.5))
-        .padding(.horizontal, 14).padding(.vertical, 7)
-        .background(.black.opacity(0.55), in: Capsule())
+        .font(.hubCaption)
+        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+        .background(Palette.scrim.opacity(0.55), in: Capsule())
         .transition(.opacity)
     }
 
     private func key(_ keys: String, _ does: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text(keys)
-                .font(.zoomed(size: 11, weight: .medium).monospaced())
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
-            Text(does).foregroundStyle(.white.opacity(0.75))
+                .font(.hubCaption.weighted(.medium).monospaced())
+                .padding(.horizontal, Space.xs).padding(.vertical, 1)
+                .background(Palette.onScrim.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+            Text(does).foregroundStyle(Palette.onScrim.opacity(0.75))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Palette.onScrim)
     }
 
     // MARK: moving
@@ -199,53 +199,53 @@ struct PictureViewer: View {
     }
 
     private var bar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.xs) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(picture.name)
-                    .font(.zoomed(size: 12.5, weight: .medium))
+                    .font(.hubCallout.weighted(.medium))
                     .lineLimit(1).truncationMode(.middle)
                 Text(detail)
-                    .font(.zoomed(size: 10.5))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.hubCaption)
+                    .foregroundStyle(Palette.onScrim.opacity(0.55))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Palette.onScrim)
             Spacer(minLength: 12)
             Button { toggleSorting() } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: Space.xs) {
                     Image(systemName: "hand.draw")
                     Text(stage.sorting ? "Done" : "Edit")
                 }
-                .font(.zoomed(size: 11.5, weight: .semibold))
-                .padding(.horizontal, 10)
+                .font(.hubCaption.weighted(.semibold))
+                .padding(.horizontal, Space.m)
                 .frame(height: 24)
-                .background(stage.sorting ? Palette.accent : Color.white.opacity(0.12), in: Capsule())
+                .background(stage.sorting ? Palette.accent : Palette.onScrim.opacity(0.12), in: Capsule())
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain).foregroundStyle(.white)
+            .buttonStyle(.plain).foregroundStyle(Palette.onScrim)
             .help("Edit mode: swipe or use the arrows to browse, move to Trash and recover  (E)")
-            Divider().frame(height: 16).padding(.horizontal, 6)
+            Divider().frame(height: 16).padding(.horizontal, Space.s)
             tool("minus.magnifyingglass", "Zoom out  (−)") { zoom.scale(by: 1 / 1.4) }
             Button { zoom.toggle() } label: {
                 Text("\(Int((zoom.magnification * 100).rounded()))%")
-                    .font(.zoomed(size: 11.5, weight: .medium).monospacedDigit())
+                    .font(.hubCaption.weighted(.medium).monospacedDigit())
                     .frame(width: 46, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.85))
+            .buttonStyle(.plain).foregroundStyle(Palette.onScrim.opacity(0.85))
             .help("Fit / actual size  (double-click)")
             tool("plus.magnifyingglass", "Zoom in  (+)") { zoom.scale(by: 1.4) }
-            Divider().frame(height: 16).padding(.horizontal, 6)
+            Divider().frame(height: 16).padding(.horizontal, Space.s)
             tool(copied ? "checkmark" : "doc.on.doc", "Copy  (⌘C)") { copy() }
             tool("square.and.arrow.down", "Save As…  (⌘S)") { save() }
             if picture.isLocal {
                 tool("folder", "Show in Finder") { PictureActions.reveal(picture) }
             }
-            Divider().frame(height: 16).padding(.horizontal, 6)
+            Divider().frame(height: 16).padding(.horizontal, Space.s)
             tool("xmark", "Close  (Esc)") { close() }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Space.l)
         .frame(height: 46)
-        .background(.black.opacity(0.55))
+        .background(Palette.scrim.opacity(0.55))
     }
 
     private var detail: String {
@@ -286,25 +286,25 @@ struct PictureViewer: View {
     private func tool(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.zoomed(size: 13, weight: .medium))
+                .font(.hubHeading)
                 .frame(width: 30, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.85))
+        .foregroundStyle(Palette.onScrim.opacity(0.85))
         .help(help)
     }
 
     private func arrow(_ symbol: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.zoomed(size: 15, weight: .semibold))
+                .font(.hubTitle)
                 .frame(width: 36, height: 36)
-                .background(.black.opacity(0.5), in: Circle())
+                .background(Palette.scrim.opacity(0.5), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(Palette.onScrim.opacity(0.9))
     }
 
     private func copy() {

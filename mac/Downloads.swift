@@ -20,11 +20,11 @@ struct DeployCard: View {
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack(spacing: Space.s) {
                     Dot(color: colour, size: 8, pulsing: live)
                     Text(run?.prompt ?? "Setting up…")
-                        .font(.zoomed(size: 13.5, weight: .medium))
+                        .font(.hubHeading)
                         .lineLimit(1)
                     Spacer()
                     if live {
@@ -37,7 +37,7 @@ struct DeployCard: View {
                 }
                 if !recent.isEmpty {
                     Text(recent.joined(separator: "\n"))
-                        .font(.zoomed(size: 11.5).monospacedDigit())
+                        .font(.hubCaption.monospacedDigit())
                         .foregroundStyle(state == "failed" ? Palette.danger : Palette.inkMuted)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -45,7 +45,7 @@ struct DeployCard: View {
                 }
                 if let error = run?.error, !error.isEmpty, state == "failed" {
                     Text(error)
-                        .font(.zoomed(size: 11.5))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)

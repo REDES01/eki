@@ -12,19 +12,20 @@ struct ActivityLines: View {
     let lines: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Space.xs) {
             ForEach(Array(lines.suffix(12).enumerated()), id: \.offset) { i, line in
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                     Text(i == lines.suffix(12).count - 1 ? "●" : "○")
-                        .font(.zoomed(size: 8))
+                        .font(.hubGlyph.weighted(.regular))
                         .foregroundStyle(line.hasPrefix("⚠") ? Palette.danger : Palette.inkFaint)
                     Text(line)
-                        .font(.zoomed(size: 12, design: .monospaced))
+                        .font(.hubMonoSmall)
                         .foregroundStyle(line.hasPrefix("⚠") ? Palette.danger : Palette.inkMuted)
                         .lineLimit(1)
                 }
             }
         }
+        .card(padding: Space.m)
     }
 }
 
@@ -36,27 +37,26 @@ struct AskCard: View {
     @State private var other: [String: String] = [:]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.l) {
             ForEach(Array(prompt.questions.enumerated()), id: \.offset) { _, q in
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     if let h = q.header, !h.isEmpty {
-                        Text(h.uppercased()).font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                            .foregroundStyle(Palette.inkFaint)
+                        SectionLabel(text: h)
                     }
-                    Text(q.question).font(.zoomed(size: 13.5, weight: .medium))
+                    Text(q.question).font(.hubHeading)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(q.options ?? [], id: \.label) { opt in
                         Button { toggle(q, opt.label) } label: {
-                            HStack(alignment: .top, spacing: 9) {
+                            HStack(alignment: .top, spacing: Space.s) {
                                 Image(systemName: picked(q, opt.label)
                                       ? (q.multiSelect == true ? "checkmark.square.fill" : "largecircle.fill.circle")
                                       : (q.multiSelect == true ? "square" : "circle"))
-                                    .font(.zoomed(size: 13))
+                                    .font(.hubRow)
                                     .foregroundStyle(picked(q, opt.label) ? Palette.accent : Palette.inkFaint)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(opt.label).font(.zoomed(size: 13)).foregroundStyle(Palette.ink)
+                                VStack(alignment: .leading, spacing: Space.xxs) {
+                                    Text(opt.label).font(.hubRow).foregroundStyle(Palette.ink)
                                     if let d = opt.description, !d.isEmpty {
-                                        Text(d).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                                        Text(d).font(.hubCaption).foregroundStyle(Palette.inkMuted)
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
@@ -70,7 +70,7 @@ struct AskCard: View {
                         get: { other[q.question] ?? "" },
                         set: { other[q.question] = $0 }))
                         .textFieldStyle(.roundedBorder)
-                        .font(.zoomed(size: 12.5))
+                        .font(.hubCallout)
                 }
             }
             HStack {
@@ -81,10 +81,7 @@ struct AskCard: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(.all, 16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius)
-            .strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1))
+        .card(tone: Palette.accent)
     }
 
     private func picked(_ q: AskQuestion, _ label: String) -> Bool {
@@ -127,27 +124,27 @@ struct PermissionCard: View {
     let prompt: PendingPrompt
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "hand.raised").font(.zoomed(size: 12)).foregroundStyle(Palette.warn)
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.s) {
+                Image(systemName: "hand.raised").font(.hubIcon).foregroundStyle(Palette.warn)
                 Text(prompt.title.isEmpty ? "\(prompt.tool) wants to run" : prompt.title)
-                    .font(.zoomed(size: 13, weight: .medium))
+                    .font(.hubHeading)
             }
             if !prompt.description.isEmpty {
-                Text(prompt.description).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+                Text(prompt.description).font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !detail.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(detail)
-                        .font(.zoomed(size: 12, design: .monospaced))
+                        .font(.hubMonoSmall)
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
-                        .padding(.all, 10)
+                        .padding(.all, Space.m)
                 }
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: Radius.small))
             }
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s) {
                 Spacer()
                 Button("Deny") {
                     model.answer(prompt, with: ["behavior": "deny",
@@ -170,10 +167,7 @@ struct PermissionCard: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(.all, 16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius)
-            .strokeBorder(Palette.warn.opacity(0.45), lineWidth: 1))
+        .card(tone: Palette.warn)
     }
 
     /// The part of the input worth reading: the command, the file, the URL.
@@ -199,37 +193,34 @@ struct CommandMenu: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 1) {
+                VStack(spacing: Space.xxs) {
                     ForEach(Array(commands.enumerated()), id: \.element.id) { i, c in
                         Button { choose(c) } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                                 Text("/" + c.name)
-                                    .font(.zoomed(size: 12.5, weight: .medium, design: .monospaced))
+                                    .font(.hubMonoSmall.weighted(.medium))
                                     .foregroundStyle(Palette.ink)
                                     .lineLimit(1).truncationMode(.middle)
                                     .frame(maxWidth: 260, alignment: .leading)
                                     .layoutPriority(2)
                                 if let hint = c.argumentHint, !hint.isEmpty {
-                                    Text(hint).font(.zoomed(size: 11.5, design: .monospaced))
+                                    Text(hint).font(.hubMonoSmall)
                                         .foregroundStyle(Palette.inkFaint)
                                         .lineLimit(1).truncationMode(.tail)
                                         .frame(maxWidth: 180, alignment: .leading)
                                 }
                                 Text(c.description ?? "")
-                                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                                    .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                                     .lineLimit(1).truncationMode(.tail)
                                 Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(i == picked ? Palette.accent.opacity(0.16) : Color.clear,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
+                            .listRow(selected: i == picked)
                         }
                         .buttonStyle(.plain)
                         .id(i)
                     }
                 }
-                .padding(.all, 6)
+                .padding(.all, Space.s)
             }
             .frame(maxHeight: 260)
             .onChange(of: picked) { _, now in proxy.scrollTo(now) }

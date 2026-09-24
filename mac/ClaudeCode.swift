@@ -17,15 +17,12 @@ struct ClaudePanelSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(panel.title).font(.hubTitle)
-                Spacer()
+            SheetHeader(title: panel.title) {
                 Button("Done") { dismiss() }
                     .buttonStyle(AccentButton())
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.all, 16)
-            Divider().overlay(Palette.hairline)
+            Hairline()
             switch panel {
             case .mcp: McpPanel()
             case .model: ModelPanel()
@@ -59,8 +56,8 @@ struct PanelState<Content: View>: View {
             VStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                 .frame(maxWidth: .infinity)
         } else if !error.isEmpty {
-            VStack { Spacer(); Text(error).font(.zoomed(size: 12.5)).foregroundStyle(Palette.danger)
-                .multilineTextAlignment(.center).padding(.all, 24); Spacer() }
+            VStack { Spacer(); Text(error).font(.hubCallout).foregroundStyle(Palette.danger)
+                .multilineTextAlignment(.center).padding(.all, Space.xl); Spacer() }
                 .frame(maxWidth: .infinity)
         } else {
             content()
@@ -136,11 +133,10 @@ struct McpPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Space.l) {
                     ForEach(groups, id: \.self) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.uppercased()).font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                                .foregroundStyle(Palette.inkFaint)
+                        VStack(alignment: .leading, spacing: Space.s) {
+                            SectionLabel(text: group)
                             ForEach(servers.filter { $0.group == group }) { s in
                                 row(s)
                             }
@@ -149,7 +145,7 @@ struct McpPanel: View {
                     registrySection
                     catalogSection
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task { await load(); catalog = (try? await model.client.mcpCatalog()) ?? [] }
@@ -163,31 +159,29 @@ struct McpPanel: View {
     /// with what each gives a backend. A local model under Codex can research
     /// once it has a search server; eki adds servers, it doesn't write them.
     private var catalogSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ADD FROM THE CATALOG").font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                .foregroundStyle(Palette.inkFaint).padding(.top, 6)
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionLabel(text: "Add from the catalog").padding(.top, Space.s)
             ForEach(Array(catalog.enumerated()), id: \.offset) { _, e in
                 let id: String = e["id"]?.text ?? ""
                 let have: Bool = alreadyAdded(e)
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(e["title"]?.text ?? id).font(.zoomed(size: 13, weight: .medium))
+                HStack(spacing: Space.m) {
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        HStack(spacing: Space.s) {
+                            Text(e["title"]?.text ?? id).font(.hubHeading)
                             ForEach(e["provides"]?.arrayValue.map(\.text) ?? [], id: \.self) { p in
-                                Text(p).font(.zoomed(size: 10, weight: .semibold)).tracking(0.4)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Palette.accent.opacity(0.15), in: Capsule())
+                                Text(p).font(.hubLabel).tracking(0.4)
+                                    .padding(.horizontal, Space.s).padding(.vertical, Space.xxs)
+                                    .background(Palette.accentSoft, in: Capsule())
                             }
                         }
-                        Text(e["blurb"]?.text ?? "").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                        Text(e["blurb"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     }
                     Spacer()
                     Button(have ? "Added" : "Add…") { picking = e }
                         .buttonStyle(GhostButton())
                         .disabled(have)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .tile()
             }
         }
     }
@@ -199,23 +193,23 @@ struct McpPanel: View {
     }
 
     private func row(_ s: McpServer) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Space.m) {
             Dot(color: s.color, size: 7, pulsing: s.status == "pending")
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(s.name).font(.zoomed(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: Space.xxs) {
+                HStack(spacing: Space.s) {
+                    Text(s.name).font(.hubHeading)
                     if s.tools > 0 {
-                        Text("\(s.tools) tools").font(.zoomed(size: 11)).foregroundStyle(Palette.inkMuted)
+                        Text("\(s.tools) tools").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     }
                 }
                 Text(s.error.isEmpty ? s.word : "\(s.word) — \(s.error)")
-                    .font(.zoomed(size: 11.5)).foregroundStyle(s.status == "failed" ? Palette.danger : Palette.inkMuted)
+                    .font(.hubCaption).foregroundStyle(s.status == "failed" ? Palette.danger : Palette.inkMuted)
                     .lineLimit(2)
                 if s.name == "computer-use" {
                     Text("Claude Code's own screen control (opt-in in Settings → Routing). Its per-app "
                          + "approval is a dialog only Claude Code's own front ends show, so it may grant "
                          + "nothing here; eki's screen tools under “eki” work regardless.")
-                        .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                        .font(.hubCaption).foregroundStyle(Palette.inkFaint)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -249,15 +243,13 @@ struct McpPanel: View {
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+        .tile()
     }
 
     private var registrySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             HStack {
-                Text("EKI'S REGISTRY").font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                    .foregroundStyle(Palette.inkFaint)
+                SectionLabel(text: "eki's registry")
                 Spacer()
                 Button("Add server…") { adding = true }.buttonStyle(GhostButton())
                 if !registry.isEmpty {
@@ -269,19 +261,19 @@ struct McpPanel: View {
             if registry.isEmpty {
                 Text("Servers declared here are rendered into Claude Code (per session) and "
                      + "Codex's config.toml. Nothing is written into ~/.claude by hand.")
-                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(registry.keys.sorted(), id: \.self) { name in
                 let spec = registry[name] ?? .null
                 let backends = spec["backends"]?.arrayValue.map(\.text) ?? []
                 let enabled = spec["enabled"]?.boolValue ?? true
-                HStack(spacing: 10) {
+                HStack(spacing: Space.m) {
                     Dot(color: enabled ? Palette.accent : Palette.inkFaint, size: 7)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name).font(.zoomed(size: 13, weight: .medium))
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        Text(name).font(.hubHeading)
                         Text(commandLine(spec))
-                            .font(.zoomed(size: 11, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                             .lineLimit(1).truncationMode(.middle)
                     }
                     Spacer()
@@ -290,7 +282,7 @@ struct McpPanel: View {
                             get: { backends.contains(b) },
                             set: { on in Task { await registryToggle(name, on, backend: b) } }))
                             .toggleStyle(.checkbox)
-                            .font(.zoomed(size: 11.5))
+                            .font(.hubCaption)
                     }
                     Button(enabled ? "Disable" : "Enable") {
                         Task { await registryToggle(name, !enabled) }
@@ -299,8 +291,7 @@ struct McpPanel: View {
                     Button("Remove") { Task { await registryRemove(name) } }
                         .buttonStyle(GhostButton())
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .tile()
             }
         }
     }
@@ -415,20 +406,20 @@ struct AddFromCatalogSheet: View {
     private var keyEnv: String { entry["key_env"]?.text ?? "" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.l) {
             Text("Add \(entry["title"]?.text ?? "")").font(.hubTitle)
-            Text(entry["blurb"]?.text ?? "").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+            Text(entry["blurb"]?.text ?? "").font(.hubCallout).foregroundStyle(Palette.inkMuted)
             Text(entry["command"]?.text ?? "").font(.hubMonoSmall).foregroundStyle(Palette.inkFaint)
             TextField("Name in eki", text: $name).textFieldStyle(.roundedBorder)
             if !keyEnv.isEmpty {
                 SecureField("\(keyEnv) — kept in the server's environment", text: $key).textFieldStyle(.roundedBorder)
             }
-            HStack(spacing: 16) {
+            HStack(spacing: Space.l) {
                 Toggle("Claude Code", isOn: $claude).toggleStyle(.checkbox)
                 Toggle("Codex (and local models under it)", isOn: $codex).toggleStyle(.checkbox)
                 Toggle("Gemini CLI", isOn: $gemini).toggleStyle(.checkbox)
             }
-            if !error.isEmpty { Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger) }
+            if !error.isEmpty { Text(error).font(.hubCallout).foregroundStyle(Palette.danger) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(GhostButton())
@@ -437,7 +428,7 @@ struct AddFromCatalogSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(.all, 20)
+        .padding(.all, Space.xl)
         .frame(width: 520)
         .background(Palette.canvas)
         .onAppear { name = entry["id"]?.text ?? "" }
@@ -473,7 +464,7 @@ struct AddMcpServerSheet: View {
     @State private var error = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.l) {
             Text("Add an MCP server").font(.hubTitle)
             TextField("Name (letters, digits, - _ .)", text: $name).textFieldStyle(.roundedBorder)
             TextField("Command, e.g. npx -y @modelcontextprotocol/server-filesystem ~/Projects", text: $command)
@@ -481,13 +472,13 @@ struct AddMcpServerSheet: View {
             TextField("…or a URL for a remote (HTTP) server", text: $url).textFieldStyle(.roundedBorder).font(.hubMonoSmall)
             TextField("Environment, KEY=value per line", text: $env, axis: .vertical)
                 .textFieldStyle(.roundedBorder).font(.hubMonoSmall).lineLimit(1...4)
-            HStack(spacing: 16) {
+            HStack(spacing: Space.l) {
                 Toggle("Claude Code", isOn: $claude).toggleStyle(.checkbox)
                 Toggle("Codex", isOn: $codex).toggleStyle(.checkbox)
                 Toggle("Gemini CLI", isOn: $gemini).toggleStyle(.checkbox)
             }
             if !error.isEmpty {
-                Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
+                Text(error).font(.hubCallout).foregroundStyle(Palette.danger)
             }
             HStack {
                 Spacer()
@@ -497,7 +488,7 @@ struct AddMcpServerSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(.all, 20)
+        .padding(.all, Space.xl)
         .frame(width: 520)
         .background(Palette.canvas)
     }
@@ -537,14 +528,14 @@ struct ModelPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     if let email = account["email"]?.stringValue {
                         Text("\(email)" + (account["subscriptionType"]?.stringValue.map { " · \($0)" } ?? ""))
-                            .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
-                            .padding(.bottom, 6)
+                            .font(.hubCaption).foregroundStyle(Palette.inkMuted)
+                            .padding(.bottom, Space.s)
                     }
-                    HStack(spacing: 8) {
-                        Text("Thinking").font(.zoomed(size: 12.5, weight: .medium))
+                    HStack(spacing: Space.s) {
+                        Text("Thinking").font(.hubCallout.weighted(.medium))
                         ForEach(["on", "off"], id: \.self) { choice in
                             Button(choice) {
                                 Task {
@@ -559,7 +550,7 @@ struct ModelPanel: View {
                         }
                         Spacer()
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, Space.xs)
                     ForEach(Array(models.enumerated()), id: \.offset) { _, m in
                         let value = m["value"]?.text ?? ""
                         let chosen = !current.isEmpty && (current == value || current.contains(value))
@@ -571,18 +562,18 @@ struct ModelPanel: View {
                                 }
                             }
                         } label: {
-                            HStack(alignment: .top, spacing: 10) {
+                            HStack(alignment: .top, spacing: Space.m) {
                                 Image(systemName: chosen ? "largecircle.fill.circle" : "circle")
-                                    .font(.zoomed(size: 13))
+                                    .font(.hubRow)
                                     .foregroundStyle(chosen ? Palette.accent : Palette.inkFaint)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(m["displayName"]?.text ?? value).font(.zoomed(size: 13, weight: .medium))
+                                VStack(alignment: .leading, spacing: Space.xxs) {
+                                    Text(m["displayName"]?.text ?? value).font(.hubHeading)
                                         .foregroundStyle(Palette.ink)
-                                    Text(m["description"]?.text ?? "").font(.zoomed(size: 11.5))
+                                    Text(m["description"]?.text ?? "").font(.hubCaption)
                                         .foregroundStyle(Palette.inkMuted)
                                     if let levels = m["supportedEffortLevels"]?.arrayValue, !levels.isEmpty {
-                                        HStack(spacing: 6) {
-                                            Text("effort").font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                                        HStack(spacing: Space.s) {
+                                            Text("effort").font(.hubCaption).foregroundStyle(Palette.inkFaint)
                                             ForEach(levels.map(\.text), id: \.self) { level in
                                                 Button(level) {
                                                     Task {
@@ -600,14 +591,13 @@ struct ModelPanel: View {
                                 }
                                 Spacer()
                             }
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                            .tile()
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -651,15 +641,13 @@ struct PermissionModeMenu: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: mode == "plan" ? "list.bullet.clipboard" : "hand.raised").font(.zoomed(size: 10.5))
+            HStack(spacing: Space.xs) {
+                Image(systemName: mode == "plan" ? "list.bullet.clipboard" : "hand.raised").font(.hubIconSmall)
                 Text(Self.modes.first { $0.0 == mode }?.1 ?? "Permissions")
-                Image(systemName: "chevron.down").font(.zoomed(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.hubGlyph)
             }
-            .font(.zoomed(size: 11.5, weight: .medium))
             .foregroundStyle(Palette.inkMuted)
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(Palette.fill.opacity(0.7), in: Capsule())
+            .pill()
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -686,36 +674,35 @@ struct PermissionsPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Space.m) {
                     if rows.isEmpty {
                         Text("No rules yet. “Always allow” on a permission card adds one.")
-                            .font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
                         let behavior: String = r["behavior"]?.text ?? r["type"]?.text ?? ""
                         let tool: String = r["toolName"]?.text ?? r["tool"]?.text ?? ""
                         let content: String = r["ruleContent"]?.text ?? r["content"]?.text ?? ""
                         let source: String = r["source"]?.text ?? ""
-                        HStack(spacing: 10) {
+                        HStack(spacing: Space.m) {
                             Text(behavior)
-                                .font(.zoomed(size: 10.5, weight: .semibold))
+                                .font(.hubLabel)
                                 .foregroundStyle(color(behavior))
                                 .frame(width: 48, alignment: .leading)
                             Text(tool + " " + content)
-                                .font(.zoomed(size: 12.5, design: .monospaced))
+                                .font(.hubMono)
                             Spacer()
-                            Text(source).font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                            Text(source).font(.hubCaption).foregroundStyle(Palette.inkFaint)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                        .tile()
                     }
                     if rows.isEmpty {
-                        Text(JSONPretty(rules).text).font(.zoomed(size: 10.5, design: .monospaced))
+                        Text(JSONPretty(rules).text).font(.hubMonoSmall)
                             .foregroundStyle(Palette.inkFaint).textSelection(.enabled)
-                            .padding(.top, 8)
+                            .padding(.top, Space.s)
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -755,9 +742,9 @@ struct UsagePanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Space.l) {
                     if let plan = usage["subscription_type"]?.stringValue {
-                        Text("Plan: \(plan)").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                        Text("Plan: \(plan)").font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     let limits = usage["rate_limits"]?.objectValue ?? [:]
                     ForEach(["five_hour", "seven_day", "seven_day_sonnet", "seven_day_opus", "seven_day_oauth_apps"], id: \.self) { key in
@@ -773,13 +760,12 @@ struct UsagePanel: View {
                     }
                     let session = usage["session"]?.objectValue ?? [:]
                     if !session.isEmpty {
-                        Divider().overlay(Palette.hairline)
-                        Text("THIS SESSION").font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                            .foregroundStyle(Palette.inkFaint)
+                        Hairline()
+                        SectionLabel(text: "This session")
                         let added: Int = session["total_lines_added"]?.intValue ?? 0
                         let removed: Int = session["total_lines_removed"]?.intValue ?? 0
                         let minutes: Int = (session["total_duration_ms"]?.intValue ?? 0) / 60000
-                        HStack(spacing: 18) {
+                        HStack(spacing: Space.l) {
                             stat("cost", String(format: "$%.2f", session["total_cost_usd"]?.doubleValue ?? 0))
                             stat("lines", "+\(added) −\(removed)")
                             stat("time", "\(minutes) min")
@@ -791,11 +777,11 @@ struct UsagePanel: View {
                             let cached: String = ContextUse.k(u["cacheReadInputTokens"]?.intValue ?? 0)
                             let line: String = "\(m): \(inTok) in · \(outTok) out · \(cached) cached"
                             Text(line)
-                                .font(.zoomed(size: 11.5, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                                .font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                         }
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -807,15 +793,15 @@ struct UsagePanel: View {
     private func window(title: String, _ w: JSONValue) -> some View {
         let used = w["utilization"]?.doubleValue ?? 0
         let fraction = used > 1 ? used / 100 : used
-        return VStack(alignment: .leading, spacing: 5) {
+        return VStack(alignment: .leading, spacing: Space.xs) {
             HStack {
-                Text(title).font(.zoomed(size: 12.5, weight: .medium))
+                Text(title).font(.hubCallout.weighted(.medium))
                 Spacer()
-                Text(String(format: "%.0f%%", fraction * 100)).font(.zoomed(size: 12, design: .monospaced))
+                Text(String(format: "%.0f%%", fraction * 100)).font(.hubMonoSmall)
                     .foregroundStyle(fraction > 0.85 ? Palette.danger : Palette.inkMuted)
                 if let reset = w["resets_at"]?.stringValue, let date = ISO8601DateFormatter().date(from: reset) {
                     Text("resets " + date.formatted(.relative(presentation: .named)))
-                        .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                        .font(.hubCaption).foregroundStyle(Palette.inkFaint)
                 }
             }
             GeometryReader { geo in
@@ -830,9 +816,9 @@ struct UsagePanel: View {
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
-            Text(value).font(.zoomed(size: 13, weight: .medium, design: .monospaced))
+        VStack(alignment: .leading, spacing: Space.xxs) {
+            Text(label).font(.hubCaption).foregroundStyle(Palette.inkFaint)
+            Text(value).font(.hubMono.weighted(.medium))
         }
     }
 }
@@ -853,16 +839,16 @@ struct ContextPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Space.l) {
                     let total: Int = ctx["totalTokens"]?.intValue ?? 0
                     let cap: Int = ctx["maxTokens"]?.intValue ?? 0
                     let pct: String = String(format: "%.0f%%", ctx["percentage"]?.doubleValue ?? 0)
                     HStack {
-                        Text(ctx["model"]?.text ?? "").font(.zoomed(size: 12.5, weight: .medium))
+                        Text(ctx["model"]?.text ?? "").font(.hubCallout.weighted(.medium))
                         Spacer()
                         let headline: String = "\(ContextUse.k(total)) of \(ContextUse.k(cap)) · \(pct)"
                         Text(headline)
-                            .font(.zoomed(size: 12, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                     }
                     let cats = ctx["categories"]?.arrayValue ?? []
                     GeometryReader { geo in
@@ -882,25 +868,25 @@ struct ContextPanel: View {
                     .frame(height: 12)
                     ForEach(Array(cats.enumerated()), id: \.offset) { _, c in
                         if c["kind"]?.text != "free" {
-                            HStack(spacing: 8) {
+                            HStack(spacing: Space.s) {
                                 RoundedRectangle(cornerRadius: 2).fill(swatch(c)).frame(width: 10, height: 10)
-                                Text(c["name"]?.text ?? "").font(.zoomed(size: 12.5))
+                                Text(c["name"]?.text ?? "").font(.hubCallout)
                                 Spacer()
-                                Text(ContextUse.k(c["tokens"]?.intValue ?? 0)).font(.zoomed(size: 12, design: .monospaced))
+                                Text(ContextUse.k(c["tokens"]?.intValue ?? 0)).font(.hubMonoSmall)
                                     .foregroundStyle(Palette.inkMuted)
                             }
                         }
                     }
-                    list("MEMORY FILES", ctx["memoryFiles"]?.arrayValue ?? [], name: "path")
-                    list("MCP TOOLS", ctx["mcpTools"]?.arrayValue ?? [], name: "name")
-                    list("AGENTS", ctx["agents"]?.arrayValue ?? [], name: "agentType")
+                    list("Memory files", ctx["memoryFiles"]?.arrayValue ?? [], name: "path")
+                    list("MCP tools", ctx["mcpTools"]?.arrayValue ?? [], name: "name")
+                    list("Agents", ctx["agents"]?.arrayValue ?? [], name: "agentType")
                     if let s = ctx["skills"], let n = s["totalSkills"]?.intValue {
                         let skillTok: String = ContextUse.k(s["tokens"]?.intValue ?? 0)
                         Text("\(n) skills · " + skillTok + " tokens")
-                            .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -920,18 +906,17 @@ struct ContextPanel: View {
     private func list(_ title: String, _ items: [JSONValue], name: String) -> some View {
         Group {
             if !items.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                        .foregroundStyle(Palette.inkFaint).padding(.top, 6)
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    SectionLabel(text: title).padding(.top, Space.s)
                     ForEach(Array(items.enumerated()), id: \.offset) { _, it in
                         HStack {
-                            Text(it[name]?.text ?? "").font(.zoomed(size: 11.5, design: .monospaced))
+                            Text(it[name]?.text ?? "").font(.hubMonoSmall)
                                 .lineLimit(1).truncationMode(.middle)
                             if let s = it["serverName"]?.stringValue {
-                                Text(s).font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                                Text(s).font(.hubCaption).foregroundStyle(Palette.inkFaint)
                             }
                             Spacer()
-                            Text(ContextUse.k(it["tokens"]?.intValue ?? 0)).font(.zoomed(size: 11.5, design: .monospaced))
+                            Text(ContextUse.k(it["tokens"]?.intValue ?? 0)).font(.hubMonoSmall)
                                 .foregroundStyle(Palette.inkMuted)
                         }
                     }
@@ -950,16 +935,16 @@ struct RewindPanel: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Space.m) {
                 Text("Put the files back as they were before an answer. The thread stays; "
                      + "only the folder changes. Needs file checkpointing on in Claude Code's settings.")
-                    .font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                    .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 let turns = model.turns.filter { $0.role == "assistant" && $0.checkpoint != nil }
                 if model.usesCodex {
                     HStack {
                         Text("Codex rolls the thread back whole turns (thread/rollback).")
-                            .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                         Spacer()
                         Button("Roll back the last turn") {
                             Task {
@@ -973,12 +958,12 @@ struct RewindPanel: View {
                     }
                 } else if turns.isEmpty {
                     Text("No checkpoints in this thread yet — they're kept from the next Claude Code answer on.")
-                        .font(.zoomed(size: 12)).foregroundStyle(Palette.inkFaint)
+                        .font(.hubCallout).foregroundStyle(Palette.inkFaint)
                 }
                 ForEach(turns) { turn in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: Space.m) {
                         Text(String(turn.content.prefix(140)).replacingOccurrences(of: "\n", with: " "))
-                            .font(.zoomed(size: 12)).lineLimit(2)
+                            .font(.hubCallout).lineLimit(2)
                         Spacer()
                         if working == turn.id {
                             ProgressView().controlSize(.small)
@@ -987,15 +972,14 @@ struct RewindPanel: View {
                                 .buttonStyle(GhostButton())
                         }
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                    .tile()
                 }
                 if !result.isEmpty {
-                    Text(result).font(.zoomed(size: 11.5, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                    Text(result).font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                         .textSelection(.enabled)
                 }
             }
-            .padding(.all, 16)
+            .padding(.all, Space.l)
         }
     }
 
@@ -1020,31 +1004,30 @@ struct HooksPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     let list = hooks["hooks"]?.arrayValue ?? []
                     if list.isEmpty {
-                        Text("No hooks configured.").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                        Text("No hooks configured.").font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(list.enumerated()), id: \.offset) { _, h in
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: Space.xs) {
                             HStack {
-                                Text(h["event"]?.text ?? "").font(.zoomed(size: 12.5, weight: .medium))
+                                Text(h["event"]?.text ?? "").font(.hubCallout.weighted(.medium))
                                 if let m = h["matcher"]?.stringValue, !m.isEmpty {
-                                    Text(m).font(.zoomed(size: 11.5, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                                    Text(m).font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                                 }
                                 Spacer()
                                 Text(h["sourceLabel"]?.text ?? h["source"]?.text ?? "")
-                                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                                    .font(.hubCaption).foregroundStyle(Palette.inkFaint)
                             }
                             Text(h["displayText"]?.text ?? h["commandText"]?.text ?? "")
-                                .font(.zoomed(size: 11.5, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                                .font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                                 .lineLimit(3)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                        .tile()
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -1063,26 +1046,25 @@ struct AgentsPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     if agents.isEmpty {
                         Text("No custom agents. They live in .claude/agents/ of a project or ~/.claude/agents/.")
-                            .font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(agents.enumerated()), id: \.offset) { _, a in
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: Space.xs) {
                             HStack {
-                                Text(a["name"]?.text ?? "").font(.zoomed(size: 12.5, weight: .medium))
+                                Text(a["name"]?.text ?? "").font(.hubCallout.weighted(.medium))
                                 Spacer()
-                                Text(a["source"]?.text ?? "").font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                                Text(a["source"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkFaint)
                             }
-                            Text(a["description"]?.text ?? "").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                            Text(a["description"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                        .tile()
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -1107,20 +1089,20 @@ struct ElicitationCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "bubble.left.and.text.bubble.right").font(.zoomed(size: 12)).foregroundStyle(Palette.accent)
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.s) {
+                Image(systemName: "bubble.left.and.text.bubble.right").font(.hubCallout).foregroundStyle(Palette.accent)
                 Text(prompt.title.isEmpty ? "\(prompt.server) is asking" : prompt.title)
-                    .font(.zoomed(size: 13, weight: .medium))
+                    .font(.hubHeading)
             }
             if !prompt.message.isEmpty {
-                Text(prompt.message).font(.zoomed(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+                Text(prompt.message).font(.hubCallout).fixedSize(horizontal: false, vertical: true)
             }
             if prompt.mode == "url", let url = URL(string: prompt.url) {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
-                    Label(prompt.url, systemImage: "safari").font(.zoomed(size: 12, design: .monospaced))
+                    Label(prompt.url, systemImage: "safari").font(.hubMonoSmall)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .buttonStyle(GhostButton())
@@ -1145,7 +1127,7 @@ struct ElicitationCard: View {
                     }
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s) {
                 Spacer()
                 Button("Decline") { model.answer(prompt, with: ["action": "decline"]) }
                     .buttonStyle(GhostButton())
@@ -1156,10 +1138,7 @@ struct ElicitationCard: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(.all, 16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius)
-            .strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1))
+        .card(tone: Palette.accent)
     }
 
     /// Typed the way the schema says, so a number isn't sent as text.
@@ -1185,10 +1164,10 @@ struct DialogCard: View {
     let prompt: PendingPrompt
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Claude Code: \(prompt.dialog)").font(.zoomed(size: 13, weight: .medium))
+        VStack(alignment: .leading, spacing: Space.m) {
+            Text("Claude Code: \(prompt.dialog)").font(.hubHeading)
             Text(JSONPretty(prompt.payload).text)
-                .font(.zoomed(size: 11.5, design: .monospaced)).foregroundStyle(Palette.inkMuted)
+                .font(.hubMonoSmall).foregroundStyle(Palette.inkMuted)
                 .textSelection(.enabled)
             HStack {
                 Spacer()
@@ -1196,9 +1175,7 @@ struct DialogCard: View {
                     .buttonStyle(GhostButton())
             }
         }
-        .padding(.all, 16)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.hairline, lineWidth: 1))
+        .card()
     }
 }
 
@@ -1208,7 +1185,7 @@ struct ThinkingLines: View {
 
     var body: some View {
         Text(text.suffix(600))
-            .font(.zoomed(size: 12))
+            .font(.hubCallout)
             .foregroundStyle(Palette.inkFaint)
             .italic()
             .lineLimit(6)
@@ -1251,20 +1228,20 @@ struct TasksPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     if tasks.isEmpty {
-                        Text("Nothing running in the background.").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                        Text("Nothing running in the background.").font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(tasks.enumerated()), id: \.offset) { _, t in
                         let id: String = t["task_id"]?.text ?? t["id"]?.text ?? ""
                         let what: String = t["description"]?.text ?? t["type"]?.text ?? id
                         let status: String = t["status"]?.text ?? ""
-                        HStack(spacing: 10) {
+                        HStack(spacing: Space.m) {
                             Dot(color: status == "running" || status.isEmpty ? Palette.accent : Palette.inkFaint, size: 7,
                                 pulsing: status == "running")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(what).font(.zoomed(size: 12.5, weight: .medium)).lineLimit(2)
-                                Text(status + (id.isEmpty ? "" : " · " + id)).font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                            VStack(alignment: .leading, spacing: Space.xxs) {
+                                Text(what).font(.hubCallout.weighted(.medium)).lineLimit(2)
+                                Text(status + (id.isEmpty ? "" : " · " + id)).font(.hubCaption).foregroundStyle(Palette.inkFaint)
                             }
                             Spacer()
                             if !id.isEmpty {
@@ -1276,11 +1253,10 @@ struct TasksPanel: View {
                                 .buttonStyle(GhostButton())
                             }
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                        .tile()
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task { await load() }
@@ -1305,7 +1281,7 @@ struct StatusPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Space.m) {
                     if model.usesClaude { row("Claude Code", account["version"]?.text ?? "") }
                     row("Account", (account["account"]?["email"]?.text ?? "") + " · " + (account["account"]?["subscriptionType"]?.text ?? ""))
                     row("Model", status["model"]?.text ?? "")
@@ -1317,18 +1293,18 @@ struct StatusPanel: View {
                         row("Tools", (account["tools"]?.arrayValue.map(\.text) ?? []).joined(separator: ", "))
                         row("Build capabilities", (account["capabilities"]?.arrayValue.map(\.text) ?? []).joined(separator: ", "))
                     }
-                    Divider().overlay(Palette.hairline)
-                    Text("PANELS").font(.zoomed(size: 10, weight: .semibold)).tracking(0.6).foregroundStyle(Palette.inkFaint)
+                    Hairline()
+                    SectionLabel(text: "Panels")
                     ForEach(ClaudePanel.panels(codex: model.usesCodex)) { p in
                         Button("/" + p.rawValue + "  —  " + p.title) { model.claudePanel = p }
                             .buttonStyle(GhostButton())
                     }
                     Text("Sign-in, themes and terminal setup belong to the terminal; sign in once "
                          + "there and eki runs \(model.agentName) as you.")
-                        .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                        .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -1339,9 +1315,9 @@ struct StatusPanel: View {
     }
 
     private func row(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(label).font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted).frame(width: 130, alignment: .leading)
-            Text(value.isEmpty ? "—" : value).font(.zoomed(size: 12, design: .monospaced)).textSelection(.enabled)
+        HStack(alignment: .top, spacing: Space.m) {
+            Text(label).font(.hubCallout).foregroundStyle(Palette.inkMuted).frame(width: 130, alignment: .leading)
+            Text(value.isEmpty ? "—" : value).font(.hubMonoSmall).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1359,10 +1335,10 @@ struct ConfigPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Space.m) {
                     if !efforts.isEmpty {
-                        HStack(spacing: 8) {
-                            Text("Effort").font(.zoomed(size: 12.5, weight: .medium))
+                        HStack(spacing: Space.s) {
+                            Text("Effort").font(.hubCallout.weighted(.medium))
                             ForEach(efforts, id: \.self) { level in
                                 Button(level) {
                                     Task {
@@ -1376,8 +1352,8 @@ struct ConfigPanel: View {
                         }
                     }
                     if model.usesClaude {
-                        HStack(spacing: 8) {
-                            Text("Thinking").font(.zoomed(size: 12.5, weight: .medium))
+                        HStack(spacing: Space.s) {
+                            Text("Thinking").font(.hubCallout.weighted(.medium))
                             ForEach(["on", "off"], id: \.self) { choice in
                                 Button(choice) {
                                     Task {
@@ -1393,8 +1369,8 @@ struct ConfigPanel: View {
                         }
                     }
                     if !styles.isEmpty {
-                        HStack(spacing: 8) {
-                            Text("Output style").font(.zoomed(size: 12.5, weight: .medium))
+                        HStack(spacing: Space.s) {
+                            Text("Output style").font(.hubCallout.weighted(.medium))
                             Picker("", selection: $current) {
                                 ForEach(styles, id: \.self) { Text($0).tag($0) }
                             }
@@ -1411,12 +1387,12 @@ struct ConfigPanel: View {
                     }
                     Text("As the session sees them, after every settings file and flag. Edit "
                          + "~/.claude/settings.json or a project's .claude/settings.json to change them.")
-                        .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                        .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(JSONPretty(settings).text)
-                        .font(.zoomed(size: 11, design: .monospaced)).textSelection(.enabled)
+                        .font(.hubMonoSmall).textSelection(.enabled)
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -1447,32 +1423,31 @@ struct MemoryPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     let files = memory["memoryFiles"]?.arrayValue ?? memory["files"]?.arrayValue ?? []
                     if files.isEmpty {
                         Text("No CLAUDE.md or memory files loaded for this folder.")
-                            .font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                            .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(files.enumerated()), id: \.offset) { _, f in
                         let path: String = f["path"]?.text ?? f["file"]?.text ?? f.text
                         HStack {
-                            Text(path).font(.zoomed(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                            Text(path).font(.hubMonoSmall).lineLimit(1).truncationMode(.middle)
                             Spacer()
                             if let t = f["type"]?.stringValue {
-                                Text(t).font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                                Text(t).font(.hubCaption).foregroundStyle(Palette.inkFaint)
                             }
                             Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
                                 .buttonStyle(GhostButton())
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                        .tile()
                     }
                     if files.isEmpty, case .object = memory {
-                        Text(JSONPretty(memory).text).font(.zoomed(size: 11, design: .monospaced))
+                        Text(JSONPretty(memory).text).font(.hubMonoSmall)
                             .foregroundStyle(Palette.inkMuted).textSelection(.enabled)
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {
@@ -1519,7 +1494,7 @@ struct SkillsPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
+                HStack(spacing: Space.s) {
                     TextField("Filter skills", text: $filter).textFieldStyle(.roundedBorder)
                     Button("New skill…") { editing = SkillDraft(isNew: true) }.buttonStyle(GhostButton())
                     Button("Open folder") {
@@ -1527,14 +1502,14 @@ struct SkillsPanel: View {
                     }
                     .buttonStyle(GhostButton())
                 }
-                .padding(.horizontal, 16).padding(.vertical, 10)
+                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: Space.l) {
                         storeSection
                         if !loose.isEmpty { looseSection }
                         programSection
                     }
-                    .padding(.horizontal, 16).padding(.bottom, 16)
+                    .padding(.horizontal, Space.l).padding(.bottom, Space.l)
                 }
             }
         }
@@ -1545,17 +1520,16 @@ struct SkillsPanel: View {
     }
 
     private func header(_ text: String) -> some View {
-        Text(text.uppercased()).font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-            .foregroundStyle(Palette.inkFaint)
+        SectionLabel(text: text)
     }
 
     private var storeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             header("eki's skills — one copy, every backend")
             if store.isEmpty {
                 Text("None yet. A skill is a folder with a SKILL.md; eki links each one into "
                      + "~/.claude/skills and ~/.agents/skills, and hands it to local models itself.")
-                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                    .font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(Array(store.filter(matches).enumerated()), id: \.offset) { _, s in
@@ -1572,26 +1546,26 @@ struct SkillsPanel: View {
         let views = s["views"]?.objectValue ?? [:]
         let conflicts = views.filter { $0.value.text == "conflict" }.map(\.key).sorted()
         let uses = s["uses"]?.intValue ?? 0
-        return HStack(alignment: .top, spacing: 10) {
-            Dot(color: enabled ? Palette.accent : Palette.inkFaint, size: 7).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(name).font(.zoomed(size: 12.5, weight: .medium, design: .monospaced))
+        return HStack(alignment: .top, spacing: Space.m) {
+            Dot(color: enabled ? Palette.accent : Palette.inkFaint, size: 7).padding(.top, Space.xs)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(spacing: Space.s) {
+                    Text(name).font(.hubMono.weighted(.medium))
                     if s["origin"]?.text == "eki" {
-                        Text("eki's own").font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                        Text("eki's own").font(.hubCaption).foregroundStyle(Palette.inkFaint)
                     }
                     if uses > 0 {
-                        Text("used \(uses)×").font(.zoomed(size: 10.5)).foregroundStyle(Palette.inkFaint)
+                        Text("used \(uses)×").font(.hubCaption).foregroundStyle(Palette.inkFaint)
                     }
                 }
-                Text(s["description"]?.text ?? "").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text(s["description"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 12) {
+                HStack(spacing: Space.m) {
                     ForEach(Self.backends, id: \.0) { b in
                         Toggle(b.1, isOn: Binding(
                             get: { on.contains(b.0) },
                             set: { v in Task { await toggle(folder, v, backend: b.0) } }))
-                            .toggleStyle(.checkbox).font(.zoomed(size: 11.5))
+                            .toggleStyle(.checkbox).font(.hubCaption)
                             .disabled(!enabled)
                     }
                 }
@@ -1600,7 +1574,7 @@ struct SkillsPanel: View {
                          + conflicts.map { ["claude": "~/.claude/skills", "gemini": "~/.gemini/skills"][$0]
                                            ?? "~/.agents/skills" }
                             .joined(separator: " and ") + " — eki left it alone")
-                        .font(.zoomed(size: 11)).foregroundStyle(Palette.warn)
+                        .font(.hubCaption).foregroundStyle(Palette.warn)
                 }
             }
             Spacer()
@@ -1611,12 +1585,11 @@ struct SkillsPanel: View {
             Button("Remove") { Task { await remove(folder) } }.buttonStyle(GhostButton())
                 .help("Out of the store and every backend. It stays in the store's git history.")
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+        .tile()
     }
 
     private var looseSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             HStack {
                 header("Found in the programs' own folders")
                 Spacer()
@@ -1625,27 +1598,26 @@ struct SkillsPanel: View {
             }
             ForEach(Array(loose.enumerated()), id: \.offset) { _, u in
                 let folder: String = u["folder"]?.text ?? ""
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(folder).font(.zoomed(size: 12.5, weight: .medium, design: .monospaced))
-                        Text(u["path"]?.text ?? "").font(.zoomed(size: 11, design: .monospaced))
+                HStack(spacing: Space.m) {
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        Text(folder).font(.hubMono.weighted(.medium))
+                        Text(u["path"]?.text ?? "").font(.hubMonoSmall)
                             .foregroundStyle(Palette.inkFaint).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer()
                     if u["held"]?.boolValue == true {
-                        Text("eki has one by this name").font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                        Text("eki has one by this name").font(.hubCaption).foregroundStyle(Palette.inkFaint)
                     } else {
                         Button("Import") { Task { await importSkills([folder]) } }.buttonStyle(GhostButton())
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .tile()
             }
         }
     }
 
     private var programSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             HStack {
                 header("Also in \(model.agentName) here — plugins, this project, synced")
                 Spacer()
@@ -1655,22 +1627,22 @@ struct SkillsPanel: View {
             if programLoading {
                 ProgressView().controlSize(.small)
             } else if !programError.isEmpty {
-                Text(programError).font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkFaint)
+                Text(programError).font(.hubCaption).foregroundStyle(Palette.inkFaint)
             } else if programOnly.isEmpty {
-                Text("Nothing beyond eki's skills.").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                Text("Nothing beyond eki's skills.").font(.hubCaption).foregroundStyle(Palette.inkMuted)
             }
             ForEach(Array(programOnly.enumerated()), id: \.offset) { _, s in
                 let name: String = s["name"]?.text ?? ""
                 let hint: String = s["argumentHint"]?.text ?? ""
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text("/" + name).font(.zoomed(size: 12.5, weight: .medium, design: .monospaced))
+                HStack(alignment: .top, spacing: Space.m) {
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        HStack(spacing: Space.s) {
+                            Text("/" + name).font(.hubMono.weighted(.medium))
                             if !hint.isEmpty {
-                                Text(hint).font(.zoomed(size: 11, design: .monospaced)).foregroundStyle(Palette.inkFaint)
+                                Text(hint).font(.hubMonoSmall).foregroundStyle(Palette.inkFaint)
                             }
                         }
-                        Text(s["description"]?.text ?? "").font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
+                        Text(s["description"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                             .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
@@ -1680,8 +1652,7 @@ struct SkillsPanel: View {
                     }
                     .buttonStyle(GhostButton())
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .tile()
             }
         }
     }
@@ -1764,25 +1735,25 @@ struct SkillEditor: View {
     @State private var error = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text(draft.isNew ? "New skill" : draft.name).font(.hubTitle)
             if draft.isNew {
                 TextField("Name (letters, digits, - _ .)", text: $name).textFieldStyle(.roundedBorder)
                 TextField("When to use it — this is what a model reads to decide", text: $description, axis: .vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(2...4)
-                Text("Instructions").font(.zoomed(size: 11, weight: .semibold)).foregroundStyle(Palette.inkFaint)
+                Text("Instructions").font(.hubCaption.weighted(.semibold)).foregroundStyle(Palette.inkFaint)
             } else {
                 Text("SKILL.md — saving commits it to the store and every backend sees it at once")
-                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
+                    .font(.hubCaption).foregroundStyle(Palette.inkFaint)
             }
             TextEditor(text: $text)
                 .font(.hubMonoSmall)
                 .scrollContentBackground(.hidden)
-                .padding(.all, 8)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                .padding(.all, Space.s)
+                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.small))
                 .frame(minHeight: 260)
             if !error.isEmpty {
-                Text(error).font(.zoomed(size: 12)).foregroundStyle(Palette.danger)
+                Text(error).font(.hubCallout).foregroundStyle(Palette.danger)
             }
             HStack {
                 Spacer()
@@ -1792,7 +1763,7 @@ struct SkillEditor: View {
                     .keyboardShortcut("s", modifiers: .command)
             }
         }
-        .padding(.all, 20)
+        .padding(.all, Space.xl)
         .frame(width: 640, height: draft.isNew ? 520 : 560)
         .background(Palette.canvas)
         .onAppear { text = draft.text; name = draft.name }
@@ -1824,29 +1795,27 @@ struct PluginsPanel: View {
     var body: some View {
         PanelState(loading: loading, error: error) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     let markets = plugins["marketplaces"]?.arrayValue ?? []
                     if markets.isEmpty {
-                        Text("No plugin marketplaces.").font(.zoomed(size: 12.5)).foregroundStyle(Palette.inkMuted)
+                        Text("No plugin marketplaces.").font(.hubCallout).foregroundStyle(Palette.inkMuted)
                     }
                     ForEach(Array(markets.enumerated()), id: \.offset) { _, m in
-                        Text((m["name"]?.text ?? "").uppercased()).font(.zoomed(size: 10, weight: .semibold)).tracking(0.6)
-                            .foregroundStyle(Palette.inkFaint).padding(.top, 6)
+                        SectionLabel(text: (m["name"]?.text ?? "")).padding(.top, Space.s)
                         ForEach(Array((m["plugins"]?.arrayValue ?? []).enumerated()), id: \.offset) { _, p in
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(p["name"]?.text ?? p["id"]?.text ?? "").font(.zoomed(size: 12.5, weight: .medium))
-                                    Text(p["id"]?.text ?? "").font(.zoomed(size: 11, design: .monospaced)).foregroundStyle(Palette.inkFaint)
+                                VStack(alignment: .leading, spacing: Space.xxs) {
+                                    Text(p["name"]?.text ?? p["id"]?.text ?? "").font(.hubCallout.weighted(.medium))
+                                    Text(p["id"]?.text ?? "").font(.hubMonoSmall).foregroundStyle(Palette.inkFaint)
                                 }
                                 Spacer()
-                                Text(p["localVersion"]?.text ?? p["version"]?.text ?? "").font(.zoomed(size: 11)).foregroundStyle(Palette.inkMuted)
+                                Text(p["localVersion"]?.text ?? p["version"]?.text ?? "").font(.hubCaption).foregroundStyle(Palette.inkMuted)
                             }
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+                            .tile()
                         }
                     }
                 }
-                .padding(.all, 16)
+                .padding(.all, Space.l)
             }
         }
         .task {

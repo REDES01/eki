@@ -78,31 +78,16 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                Button {
-                    choose(.chat(""))
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "square.and.pencil").font(.zoomed(size: 12))
-                        Text("New chat").font(.zoomed(size: 13, weight: .medium))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .background(Palette.surface,
-                                in: RoundedRectangle(cornerRadius: Metric.smallRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
-                        .strokeBorder(Palette.hairline, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-
+            VStack(spacing: Space.s) {
+                RailRow(icon: "square.and.pencil", title: "New chat",
+                        selected: false) { choose(.chat("")) }
                 SearchField(text: $model.search)
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Space.s)
+            .padding(.bottom, Space.m)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     RailRow(icon: "gauge.with.dots.needle.33percent", title: "Usage",
                             trailing: usageSummary,
                             selected: pane == .usage) { choose(.usage) }
@@ -118,38 +103,31 @@ struct Sidebar: View {
                     let pinned = model.conversations.filter { $0.isPinned && $0.live != true }
                     let rest = model.conversations.filter { !$0.isPinned && $0.live != true }
                     if !working.isEmpty && model.search.isEmpty {
-                        SectionLabel(text: "Working")
-                            .padding(.horizontal, 11).padding(.top, 16).padding(.bottom, 6)
+                        RailHeader(text: "Working")
                         ForEach(working) { row in
                             ChatRow(row: row, selected: pane == .chat(row.id),
                                     rename: { renaming = row }) { choose(.chat(row.id)) }
                         }
                     }
                     if !pinned.isEmpty && model.search.isEmpty {
-                        SectionLabel(text: "Pinned")
-                            .padding(.horizontal, 11).padding(.top, 16).padding(.bottom, 6)
+                        RailHeader(text: "Pinned")
                         ForEach(pinned) { row in
                             ChatRow(row: row, selected: pane == .chat(row.id),
                                     rename: { renaming = row }) { choose(.chat(row.id)) }
                         }
                     }
-                    HStack {
-                        SectionLabel(text: !model.search.isEmpty ? "Results"
-                                     : model.showArchived ? "Archived" : "Chats")
-                        Spacer()
+                    RailHeader(text: !model.search.isEmpty ? "Results"
+                               : model.showArchived ? "Archived" : "Chats") {
                         if model.search.isEmpty {
                             Button(model.showArchived ? "Back" : "Archived") {
                                 model.showArchived.toggle()
                                 Task { await model.refreshConversations() }
                             }
                             .buttonStyle(.plain)
-                            .font(.zoomed(size: 10.5, weight: .medium))
+                            .font(.hubCaption.weighted(.medium))
                             .foregroundStyle(Palette.inkFaint)
                         }
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.top, 16)
-                    .padding(.bottom, 6)
 
                     ForEach(model.search.isEmpty ? rest : model.conversations) { row in
                         ChatRow(row: row, selected: pane == .chat(row.id),
@@ -158,14 +136,14 @@ struct Sidebar: View {
                     if model.conversations.isEmpty {
                         Text(!model.search.isEmpty ? "No matches"
                              : model.showArchived ? "Nothing archived" : "Nothing yet")
-                            .font(.zoomed(size: 12))
+                            .font(.hubCallout)
                             .foregroundStyle(Palette.inkFaint)
-                            .padding(.horizontal, 11)
-                            .padding(.top, 4)
+                            .padding(.horizontal, Space.s)
+                            .padding(.top, Space.xs)
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 14)
+                .padding(.horizontal, Space.s)
+                .padding(.bottom, Space.l)
             }
         }
         .background(Palette.rail)
@@ -191,30 +169,51 @@ struct Sidebar: View {
     }
 }
 
+/// A heading in the rail, with room for one quiet control at its end.
+struct RailHeader<Trailing: View>: View {
+    let text: String
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack {
+            SectionLabel(text: text)
+            Spacer()
+            trailing()
+        }
+        .padding(.horizontal, Space.s)
+        .padding(.top, Space.l)
+        .padding(.bottom, Space.xs)
+    }
+}
+
+extension RailHeader where Trailing == EmptyView {
+    init(text: String) { self.init(text: text) { EmptyView() } }
+}
+
 struct SearchField: View {
     @Binding var text: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Image(systemName: "magnifyingglass")
-                .font(.zoomed(size: 11))
+                .font(.hubIcon)
                 .foregroundStyle(Palette.inkFaint)
+                .frame(width: 16)
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
-                .font(.zoomed(size: 12.5))
+                .font(.hubRow)
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.zoomed(size: 11))
+                        .font(.hubIcon)
                         .foregroundStyle(Palette.inkFaint)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(Palette.fill.opacity(0.7),
-                    in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+        .padding(.horizontal, Space.s)
+        .frame(height: Metric.control)
+        .background(Palette.fill, in: RoundedRectangle(cornerRadius: Radius.small))
     }
 }
 
@@ -229,31 +228,24 @@ struct RailRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: Space.s) {
                 Image(systemName: icon)
-                    .font(.zoomed(size: icon == "circle.fill" ? 7 : 12))
+                    .font(icon == "circle.fill" ? .zoomed(size: 7) : .hubIcon)
                     .foregroundStyle(iconColor ?? Palette.inkMuted)
-                    .frame(width: 14)
-                Text(title).font(.zoomed(size: 13))
+                    .frame(width: 16)
+                Text(title).font(.hubRow)
                 Spacer()
                 if let trailing {
                     Text(trailing)
-                        .font(.zoomed(size: 11, weight: .medium))
+                        .font(.hubCaption)
                         .foregroundStyle(Palette.inkMuted)
                 }
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(background, in: RoundedRectangle(cornerRadius: 7))
-            .contentShape(Rectangle())
+            .listRow(selected: selected, hovering: hovering)
         }
         .buttonStyle(.plain)
         .foregroundStyle(Palette.ink)
         .onHover { hovering = $0 }
-    }
-
-    private var background: Color {
-        selected ? Palette.accentSoft : (hovering ? Palette.fill.opacity(0.8) : .clear)
     }
 }
 
@@ -269,14 +261,14 @@ struct ChatRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     Text(title)
-                        .font(.zoomed(size: 13))
+                        .font(.hubRow)
                         .lineLimit(1)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.zoomed(size: 11))
+                            .font(.hubCaption)
                             .foregroundStyle(row.live == true ? Palette.ok : Palette.inkFaint)
                             .lineLimit(1)
                     }
@@ -284,11 +276,7 @@ struct ChatRow: View {
                 Spacer(minLength: 0)
                 if hovering || selected {
                     Menu { menuItems } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.zoomed(size: 12, weight: .medium))
-                            .foregroundStyle(Palette.inkMuted)
-                            .frame(width: 20, height: 18)
-                            .contentShape(Rectangle())
+                        IconChip(systemName: "ellipsis", fill: .clear, size: 20)
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -296,24 +284,19 @@ struct ChatRow: View {
                     .fixedSize()
                 } else if row.isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.zoomed(size: 8))
+                        .font(.hubGlyph)
                         .foregroundStyle(Palette.inkFaint)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(selected ? Palette.accentSoft
-                                 : (hovering ? Palette.fill.opacity(0.8) : .clear),
-                        in: RoundedRectangle(cornerRadius: 7))
+            .listRow(selected: selected, hovering: hovering)
             .overlay(alignment: .leading) {
                 if row.live == true {
                     // being answered right now: a pulse at the very left
                     Dot(color: Palette.ok, size: 5, pulsing: true)
-                        .padding(.leading, 3)
+                        .padding(.leading, Space.xxs)
                 }
             }
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(Palette.ink)
@@ -369,15 +352,15 @@ struct EngineBadge: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Dot(color: color, size: 6, pulsing: model.engine == .starting)
             Text(label)
-                .font(.zoomed(size: 11.5))
+                .font(.hubCaption)
                 .foregroundStyle(Palette.inkMuted)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(Palette.fill.opacity(0.6), in: Capsule())
+        .padding(.horizontal, Space.s)
+        .padding(.vertical, Space.xs)
+        .background(Palette.fill, in: Capsule())
         .help(detail)
     }
 
@@ -455,8 +438,8 @@ struct ChatPane: View {
             }
             if !model.notice.isEmpty {
                 Text(model.notice)
-                    .font(.zoomed(size: 11.5)).foregroundStyle(Palette.inkMuted)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .font(.hubCaption).foregroundStyle(Palette.inkMuted)
+                    .padding(.horizontal, Space.m).padding(.vertical, Space.xs)
                     .background(Palette.fill, in: Capsule())
                     .transition(.opacity)
             }
@@ -473,7 +456,7 @@ struct ChatPane: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
+                LazyVStack(alignment: .leading, spacing: Space.xl) {
                     if model.turns.isEmpty && model.streaming.isEmpty && !model.sending {
                         EmptyChat()
                     }
@@ -511,7 +494,7 @@ struct ChatPane: View {
                 .column(alignment: .leading)
                 .frame(maxWidth: .infinity)          // centre the column
                 .padding(.horizontal, Metric.gutter)
-                .padding(.vertical, 28)
+                .padding(.vertical, Space.xxl)
             }
             .onChange(of: model.turns.count) {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom") }
@@ -530,31 +513,31 @@ struct EmptyChat: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text("What are we doing?")
-                .font(.zoomed(size: 22, weight: .semibold))
+                .font(.hubDisplay)
             Text("Auto sends this to the cheapest backend that can do the job "
                  + "and still has quota. Give it a folder and only the ones that "
                  + "can edit files are considered.")
-                .font(.zoomed(size: 13))
+                .font(.hubRow)
                 .foregroundStyle(Palette.inkMuted)
-                .lineSpacing(3)
+                .lineSpacing(Metric.leading)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 7) {
+            HStack(spacing: Space.s) {
                 ForEach(model.backends.filter { $0.ok && $0.answers }) { backend in
-                    HStack(spacing: 5) {
+                    HStack(spacing: Space.xs) {
                         Dot(color: Palette.backend(backend.key), size: 6)
-                        Text(backend.key).font(.zoomed(size: 11.5))
+                        Text(backend.key).font(.hubCaption)
                             .foregroundStyle(Palette.inkMuted)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Palette.fill.opacity(0.6), in: Capsule())
+                    .padding(.horizontal, Space.s)
+                    .padding(.vertical, Space.xs)
+                    .background(Palette.fill, in: Capsule())
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, Space.xs)
         }
-        .padding(.vertical, 40)
+        .padding(.vertical, Space.xxl)
     }
 }
 
@@ -565,26 +548,29 @@ struct MessageView: View {
     private var isUser: Bool { turn.role == "user" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.s) {
             if isUser {
-                // the question, as a compact bubble that stops short of the margin
+                // the question: a quiet bubble on the right, stopping well
+                // short of the left margin so the two voices read apart
                 Text(turn.content)
                     .font(.hubMessage)
-                    .lineSpacing(4)
+                    .lineSpacing(Metric.leading)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.fill,
-                                in: RoundedRectangle(cornerRadius: Metric.radius))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, 60)
+                    .padding(.horizontal, Space.l)
+                    .padding(.vertical, Space.m)
+                    .background(Palette.surface,
+                                in: RoundedRectangle(cornerRadius: Radius.large))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.large)
+                        .strokeBorder(Palette.hairline, lineWidth: 1))
+                    .padding(.leading, Metric.indent)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
-                HStack(spacing: 7) {
+                HStack(spacing: Space.s) {
                     Dot(color: Palette.backend(turn.backend ?? ""), size: 7,
                         pulsing: streaming)
                     Text((turn.backend ?? "assistant").uppercased())
-                        .font(.zoomed(size: 10.5, weight: .semibold))
+                        .font(.hubLabel)
                         .tracking(0.6)
                         .foregroundStyle(Palette.inkMuted)
                     if turn.continued {
@@ -593,7 +579,7 @@ struct MessageView: View {
                                   + "and it picked up where it left off, the way it would in a terminal.")
                     } else if let reason = turn.reason, !reason.isEmpty {
                         Text(reason)
-                            .font(.zoomed(size: 10.5))
+                            .font(.hubCaption)
                             .foregroundStyle(Palette.inkFaint)
                             .lineLimit(1)
                     }
@@ -616,7 +602,7 @@ struct TurnActions: View {
     @State private var copied = false
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xxs) {
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(turn.content, forType: .string)
@@ -675,7 +661,7 @@ struct TurnActions: View {
             }
         }
         .labelStyle(.titleAndIcon)
-        .padding(.leading, -9)                    // align the ghost text with the answer
+        .padding(.leading, -Space.s.value)        // align the ghost text with the answer
         .sheet(isPresented: $showingDiff) {
             DiffSheet(folder: turn.cwd ?? "", diff: diff)
         }
@@ -698,32 +684,22 @@ struct DiffSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Changes").font(.hubTitle)
-                    Text(folder)
-                        .font(.hubMonoSmall)
-                        .foregroundStyle(Palette.inkFaint)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-                Spacer()
+            SheetHeader(title: "Changes", subtitle: folder) {
                 Button("Done") { dismiss() }
                     .buttonStyle(AccentButton())
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.all, 16)
-            Divider().overlay(Palette.hairline)
+            Hairline()
             ScrollView {
-                DiffView(text: diff).padding(.all, 16)
+                DiffView(text: diff).padding(.all, Space.l)
             }
             // what the repo holds now, which may include edits made since —
             // said here so a stale-looking diff isn't a mystery
             Text("As the folder is now, against its last commit.")
-                .font(.zoomed(size: 11))
+                .font(.hubCaption)
                 .foregroundStyle(Palette.inkFaint)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .padding(.horizontal, Space.l)
+                .padding(.bottom, Space.m)
         }
         .frame(minWidth: 640, minHeight: 440)
         .background(Palette.canvas)
@@ -735,14 +711,14 @@ struct Thinking: View {
     @State private var phase = 0.0
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Circle()
                 .fill(Palette.accent)
                 .frame(width: 7, height: 7)
                 .scaleEffect(0.6 + 0.4 * phase)
                 .opacity(0.45 + 0.55 * phase)
             Text(reason.isEmpty ? "routing…" : reason)
-                .font(.zoomed(size: 12))
+                .font(.hubCallout)
                 .foregroundStyle(Palette.inkMuted)
         }
         .onAppear {
@@ -813,7 +789,7 @@ struct Composer: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Space.s) {
             if (model.cost?.turns ?? 0) > 0 || model.contextUse != nil {
                 CostStrip(cost: model.cost, context: model.contextUse)
             }
@@ -822,9 +798,9 @@ struct Composer: View {
                     CommandMenu(commands: suggestions, picked: min(picked, suggestions.count - 1)) { c in
                         complete(c)
                     }
-                    Divider().overlay(Palette.hairline)
+                    Hairline()
                 } else if draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace), model.commands.isEmpty {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.s) {
                         if model.commandsLoading {
                             ProgressView().controlSize(.small)
                             Text("Asking \(model.agentName) for its commands…")
@@ -834,10 +810,10 @@ struct Composer: View {
                             Text("No commands yet — is \(model.agentName) set up?")
                         }
                     }
-                    .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .font(.hubCallout).foregroundStyle(Palette.inkMuted)
+                    .padding(.horizontal, Space.l).padding(.vertical, Space.s)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Divider().overlay(Palette.hairline)
+                    Hairline()
                 }
                 // A vertical TextField rather than a TextEditor: an editor
                 // takes every point of height offered and the composer ends up
@@ -846,8 +822,8 @@ struct Composer: View {
                     .textFieldStyle(.plain)
                     .font(.hubMessage)
                     .lineLimit(1...8)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 11)
+                    .padding(.horizontal, Space.l)
+                    .padding(.top, Space.m)
                     .focused($focused)
                     .onSubmit(submit)        // ⇧↩ still makes a new line
                     .onChange(of: draft) { _, now in
@@ -863,7 +839,7 @@ struct Composer: View {
                         focused = true
                     }
 
-                HStack(spacing: 8) {
+                HStack(spacing: Space.s) {
                     BackendPicker()
                     RepoField(repo: $repo)
                     if model.usesAgent {
@@ -875,18 +851,20 @@ struct Composer: View {
                         Button {
                             model.stopRun()
                         } label: {
-                            Image(systemName: "stop.circle.fill")
-                                .font(.zoomed(size: 21))
-                                .foregroundStyle(Palette.inkMuted)
+                            Image(systemName: "stop.fill")
+                                .font(.hubIconSmall)
+                                .foregroundStyle(Palette.onAccent)
+                                .frame(width: Metric.control, height: Metric.control)
+                                .background(Palette.inkMuted, in: Circle())
                         }
                         .buttonStyle(.plain)
                         .help("Stop this run. (Closing the window doesn't — it keeps going.)")
                     } else {
                         Button(action: send) {
                             Image(systemName: "arrow.up")
-                                .font(.zoomed(size: 12, weight: .bold))
-                                .foregroundStyle(empty ? Palette.inkFaint : .white)
-                                .frame(width: 26, height: 26)
+                                .font(.hubIcon.weighted(.bold))
+                                .foregroundStyle(empty ? Palette.inkFaint : Palette.onAccent)
+                                .frame(width: Metric.control, height: Metric.control)
                                 .background(empty ? Palette.fill : Palette.accent,
                                             in: Circle())
                         }
@@ -895,24 +873,25 @@ struct Composer: View {
                         .keyboardShortcut(.return, modifiers: .command)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Space.s)
+                .padding(.vertical, Space.s)
             }
             .background(Palette.surface,
-                        in: RoundedRectangle(cornerRadius: Metric.radius + 2))
-            .overlay(RoundedRectangle(cornerRadius: Metric.radius + 2)
-                .strokeBorder(focused ? Palette.accent.opacity(0.45) : Palette.hairline,
-                              lineWidth: 1))
+                        in: RoundedRectangle(cornerRadius: Radius.large))
+            .overlay(RoundedRectangle(cornerRadius: Radius.large)
+                .strokeBorder(focused ? Palette.inkFaint : Palette.hairline, lineWidth: 1))
+            .raised()
 
             Text("↩ to send · ⇧↩ for a new line")
-                .font(.zoomed(size: 10.5))
+                .font(.hubCaption)
                 .foregroundStyle(Palette.inkFaint)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, Space.s)
         }
         .column()
         .frame(maxWidth: .infinity)
         .padding(.horizontal, Metric.gutter)
-        .padding(.bottom, 16)
+        .padding(.bottom, Space.m)
         .onAppear { focused = true }
     }
 
@@ -950,24 +929,24 @@ struct AttachmentStrip: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s) {
                 ForEach(model.attachments) { a in
                     ZStack(alignment: .topTrailing) {
                         Image(nsImage: a.image)
                             .resizable().aspectRatio(contentMode: .fill)
                             .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.small))
                         Button {
                             model.attachments.removeAll { $0.id == a.id }
                         } label: {
-                            Image(systemName: "xmark.circle.fill").font(.zoomed(size: 13))
-                                .foregroundStyle(.white, Palette.ink.opacity(0.7))
+                            Image(systemName: "xmark.circle.fill").font(.hubRow)
+                                .foregroundStyle(Palette.surface, Palette.inkMuted)
                         }
-                        .buttonStyle(.plain).padding(3)
+                        .buttonStyle(.plain).padding(.all, Space.xs)
                     }
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
         }
     }
 }
@@ -981,26 +960,23 @@ struct FileMenu: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 1) {
+                VStack(spacing: Space.xxs) {
                     ForEach(Array(paths.enumerated()), id: \.offset) { i, p in
                         Button { choose(p) } label: {
-                            HStack(spacing: 8) {
+                            HStack(spacing: Space.s) {
                                 Image(systemName: p.hasSuffix("/") ? "folder" : "doc.text")
-                                    .font(.zoomed(size: 11)).foregroundStyle(Palette.inkFaint)
-                                Text(p).font(.zoomed(size: 12.5, design: .monospaced)).foregroundStyle(Palette.ink)
+                                    .font(.hubIconSmall).foregroundStyle(Palette.inkFaint)
+                                Text(p).font(.hubMonoSmall).foregroundStyle(Palette.ink)
                                     .lineLimit(1).truncationMode(.middle)
                                 Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(i == picked ? Palette.accent.opacity(0.16) : Color.clear,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
+                            .listRow(selected: i == picked)
                         }
                         .buttonStyle(.plain)
                         .id(i)
                     }
                 }
-                .padding(.all, 6)
+                .padding(.all, Space.s)
             }
             .frame(maxHeight: 220)
             .onChange(of: picked) { _, now in proxy.scrollTo(now) }
@@ -1021,13 +997,13 @@ struct PermissionNeedCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "hand.raised.circle").font(.zoomed(size: 13)).foregroundStyle(Palette.warn)
-                Text("macOS hasn't let the screen tools in").font(.zoomed(size: 13, weight: .medium))
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.s) {
+                Image(systemName: "hand.raised.circle").font(.hubIcon).foregroundStyle(Palette.warn)
+                Text("macOS hasn't let the screen tools in").font(.hubHeading)
                 Spacer()
                 Button { model.permissionNeed = nil } label: {
-                    Image(systemName: "xmark").font(.zoomed(size: 10, weight: .semibold)).foregroundStyle(Palette.inkFaint)
+                    Image(systemName: "xmark").font(.hubIconSmall.weighted(.semibold)).foregroundStyle(Palette.inkFaint)
                 }
                 .buttonStyle(.plain)
             }
@@ -1037,9 +1013,9 @@ struct PermissionNeedCard: View {
                  : "Open System Settings › Privacy & Security › \(pane.title), turn on "
                    + "“\(need.program.hasSuffix("eki-hid") ? "eki-hid" : "claude")” — or add the "
                    + "program with “+” if it isn't listed — then ask again.")
-                .font(.zoomed(size: 12)).foregroundStyle(Palette.inkMuted)
+                .font(.hubCallout).foregroundStyle(Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s) {
                 if need.program.hasSuffix("eki.app") {
                     Button("Ask macOS") {
                         Task { await model.requestScreenAccess() }
@@ -1070,13 +1046,11 @@ struct PermissionNeedCard: View {
                 }
             }
         }
-        .padding(.all, 14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metric.radius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radius).strokeBorder(Palette.warn.opacity(0.45), lineWidth: 1))
+        .card(tone: Palette.warn)
         .column()
         .frame(maxWidth: .infinity)
         .padding(.horizontal, Metric.gutter)
-        .padding(.bottom, 8)
+        .padding(.bottom, Space.s)
     }
 }
 
@@ -1090,11 +1064,7 @@ struct ClaudePanelButton: View {
                 Button(p.title) { model.claudePanel = p }
             }
         } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.zoomed(size: 12))
-                .foregroundStyle(Palette.inkMuted)
-                .padding(.horizontal, 7).padding(.vertical, 5)
-                .background(Palette.fill.opacity(0.7), in: Capsule())
+            IconChip(systemName: "slider.horizontal.3")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -1135,22 +1105,19 @@ struct BackendPicker: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Space.xs) {
                 if model.preferredBackend.isEmpty {
-                    Image(systemName: "wand.and.stars").font(.zoomed(size: 10.5))
+                    Image(systemName: "wand.and.stars").font(.hubIconSmall)
                     Text("Auto")
                 } else {
                     Dot(color: Palette.backend(model.preferredBackend), size: 6)
                     Text(model.preferredModel.isEmpty ? model.preferredBackend
                          : "\(model.preferredBackend) · \(model.preferredModel)")
                 }
-                Image(systemName: "chevron.down").font(.zoomed(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.hubGlyph)
             }
-            .font(.zoomed(size: 11.5, weight: .medium))
             .foregroundStyle(Palette.inkMuted)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Palette.fill.opacity(0.7), in: Capsule())
+            .pill()
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -1171,32 +1138,28 @@ struct RepoField: View {
     @Binding var repo: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.xs) {
             Button {
                 if let picked = model.chooseRepo() { repo = picked; model.lastRepo = picked }
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: Space.xs) {
                     Image(systemName: repo.isEmpty ? "folder.badge.plus" : "folder.fill")
-                        .font(.zoomed(size: 10.5))
+                        .font(.hubIconSmall)
                     Text(repo.isEmpty ? "Folder" : (repo as NSString).lastPathComponent)
                         .lineLimit(1)
                 }
-                .font(.zoomed(size: 11.5, weight: .medium))
                 .foregroundStyle(repo.isEmpty ? Palette.inkMuted : Palette.accent)
             }
             .buttonStyle(.plain)
             if !repo.isEmpty {
                 Button { repo = "" } label: {
-                    Image(systemName: "xmark").font(.zoomed(size: 8, weight: .bold))
+                    Image(systemName: "xmark").font(.hubGlyph)
                         .foregroundStyle(Palette.inkFaint)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(repo.isEmpty ? Palette.fill.opacity(0.7) : Palette.accentSoft,
-                    in: Capsule())
+        .pill(fill: repo.isEmpty ? Palette.fill : Palette.accentSoft)
         .help("Give the answer a working folder — only backends that can edit "
               + "files are considered")
     }
@@ -1212,11 +1175,11 @@ struct CostStrip: View {
     var context: ContextUse? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Space.m) {
             if let cost {
                 ForEach(cost.by_backend.sorted(by: { $0.value.turns > $1.value.turns }),
                         id: \.key) { key, entry in
-                    HStack(spacing: 5) {
+                    HStack(spacing: Space.xs) {
                         Dot(color: Palette.backend(key), size: 5)
                         Text("\(key) ×\(entry.turns)")
                         if entry.output_tokens > 0 {
@@ -1231,9 +1194,9 @@ struct CostStrip: View {
                 ContextMeter(use: context)
             }
         }
-        .font(.zoomed(size: 11).monospacedDigit())
+        .font(.hubCaption.monospacedDigit())
         .foregroundStyle(Palette.inkMuted)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Space.s)
     }
 }
 
@@ -1248,7 +1211,7 @@ struct ContextMeter: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text("context \(use.text)")
             if use.window > 0 {
                 ZStack(alignment: .leading) {
@@ -1271,21 +1234,21 @@ struct Banner<Trailing: View>: View {
     @ViewBuilder let trailing: () -> Trailing
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: Space.s) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.zoomed(size: 11))
+                .font(.hubIconSmall)
                 .foregroundStyle(tone)
-            Text(text).font(.zoomed(size: 12.5))
+            Text(text).font(.hubCallout)
             Spacer()
             trailing()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(tone.opacity(0.10), in: RoundedRectangle(cornerRadius: Metric.smallRadius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
+        .padding(.horizontal, Space.m)
+        .padding(.vertical, Space.s)
+        .background(tone.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small)
             .strokeBorder(tone.opacity(0.25), lineWidth: 1))
         .padding(.horizontal, Metric.gutter)
-        .padding(.top, 12)
+        .padding(.top, Space.m)
     }
 }
 
@@ -1298,7 +1261,7 @@ struct RenameSheet: View {
     @State private var title = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.l) {
             Text("Rename").font(.hubTitle)
             TextField("Title", text: $title)
                 .textFieldStyle(.roundedBorder)
@@ -1311,7 +1274,7 @@ struct RenameSheet: View {
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(.all, 22)
+        .padding(.all, Space.xl)
         .frame(width: 380)
         .onAppear { title = row.title ?? "" }
     }
@@ -1330,7 +1293,7 @@ struct DiffView: View {
     var body: some View {
         if text.isEmpty {
             Text("No changes")
-                .font(.zoomed(size: 12))
+                .font(.hubCallout)
                 .foregroundStyle(Palette.inkFaint)
         } else {
             VStack(alignment: .leading, spacing: 0) {
@@ -1340,16 +1303,16 @@ struct DiffView: View {
                         .font(.hubMonoSmall)
                         .foregroundStyle(color(line))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 1.5)
+                        .padding(.horizontal, Space.m)
+                        .padding(.vertical, Space.xxs)
                         .background(background(line))
                         .textSelection(.enabled)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, Space.s)
             .background(Palette.surface,
-                        in: RoundedRectangle(cornerRadius: Metric.smallRadius))
-            .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
+                        in: RoundedRectangle(cornerRadius: Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: Radius.small)
                 .strokeBorder(Palette.hairline, lineWidth: 1))
         }
     }

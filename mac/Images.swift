@@ -164,8 +164,8 @@ struct InlineImage: View {
             } else if missing {
                 gone
             } else {
-                RoundedRectangle(cornerRadius: Metric.radius)
-                    .fill(Palette.fill.opacity(0.6))
+                RoundedRectangle(cornerRadius: Radius.card)
+                    .fill(Palette.fill)
                     .frame(width: 240, height: 240)
                     .overlay(ProgressView().controlSize(.small))
             }
@@ -180,7 +180,7 @@ struct InlineImage: View {
     }
 
     private func shown(_ image: NSImage) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Metric.radius)
+        let shape = RoundedRectangle(cornerRadius: Radius.card)
         return Image(nsImage: image)
             .resizable()
             .interpolation(.high)
@@ -190,16 +190,16 @@ struct InlineImage: View {
             .overlay(shape.strokeBorder(Palette.hairline, lineWidth: 1))
             .overlay(alignment: .bottomTrailing) {
                 if hovering {
-                    HStack(spacing: 2) {
+                    HStack(spacing: Space.xxs) {
                         chip("arrow.up.left.and.arrow.down.right", "Open") { open() }
                         chip("square.and.arrow.down", "Save…") { PictureActions.save(picture, image) }
                         if picture.isLocal {
                             chip("folder", "Show in Finder") { PictureActions.reveal(picture) }
                         }
                     }
-                    .padding(.all, 4)
+                    .padding(.all, Space.xs)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    .padding(.all, 8)
+                    .padding(.all, Space.s)
                     .transition(.opacity)
                 }
             }
@@ -226,12 +226,12 @@ struct InlineImage: View {
     }
 
     private var gone: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Image(systemName: "photo.badge.exclamationmark")
                 .foregroundStyle(Palette.inkFaint)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.xxs) {
                 Text("This picture isn't where it was")
-                    .font(.zoomed(size: 12.5, weight: .medium))
+                    .font(.hubCallout.weighted(.medium))
                 Text(source)
                     .font(.hubMonoSmall)
                     .foregroundStyle(Palette.inkFaint)
@@ -240,15 +240,15 @@ struct InlineImage: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Palette.fill.opacity(0.5), in: RoundedRectangle(cornerRadius: Metric.smallRadius))
+        .padding(.horizontal, Space.m)
+        .padding(.vertical, Space.s)
+        .background(Palette.fill, in: RoundedRectangle(cornerRadius: Radius.small))
     }
 
     private func chip(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.zoomed(size: 11.5, weight: .medium))
+                .font(.hubCaption.weighted(.medium))
                 .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }

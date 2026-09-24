@@ -166,29 +166,29 @@ struct MarkdownText: View {
     @Environment(\.zoom) private var zoom
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: Space.m) {
             ForEach(MarkdownParser.blocks(content)) { block in
                 switch block {
                 case .text(let text):
                     Text(MarkdownParser.inline(text, zoom: zoom))
                         .font(.hubMessage)
-                        .lineSpacing(4.5)
+                        .lineSpacing(Metric.leading)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .heading(let text, let level):
                     Text(MarkdownParser.inline(text, zoom: zoom))
-                        .font(.zoomed(size: level <= 2 ? 16 : 14.5, weight: .semibold))
-                        .padding(.top, 3)
+                        .font(level <= 2 ? Face.hubTitle.weighted(.semibold) : .hubBody.weighted(.semibold))
+                        .padding(.top, Space.xs)
                         .textSelection(.enabled)
 
                 case .bullet(let items):
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                             // an ordered item carries its own number; giving it
                             // a bullet too reads as "• 4. Retry logic"
                             let split = MarkdownParser.marker(item)
-                            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                                 Text(split.marker)
                                     .font(.hubMessage)
                                     .foregroundStyle(Palette.inkFaint)
@@ -196,7 +196,7 @@ struct MarkdownText: View {
                                            alignment: .trailing)
                                 Text(MarkdownParser.inline(split.body, zoom: zoom))
                                     .font(.hubMessage)
-                                    .lineSpacing(4)
+                                    .lineSpacing(Metric.leading)
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -227,7 +227,7 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language)
-                    .font(.zoomed(size: 10.5, weight: .medium))
+                    .font(.hubCaption.weighted(.medium))
                     .foregroundStyle(Palette.inkFaint)
                 Spacer()
                 Button(copied ? "copied" : "copy") {
@@ -241,20 +241,21 @@ struct CodeBlock: View {
                 }
                 .buttonStyle(GhostButton())
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(Palette.fill.opacity(0.7))
+            .padding(.leading, Space.m)
+            .padding(.trailing, Space.xs)
+            .background(Palette.fill)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
                     .font(.hubMono)
+                    .lineSpacing(Space.xxs.value)
                     .textSelection(.enabled)
-                    .padding(.all, 11)
+                    .padding(.all, Space.m)
             }
         }
-        .background(Palette.fill.opacity(0.45))
-        .clipShape(RoundedRectangle(cornerRadius: Metric.smallRadius))
-        .overlay(RoundedRectangle(cornerRadius: Metric.smallRadius)
+        .background(Palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card)
             .strokeBorder(Palette.hairline, lineWidth: 1))
     }
 }

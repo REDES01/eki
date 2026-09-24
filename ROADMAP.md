@@ -305,7 +305,7 @@ So that the agent doing the work can ask eki for what it can't do itself.
       kind of work as it arrives — non-interactive, `--json`, real exit codes,
       output written to a path and the path printed *(eki: self/9fb5fc6b)*
 - [x] `eki capabilities`: what this Mac can do right now, for an agent to read *(eki: self/96241b9a)*
-- [ ] `eki submit` / `eki wait <id>` for work too slow to block a shell on
+- [x] `eki submit` / `eki wait <id>` for work too slow to block a shell on *(eki: self/4ba8cc0d)*
 - [x] A depth guard (`EKI_DEPTH`) so an agent calling eki calling an agent
       stops somewhere, and nested calls count against quota like any other *(eki: self/a582d8cd)*
 - [x] eki writes a short "how to use eki here" section into a project's

@@ -2,6 +2,11 @@
 """Capability commands: `eki image`, `eki write` — one per kind of work —
 and `eki capabilities`, what this Mac can do right now.
 
+`eki submit` and `eki wait <id>` split the same thing in two, for work too
+slow to block a shell on: submit prints a run id at once, wait blocks
+until that run ends and hands back what it made — a picture's path, the
+text, or the file it was written to.
+
 `eki ask` is for a person watching a terminal: it streams, it can be let go
 of, it prints the route. These are for an agent with a shell that wants a
 thing made (ROADMAP, Stage 4): they block until the work is done, print
@@ -12,7 +17,8 @@ and say how it went in the exit code:
     1  the run failed or was cancelled
     3  the engine couldn't be reached or refused the request
     4  the run finished but made nothing (no picture in the answer)
-    5  it took longer than --timeout (the run carries on in the engine)
+    5  it took longer than --timeout (the run carries on in the engine;
+       `eki wait <id>` again picks it back up)
 
 `eki capabilities` is what an agent reads before these: every backend the
 engine has, whether it is up, what it does, and the command that reaches
@@ -51,41 +57,85 @@ class Failure(Exception):
 
 # ---- the run -----------------------------------------------------------
 
-def run_and_wait(service: str, body: Dict[str, Any], timeout: float,
-                 ensure: Callable[[str], None]) -> Tuple[Dict[str, Any], str, str]:
-    """Start one run and wait for it to end: (run, conversation, answer)."""
-    if os.environ.get("EKI_INSIDE"):
-        body["via"] = "agent"                  # a program's request, not the person's
+def from_agent(body: Dict[str, Any], *, read_only: bool = False,
+               commands: Optional[List[str]] = None, paths: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Mark a request made from inside a program eki started: it is that
+    program's, not the person's — a goal's turn doesn't step aside for it,
+    it gets no more than the run asking has (eki/grant.py), and it counts
+    one level down from that run (eki/nesting.py). Shared with `eki ask`."""
+    from . import grant as grant_mod
+    parent_thread = os.environ.get("EKI_PARENT", "")
+    if os.environ.get("EKI_INSIDE") or os.environ.get(grant_mod.ENV) or parent_thread:
+        body.update(via="agent", parent=grant_mod.from_env().to_json(), read_only=read_only,
+                    commands=commands or [], paths=paths or [], parent_thread=parent_thread)
+    depth, parent_run = nesting.caller()
+    if depth or parent_run:
+        body.update(depth=depth, parent_run=parent_run)
+    return body
+
+
+def _client(service: str) -> httpx.Client:
+    parent = os.environ.get("EKI_PARENT", "")
+    return httpx.Client(base_url=service, timeout=30,
+                        headers={"X-Eki-Parent": parent} if parent else {})
+
+
+def _reach(service: str, ensure: Callable[[str], None]) -> None:
     try:
         ensure(service)
     except SystemExit:
         raise Failure(UNREACHABLE, f"the engine isn't running on {service}")
-    try:
-        with httpx.Client(base_url=service, timeout=30) as http:
-            r = http.post("/api/ask", json=body)
-            if r.status_code >= 400:
-                raise Failure(UNREACHABLE, f"the engine refused it: {r.status_code} {r.text[:200]}")
-            started = r.json()
-            rid, cid = started["run"], started.get("conversation", "")
-            deadline = time.time() + timeout
-            while True:
-                run = http.get(f"/api/runs/{rid}").json()
-                if run.get("state") in ("done", "failed", "cancelled", "interrupted"):
-                    break
-                if time.time() > deadline:
-                    raise Failure(TIMEOUT, f"still running after {timeout:.0f}s: eki watch {rid}", run)
-                time.sleep(1.0)
-            answer = ""
-            if cid:
-                r = http.get(f"/api/conversations/{cid}")
-                if r.status_code < 400:
-                    turns = [t for t in r.json().get("turns") or [] if t.get("role") == "assistant"]
-                    answer = str(turns[-1].get("content") or "") if turns else ""
-    except httpx.HTTPError as e:
-        raise Failure(UNREACHABLE, f"lost the engine: {e}")
+
+
+def start(http: httpx.Client, body: Dict[str, Any]) -> Tuple[str, str]:
+    """Hand the engine one request: (run, conversation)."""
+    r = http.post("/api/ask", json=body)
+    if r.status_code >= 400:
+        raise Failure(UNREACHABLE, f"the engine refused it: {r.status_code} {r.text[:200]}")
+    started = r.json()
+    return started["run"], started.get("conversation", "")
+
+
+def wait_for(http: httpx.Client, rid: str, timeout: float) -> Tuple[Dict[str, Any], str, str]:
+    """Wait for a run to end: (run, conversation, answer). Timing out lets
+    go of it; the run carries on in the engine."""
+    deadline = time.time() + timeout
+    while True:
+        r = http.get(f"/api/runs/{rid}")
+        if r.status_code == 404:
+            raise Failure(FAILED, f"no such run: {rid}")
+        if r.status_code >= 400:
+            raise Failure(UNREACHABLE, f"the engine refused it: {r.status_code} {r.text[:200]}")
+        run = r.json()
+        if run.get("state") in ("done", "failed", "cancelled", "interrupted"):
+            break
+        if time.time() > deadline:
+            raise Failure(TIMEOUT, f"still running after {timeout:.0f}s: eki wait {rid}", run)
+        time.sleep(1.0)
+    cid = run.get("conversation_id", "")
+    answer = ""
+    if cid:
+        r = http.get(f"/api/conversations/{cid}")
+        if r.status_code < 400:
+            turns = [t for t in r.json().get("turns") or [] if t.get("role") == "assistant"]
+            answer = str(turns[-1].get("content") or "") if turns else ""
     if run.get("state") != "done":
         raise Failure(FAILED, run.get("error") or f"the run was {run.get('state')}", run)
     return run, cid, (answer or run.get("output") or "").strip()
+
+
+def run_and_wait(service: str, body: Dict[str, Any], timeout: float,
+                 ensure: Callable[[str], None]) -> Tuple[Dict[str, Any], str, str]:
+    """Start one run and wait for it to end: (run, conversation, answer)."""
+    from_agent(body)
+    _reach(service, ensure)
+    try:
+        with _client(service) as http:
+            rid, cid = start(http, body)
+            run, got, answer = wait_for(http, rid, timeout)
+    except httpx.HTTPError as e:
+        raise Failure(UNREACHABLE, f"lost the engine: {e}")
+    return run, got or cid, answer
 
 
 # ---- where the output goes ---------------------------------------------------
@@ -171,6 +221,94 @@ def write(args: Any, ensure: Callable[[str], None]) -> int:
         return [dest]
 
     return _finish(args, body, ensure, make, extra)
+
+
+# ---- work too slow to block a shell on ---------------------------------------
+
+def submit(args: Any, ensure: Callable[[str], None]) -> int:
+    """Start a run and return straight away with its id; `eki wait <id>`
+    picks it up later. The same request `eki ask` makes, from an agent."""
+    body: Dict[str, Any] = {"prompt": args.prompt, "backend": args.model or "",
+                            "repo": os.path.abspath(os.path.expanduser(args.repo)) if args.repo else "",
+                            "images": bool(args.image)}
+    from_agent(body, read_only=args.read_only, commands=args.allow, paths=args.write)
+    try:
+        _reach(args.service, ensure)
+        with _client(args.service) as http:
+            rid, cid = start(http, body)
+    except httpx.HTTPError as e:
+        return _refused(args, f"lost the engine: {e}")
+    except Failure as f:
+        return _refused(args, str(f))
+    if args.json:
+        print(json.dumps({"ok": True, "run": rid, "conversation": cid, "error": ""}))
+    else:
+        print(rid)
+    return OK
+
+
+def wait(args: Any, ensure: Callable[[str], None]) -> int:
+    """Wait for a run started earlier (`eki submit`, `eki ask -d`) and hand
+    back what it made the way `eki image` and `eki write` do: pictures in
+    the answer are copied to `-o` (here by default) and their paths
+    printed; otherwise the text goes into the file `-o` names, or to
+    stdout when there is none."""
+    extra: Dict[str, Any] = {}
+
+    def make(run: Dict[str, Any], answer: str) -> List[Path]:
+        prompt = run.get("prompt") or ""
+        made = [p for p in images_in(answer) if os.path.exists(p)]
+        if made:
+            ext = Path(made[0]).suffix or ".png"
+            dests = destinations(args.output, len(made), slug(prompt, "image"), ext)
+            for src, dst in zip(made, dests):
+                shutil.copy2(src, dst)
+            return dests
+        if not answer:
+            raise Failure(NOTHING, "the run finished without an answer", run)
+        if not args.output or args.output == "-":
+            if args.json:
+                extra["text"] = answer
+            else:
+                sys.stdout.write(answer + "\n")
+            return []
+        dest = destinations(args.output, 1, slug(prompt, "text"), ".md")[0]
+        dest.write_text(answer + "\n")
+        return [dest]
+
+    run: Dict[str, Any] = {"id": args.id}
+    cid = ""
+    try:
+        _reach(args.service, ensure)
+        with _client(args.service) as http:
+            run, cid, answer = wait_for(http, args.id, args.timeout)
+        paths = [str(p.resolve()) for p in make(run, answer)]
+    except httpx.HTTPError as e:
+        return _failed(args, Failure(UNREACHABLE, f"lost the engine: {e}"), run, cid)
+    except Failure as f:
+        return _failed(args, f, f.run or run, cid)
+    if args.json:
+        _json(True, run, cid, paths, "", extra)
+    else:
+        for p in paths:
+            print(p)
+    return OK
+
+
+def _refused(args: Any, error: str) -> int:
+    if args.json:
+        print(json.dumps({"ok": False, "run": "", "conversation": "", "error": error}))
+    else:
+        print(f"! {error}", file=sys.stderr)
+    return UNREACHABLE
+
+
+def _failed(args: Any, f: Failure, run: Dict[str, Any], cid: str) -> int:
+    if args.json:
+        _json(False, run, cid, [], str(f))
+    else:
+        print(f"! {f}", file=sys.stderr)
+    return f.code
 
 
 # ---- what this Mac can do ----------------------------------------------------
@@ -266,12 +404,7 @@ def _finish(args: Any, body: Dict[str, Any], ensure: Callable[[str], None],
         run, cid, answer = run_and_wait(args.service, body, args.timeout, ensure)
         paths = [str(p.resolve()) for p in make(run, answer)]
     except Failure as f:
-        run = f.run or run
-        if args.json:
-            _json(False, run, cid, [], str(f))
-        else:
-            print(f"! {f}", file=sys.stderr)
-        return f.code
+        return _failed(args, f, f.run or run, cid)
     if args.json:
         _json(True, run, cid, paths, "", extra)
     else:

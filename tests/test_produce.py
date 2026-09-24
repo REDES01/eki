@@ -5,7 +5,9 @@ import json
 import httpx
 import pytest
 
-from eki import cli, migrate, produce
+from eki import cli, grant, migrate, produce
+
+REAL_CLIENT = httpx.Client
 
 
 def engine(monkeypatch, *, state="done", answer="", error="", backend="comfyui", never_ends=False):
@@ -18,18 +20,22 @@ def engine(monkeypatch, *, state="done", answer="", error="", backend="comfyui",
             return httpx.Response(200, json={"run": "r1", "conversation": "c1"})
         if req.url.path == "/api/runs/r1":
             return httpx.Response(200, json={"id": "r1", "state": "running" if never_ends else state,
+                                             "conversation_id": "c1", "prompt": "a sea shanty",
                                              "backend": backend, "error": error, "output": answer})
         if req.url.path == "/api/conversations/c1":
             return httpx.Response(200, json={"turns": [{"role": "user", "content": "x"},
                                                        {"role": "assistant", "content": answer}]})
         return httpx.Response(404)
 
-    real = httpx.Client
     monkeypatch.setattr(produce.httpx, "Client",
-                        lambda **kw: real(transport=httpx.MockTransport(handle), **kw))
+                        lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(migrate, "run", lambda root: None)
     monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
     monkeypatch.setattr(produce.time, "sleep", lambda s: None)
+    # the suite may itself be run by an agent eki started
+    for var in ("EKI_INSIDE", "EKI_PARENT", produce.nesting.VAR, produce.nesting.RUN):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv(grant.ENV, raising=False)
     return asked
 
 
@@ -94,7 +100,7 @@ def test_a_slow_run_exits_5_and_keeps_going(monkeypatch, capsys):
     engine(monkeypatch, never_ends=True)
     assert cli.main(["write", "hi", "--timeout", "0", "--json"]) == produce.TIMEOUT
     got = json.loads(capsys.readouterr().out)
-    assert "eki watch r1" in got["error"] and got["state"] == "running"
+    assert "eki wait r1" in got["error"] and got["state"] == "running"
 
 
 def test_no_engine_exits_3(monkeypatch, capsys):
@@ -112,6 +118,81 @@ def test_asked_from_inside_an_agent_it_says_so(monkeypatch, tmp_path):
     monkeypatch.setenv("EKI_INSIDE", "1")
     cli.main(["write", "hi", "-o", str(tmp_path)])
     assert asked[0]["via"] == "agent"
+
+
+def test_asked_from_inside_a_run_it_counts_one_level_down(monkeypatch, tmp_path):
+    asked = engine(monkeypatch, answer="ok")
+    monkeypatch.setenv("EKI_DEPTH", "2")
+    monkeypatch.setenv("EKI_RUN", "parent-run")
+    cli.main(["write", "hi", "-o", str(tmp_path)])
+    assert asked[0]["depth"] == 2 and asked[0]["parent_run"] == "parent-run"
+
+
+def test_submit_prints_the_run_and_returns_at_once(monkeypatch, tmp_path, capsys):
+    asked = engine(monkeypatch, never_ends=True)
+    assert cli.main(["submit", "port the parser", "-m", "codex", "-r", str(tmp_path),
+                     "--read-only"]) == 0
+    assert capsys.readouterr().out.strip() == "r1"
+    assert asked[0]["backend"] == "codex" and asked[0]["repo"] == str(tmp_path)
+    assert cli.main(["submit", "a fox", "--image", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got == {"ok": True, "run": "r1", "conversation": "c1", "error": ""}
+    assert asked[1]["images"] is True
+
+
+def test_submit_from_an_agent_hands_on_only_what_it_asks(monkeypatch):
+    asked = engine(monkeypatch)
+    monkeypatch.setenv("EKI_INSIDE", "1")
+    monkeypatch.setenv("EKI_DEPTH", "1")
+    assert cli.main(["submit", "run the tests", "--allow", "pytest", "--read-only"]) == 0
+    assert asked[0]["via"] == "agent" and asked[0]["read_only"] is True
+    assert asked[0]["commands"] == ["pytest"] and asked[0]["depth"] == 1
+
+
+def test_submit_without_an_engine_exits_3(monkeypatch, capsys):
+    engine(monkeypatch)
+
+    def down(service):
+        raise SystemExit(1)
+    monkeypatch.setattr(cli, "ensure_engine", down)
+    assert cli.main(["submit", "hi", "--json"]) == produce.UNREACHABLE
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_wait_prints_the_text_or_saves_it(monkeypatch, tmp_path, capsys):
+    engine(monkeypatch, answer="Oh the wind blew hard…", backend="qwen")
+    assert cli.main(["wait", "r1"]) == 0
+    assert capsys.readouterr().out == "Oh the wind blew hard…\n"
+    assert cli.main(["wait", "r1", "-o", str(tmp_path) + "/"]) == 0
+    assert capsys.readouterr().out.strip() == str(tmp_path / "a-sea-shanty.md")
+    assert (tmp_path / "a-sea-shanty.md").read_text() == "Oh the wind blew hard…\n"
+    assert cli.main(["wait", "r1", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["ok"] and got["text"] == "Oh the wind blew hard…" and got["backend"] == "qwen"
+    assert got["conversation"] == "c1" and got["paths"] == []
+
+
+def test_wait_copies_the_pictures_out(monkeypatch, tmp_path, capsys):
+    drawn = tmp_path / "ComfyUI_0001.png"
+    drawn.write_bytes(b"png")
+    engine(monkeypatch, answer=f"![x]({drawn})")
+    out = tmp_path / "art"
+    assert cli.main(["wait", "r1", "-o", str(out) + "/"]) == 0
+    assert capsys.readouterr().out.strip() == str(out / "a-sea-shanty.png")
+    assert (out / "a-sea-shanty.png").read_bytes() == b"png"
+
+
+def test_wait_says_how_it_went_in_the_exit_code(monkeypatch, capsys):
+    engine(monkeypatch, never_ends=True)
+    assert cli.main(["wait", "r1", "--timeout", "0", "--json"]) == produce.TIMEOUT
+    got = json.loads(capsys.readouterr().out)
+    assert "eki wait r1" in got["error"] and got["state"] == "running" and got["run"] == "r1"
+    engine(monkeypatch, state="failed", error="codex ran out of quota")
+    assert cli.main(["wait", "r1"]) == produce.FAILED
+    assert "ran out of quota" in capsys.readouterr().err
+    engine(monkeypatch)
+    assert cli.main(["wait", "nope"]) == produce.FAILED
+    assert "no such run: nope" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("prompt,name", [("", "text"), ("Ünïcode!! ok", "n-code-ok")])

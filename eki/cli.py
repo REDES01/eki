@@ -13,6 +13,8 @@ For an agent with a shell — blocking, quiet, a path out, real exit codes:
     eki capabilities                     what this Mac can do right now
     eki image "a brass compass" -o art/  a picture, saved; its path printed
     eki write "a sea shanty" -m qwen     text from that model into a file
+    eki submit "…" [-m key] [--image]    start it, print its run id, return
+    eki wait <run> [-o path]             block until it ends; its path or text
     ... --json                           one JSON object instead
 
 Every ask is a run in the engine, not in this terminal: Ctrl-C stops
@@ -131,21 +133,11 @@ def cmd_ask(cfg, args) -> int:
     body = {"prompt": args.prompt, "conversation": conversation,
             "backend": args.backend or "", "repo": args.repo or "",
             "images": bool(args.image)}
-    if os.environ.get("EKI_INSIDE") or os.environ.get(grant_mod.ENV) or os.environ.get("EKI_PARENT"):
-        # run by a program the engine started (a goal's agent testing eki, say):
-        # its request, not yours — a goal's turn doesn't step aside for it,
-        # and it gets what the run asking hands it, never more (eki/grant.py)
-        body["via"] = "agent"
-        body["parent"] = grant_mod.from_env().to_json()
-        body.update(read_only=bool(getattr(args, "read_only", False)),
-                    commands=getattr(args, "allow", None) or [],
-                    paths=getattr(args, "write", None) or [])
-        body["parent_thread"] = os.environ.get("EKI_PARENT", "")
-    from . import nesting
-    depth, parent_run = nesting.caller()
-    if depth or parent_run:
-        # an agent eki started, asking: one level down, tied to its run
-        body.update(depth=depth, parent_run=parent_run)
+    # run by a program the engine started (a goal's agent testing eki, say):
+    # its request, not yours, one level down from the run asking
+    from . import produce
+    produce.from_agent(body, read_only=bool(getattr(args, "read_only", False)),
+                       commands=getattr(args, "allow", None), paths=getattr(args, "write", None))
     started = call("POST", "/api/ask", args.service, json=body)
     if args.detach:
         print(started["run"])
@@ -1155,6 +1147,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             c.add_argument("--height", type=int, default=0)
             c.add_argument("-n", "--count", type=int, default=0, help="how many (1-4)")
 
+    su = sub.add_parser("submit", help="start something slow, print its run id, return (for agents)")
+    su.add_argument("prompt")
+    su.add_argument("-m", "--model", default="", help="a backend by key (see `eki backends`); default routed")
+    su.add_argument("-r", "--repo", help="a folder it may edit")
+    su.add_argument("--image", action="store_true", help="the answer is a picture")
+    su.add_argument("--read-only", action="store_true", help="the run may read, not edit (a review)")
+    su.add_argument("--allow", action="append", metavar="CMD", help="a command the run may use (repeatable)")
+    su.add_argument("--write", action="append", metavar="PATH",
+                    help="a path the run may write besides its copy (repeatable)")
+    su.add_argument("--json", action="store_true", help="one JSON object: ok, run, conversation, error")
+    wt = sub.add_parser("wait", help="wait for a submitted run; print what it made (for agents)")
+    wt.add_argument("id")
+    wt.add_argument("-o", "--output", default="",
+                    help="pictures: a folder or file (default: here); text: a file (default: printed)")
+    wt.add_argument("--json", action="store_true", help="one JSON object: ok, paths, text, run, backend, error")
+    wt.add_argument("--timeout", type=float, default=3600, help="seconds to wait (exit 5 after; it keeps running)")
+
     cp = sub.add_parser("capabilities", help="what this Mac can do right now, and how to reach it (for agents)")
     cp.add_argument("--json", action="store_true",
                     help="one JSON object: ok, depth, max_depth, can_ask, backends, error")
@@ -1327,7 +1336,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_agent(args)
     if args.cmd == "self":
         return cmd_self(args)
-    if args.cmd in ("image", "write", "capabilities"):
+    if args.cmd in ("image", "write", "capabilities", "submit", "wait"):
         from . import produce
         return getattr(produce, args.cmd)(args, ensure_engine)
     if args.cmd == "runs":

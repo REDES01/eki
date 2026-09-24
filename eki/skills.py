@@ -587,6 +587,13 @@ eki write "…" -o -                           # the text itself, for a pipe
 eki image "…" --json                         # {"ok", "paths", "run", "backend", "error"}
 ```
 
+For work too slow to wait on, start it and pick it up later:
+
+```
+eki submit "port the parser to Rust" -m <key> -r .   # prints a run id at once
+eki wait <run> -o out/                       # blocks: the pictures' paths, the text, or -o's file
+```
+
 ## As tools
 
 The `eki` MCP server gives the same through `eki_capabilities` (read it

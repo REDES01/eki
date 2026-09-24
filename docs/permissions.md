@@ -49,9 +49,30 @@ is refused, not asked. It doesn't use a kept-open session.
 
 The thread shows what the run was handed beside its routing reason.
 
+## What it wasn't allowed
+
+A refused tool call doesn't stop the run: the program is told no, and carries
+on or fails. Claude Code lists what it was denied when it finishes
+(`permission_denials`), and the thread says so under the answer, whether the
+run finished or failed:
+
+```
+eki: this run wasn't allowed to run `pytest -q`; edit `~/code/thing/notes.md` —
+`eki allow 3f2a…` allows it and runs the request again
+```
+
+*Allow and rerun* — `eki allow <run>`, or **Allow and rerun** under the
+answer in the app — asks the same question again, once, under the run's grant
+plus what it wanted: the command's program and verb (`git push`, `pytest`),
+edits and the folder of a file it wanted to write. It stays a narrowed,
+headless run; a refused MCP tool is described but no grant covers it. Asked
+from inside a narrowed run, `eki allow` is still bounded by that run's grant.
+Each refusal is noted in eki's journal (`friction`, `refused`).
+
 ## Known edges
 
-- Refusals end quietly for now: the thread doesn't yet say what the run
-  wanted, with *allow and rerun* (ROADMAP, Stage 2's next item).
+- Only Claude Code says what it was denied. Codex's sandbox refuses inside
+  the command (a write fails, the network is off), and `codex exec` doesn't
+  report it as a refusal, so a Codex child's refusals show only in its answer.
 - The grant is sent by the asking process; the bound that holds whatever it
   claims is the program's own sandbox and tool lists.

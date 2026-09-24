@@ -842,6 +842,49 @@ class Engine(SelfLoop):
         await self.runner.submit(new)
         return {"run": new, "conversation": old["conversation_id"]}
 
+    def _refused(self, backend: Backend, grant: grant_mod.Grant, run: Dict[str, Any],
+                 meta: Dict[str, Any]) -> str:
+        """A narrowed run was denied things, not asked (nobody watches a
+        child run): kept on the run and in the turn, with the grant that
+        would have allowed them, and a line for the thread saying what it
+        wanted — *allow and rerun* (`allow`). "" when nothing was refused."""
+        refused = list(getattr(backend, "last_refused", None) or [])
+        if not grant.narrowed or not refused:
+            return ""
+        wider = grant_mod.widened(grant, refused).to_json()
+        meta["refused"] = refused
+        meta["allow"] = wider
+        stored = self.runs.get(run["id"]) or run
+        self.runs.update(run["id"], payload=json.dumps({**_payload(stored), "refused": refused,
+                                                        "allow": wider}))
+        observe_mod.note("friction", signal="refused", backend=backend.key, run=run["id"],
+                         wanted=[r.get("what") or r.get("tool") for r in refused][:10],
+                         request=run["prompt"][:200])
+        return f"\n\n*{grant_mod.refused_line(refused, run['id'])}*"
+
+    async def allow(self, rid: str, parent: Any = None) -> Optional[Dict[str, str]]:
+        """Allow and rerun: the same question again, under the grant that
+        would have allowed what the run was refused. Asked from inside a
+        narrowed run (`parent`), it is still no more than that run has; the
+        person asking may widen it as far as it wanted. Once per run."""
+        old = self.runs.get(rid)
+        if not old or old["state"] in ("queued", "running"):
+            return None
+        was = _payload(old)
+        if not was.get("allow") or self.runs.carried_on(rid):
+            return None
+        wider = grant_mod.load(was["allow"])
+        if parent:
+            wider = grant_mod.narrow(grant_mod.load(parent), wider)
+        payload = {"retry_of": rid, "carries": _carries(was), "via": was.get("via") or "agent",
+                   "grant": wider.to_json()}
+        new = self.runs.create(old["prompt"], conversation=old["conversation_id"],
+                               cwd=old["cwd"], requested=old["requested"],
+                               images=bool(old["images"]), user_turn=old["user_turn"],
+                               payload=json.dumps(payload))
+        await self.runner.submit(new)
+        return {"run": new, "conversation": old["conversation_id"]}
+
     async def _dispatch(self, run: Dict[str, Any]
                         ) -> AsyncIterator[Union[str, Dict[str, str]]]:
         """One run, start to finish. Yields a routing note, then the answer.
@@ -1130,7 +1173,7 @@ class Engine(SelfLoop):
                            "sources": list(was.get("sources") or [])
                            + [backend.info.quota_source or backend.key]}
             else:
-                line = self._keep_workspace(ws, run)
+                line = self._keep_workspace(ws, run) + self._refused(backend, grant, run, meta)
                 if cid:
                     self.store.add_turn(cid, "assistant", ("".join(parts) or f"[failed: {e}]") + line,
                                         backend.key, choice.reason,
@@ -1207,6 +1250,12 @@ class Engine(SelfLoop):
             made = await asyncio.to_thread(files_mod.made_since, ws.path, started)
             if made:
                 meta["made"] = made
+
+        # what it wasn't allowed, and how to allow it: said under the answer
+        refused = self._refused(backend, grant, run, meta)
+        if refused:
+            parts.append(refused)
+            yield refused
 
         # usage is whatever the backend volunteered, normalised only in name:
         # an invented number would be worse than an absent one

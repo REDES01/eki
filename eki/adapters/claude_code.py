@@ -56,6 +56,8 @@ class ClaudeCodeBackend(Backend):
         self._help: Optional[str] = None
         #: set from the init event, so a follow-up can --resume this thread
         self.last_session: Optional[str] = None
+        #: what a narrowed run was denied, from the result event (eki/grant.py)
+        self.last_refused: List[Dict[str, str]] = []
 
     async def health(self) -> Health:
         if not self.bin:
@@ -194,6 +196,11 @@ class ClaudeCodeBackend(Backend):
                         if block.get("type") == "text" and block.get("text"):
                             yield block["text"]
                 elif kind == "result":
+                    # headless, a tool outside the lists is denied, not asked;
+                    # the program lists what it was denied, and the thread says so
+                    self.last_refused = [grant_mod.refusal(d.get("tool_name", ""), d.get("tool_input"))
+                                         for d in event.get("permission_denials") or []
+                                         if isinstance(d, dict)]
                     if event.get("is_error"):
                         raise BackendError(str(event.get("result"))[:200])
                     self.last_usage = event.get("usage") or {}

@@ -221,6 +221,17 @@ def cmd_cancel(args) -> int:
     return 0 if out.get("cancelled") else 1
 
 
+def cmd_allow(args) -> int:
+    """Allow what a narrowed run was refused, and run it again; followed
+    like an ask. From inside a narrowed run, no more than it has."""
+    body = {"parent": grant_mod.from_env().to_json()} if os.environ.get(grant_mod.ENV) else {}
+    out = call("POST", f"/api/runs/{args.id}/allow", args.service, json=body)
+    if not out.get("run"):
+        print("that run wasn't refused anything, or it was allowed already", file=sys.stderr)
+        return 1
+    return watch(out["run"], args.service)
+
+
 def cmd_diff(args) -> int:
     out = call("GET", f"/api/runs/{args.id}/diff", args.service)
     print(out["diff"] or "(no changes)")
@@ -1151,7 +1162,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     r = sub.add_parser("runs", help="what's running and what finished")
     r.add_argument("-n", "--limit", type=int, default=30)
     for name, helptext in (("watch", "follow a run"), ("cancel", "stop a run"),
-                           ("diff", "what a run changed")):
+                           ("diff", "what a run changed"),
+                           ("allow", "allow what a run was refused, and run it again")):
         sub.add_parser(name, help=helptext).add_argument("id")
 
     sub.add_parser("backends", help="list backends and health")
@@ -1326,6 +1338,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_cancel(args)
     if args.cmd == "diff":
         return cmd_diff(args)
+    if args.cmd == "allow":
+        return cmd_allow(args)
 
     cfg = config_mod.load(args.config)
     if args.cmd == "ask":

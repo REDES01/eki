@@ -779,6 +779,16 @@ struct TurnActions: View {
                 .help("Put the folder back as it was before this answer (Claude Code's /rewind)")
             }
 
+            if let run = turn.run, turn.canAllow {
+                Button {
+                    model.allow(run)
+                } label: {
+                    Label("Allow and rerun", systemImage: "lock.open")
+                }
+                .buttonStyle(GhostButton())
+                .help("Allow what this run was refused, and run the request again")
+            }
+
             if let run = turn.run, turn.wasInterrupted {
                 Button {
                     model.resume(run)

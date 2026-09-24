@@ -506,6 +506,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Allow what a run was refused, and ask it again (eki/grant.py).
+    func allow(_ run: String) {
+        Task {
+            do {
+                let started = try await client.allow(run: run)
+                if started.conversation == conversationID { attach(started.run) }
+                await refreshLive()
+            } catch {
+                chatError = error.localizedDescription
+            }
+        }
+    }
+
     /// Watch a run: replayed from the first word, then live, until it ends.
     private func attach(_ run: String) {
         watcher?.cancel()

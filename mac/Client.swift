@@ -69,6 +69,9 @@ struct Turn: Codable, Identifiable, Hashable {
     var didNotFinish: Bool {
         (metaObject?["failed"] as? Bool ?? false) || (metaObject?["stopped"] as? Bool ?? false)
     }
+    /// A run an agent started was refused things it wanted, and can be
+    /// allowed them and run again.
+    var canAllow: Bool { metaObject?["allow"] != nil }
     /// The engine restarted under this run; the program can carry on.
     var wasInterrupted: Bool { metaObject?["interrupted"] as? Bool ?? false }
     /// A turn the program took on its own, after a background task finished.
@@ -511,6 +514,10 @@ actor EngineClient {
 
     func retry(run id: String) async throws -> Started {
         try await decode(Started.self, "POST", "api/runs/\(id)/retry")
+    }
+
+    func allow(run id: String) async throws -> Started {
+        try await decode(Started.self, "POST", "api/runs/\(id)/allow")
     }
 
     /// A run's events: the stored log first, then live, until it ends.

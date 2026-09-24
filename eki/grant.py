@@ -10,7 +10,9 @@ and tool lists, Codex's sandbox — which is also the harness the local
 models borrow through the gateway — and Gemini CLI's approval mode.
 
 A narrowed run runs headless (`claude -p`, `codex exec`): nobody is
-watching it, so what it isn't allowed is denied, never asked.
+watching it, so what it isn't allowed is denied, never asked. What was
+denied is read back (`refusal`), said in the thread, and kept as the grant
+that would have allowed it (`widened`) — *allow and rerun*.
 
 Three levels, each inside the one before:
 
@@ -191,6 +193,77 @@ def gemini_mode(grant: Grant) -> str:
     if not grant.narrowed:
         return ""
     return "auto_edit" if grant.level == "write" else "default"
+
+
+# ---- what a narrowed run was refused --------------------------------------
+
+def refusal(tool: str, given: Any) -> Dict[str, str]:
+    """One thing a narrowed run was denied, from the program's own report
+    (Claude Code's ``permission_denials``): the tool, what it was after in a
+    few words, and what would allow it — a ``command`` prefix, an ``edit``,
+    a ``path`` to write — when a grant can say it at all. An MCP tool or
+    anything else is only described: no grant covers it."""
+    given = given if isinstance(given, dict) else {}
+    out: Dict[str, str] = {"tool": str(tool or "?")}
+    if tool == "Bash":
+        cmd = str(given.get("command") or "").strip()
+        out["what"] = "run `" + cmd[:160] + "`"
+        prefix = _prefix(cmd)
+        if prefix:
+            out["command"] = prefix
+    elif tool in EDIT_TOOLS:
+        path = str(given.get("file_path") or given.get("notebook_path") or "").strip()
+        out["what"] = "edit `" + (_home(_abs(path)) if path else "a file") + "`"
+        out["edit"] = "1"
+        if path:
+            out["path"] = os.path.dirname(_abs(path))
+    else:
+        out["what"] = "use " + out["tool"]
+    return out
+
+
+def widened(grant: Grant, refused: List[Dict[str, str]]) -> Grant:
+    """The grant that would have allowed what was refused: the commands
+    added, edits if it wanted to edit, the folders it wanted to write in.
+    Never ``full`` — allowing more is still a narrowed run."""
+    if not grant.narrowed:
+        return grant
+    level = grant.level
+    paths = list(grant.paths)
+    commands = list(grant.commands or ())
+    for r in refused:
+        if r.get("command") and not any(_covers(c, r["command"]) for c in commands):
+            commands.append(r["command"])
+        if r.get("edit"):
+            level = "write"
+        p = r.get("path")
+        if p and not any(_inside(p, q) for q in paths):
+            paths.append(p)
+    if level == "read":
+        paths = []                      # nothing to write in when it may not write
+    return Grant(level, tuple(paths), tuple(commands))
+
+
+def refused_line(refused: List[Dict[str, str]], run: str) -> str:
+    """What the thread says under an answer whose run was refused things."""
+    wanted = "; ".join(r.get("what") or r.get("tool", "?") for r in refused[:5])
+    if len(refused) > 5:
+        wanted += f"; and {len(refused) - 5} more"
+    return (f"eki: this run wasn't allowed to {wanted} — "
+            f"`eki allow {run}` allows it and runs the request again")
+
+
+def _prefix(cmd: str) -> str:
+    """The command prefix to allow for a refused command line: its program,
+    and the verb after it when there is one (`git push`, `npm install`)."""
+    words = cmd.split()
+    while words and "=" in words[0] and not words[0].startswith("="):
+        words = words[1:]                   # FOO=1 pytest → pytest
+    if not words:
+        return ""
+    if len(words) > 1 and words[1].replace("-", "").isalpha() and not words[1].startswith("-"):
+        return " ".join(words[:2])
+    return words[0]
 
 
 # ---- paths -----------------------------------------------------------------

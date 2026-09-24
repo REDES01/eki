@@ -92,17 +92,61 @@ def test_the_adapters_render_it_over_the_permissions_setting(tmp_path, monkeypat
     assert argv[argv.index("--approval-mode") + 1] == "default"
 
 
+# ---- what a narrowed run was refused --------------------------------------------------------
+
+def test_a_refusal_says_what_it_wanted_and_what_would_allow_it():
+    r = grant.refusal("Bash", {"command": "git push origin main"})
+    assert r["command"] == "git push" and "git push origin main" in r["what"]
+    assert grant.refusal("Bash", {"command": "FOO=1 pytest -q"})["command"] == "pytest"
+    e = grant.refusal("Write", {"file_path": "/tmp/x/notes.md"})
+    assert e["edit"] and e["path"] == os.path.realpath("/tmp/x")
+    m = grant.refusal("mcp__github__create_issue", {})
+    assert "command" not in m and "edit" not in m and m["what"].startswith("use ")
+
+
+def test_allowing_adds_what_was_wanted_and_stays_narrowed():
+    g = grant.Grant("read", (), ("git log",))
+    wider = grant.widened(g, [grant.refusal("Bash", {"command": "git log -3"}),
+                              grant.refusal("Bash", {"command": "pytest -q"})])
+    assert wider == grant.Grant("read", (), ("git log", "pytest"))       # git log already covered it
+    edits = grant.widened(g, [grant.refusal("Edit", {"file_path": "/tmp/x/a.py"})])
+    assert edits.level == "write" and edits.paths == (os.path.realpath("/tmp/x"),)
+    assert grant.widened(grant.FULL, [grant.refusal("Bash", {"command": "ls"})]) == grant.FULL
+    assert "eki allow abc" in grant.refused_line([grant.refusal("Bash", {"command": "ls"})], "abc")
+
+
+def test_claude_codes_denials_are_read_back(tmp_path, monkeypatch):
+    import asyncio
+    from eki.adapters.claude_code import ClaudeCodeBackend
+    from eki.adapters.base import Message
+    monkeypatch.setattr(settings, "load", lambda: {"permissions": "ask"})
+    fake = tmp_path / "claude"
+    denial = {"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": "npm install left-pad"}}
+    fake.write_text("#!/bin/sh\n" + "echo '" + json.dumps(
+        {"type": "result", "is_error": False, "result": "no", "permission_denials": [denial]}) + "'\n")
+    fake.chmod(0o755)
+    b = ClaudeCodeBackend(BackendInfo(key="c", kind="claude_code", label="C"), {"binary": str(fake)})
+    monkeypatch.setattr(b, "_no_bare_flag", lambda: None)
+
+    async def drain():
+        return [c async for c in b.stream([Message("user", "hi")], grant=grant.Grant("read", (), ()))]
+    asyncio.run(drain())
+    assert b.last_refused == [grant.refusal("Bash", {"command": "npm install left-pad"})]
+
+
 # ---- in a run ------------------------------------------------------------------------------
 
 class Harness(Backend):
     kw = []
     fail = False
+    refused = []
 
     async def health(self):
         return Health(True)
 
     async def stream(self, messages, **kw):
         Harness.kw.append(kw)
+        self.last_refused = list(Harness.refused)
         if Harness.fail:
             raise BackendError("SyntaxError in app.py")
         yield "done"
@@ -127,7 +171,7 @@ def desk(tmp_path, monkeypatch):
     async def live_turn(*a, **k):
         yield "live"
     monkeypatch.setattr(e, "_live_turn", live_turn)
-    Harness.kw, Harness.fail = [], False
+    Harness.kw, Harness.fail, Harness.refused = [], False, []
     return e
 
 
@@ -176,4 +220,59 @@ async def test_your_own_run_is_untouched(tmp_path, monkeypatch):
     run = await settle(eng.runs, s["run"], timeout=5)
     assert "grant" not in (run.get("payload") or "")
     assert eng.store.turns(s["conversation"])[-1]["content"] == "live"      # the kept-open session
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_run_says_what_it_wanted_and_can_be_allowed_once(tmp_path, monkeypatch):
+    eng = desk(tmp_path, monkeypatch)
+    Harness.refused = [grant.refusal("Bash", {"command": "pytest -q"})]
+    s = await eng.ask("check the tests", backend_key="claude_code", via="agent")
+    run = await settle(eng.runs, s["run"], timeout=5)
+    assert run["state"] == "done"                                         # it carried on
+    turn = eng.store.turns(s["conversation"])[-1]
+    assert "run `pytest -q`" in turn["content"] and f"eki allow {s['run']}" in turn["content"]
+    assert json.loads(turn["meta"])["allow"]["commands"] == ["pytest"]
+    Harness.refused = []
+    again = await eng.allow(s["run"])
+    rerun = await settle(eng.runs, again["run"], timeout=5)
+    assert Harness.kw[-1]["grant"] == grant.Grant("read", (), ("pytest",))
+    assert json.loads(rerun["payload"])["retry_of"] == s["run"]
+    assert await eng.allow(s["run"]) is None                              # once
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_run_that_failed_says_so_too(tmp_path, monkeypatch):
+    eng = desk(tmp_path, monkeypatch)
+    Harness.fail = True
+    Harness.refused = [grant.refusal("Write", {"file_path": str(tmp_path / "out.md")})]
+    s = await eng.ask("write the notes", backend_key="claude_code", via="agent")
+    assert (await settle(eng.runs, s["run"], timeout=5))["state"] == "failed"
+    turn = eng.store.turns(s["conversation"])[-1]
+    assert "wasn't allowed to edit" in turn["content"] and json.loads(turn["meta"])["failed"]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_allowing_is_bounded_by_what_it_has(tmp_path, monkeypatch):
+    eng = desk(tmp_path, monkeypatch)
+    Harness.refused = [grant.refusal("Bash", {"command": "git push"}),
+                       grant.refusal("Bash", {"command": "pytest"})]
+    s = await eng.ask("ship it", backend_key="claude_code", via="agent")
+    await settle(eng.runs, s["run"], timeout=5)
+    Harness.refused = []
+    again = await eng.allow(s["run"], grant.Grant("read", (), ("pytest",)).to_json())
+    await settle(eng.runs, again["run"], timeout=5)
+    assert Harness.kw[-1]["grant"] == grant.Grant("read", (), ("pytest",))
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_nothing_refused_nothing_to_allow(tmp_path, monkeypatch):
+    eng = desk(tmp_path, monkeypatch)
+    s = await eng.ask("review this diff", backend_key="claude_code", via="agent")
+    await settle(eng.runs, s["run"], timeout=5)
+    assert await eng.allow(s["run"]) is None
+    assert "allow" not in eng.store.turns(s["conversation"])[-1]["content"]
     await eng.runner.stop()

@@ -408,6 +408,20 @@ async def retry_run(rid: str) -> Any:
     return started
 
 
+class AllowBody(BaseModel):
+    #: the grant of the run asking, when an agent asks (eki/grant.py)
+    parent: Dict[str, Any] = {}
+
+
+@app.post("/api/runs/{rid}/allow")
+async def allow_run(rid: str, body: Optional[AllowBody] = None) -> Any:
+    """Allow what a narrowed run was refused, and run it again (Engine.allow)."""
+    started = await engine().allow(rid, (body.parent if body else None) or None)
+    if not started:
+        raise HTTPException(409, "that run wasn't refused anything, or it was allowed already")
+    return started
+
+
 @app.get("/api/runs/{rid}/diff")
 def run_diff(rid: str) -> Any:
     if not engine().runs.get(rid):

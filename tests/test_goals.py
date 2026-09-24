@@ -145,6 +145,37 @@ async def test_a_goal_gets_turns_in_its_own_thread_until_it_says_done(eng):
     await eng.runner.stop()
 
 
+def test_useful_local_work_is_measured_by_the_day(eng):
+    """Stage 3's measure: hours a day finished runs kept this Mac's models busy,
+    against the 1% before the idle shift — subscriptions and failures left out."""
+    now = time.mktime(time.strptime("2026-09-24 12:00", "%Y-%m-%d %H:%M"))
+    yesterday = now - 86400
+
+    def ran(backend, start, seconds, state="done"):
+        rid = eng.runs.create("x", requested=backend)
+        eng.runs.update(rid, backend=backend, state=state, started_at=int(start), ended_at=int(start + seconds))
+
+    ran("qwen", yesterday, 3 * 3600)
+    ran("codex-qwen", now - 3600, 1800)
+    ran("qwen", now - 7200, 3600, state="failed")                 # not useful
+    ran("claude_code", now - 7200, 3600)                           # not local
+    ran("qwen", now - 8 * 86400, 3600)                             # before the week
+    w = eng.local_work(now=now)
+    assert w["local_hours"] == 3.5 and w["baseline_share"] == 0.01
+    assert [d["hours"] for d in w["by_day"]] == [0, 0, 0, 0, 0, 3.0, 0.5]
+    assert w["by_day"][-1]["day"] == "2026-09-24"
+    span = 6 * 86400 + 12 * 3600                                   # six days and this morning
+    assert w["share"] == round(3.5 * 3600 / span, 4) and w["hours_a_day"] == round(3.5 * 86400 / span, 2)
+    assert "local_work" in eng.goals_view() and "local_work" in eng.goals_report()
+
+
+def test_the_command_line_says_the_measure():
+    from eki.cli import _local_work_line
+    line = _local_work_line({"days": 7, "hours_a_day": 3.4, "share": 0.1417, "baseline_share": 0.01})
+    assert line == ("local models, last 7 days: 3.4 h of useful work a day "
+                    "(14.2% of the time; 1% before the idle shift)")
+
+
 @pytest.mark.asyncio
 async def test_work_that_needs_tools_stays_local_unless_the_goal_may_spend(eng, tmp_path):
     g = goals.create("Fix the failing test in this repo", folder=str(tmp_path))

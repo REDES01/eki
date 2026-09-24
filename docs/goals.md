@@ -92,3 +92,8 @@ eki goals run|pause|resume|rm <id>
 eki goals mode on|off|resources|away
 eki goals report 12          # the last 12 hours: turns, outcomes, minutes, on which models
 ```
+
+`eki goals`, `eki goals report` and the top of the board also show what the
+shift is for: the hours a day this Mac's own models did useful work over the
+last 7 days — requests and goal turns that finished, whoever asked — and that
+as a share of the time, against the 1% they were busy before the idle shift.

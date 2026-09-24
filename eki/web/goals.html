@@ -52,6 +52,15 @@
   .btn.danger { color: var(--danger); } .btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
   .btn.small { font-size: 11.5px; padding: 3px 9px; border-radius: 7px; }
   .muted { color: var(--ink-3); }
+  .work { display: flex; align-items: center; gap: 18px; padding: 12px 16px; margin: 14px 0 18px; }
+  .work .num { font-size: 22px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .work .says { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+  .work .says b { color: var(--ink); font-weight: 600; }
+  .work .days { display: flex; align-items: flex-end; gap: 2px; height: 34px; flex: none; }
+  .work .day { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 18px; height: 100%; justify-content: flex-end; }
+  .work .stick { width: 10px; min-height: 1px; background: var(--accent); border-radius: 4px 4px 0 0; }
+  .work .stick.none { background: var(--line-2); }
+  .work .day span { font-size: 9.5px; color: var(--ink-3); line-height: 1; }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
   textarea.input, input.input, select.input { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
                 border-radius: 8px; padding: 7px 10px; font-size: 13.5px; }
@@ -313,6 +322,21 @@ function usesText(g) {
        : g.spare ? "may use your subscriptions (spare room only)" : "only models on this machine") + how;
 }
 
+// the Stage 3 measure: hours a day the local models did useful work, against the 1% before the shift
+function localWork(w) {
+  if (!w) return "";
+  const top = Math.max(1, ...w.by_day.map(d => d.hours)), h = x => x.toFixed(x < 10 ? 1 : 0);
+  const bars = w.by_day.map(d => {
+    const day = new Date(d.day + "T12:00:00"), name = day.toLocaleDateString([], { weekday: "short" });
+    return `<div class="day" title="${esc(day.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }))}: ${d.hours} h">
+      <i class="stick ${d.hours ? "" : "none"}" style="height:${d.hours ? Math.max(2, Math.round(24 * d.hours / top)) : 1}px"></i><span>${esc(name[0])}</span></div>`;
+  }).join("");
+  return `<div class="card work" title="Requests and goal turns that finished on models on this Mac, last ${w.days} days">
+    <div class="num">${h(w.hours_a_day)} h</div>
+    <div class="says">of useful work a day on this Mac's models, the last ${w.days} days — <b>${(w.share * 100).toFixed(1)}%</b> of the time, against ${w.baseline_share * 100}% before the idle shift</div>
+    <div class="days" aria-label="Hours a day">${bars}</div></div>`;
+}
+
 // ---- the list ----------------------------------------------------------------------------------
 function home() {
   const d = S.draft, goals = S.view?.goals || [];
@@ -324,6 +348,7 @@ function home() {
       ${usesChecks(d, "new")}
       <button class="btn primary" data-add ${d.text.trim() ? "" : "disabled"}>Add goal</button></div>
     ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
+  h += localWork(S.view?.local_work);
   if (!goals.length) return h + `<div class="empty">No goals yet. Write one above — the way you'd ask in a chat.<br>eki gives it turns whenever the machine has room, and you answer it in its thread.</div>`;
   h += `<div class="label">Goals</div><div class="goals">` + goals.map(g => {
     const k = "rm:" + g.id;

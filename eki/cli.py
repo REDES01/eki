@@ -1095,17 +1095,30 @@ def cmd_goals(args) -> int:
         for key, b in r["by_backend"].items():
             print(f"  {key:<22} {int(b['turns'])} turns, {round(b['seconds'] / 60)} min")
         print(f"  on a subscription: {r['on_subscription']} turns")
+        w = r.get("local_work")
+        if w:
+            print(_local_work_line(w))
+            print("  " + " · ".join(f"{time.strftime('%a', time.strptime(d['day'], '%Y-%m-%d'))} {d['hours']:g} h"
+                                    for d in w["by_day"]))
         return 0
     v = call("GET", "/api/goals", args.service)
     sh = v["shift"]
     print(f"background: {'on' if v['on'] else 'off'} · "
           f"{'whenever there is room' if v['when'] == 'resources' else 'only when you are away'}")
     print(f"now: {sh.get('state')} — {sh.get('why')}")
+    if v.get("local_work"):
+        print(_local_work_line(v["local_work"]))
     if not v["goals"]:
         print('no goals — eki goals add "…"   (or New goal on the board: http://127.0.0.1:8787/goals)')
     for g in v["goals"]:
         print(_goal_line(g))
     return 0
+
+
+def _local_work_line(w: dict) -> str:
+    """The Stage 3 measure in a line: useful local hours a day, against the 1% baseline."""
+    return (f"local models, last {w['days']} days: {w['hours_a_day']:g} h of useful work a day "
+            f"({w['share'] * 100:.1f}% of the time; {w['baseline_share'] * 100:g}% before the idle shift)")
 
 
 def cmd_swap(args) -> int:

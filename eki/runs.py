@@ -19,7 +19,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import nesting
 from .steps import Interrupted
@@ -194,6 +194,16 @@ class RunStore:
                 " AND ended_at >= started_at AND backend IS NOT NULL AND backend != ''"
                 " GROUP BY backend", (int(since),)).fetchall()
         return {str(r[0]): float(r[1] or 0) for r in rows}
+
+    def done_spans(self, since: float) -> List[Tuple[str, int, float]]:
+        """(backend, started_at, seconds) of each run since `since` that
+        finished — useful work, not what failed or was cancelled."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT backend, started_at, ended_at - started_at FROM runs WHERE started_at >= ?"
+                " AND state = 'done' AND ended_at >= started_at"
+                " AND backend IS NOT NULL AND backend != ''", (int(since),)).fetchall()
+        return [(str(r[0]), int(r[1]), float(r[2] or 0)) for r in rows]
 
     def finished_count(self, backends: List[str]) -> int:
         """Requests that have ever finished on these backends (a running count)."""

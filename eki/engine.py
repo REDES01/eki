@@ -121,6 +121,9 @@ def _eki_own(folder: str) -> bool:
 
 #: a goal that uses the screen, waiting for you to leave it
 SCREEN_WAIT = "uses the screen — waits until you're away"
+#: how much of the day the local models worked before the idle shift — the
+#: number Stage 3 of the roadmap is measured against
+BASELINE_LOCAL_SHARE = 0.01
 
 
 def _product_of(task: str) -> str:
@@ -3797,7 +3800,7 @@ class Engine(SelfLoop):
                              else "queued")
             rows.append(row)
         return {"on": self._shift_on(), "when": str(self.settings.get("background_when", "resources")),
-                "shift": self._shift_state, "goals": rows}
+                "shift": self._shift_state, "goals": rows, "local_work": self.local_work()}
 
     def goals_create(self, text: str, when: Optional[Dict[str, Any]] = None, folder: str = "",
                      spare: bool = False, screen: bool = False, on_time: bool = False,
@@ -3855,7 +3858,30 @@ class Engine(SelfLoop):
                 "finished": sum(e.get("outcome") == "done" for e in entries),
                 "working_seconds": round(sum(float(e.get("seconds") or 0) for e in entries), 1),
                 "by_backend": by_backend,
-                "on_subscription": sum(1 for e in turns if (e.get("backend") or "") not in local)}
+                "on_subscription": sum(1 for e in turns if (e.get("backend") or "") not in local),
+                "local_work": self.local_work()}
+
+    def local_work(self, days: int = 7, now: Optional[float] = None) -> Dict[str, Any]:
+        """Hours a day the models on this machine did useful work — requests
+        and goal turns that finished — against the 1% of the day they were
+        busy before the idle shift. The measure Stage 3 is judged by."""
+        now = time.time() if now is None else now
+        local = {b.key for b in self.backends if b.info.cost.tier == 0}
+        midnight = time.mktime(time.localtime(now)[:3] + (0, 0, 0, 0, 0, -1))
+        first = midnight - (days - 1) * 86400
+        seconds: Dict[str, float] = {}
+        for backend, started, secs in self.runs.done_spans(first):
+            if backend in local:
+                day = time.strftime("%Y-%m-%d", time.localtime(started))
+                seconds[day] = seconds.get(day, 0.0) + secs
+        labels = [time.strftime("%Y-%m-%d", time.localtime(first + i * 86400 + 3600)) for i in range(days)]
+        by_day = [{"day": d, "hours": round(seconds.get(d, 0.0) / 3600, 2)} for d in labels]
+        span = now - first
+        total = sum(seconds.values()) / 3600
+        return {"days": days, "local_hours": round(total, 2),
+                "hours_a_day": round(total * 86400 / span, 2) if span > 0 else 0.0,
+                "share": round(total * 3600 / span, 4) if span > 0 else 0.0,
+                "baseline_share": BASELINE_LOCAL_SHARE, "by_day": by_day}
 
     # ---- measuring ---------------------------------------------------
 

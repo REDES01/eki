@@ -16,6 +16,8 @@ from .base import Backend, BackendError, Health, Message, ToolCall, register
 
 @register("mlx")
 class MLXBackend(Backend):
+    PRODUCES = ("code", "prose")
+
     #: takes OpenAI's `tools` and streams `tool_calls` back — mlx_lm.server
     #: parses the model's own call format (Qwen's <tool_call>) into them
     accepts_tools = True

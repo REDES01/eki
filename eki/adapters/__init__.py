@@ -2,7 +2,7 @@
 """Backend registry. Importing a module here registers its kind."""
 from .base import (  # noqa: F401
     Backend, BackendError, BackendInfo, Capabilities, Cost, Health, Message,
-    AGENT_CLIS, build, kinds, register,
+    AGENT_CLIS, PRODUCTS, build, kinds, needs, produces, register,
 )
 
 from . import claude_code  # noqa: F401,E402

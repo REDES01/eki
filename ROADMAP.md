@@ -317,8 +317,8 @@ views into a project rather than the top of the tree.
 
 Routing is already by capability; this widens what a capability can be.
 
-- [ ] Adapters declare what they produce (code, prose, image, mesh, audio) and
-      what they need; routing is capability first, then quota and cost
+- [x] Adapters declare what they produce (code, prose, image, mesh, audio) and
+      what they need; routing is capability first, then quota and cost *(eki: self/d5757ace)*
 - [ ] A mesh backend that produces Blender assets into the project folder
 - [ ] Prose models chosen by the person for the kind of writing, not by benchmark
 - [ ] Text models asking for a picture mid-answer (through Stage 4's commands)

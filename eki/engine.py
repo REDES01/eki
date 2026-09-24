@@ -97,6 +97,25 @@ def _goal_of(run: Dict[str, Any]) -> str:
 SCREEN_WAIT = "uses the screen — waits until you're away"
 
 
+def _product_of(task: str) -> str:
+    """What a kind of work asks a backend to make: a picture for "image";
+    words, which every text model writes, for the rest."""
+    return "image" if task == "image" else ""
+
+
+_PICTURE = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif", ".tiff", ".bmp")
+
+
+def _inputs_of(run: Dict[str, Any]) -> List[str]:
+    """What a run brings for a backend that needs something to start from:
+    its folder, and an attached picture."""
+    have = ["folder"] if run.get("cwd") else []
+    attached = _payload(run).get("attachments") or []
+    if any(str(p).lower().endswith(_PICTURE) for p in attached):
+        have.append("image")
+    return have
+
+
 def _allowed_of(run: Dict[str, Any]) -> Optional[List[str]]:
     """The providers a run may use (a goal's budget), or None for any."""
     allowed = _payload(run).get("allowed")
@@ -474,6 +493,7 @@ class Engine(SelfLoop):
                     "repo": caps.repo, "tools": caps.tools, "vision": caps.vision,
                     "images_out": caps.images_out, "text": caps.text, "web": caps.web,
                     "context_tokens": caps.context_tokens,
+                    "produces": sorted(adapters.produces(b)), "needs": sorted(adapters.needs(b)),
                 },
                 "ok": bool(h and h.ok),
                 "detail": h.detail if h else "",
@@ -780,6 +800,8 @@ class Engine(SelfLoop):
         need = Need(repo=bool(run["cwd"]), escalate=escalate, vision=screen_goal,
                     tools=bool(run["cwd"]) or wants_harness,
                     images_out=bool(run["images"]) or label.task == "image",
+                    produces=_product_of(label.task),
+                    inputs=_inputs_of(run),
                     # research means looking things up: a provider with the web
                     web=label.task == "research" and not requested and not stays,
                     backend=requested or None,
@@ -1562,6 +1584,7 @@ class Engine(SelfLoop):
             or screen
         need = Need(repo=bool(folder), escalate=escalate, tools=bool(folder) or wants_harness, vision=screen,
                     images_out=label.task == "image", web=label.task == "research" and not stays,
+                    produces=_product_of(label.task), inputs=["folder"] if folder else [],
                     task=label.task, difficulty=label.difficulty, row=row,
                     row_title=table_mod.TITLES.get(row, row), targets=targets, allowed=allowed)
         return label, row_why, need, self.router.choose(need)

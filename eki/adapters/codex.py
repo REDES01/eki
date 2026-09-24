@@ -59,6 +59,8 @@ def features(binary: str) -> set:
 
 @register("codex")
 class CodexBackend(Backend):
+    PRODUCES = ("code", "prose")
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.bin = _find_binary(self.options.get("binary", "codex"))

@@ -42,6 +42,8 @@ def _find_binary(name: str) -> Optional[str]:
 
 @register("claude_code")
 class ClaudeCodeBackend(Backend):
+    PRODUCES = ("code", "prose")
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.bin = _find_binary(self.options.get("binary", "claude"))

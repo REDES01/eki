@@ -112,6 +112,9 @@ def fit_size(width: int, height: int, max_pixels: int) -> Tuple[int, int]:
 
 @register("comfyui")
 class ComfyBackend(Backend):
+    #: pictures; a workflow that makes something else says so in its row
+    PRODUCES = ("image",)
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.base = self.options.get("base_url", "http://127.0.0.1:8188").rstrip("/")

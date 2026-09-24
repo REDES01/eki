@@ -81,3 +81,77 @@ def test_nothing_fits_says_why():
 
 def test_unknown_quota_is_never_held_against_a_backend():
     assert QuotaSource().exhausted() == {}
+
+
+# ---- what a backend makes, and what it needs ---------------------------------
+
+class Draws(Fake):
+    PRODUCES = ("image",)
+
+
+class Sculpts(Fake):
+    """An image-to-3D backend: makes meshes, and needs a picture to start from."""
+    PRODUCES = ("mesh",)
+    NEEDS = ("image",)
+
+
+def made(cls, key, tier=0, **caps):
+    return cls(BackendInfo(key=key, kind="fake", label=key,
+                           capabilities=Capabilities(**caps), cost=Cost(tier=tier)), {})
+
+
+def test_adapters_declare_what_they_make():
+    from eki import adapters
+    assert adapters.produces(LOCAL) == {"code", "prose"}
+    assert adapters.produces(made(adapters.base._REGISTRY["comfyui"], "flux",
+                                  text=False, images_out=True)) == {"image"}
+    for kind in ("claude_code", "codex", "mlx", "openai_compat", "anthropic_api", "gemini_cli"):
+        assert set(adapters.base._REGISTRY[kind].PRODUCES) == {"code", "prose"}
+    assert set(adapters.PRODUCTS) >= {"code", "prose", "image", "mesh", "audio"}
+
+
+def test_a_provider_row_overrides_its_adapter():
+    # a ComfyUI workflow that makes meshes says so in its row
+    b = made(Draws, "trellis", text=False, produces=["mesh"])
+    assert b.info.capabilities.produces == ("mesh",)
+    from eki.adapters import produces
+    assert produces(b) == {"mesh"}
+
+
+def test_capability_comes_before_cost():
+    # the free image model can't make a mesh; the dearer mesh one can
+    flux = made(Draws, "flux", 0, text=False)
+    mesh = made(Sculpts, "mesh", 100, text=False)
+    c = Router([flux, mesh]).choose(Need(produces="mesh", inputs=["image"]))
+    assert c.backend is mesh
+    assert "flux: lacks meshes" in c.rejected
+
+
+def test_a_backend_needs_what_it_starts_from():
+    mesh = made(Sculpts, "mesh", 0, text=False)
+    c = Router([mesh]).choose(Need(produces="mesh"))
+    assert c.backend is None
+    assert "mesh: needs image to start from" in c.rejected
+
+
+def test_words_are_not_asked_of_a_mesh_model():
+    mesh = made(Sculpts, "mesh", 0, text=False)
+    c = Router([mesh, CLAUDE]).choose(Need(inputs=["image"]))
+    assert c.backend is CLAUDE
+    assert "mesh: makes meshes, doesn't answer in words" in c.rejected
+
+
+def test_images_out_still_means_a_picture():
+    flux = made(Draws, "flux", 0, text=False)
+    c = Router([LOCAL, flux]).choose(Need(images_out=True))
+    assert c.backend is flux
+    assert "qwen: lacks images" in c.rejected
+
+
+def test_what_a_run_brings(tmp_path):
+    import json
+    from eki.engine import _inputs_of, _product_of
+    assert _product_of("image") == "image" and _product_of("code") == ""
+    run = {"cwd": str(tmp_path), "payload": json.dumps({"attachments": ["/x/a.PNG", "/x/notes.txt"]})}
+    assert _inputs_of(run) == ["folder", "image"]
+    assert _inputs_of({"cwd": "", "payload": ""}) == []

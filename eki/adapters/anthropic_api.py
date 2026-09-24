@@ -22,6 +22,8 @@ VERSION = "2023-06-01"
 
 @register("anthropic_api")
 class AnthropicAPIBackend(Backend):
+    PRODUCES = ("code", "prose")
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.base = self.options.get("base_url", "https://api.anthropic.com").rstrip("/")

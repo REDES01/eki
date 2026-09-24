@@ -135,12 +135,22 @@ questions (elicitation) are cards, the model's thinking shows, and the
 program gets eki's tools in-process — the other backends, pictures, the
 screen (`docs/claude-code.md`).
 
+**Next: measure the number the vision is about.** The release's first
+priority is *Measured: hours of useful local work a day* (Stage 3): the
+vision says the number to move is how much of the day the local models work,
+and today it is about 1% and shown nowhere but the weekly note — so nothing
+eki does can be seen to move it. Until it's measured and on the board and in
+`eki goals report`, the other items are guesses about what helps.
+
 Open right now:
 
+- [ ] **Measured: hours of useful local work a day**, against the 1% baseline
+      (the weekly note carries the local models' share of the week since
+      745807a; not yet shown anywhere else)
 - [x] Commit the working tree: image follow-up edits, ComfyUI workflows as
       models (`eki/workflow.py`), gallery, picture sorting mode, app icon,
       Claude Code panels + eki's in-process tools + the MCP registry *(eki: self/a92130fc)*
-- [ ] Confirm the hold-then-release swipe fix on a real trackpad
+- [ ] Confirm the hold-then-release swipe fix on a real trackpad *(for a person)*
 - [x] Cut 0.2.0 with the icon in the release *(eki: self/5931d470)*
 
 ## Stage 1 — One set of skills, context and tools
@@ -155,9 +165,10 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
       doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
-- [ ] **The harnesses people already use.** Claude Code and Codex now;
-      Gemini CLI and other agent CLIs next, each through its official
-      program and reading the same store
+- [x] **The harnesses people already use.** Claude Code and Codex, each
+      through its official program and reading the same store
+- [ ] **Gemini CLI and other agent CLIs**, the same way: through the
+      official program, reading the same store
 
 - [x] **One skill store.** `~/.eki/skills/`, under git (every change a
       commit), in the Agent Skills format both CLIs read (`eki/skills.py`,
@@ -195,11 +206,13 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       eki's own picker owns the model on every backend (no `/model`)
 - [ ] **Commands shared under Auto.** `/skills`, `/context` and the like
       mean something for every provider; Auto should offer what is common
-      to all of them — carefully, one command at a time
+      to all of them — carefully, one command at a time *(for a person)*:
+      eki tried it twice and failed both times; it needs the person to say
+      what Auto should offer
 - [x] **"How to call eki" is a skill**, installed for both CLIs (the
       `eki` skill, refreshed at engine start until you edit it). Generating
       it from `eki capabilities` waits for that command (Stage 4)
-- [ ] **Per-project layer** once Stage 5 exists: `.eki/skills/` and the
+- [ ] **Per-project layer** *(waiting on Stage 5)*: `.eki/skills/` and the
       project's `AGENTS.md` sit on top of the global set
 - [x] A Skills pane: `/skills` in any thread — eki's store with
       per-backend toggles, an editor, import; then what Claude Code alone
@@ -235,12 +248,12 @@ a thread has to be able to move to another harness without losing its place.
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
       modes, and the harness the local models borrow *(eki: self/71242570)*
-- [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
+- [x] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
-      thread says what it wanted, with *allow and rerun*
-- [ ] **Roots eki starts on its own are not the person's.** Self-work opened
+      thread says what it wanted, with *allow and rerun* (7a582e0) *(eki: self/4ba8cc0d)*
+- [x] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
-      can't change alone stay that way at any level of the tree
+      can't change alone stay that way at any level of the tree (1bf1ac6) *(eki: self/00cba77b)*
 - [ ] **Handoff between backends on long threads.** Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
@@ -276,9 +289,8 @@ the moment you or another app need it.
       subscriptions — then only under pace for the week, never the last 30%
 - [x] **The board** at `/goals`, and in the Mac app: goals, their threads, a
       reply box; `eki goals` and `eki goals report`
-- [ ] Measured: hours of useful local work a day, against the 1% baseline
-      (the weekly note carries the local models' share of the week since
-      745807a; not yet shown anywhere else)
+- Measured: hours of useful local work a day — moved to *Where it stands*,
+  the first thing to do
 - [x] Goals that need the screen (computer use) run only when you're away
       (9969689)
 - *Evolve:* replies in a goal's thread are the feedback — what you keep asking
@@ -308,7 +320,8 @@ views into a project rather than the top of the tree.
 
 - [ ] `.eki/` marker in a folder; calls made inside it belong to the project
 - [ ] Project in the app: its chats, its artifacts, its files made by agents
-      (today files Claude Code or Codex write into a repo don't reach the gallery)
+      (16f0c12, self/29ac7283: files Claude Code or Codex write into a repo
+      now reach the gallery; the project itself waits for the `.eki/` marker)
 - [ ] Per-project roster and policy: which backend does prose here, which does code
 - *Evolve:* a project keeps notes on what worked — which backend was redone,
   which wasn't — and its policy is adjusted from them, visibly.
@@ -347,9 +360,11 @@ The loop is closed (745807a, 4909625): eki works on itself as a goal —
 whenever the machine has room it fixes what breaks in its own code, then takes
 the next open item in this file, each change in its own worktree and checked
 before anyone sees it (`eki self on`, Goals → Self; `docs/self-build.md`).
-An engine restart marks every live run *interrupted*, so the swap is
-never done from inside a run: the self-work run ends, then a supervisor waits
-for `running == 0` and swaps (see `docs/self-build.md`).
+Up to `self_parallel` pieces of self-work run at once, each held to its own
+area; conflicts between them are resolved when they're applied, commit by
+commit. A change goes live about two minutes after it's applied, and runs
+still going carry over into the new version rather than holding it back
+(see `docs/self-build.md`).
 
 - [x] **eki is its own first project.** It knows where its source is, which
       checkout it is running from, and what version that is (78ed50a:
@@ -375,13 +390,15 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       candidate engine starts on a spare port against a copy of the database,
       answers health, completes a run on a local model, and migrates the
       schema both ways
-- [x] **Swap without dropping work.** The old engine drains or hands over:
-      runs either finish first or are resumable across a restart — which
-      means fixing *interrupted* so a run can be picked up, not just declared
-      dead. The self-work run itself is recorded as finished by the new engine
-      (78ed50a, 11da108, 8a301ee: the supervisor waits for no runs; a run cut
-      off anyway is carried on in its session and folder copy — checked live
-      with Claude Code and Codex)
+- [x] **Swap without dropping work.** A new version goes live about two
+      minutes after it's applied, whether or not runs are going: a run cut
+      off by the swap is handed over and carried on by the new engine, in its
+      session and folder copy. A newer apply joins the swap already waiting
+      and keeps its deadline, so a stream of applies can't hold the engine
+      back. The self-work run itself is recorded as finished by the new
+      engine (78ed50a, 11da108, 8a301ee: runs carried across a restart,
+      checked live with Claude Code and Codex; f2fdbf7: live within two
+      minutes, the waiting swap's deadline stands)
 - [x] **Going back is automatic.** The previous build is kept. A supervisor
       small enough not to need changing watches the new engine; if it isn't
       healthy within minutes, the old one comes back and the thread says why
@@ -396,8 +413,10 @@ for `running == 0` and swaps (see `docs/self-build.md`).
 - [x] **Two things it can't change on its own at any setting:** the supervisor
       and rollback path, because a bad change there can't be undone by them;
       and the credentials rule. Those need a person (78ed50a: `builds.py`,
-      `supervisor.sh`, `agent.py`, secrets and quota are protected — never
-      applied; the supervisor is only installed by `eki agent install`)
+      `supervisor.sh`, `agent.py`, secrets and quota are protected — eki never
+      applies them itself; the supervisor is only installed by `eki agent
+      install`. 5006fdd: the person can apply such a change — `eki self
+      apply`, or *Apply* on the board)
 - [ ] **This Mac and the public repo are different.** What eki changes here is
       a local branch on top of the last release, rebased when a release
       lands. Offering a change upstream is a pull request; merging to `main`
@@ -406,13 +425,17 @@ for `running == 0` and swaps (see `docs/self-build.md`).
       put on top of it and judged again before it's applied. Still open:
       offering one upstream as a pull request)
 - [x] **Several changes at once.** Up to `self_parallel` (2) pieces of
-      self-work side by side, held to the subscriptions' spare room (the
-      local models: one between them); an item waits while one in the same
-      area works — the Mac app one at a time — and finished changes are
-      applied one by one, in the order they finished, each rebased and
-      judged again (the merge queue). Ask for several with `eki self -r … -r …`
-      or `--batch`; `eki self` and the board show each item's area and the
-      queue (`selfloop.area_of`, `selfloop.room`, `selfengine._self_merge`)
+      self-work run at once, held to the subscriptions' spare room (the
+      local models: one between them). An item's area is guessed from its
+      words and a look at the repo; it waits while one in the same area
+      works — the Mac app one at a time — and one whose area can't be told
+      runs beside the others. Finished changes are applied one by one, in
+      the order they finished (the merge queue); one that no longer goes on
+      top has its conflicts resolved automatically, commit by commit, and is
+      judged again. Ask for several with `eki self -r … -r …` or `--batch`;
+      `eki self` and the board show each item's area and the queue (543dfa2,
+      c590bdb, 3ca2662: `selfloop.area_of`, `selfloop.room`,
+      `selfengine._self_merge`)
 - [x] **Everything it did to itself is visible.** A Self pane: each change,
       who asked, which agent, the diff, the checks, and *Undo* (4909625:
       Goals → Self on the board, and `eki self`; each change has a page with
@@ -470,6 +493,8 @@ The self-build track is eki changing its code. This is the other half — what i
 
 Anyone — a person, an agent, eki — who finishes an item ticks it and names the
 commit (eki names the change, `self/<id>`, in the same commit). An item only a
-person can do says `(for a person)`; eki never takes it. New ideas go under
+person can do says `(for a person)`; eki never takes it. An item that needs
+something else to land first says `(waiting on …)`; eki leaves it until the
+mark is removed. New ideas go under
 the stage they belong to, or under a new stage if they change the order. Don't delete history; move what's abandoned to
 *Not planned* with a line saying why.

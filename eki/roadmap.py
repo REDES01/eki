@@ -13,7 +13,8 @@ finished it, naming that change. So a tick lands exactly when the work
 does, and a change you discard takes its tick with it.
 
 Never taken: an item that says `(for a person)` anywhere in it, and
-anything under *Not planned* or *Keeping this file*.
+anything under *Not planned* or *Keeping this file*. Not taken yet: an item
+that says `(waiting on …)` — it needs something else to land first.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ NAME = "ROADMAP.md"
 BOX = re.compile(r"^- \[( |x|X)\] (.*)$")
 SECTION = re.compile(r"^##\s+(.*?)\s*$")
 PERSON = re.compile(r"\(for a person\b[^)]*\)", re.I)
+WAITING = re.compile(r"\(waiting on\b[^)]*\)", re.I)
 #: sections whose bullets are never work
 SKIP = ("not planned", "keeping this file")
 
@@ -102,8 +104,8 @@ def parse(text: str) -> List[Item]:
 
 
 def workable(items: Iterable[Item]) -> List[Item]:
-    """What eki may take: open, not a person's, not under Not planned."""
-    return [i for i in items if not i.done and not i.person
+    """What eki may take: open, not a person's, not waiting, not under Not planned."""
+    return [i for i in items if not i.done and not i.person and not WAITING.search(i.text)
             and not any(i.section.lower().startswith(s) for s in SKIP)]
 
 

@@ -53,6 +53,13 @@ def test_items_are_the_checkboxes_in_file_order():
     assert roadmap.counts(items) == {"done": 1, "open": 3, "person": 1}
 
 
+def test_an_item_waiting_on_something_else_isnt_taken_until_the_mark_goes():
+    waiting = PLAN.replace("- [ ] **One standing context.**",
+                           "- [ ] **One standing context.** *(waiting on Stage 5)*")
+    assert [i.title for i in roadmap.workable(roadmap.parse(waiting))] == ["Commit the working tree"]
+    assert [i.title for i in roadmap.workable(roadmap.parse(PLAN))][-1] == "One standing context"
+
+
 def test_the_key_survives_reordering_and_rewording_below_the_title():
     moved = PLAN.replace("CLAUDE.md imports it.", "and CLAUDE.md is an import of it.")
     a = {i.title: i.key for i in roadmap.parse(PLAN)}

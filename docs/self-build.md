@@ -290,7 +290,8 @@ more, told what failed; after two it is *left for you*.
 
 **The roadmap.** `eki/roadmap.py` reads `ROADMAP.md`: an item is a `- [ ]`
 line under a `## ` section, with its indented lines. Items that say
-`(for a person)`, and anything under *Not planned*, are never taken. The agent
+`(for a person)`, and anything under *Not planned*, are never taken; an item
+that says `(waiting on …)` isn't taken until that's removed. The agent
 gets the item, what its stage is for, and four ways to finish, as the last
 line of its answer:
 

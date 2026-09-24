@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Type
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Set, Tuple, Type
+
+
+#: the kinds of thing a backend can make; a request asks for one of them.
+#: Routing starts here — a backend that can't make what was asked for is out
+#: before quota or cost are looked at.
+PRODUCTS = ("code", "prose", "image", "mesh", "audio")
 
 
 @dataclass
@@ -44,6 +50,16 @@ class Capabilities:
     #: one, or an MCP search server it has been given) — research needs it
     web: bool = False
     streaming: bool = True
+    #: what it makes, from PRODUCTS; empty: what its adapter declares
+    produces: Tuple[str, ...] = ()
+    #: what a request must bring before it can start ("image" for an
+    #: image-to-3D model, "folder"); empty: what its adapter declares
+    needs: Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        # rows from JSON and YAML hold lists; keep them hashable and fixed
+        self.produces = tuple(self.produces or ())
+        self.needs = tuple(self.needs or ())
 
 
 @dataclass
@@ -81,6 +97,12 @@ class BackendError(RuntimeError):
 
 
 class Backend(abc.ABC):
+    #: what this kind of backend makes and needs, declared by the adapter so
+    #: routing can rule it out without trying it; a provider's own
+    #: capabilities override these (a ComfyUI workflow that makes meshes)
+    PRODUCES: Tuple[str, ...] = ("code", "prose")
+    NEEDS: Tuple[str, ...] = ()
+
     def __init__(self, info: BackendInfo, options: Dict[str, Any]):
         self.info = info
         self.options = options or {}
@@ -102,6 +124,27 @@ class Backend(abc.ABC):
 
     async def close(self) -> None:
         pass
+
+
+def produces(backend: Backend) -> Set[str]:
+    """What a backend makes: its provider's word if it gave one, else its
+    adapter's. A text-only row of an adapter that also draws (or the other
+    way round) is taken at its row's `text` / `images_out`."""
+    caps = backend.info.capabilities
+    if caps.produces:
+        return set(caps.produces)
+    made = set(getattr(type(backend), "PRODUCES", ()) or ())
+    if not caps.text:
+        made -= {"code", "prose"}
+    if caps.images_out:
+        made.add("image")
+    return made
+
+
+def needs(backend: Backend) -> Set[str]:
+    """What a request must bring for this backend to start."""
+    caps = backend.info.capabilities
+    return set(caps.needs or getattr(type(backend), "NEEDS", ()) or ())
 
 
 _REGISTRY: Dict[str, Type[Backend]] = {}

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pick a backend for a request, and say why.
 
-Filters in order: your policy, whether it is actually running, hard
+Filters in order: your policy, whether it is actually running, what it
+makes and what it needs (a picture, a mesh, words), the rest of the hard
 requirements, live quota, then cost and declared order.
 Every decision carries its reasoning — automatic selection you can't inspect is
 worse than none, and the first question of any surprising answer is "which
@@ -13,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import priors
+from .adapters import base as adapters_base
 from .adapters.base import Backend
 from .policy import Policy
 
@@ -40,6 +42,21 @@ class Need:
     targets: List[str] = field(default_factory=list)
     #: only these may take it (a goal's budget); None: any
     allowed: Optional[List[str]] = None
+    #: what the answer must be, from adapters.base.PRODUCTS; "" is words —
+    #: prose or code, whichever the backend writes
+    produces: str = ""
+    #: what the request brings with it ("image" attached, "folder"): a
+    #: backend that needs one of these can't start without it
+    inputs: List[str] = field(default_factory=list)
+
+    def product(self) -> str:
+        """What is asked for: `produces`, or a picture when images_out says so."""
+        return self.produces or ("image" if self.images_out else "")
+
+
+#: how a product reads in "lacks …" and "makes …"
+PLURAL = {"image": "images", "mesh": "meshes", "audio": "audio",
+          "code": "code", "prose": "prose"}
 
 
 @dataclass
@@ -139,20 +156,30 @@ class Router:
                 rejected.append(f"{b.key}: not running")
                 continue
             caps = b.info.capabilities
-            if not need.images_out and not caps.text:
-                # an image model asked a question draws a picture of it; that
-                # is a wrong answer, not a cheap one
-                rejected.append(f"{b.key}: draws images, doesn't answer in words")
+            # capability first: what it makes, then what it needs. An image
+            # model asked a question draws a picture of it; that is a wrong
+            # answer, not a cheap one
+            made = adapters_base.produces(b)
+            wanted = need.product()
+            if not wanted and not made & {"code", "prose"}:
+                things = " and ".join(PLURAL.get(m, m) for m in sorted(made)) or "nothing"
+                verb = "draws" if made == {"image"} else "makes"
+                rejected.append(f"{b.key}: {verb} {things}, doesn't answer in words")
+                continue
+            lacking = adapters_base.needs(b) - set(need.inputs)
+            if lacking:
+                rejected.append(f"{b.key}: needs {' and '.join(sorted(lacking))} to start from")
                 continue
             missing = [
-                name for name, wanted, have in (
+                name for name, wanted_, have in (
                     ("repo", need.repo, caps.repo),
                     ("tools", need.tools, caps.tools),
                     ("vision", need.vision, caps.vision),
                     ("web", need.web, caps.web),
-                    ("images", need.images_out, caps.images_out),
-                ) if wanted and not have
+                ) if wanted_ and not have
             ]
+            if wanted and wanted not in made:
+                missing.append(PLURAL.get(wanted, wanted))
             if missing:
                 rejected.append(f"{b.key}: lacks {', '.join(missing)}")
                 continue

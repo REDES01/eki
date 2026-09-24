@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS providers (
 """
 
 CAPABILITY_FIELDS = ("context_tokens", "text", "vision", "tools", "repo",
-                     "images_out", "web", "streaming")
+                     "images_out", "web", "streaming", "produces", "needs")
 
 
 @dataclass

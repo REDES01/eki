@@ -17,6 +17,8 @@ from .base import Backend, BackendError, Health, Message, register
 
 @register("openai_compat")
 class OpenAICompatBackend(Backend):
+    PRODUCES = ("code", "prose")
+
     def __init__(self, info, options: Dict[str, Any]):
         super().__init__(info, options)
         self.base = self.options.get("base_url", "http://127.0.0.1:8000/v1").rstrip("/")

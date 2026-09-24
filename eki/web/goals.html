@@ -445,6 +445,16 @@ function changeCard(c) {
     <div class="acts">${changeActs(c, true)}</div></div>`;
 }
 
+// a new version on its way in: work isn't paused for it, and runs still
+// going when it swaps carry on in the new engine
+function goingLive(g) {
+  if (!g || !g.state) return "";
+  const what = g.self ? ` (self/${esc(g.self)})` : "";
+  const when = g.state === "swapping" || !g.in ? "now" : `in ${Math.max(1, Math.ceil(g.in / 60))} min`;
+  return `<div class="line"><span class="spinner"></span><span>New version${what} going live ${when}</span>
+    <span class="muted" style="font-size:12.5px">— runs still going then carry on in it</span></div>`;
+}
+
 function selfPage() {
   const v = S.self;
   if (!v) return `<div class="empty">Loading…</div>`;
@@ -462,6 +472,7 @@ function selfPage() {
       <span class="badge ${on ? (now ? "working" : "queued") : "paused"}">${on ? "On" : g ? "Paused" : "Off"}</span>
       <span class="muted" style="flex:1 1 220px;min-width:0">${esc(status)}</span>
       <button class="btn ${on ? "" : "primary"}" data-self-on="${on ? 0 : 1}">${on ? "Pause" : g ? "Resume" : "Start"}</button></div>
+    ${goingLive(v.going_live)}
     <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the next open item in ROADMAP.md — each change in its own worktree, tested and started on a spare port before you see it.</div>
     <div class="line"><span class="muted">How far it goes alone</span>
       <div class="seg" role="group" aria-label="Autonomy"><button data-self-auto="propose" aria-pressed="${v.autonomy === "propose"}" title="A branch, a diff and its checks: you apply it">Propose</button><button data-self-auto="apply" aria-pressed="${v.autonomy === "apply"}" title="A change that passes is swapped in, watched, and rolled back if it isn't healthy">Apply here</button></div>

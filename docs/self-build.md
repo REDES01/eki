@@ -42,16 +42,17 @@ afterwards, outside any run. Nothing is killed by its own success.
 
 That leaves other people's runs. Two facts already in the code settle it:
 
-- `/api/health` reports `running`. The supervisor **waits for zero**, up to a
-  limit, before it swaps. Most swaps interrupt nothing.
-- `Engine.resume` already carries a thread on after an interruption when the
-  backend keeps its own session (Claude Code, Codex). If the wait runs out,
-  the supervisor swaps anyway, and the new engine resumes exactly those —
-  the ones `note_interruptions` finds with a session. A run with a folder and
-  no session stays manual, for the reason `retry` gives: it may have made
-  half its edits.
+- `/api/health` reports `running`. The supervisor waits a little (2 min by
+  default) for a moment with none, then swaps anyway. Work is never paused
+  for it: runs keep going and new ones keep starting.
+- `Engine.resume` carries a thread on after an interruption when the backend
+  keeps its own session (Claude Code, Codex): the new engine resumes the
+  runs the swap cut off (see *Runs cut off by a swap*, below).
 
-No change to `runs.py` is needed for the first version.
+(An earlier version waited up to 10 minutes for zero runs. With self-work
+going in parallel there were always runs, and every newer apply restarted
+the wait — on 2026-09-24 the engine stayed on fba7d32 through three
+applies.)
 
 ## The candidate check  (built: `eki/candidate.py`)
 
@@ -144,7 +145,12 @@ dropping it (`builds.live` / `behind` / `base` / `catch_up`):
   would still drop something (`--force` overrides).
 
 One swap at a time, newest wins: a swap still waiting is superseded (the new
-build contains it); one already swapping finishes its watch first.
+build contains it) **and its deadline stands** — the new one doesn't start a
+wait of its own, so a steady stream of applies can't hold the engine back.
+One already swapping (or past its wait) finishes first, and the next is
+counted to the same deadline once it has. `eki self`, `eki builds` and the
+Self board say *new version going live in N min* while one is on its way
+(`builds.going_live`).
 
 ## The supervisor  (built: `eki/supervisor.sh`)
 
@@ -152,7 +158,9 @@ Small on purpose — a hundred lines of shell, no imports from eki, so that
 no change to eki can break it. `eki agent install` copies it to
 `~/.eki/bin/eki-supervisor`; nothing else does.
 
-1. wait (default 10 min) for `/api/health` to show no runs
+1. wait (default 2 min; `builds.swap` passes what's left of the deadline) for
+   `/api/health` to show no runs — then swap anyway; from here on it is not
+   superseded (it ignores TERM) but waited out
 2. `previous` → what ran, `current` → the new build, `launchctl kickstart -k`
 3. the engine must answer `/api/health` *as that build* within a minute,
    and be the same process after the watch window (default 3 min)
@@ -162,10 +170,26 @@ no change to eki can break it. `eki agent install` copies it to
    fast-forwards it into your checkout if nothing there is uncommitted or
    newer.
 
-Runs cut off by a swap (or any restart) aren't cancelled: the next engine
-marks them interrupted and carries on those in Claude Code or Codex in
-their session and in the copy of the folder they were working in
-(`resume_interrupted`, once — never a loop).
+**Runs cut off by a swap** (or any restart) aren't cancelled. The engine
+going away marks each run it cuts off *handed over* (`Runner.stop`); the
+next engine marks them interrupted, says so in their threads, and carries
+them on (`Engine._carry`, `resume_interrupted`):
+
+- in Claude Code or Codex, in their session and in the copy of the folder
+  they were working in — the session id is saved as soon as the program
+  says it, so a run cut off mid-turn has one;
+- self-work goes on as self-work: the same item, worktree and thread, and the
+  item points at the new run at once, so the loop never takes it up a second
+  time; one cut off before its program had a session is started again from
+  where its item stands;
+- a run that never began is simply asked again;
+- a run with a folder and no session stays yours to retry — it may have made
+  half its edits.
+
+Never lost, never twice: a run is carried on once (`RunStore.carried_on` —
+resuming or retrying one already carried on does nothing). A carrying-on cut
+off by the next swap carries on again, up to five in a row; one lost to a
+crash (not handed over) isn't, so a crash can't loop.
 
 It lives outside `builds/`, is installed once, and eki's self-work is refused
 any diff that touches it, `agent.py`'s plist writer, or `secrets.py` and the
@@ -319,8 +343,8 @@ finishes the rebase itself, refuses a result with markers left or not on top
 of your checkout (putting the change back exactly as it was, *conflicts*),
 judges it again and applies it. Apply is refused while that runs.
 `self_resolve: false` turns it off. Documentation goes straight into your
-checkout (fast-forward); code becomes a build the supervisor swaps in once
-nothing is running, watches, and rolls back if it isn't healthy — and a
+checkout (fast-forward); code becomes a build the supervisor swaps in within a
+couple of minutes (runs still going carry on in the new engine), watches, and rolls back if it isn't healthy — and a
 healthy one is fast-forwarded into your checkout. Files you never added to git
 don't stop that; edits to tracked files do.
 

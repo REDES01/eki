@@ -13,6 +13,7 @@ quick question has no business waiting behind a refactor.
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import threading
 import time
@@ -209,6 +210,29 @@ class RunStore:
                 " WHERE state IN ('queued','running')").fetchall()
         return [dict(r) for r in rows]
 
+    def hand_over(self, rid: str) -> None:
+        """Mark a live run as cut off by the engine going away on purpose (a
+        swap, a restart) — not by a crash. The next engine may carry on a
+        run cut off this way even if it was itself a carrying-on; one lost
+        to a crash is carried on only once, so a crash can't loop."""
+        run = self.get(rid)
+        if not run:
+            return
+        try:
+            payload = json.loads(run.get("payload") or "{}") or {}
+        except (TypeError, ValueError):
+            payload = {}
+        self.update(rid, payload=json.dumps({**payload, "handed_over": 1}))
+
+    def carried_on(self, rid: str) -> str:
+        """The run that already carries `rid` on (a resumption or a retry of
+        it), so it is never started twice. "" when there is none."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM runs WHERE payload LIKE ? OR payload LIKE ? LIMIT 1",
+                (f'%"resume_of": "{rid}"%', f'%"retry_of": "{rid}"%')).fetchone()
+        return row["id"] if row else ""
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -345,7 +369,9 @@ class Runner:
         """Shutdown: nothing is left orphaned. Runs cut off here stay
         "running" in the store for the next engine to pick up."""
         self.stopping = True
-        for task in list(self.tasks.values()):
+        for rid, task in list(self.tasks.items()):
+            if not task.done():
+                self.store.hand_over(rid)
             task.cancel()
         if self.tasks:
             await asyncio.gather(*self.tasks.values(), return_exceptions=True)

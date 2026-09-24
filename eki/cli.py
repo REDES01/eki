@@ -515,6 +515,9 @@ def _self_status(service: str, limit: int) -> int:
               + ("   (eki self off)" if g["state"] == "active" else "   (eki self on)"))
         if g.get("note") and not g.get("working"):
             print(f"now: {g['note']}")
+    going = _going_live(v.get("going_live") or {})
+    if going:
+        print(going)
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
           + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
@@ -650,7 +653,8 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     if r.status_code >= 400:
         print(f"! {got.get('detail') or r.text[:200]}", file=sys.stderr)
         return 1
-    say = {"applying": "applying — the supervisor swaps it in once nothing is running, watches it, "
+    say = {"applying": "applying — the supervisor swaps it in within a couple of minutes (runs still going "
+                       "carry on in it), watches it, "
                        "and goes back if it isn't healthy (eki builds)",
            "applied": got.get("merged") or "applied",
            "conflicts": "it no longer goes on top of your checkout — `eki self retry` lets eki try again",
@@ -866,6 +870,18 @@ def cmd_observe(args) -> int:
     return 0
 
 
+def _going_live(g: Dict[str, Any]) -> str:
+    """"new version going live in N min" — a swap on its way in (builds.going_live)."""
+    if not g:
+        return ""
+    what = f" (self/{g['self']})" if g.get("self") else ""
+    if g.get("state") == "swapping" or not g.get("in"):
+        return f"new version{what} going live now"
+    mins = max(1, -(-int(g["in"]) // 60))
+    return (f"new version{what} going live in {mins} min — at once if nothing is running; "
+            "runs still going then carry on in it")
+
+
 def cmd_builds(args) -> int:
     """What the engine runs, what it ran before, and how the last swap went."""
     from . import builds
@@ -883,6 +899,9 @@ def cmd_builds(args) -> int:
               + (f" ({s['why']})" if s.get("why") else ""))
     else:
         print("\nno swap yet")
+    going = _going_live(builds.going_live())
+    if going:
+        print(going)
     return 0
 
 
@@ -1027,8 +1046,10 @@ def cmd_swap(args) -> int:
                 print(f"! {target.name} isn't fit to run — not swapping", file=sys.stderr)
                 return 1
     got = builds.swap(target, wait=args.wait, watch=args.watch)
-    print(f"swapping to {target} — once runs finish; watched {args.watch}s, rolled back if "
-          f"unhealthy. Follow it: tail -f {got['log']}")
+    mins = max(0, got["deadline"] - int(time.time())) // 60
+    print(f"swapping to {target} — at a quiet moment, or in {mins} min anyway (runs still going "
+          f"carry on in the new engine); watched {args.watch}s, rolled back if unhealthy. "
+          f"Follow it: tail -f {got['log']}")
     return 0
 
 
@@ -1173,7 +1194,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--skip-tests", action="store_true", help="candidate check without the test suite")
     sp.add_argument("--force", action="store_true",
                     help="swap even if it drops something the engine runs now")
-    sp.add_argument("--wait", type=int, default=600, help="seconds to wait for runs to finish")
+    sp.add_argument("--wait", type=int, default=120,
+                    help="seconds to wait for a moment with no runs before swapping anyway")
     sp.add_argument("--watch", type=int, default=180, help="seconds it must stay healthy")
 
     g = sub.add_parser("goals", help="things eki keeps doing when the machine has room")

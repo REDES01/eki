@@ -247,6 +247,16 @@ def test_the_supervisor_waits_for_runs_to_finish(stage):
 
 
 @pytest.mark.real_processes
+def test_the_supervisor_swaps_anyway_after_a_short_wait(stage):
+    time.sleep(0.5)
+    (stage["root"] / "busy").write_text("")            # work never stops
+    got = supervise(stage, stage["two"], wait=5, watch=1)
+    assert got.returncode == 0, got.stderr
+    assert Path(os.readlink(builds.BUILDS / "current")) == stage["two"]
+    assert "swapping anyway" in (builds.SELF_HOME / "swap.log").read_text()
+
+
+@pytest.mark.real_processes
 def test_one_swap_at_a_time(stage):
     (builds.SELF_HOME).mkdir(parents=True, exist_ok=True)
     (builds.SELF_HOME / "swap.lockdir").mkdir()
@@ -335,6 +345,80 @@ def test_a_swap_still_waiting_counts_as_running_and_is_superseded(src, tmp_path)
     os.kill(builds._swap_pid(), 15)
 
 
+def _recording_supervisor(tmp_path):
+    """A supervisor that writes down what it was asked, then waits."""
+    sup = tmp_path / "sup.sh"
+    sup.write_text(f'#!/bin/sh\necho "$@" >> "{tmp_path}/asked"\nsleep 30\n')
+    sup.chmod(0o755)
+    return sup, tmp_path / "asked"
+
+
+def _asked(path, n):
+    for _ in range(100):
+        if path.exists() and len(path.read_text().splitlines()) >= n:
+            return [ln.split() for ln in path.read_text().splitlines()]
+        time.sleep(0.05)
+    pytest.fail("the supervisor wasn't started")
+
+
+def test_a_superseding_swap_keeps_the_first_ones_deadline(src, tmp_path):
+    sup, asked = _recording_supervisor(tmp_path)
+    first = builds.make(src)
+    got = builds.swap(first, wait=100, supervisor=sup)
+    deadline = got["deadline"]
+    assert 99 <= int(_asked(asked, 1)[0][1]) <= 100
+    assert 0 < builds.going_live()["in"] <= 100
+    for n in (3, 4):                                  # applies keep coming…
+        (src / "README.md").write_text(f"v{n}\n")
+        sh(src, "commit", "-q", "-am", f"v{n}")
+        again = builds.swap(builds.make(src), wait=600, supervisor=sup)
+        assert again["deadline"] == deadline          # …and the wait doesn't start over
+    rows = _asked(asked, 3)
+    assert all(int(r[1]) <= 100 for r in rows)
+    assert json.loads((builds.SELF_HOME / "swap.json").read_text())["deadline"] == deadline
+    os.kill(builds._swap_pid(), 15)
+
+
+def test_a_swap_past_its_deadline_goes_at_once(src, tmp_path):
+    sup, asked = _recording_supervisor(tmp_path)
+    builds.swap(builds.make(src), wait=100, supervisor=sup)
+    _asked(asked, 1)
+    s = json.loads((builds.SELF_HOME / "swap.json").read_text())
+    s["deadline"] = int(time.time()) - 5              # the first one's wait ran out
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps(s))
+    (src / "README.md").write_text("v3\n")
+    sh(src, "commit", "-q", "-am", "v3")
+    builds.swap(builds.make(src), supervisor=sup)
+    assert _asked(asked, 2)[1][1] == "0"
+    assert builds.going_live()["in"] == 0
+    os.kill(builds._swap_pid(), 15)
+
+
+def test_a_swap_behind_one_mid_swap_waits_it_out(src, tmp_path):
+    sup, asked = _recording_supervisor(tmp_path)
+    mid = subprocess.Popen(["sleep", "30"])
+    builds.SELF_HOME.mkdir(parents=True, exist_ok=True)
+    (builds.SELF_HOME / "swap.pid").write_text(str(mid.pid))
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps({"state": "swapping", "target": "x"}))
+    builds.swap(builds.make(src), supervisor=sup)
+    time.sleep(0.5)
+    assert not asked.exists()                          # not while the other is swapping
+    s = json.loads((builds.SELF_HOME / "swap.json").read_text())
+    assert s["state"] == "waiting" and s["behind"] == mid.pid
+    (src / "README.md").write_text("v3\n")           # superseded meanwhile: still behind it
+    sh(src, "commit", "-q", "-am", "v3")
+    builds.swap(builds.make(src), supervisor=sup)
+    assert json.loads((builds.SELF_HOME / "swap.json").read_text())["behind"] == mid.pid
+    mid.kill()
+    mid.wait()
+    assert len(_asked(asked, 1)) == 1
+    os.kill(builds._swap_pid(), 15)
+
+
+def test_nothing_going_live_says_nothing(src):
+    assert builds.going_live() == {}
+
+
 def test_the_same_change_under_another_id_is_not_lost(src):
     running = _running(src)
     (src / "notes.md").write_text("mine\n")
@@ -344,3 +428,11 @@ def test_the_same_change_under_another_id_is_not_lost(src):
     sh(src, "cherry-pick", running)                              # main has it, as another commit
     assert sh(src, "rev-parse", "HEAD") != running
     assert builds.behind(src) == ""
+
+
+def test_eki_self_says_when_a_new_version_goes_live():
+    from eki.cli import _going_live
+    assert _going_live({}) == ""
+    assert _going_live({"state": "waiting", "self": "ab12", "in": 95}).startswith(
+        "new version (self/ab12) going live in 2 min")
+    assert _going_live({"state": "swapping", "in": 0}) == "new version going live now"

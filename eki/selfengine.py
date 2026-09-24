@@ -385,7 +385,8 @@ class SelfLoop:
         if c.get("ticks") and c.get("commit") and c.get("said") in ("done", "already"):
             lines.append(f"It ticks the ROADMAP item “{it.title}”.")
         if state == "applying":
-            lines.append("The supervisor swaps it in once nothing is running, watches it, and goes "
+            lines.append("The supervisor swaps it in within a couple of minutes — runs still going "
+                         "carry on in the new engine — watches it, and goes "
                          "back to what ran before if it isn't healthy.")
         elif state == "applied":
             lines.append(str(c.get("how") or c.get("merged") or "In your checkout."))
@@ -980,6 +981,7 @@ class SelfLoop:
         return {
             "can": not why_not, "why_not": why_not, "root": str(root),
             "running": builds_mod.running(),
+            "going_live": builds_mod.going_live(),                     # a new version on its way in
             "goal": goal,
             "autonomy": self.settings.get("self_autonomy", "propose"),   # type: ignore[attr-defined]
             "areas": self.settings.get("self_autonomy_areas") or {},     # type: ignore[attr-defined]

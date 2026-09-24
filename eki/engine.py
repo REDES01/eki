@@ -82,6 +82,16 @@ from .store import Store
 HEALTH_TTL = 20.0
 
 
+#: how many times in a row a run is carried on after the engine went away
+#: on purpose (swaps, restarts) — a bound, in case going away isn't the cause
+MAX_CARRIES = 5
+
+
+def _carries(was: Dict[str, Any]) -> int:
+    """How many carryings-on in a row a run carrying `was` on is."""
+    return int(was.get("carries") or 1) + 1 if (was.get("resume_of") or was.get("retry_of")) else 1
+
+
 def _payload(run: Dict[str, Any]) -> Dict[str, Any]:
     try:
         return dict(json.loads(run.get("payload") or "{}") or {})
@@ -553,35 +563,49 @@ class Engine(SelfLoop):
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
 
-    def _resumable(self, run: Dict[str, Any]) -> bool:
-        """Carried on by itself after a restart: a run in a program that keeps
-        its own session (Claude Code, Codex), once — a run that was itself a
-        resumption isn't resumed again, so a crash can't loop."""
+    def _carry(self, run: Dict[str, Any]) -> str:
+        """How a run the previous engine took with it carries on by itself:
+        "session" — told to go on in the program's own session (Claude Code,
+        Codex), in the copy of the folder it left; "self" — a change to eki
+        itself cut off before its program had a session, taken up again
+        from where its item stands; "again" — it never began, so asking
+        again repeats nothing; "" — it waits for you (a run with a folder
+        may have made half its edits, which is why `retry` is manual).
+
+        A carrying-on that is itself lost carries on again only when the
+        engine went away on purpose (a swap, a restart — `hand_over`), and
+        only a few times in a row; after a crash, never — so a crash can't
+        loop."""
         cid, backend = run.get("conversation_id"), run.get("backend") or ""
-        if not self.settings.get("resume_interrupted", True) or not cid or not backend:
-            return False
-        try:
-            if (json.loads(run.get("payload") or "{}") or {}).get("resume_of"):
-                return False
-        except (TypeError, ValueError):
-            return False
-        return bool(self.store.session(cid, backend))
+        if not self.settings.get("resume_interrupted", True) or not cid:
+            return ""
+        p = _payload(run)
+        if (p.get("resume_of") or p.get("retry_of")) and \
+                (not p.get("handed_over") or int(p.get("carries") or 1) >= MAX_CARRIES):
+            return ""
+        if backend and self.store.session(cid, backend):
+            return "session"
+        if p.get("self_item") and p.get("handed_over"):
+            return "self"
+        if not run.get("started_at"):
+            return "again"
+        return ""
 
     def note_interruptions(self) -> int:
         """A line in each thread whose run the previous engine took with it,
-        so the thread says what happened — and, where the program kept its
-        session, that it is carrying on (`resume_interrupted`)."""
+        so the thread says what happened — and, where it can carry on by
+        itself, that it is (`resume_interrupted`)."""
         noted = 0
-        self._to_resume: List[str] = []
+        self._to_resume: List[Tuple[str, str]] = []
         for run in self.runs.just_interrupted:
             cid = run.get("conversation_id")
             if not cid or run.get("kind") != "ask":
                 continue
-            carry = self._resumable(run)
-            if carry:
-                self._to_resume.append(run["id"])
+            how = self._carry(run)
+            if how:
+                self._to_resume.append((run["id"], how))
             self.store.add_turn(cid, "assistant", "*[interrupted — the engine restarted"
-                                + ("; carrying on]*" if carry else "]*"),
+                                + ("; carrying on]*" if how else "]*"),
                                 run.get("backend") or "", run.get("reason") or "",
                                 meta={"run": run["id"], "interrupted": True,
                                       **({"cwd": run["cwd"]} if run.get("cwd") else {})})
@@ -592,14 +616,37 @@ class Engine(SelfLoop):
     async def resume_interrupted(self) -> int:
         """Start the carrying-on runs `note_interruptions` decided on."""
         started = 0
-        for rid in getattr(self, "_to_resume", []):
+        for rid, how in getattr(self, "_to_resume", []):
             try:
-                if await self.resume(rid):
+                if how == "self":
+                    got = await self._self_take_up(rid)
+                else:
+                    got = await self.resume(rid)
+                if got:
                     started += 1
             except Exception:                       # noqa: BLE001
                 continue
         self._to_resume = []
         return started
+
+    async def _self_take_up(self, rid: str) -> Optional[Dict[str, str]]:
+        """A change to eki itself cut off before its program had a session:
+        its item is started again — in its thread and worktree, from where
+        it stood — unless something else has taken it up already."""
+        iid = str(_payload(self.runs.get(rid) or {}).get("self_item") or "")
+        if not self._self_on(iid, rid):
+            return None
+        return await self._self_start(selfloop.get(iid))            # type: ignore[attr-defined]
+
+    @staticmethod
+    def _self_on(iid: str, rid: str) -> bool:
+        """The piece of self-work `iid` is still being worked on by run `rid`
+        — nothing has taken it up since."""
+        try:
+            it = selfloop.get(iid)
+        except KeyError:
+            return False
+        return it.state == "working" and it.run == rid
 
     async def app_tick(self, build: str = "") -> str:
         """The Mac app, rebuilt from the running build when its mac/ changed
@@ -685,6 +732,8 @@ class Engine(SelfLoop):
         old = self.runs.get(rid)
         if not old or old["state"] not in ("failed", "cancelled", "interrupted"):
             return None
+        if self.runs.carried_on(rid):
+            return None                             # already carried on: never twice
         cid = old["conversation_id"]
         backend = old.get("backend") or ""
         if cid and backend and self.store.session(cid, backend):
@@ -694,12 +743,19 @@ class Engine(SelfLoop):
             was = _payload(old)
             carried = {k: was[k] for k in ("self_item", "goal", "allowed", "route") if k in was} \
                 if was.get("self_item") else {}
+            if carried and not self._self_on(str(carried["self_item"]), rid):
+                return None                         # its item has moved on, or is taken up already
             # carrying on is not a way out of what the run was handed
             carried.update({k: was[k] for k in ("via", "grant") if k in was})
             # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
                                    requested=backend, images=False, user_turn=turn,
-                                   payload=json.dumps({"resume_of": rid, **carried}))
+                                   payload=json.dumps({"resume_of": rid, "carries": _carries(was),
+                                                       **carried}))
+            if carried:
+                # the item follows the new run at once, so the loop doesn't
+                # take it up a second time before the run gets going
+                selfloop.update(str(carried["self_item"]), run=new)
             await self.runner.submit(new)
             return {"run": new, "conversation": cid, "resumed": "session"}
         got = await self.retry(rid)
@@ -718,12 +774,15 @@ class Engine(SelfLoop):
         old = self.runs.get(rid)
         if not old or old["state"] not in ("failed", "cancelled", "interrupted"):
             return None
+        if self.runs.carried_on(rid):
+            return None                             # already carried on: never twice
         # the same question under the same grant: retrying doesn't widen it
-        kept = {k: v for k, v in _payload(old).items() if k in ("via", "grant")}
+        was = _payload(old)
+        kept = {k: v for k, v in was.items() if k in ("via", "grant")}
         new = self.runs.create(old["prompt"], conversation=old["conversation_id"],
                                cwd=old["cwd"], requested=old["requested"],
                                images=bool(old["images"]), user_turn=old["user_turn"],
-                               payload=json.dumps(kept) if kept else "")
+                               payload=json.dumps({"retry_of": rid, "carries": _carries(was), **kept}))
         await self.runner.submit(new)
         return {"run": new, "conversation": old["conversation_id"]}
 

@@ -36,6 +36,9 @@ TEMPLATE = Path(__file__).with_name("supervisor.sh")
 MARK = ".eki-build.json"
 #: builds other than current and previous are removed after this long
 KEEP_DAYS = 7
+#: how long a swap waits for a quiet moment before it goes ahead anyway;
+#: runs still going are carried on by the new engine
+WAIT = 120
 
 
 def here() -> Path:
@@ -166,10 +169,14 @@ def _target(name: str) -> Optional[Path]:
     return Path(os.readlink(link)).resolve()
 
 
-def swap(target: Path, *, wait: int = 600, watch: int = 180, self_id: str = "",
+def swap(target: Path, *, wait: int = WAIT, watch: int = 180, self_id: str = "",
          supervisor: Optional[Path] = None) -> Dict[str, Any]:
     """Ask the supervisor to move the engine onto `target`. It runs apart
-    from the engine (its own session), since it restarts the engine."""
+    from the engine (its own session), since it restarts the engine.
+
+    Work never pauses for it: runs keep going and new ones keep starting.
+    The supervisor waits a little (`wait`) for a quiet moment, then swaps
+    anyway — the new engine carries on the runs it cut off."""
     sup = supervisor or SUPERVISOR
     if not os.access(sup, os.X_OK):
         raise RuntimeError(f"no supervisor at {sup} — a person installs it with `eki agent install`")
@@ -177,33 +184,83 @@ def swap(target: Path, *, wait: int = 600, watch: int = 180, self_id: str = "",
     # One swap at a time, newest wins. A build made now contains what was
     # waiting to go in (`live()` counts it), so a swap still waiting is
     # superseded; one already swapping finishes its watch first.
-    before, pid = last_swap(), _swap_pid()
-    cmd = [str(sup), str(target), str(wait), str(watch), self_id]
+    before, pid, now = last_swap(), _swap_pid(), int(time.time())
+    deadline = now + max(0, int(wait))
+    behind = 0                                  # the supervisor mid-swap this one waits out
     with open(SELF_HOME / "swap.log", "a") as log:
         if pid and before.get("state") == "waiting":
+            # the new build keeps the waiting one's deadline: with work always
+            # going, a wait that restarted on every apply would never end
+            deadline = min(deadline, int(before.get("deadline") or deadline))
             try:
                 os.kill(pid, 15)
                 log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} superseded the waiting swap to "
-                          f"{before.get('target')} (the new build contains it)\n")
+                          f"{before.get('target')} (the new build contains it; its deadline stands)\n")
             except OSError:
                 pass
+            # one already past its wait no longer yields: it is waited out instead
+            behind = _alive(int(before.get("behind") or 0)) or _outlives(pid)
         elif pid and before.get("state") == "swapping":
-            cmd = ["/bin/sh", "-c", 'while kill -0 "$0" 2>/dev/null; do sleep 2; done; exec "$@"',
-                   str(pid), *cmd]
+            behind = pid
+        # the wait is counted to the deadline when the supervisor starts — after
+        # the one mid-swap has finished, if there is one
+        # (ps, not kill -0: one that has ended but isn't reaped yet is a zombie)
+        cmd = ["/bin/sh", "-c", 'while [ "$1" -gt 0 ] && ps -o stat= -p "$1" 2>/dev/null | grep -qv Z; '
+               'do sleep 2; done; '
+               'w=$(( $2 - $(date +%s) )); [ "$w" -gt 0 ] || w=0; exec "$3" "$4" "$w" "$5" "$6"',
+               "eki-swap", str(behind), str(deadline), str(sup), str(target), str(watch), self_id]
         (SELF_HOME / "swap.json").write_text(json.dumps(
-            {"state": "waiting", "target": str(target), "self": self_id, "at": int(time.time())}))
+            {"state": "waiting", "target": str(target), "self": self_id, "at": now,
+             "deadline": deadline, **({"behind": behind} if behind else {})}))
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                                 start_new_session=True)
     (SELF_HOME / "swap.pid").write_text(str(proc.pid))
-    return {"target": str(target), "log": str(SELF_HOME / "swap.log")}
+    return {"target": str(target), "log": str(SELF_HOME / "swap.log"), "deadline": deadline}
+
+
+def going_live() -> Dict[str, Any]:
+    """A new version on its way in, for `eki self` and the Self board:
+    {"target", "self", "in": seconds until it swaps (0: now), "state"}.
+    {} when nothing is on its way."""
+    s = last_swap()
+    if s.get("state") not in ("waiting", "swapping") or not _swap_pid():
+        return {}
+    left = max(0, int(s.get("deadline") or 0) - int(time.time())) if s["state"] == "waiting" else 0
+    return {"state": s["state"], "target": s.get("target") or "", "self": s.get("self") or "",
+            "in": left}
+
+
+def _alive(pid: int) -> int:
+    """`pid` while it runs, else 0. A supervisor this engine started and
+    that has ended is reaped here — a zombie would look alive."""
+    if pid <= 0:
+        return 0
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            return 0
+    except ChildProcessError:
+        pass                                    # not ours: the kill below says
+    except OSError:
+        return 0
+    try:
+        os.kill(pid, 0)
+        return pid
+    except OSError:
+        return 0
+
+
+def _outlives(pid: int, seconds: float = 3.0) -> int:
+    """`pid` if it is still running a moment after being told to stop."""
+    end = time.time() + seconds
+    while _alive(pid) and time.time() < end:
+        time.sleep(0.05)
+    return _alive(pid)
 
 
 def _swap_pid() -> int:
     """The supervisor of the last swap, while it's still alive."""
     try:
-        pid = int((SELF_HOME / "swap.pid").read_text().strip())
-        os.kill(pid, 0)
-        return pid
+        return _alive(int((SELF_HOME / "swap.pid").read_text().strip()))
     except (OSError, ValueError):
         return 0
 

@@ -10,7 +10,9 @@
 #
 #   eki-supervisor <build-dir> [wait-seconds] [watch-seconds] [self-id]
 #
-# 1. waits (up to wait-seconds) for the engine to have no runs going
+# 1. waits (up to wait-seconds, 2 min by default) for a moment with no runs
+#    going — work isn't paused for it; runs still going then are cut off and
+#    the new engine carries them on
 # 2. repoints ~/.eki/builds/current (the old one becomes `previous`) and
 #    restarts the engine through launchd
 # 3. the engine must answer /api/health as the new build within a minute,
@@ -19,7 +21,7 @@
 # The outcome is ~/.eki/self/swap.json; the story is ~/.eki/self/swap.log.
 set -u
 TARGET="${1:?usage: eki-supervisor <build-dir> [wait] [watch] [self-id]}"
-WAIT="${2:-600}"
+WAIT="${2:-120}"
 WATCH="${3:-180}"
 SELF="${4:-}"
 B="${EKI_BUILDS:-$HOME/.eki/builds}"
@@ -54,17 +56,21 @@ fi
 WANT=$(sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' "$TARGET/.eki-build.json" 2>/dev/null | head -1)
 [ -n "$WANT" ] || WANT=dev
 
-# 1. let what's running finish
-t=0
-while [ "$t" -lt "$WAIT" ]; do
-    h=$(health)
-    case "$h" in
-        ""|*'"running":[]'*|*'"running": []'*) break ;;
+# 1. a quiet moment, if one comes soon
+quiet() {
+    case "$(health)" in
+        ""|*'"running":[]'*|*'"running": []'*) return 0 ;;
     esac
+    return 1
+}
+t=0
+while [ "$t" -lt "$WAIT" ] && ! quiet; do
     sleep 5
     t=$((t + 5))
 done
-[ "$t" -ge "$WAIT" ] && say "runs still going after ${WAIT}s; swapping anyway (the new engine resumes them)"
+quiet || say "runs still going after ${t}s; swapping anyway (the new engine carries them on)"
+# from here on it isn't superseded: a newer swap waits for this one to finish
+trap '' TERM
 
 # 2. swap
 OLD=$(readlink "$B/current")

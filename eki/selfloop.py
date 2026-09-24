@@ -96,12 +96,29 @@ class Item:
     base: str = ""                  # a fault fix starts from the code that's running
     check_base: bool = True
     apply: bool = False             # applied when fit, whatever the autonomy (asked with --apply)
+    #: "eki": asked for from inside work eki started on its own (see `owner`)
+    by: str = ""
     backend: str = ""               # asked for a backend by name
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
 
     def to_json(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+#: self-work eki opens on its own, with nobody asking: a fault in its code
+EKI_ROOTS = ("fault",)
+
+
+def owner(it: Item) -> str:
+    """"eki" | "person" — whose authority a piece of self-work runs under.
+
+    What eki starts on its own isn't the person's: it goes only as far as the
+    autonomy setting lets it (never `apply` for itself), and nothing below it
+    — the runs its agent starts through eki — may flip a switch only the
+    person may. A roadmap item or the weekly note is a turn of the goal the
+    person set up, so it is theirs."""
+    return "eki" if it.source in EKI_ROOTS or it.by == "eki" else "person"
 
 
 # ---- the store ---------------------------------------------------------------------

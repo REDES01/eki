@@ -856,3 +856,109 @@ def test_several_changes_asked_for_at_once_from_the_command_line(monkeypatch, tm
     sent.clear()
     assert cli.main(["self", "--batch", str(batch), "and one more"]) == 0
     assert [b["request"] for b in sent] == ["fix the menu bar meter", "show the area on the board", "and one more"]
+
+
+# ---- roots eki starts on its own ---------------------------------------------------------------
+
+def test_what_eki_starts_on_its_own_isnt_the_persons():
+    fault = selfloop.Item(id="f", source="fault", title="Fix x")
+    assert selfloop.owner(fault) == "eki"
+    assert selfloop.owner(selfloop.Item(id="a", source="asked", title="t")) == "person"
+    assert selfloop.owner(selfloop.Item(id="r", source="roadmap", title="t")) == "person"  # your goal's turn
+    assert selfloop.owner(selfloop.Item(id="b", source="asked", title="t", by="eki")) == "eki"
+
+
+def _eki_thread(eng) -> str:
+    """A thread whose run is a fault's fix, working."""
+    cid = eng.store.new_conversation("eki · Fix x")
+    eng.runs.create("[eki · self] Fix x", conversation=cid, payload=json.dumps({"owner": "eki"}))
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_a_faults_fix_follows_the_autonomy_setting_even_if_marked_apply(eng):
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    it = selfloop.add("fault", "Fix thing", "VALUE is wrong", check_base=False, apply=True)
+    started = await eng._self_start(it)
+    assert json.loads(eng.runs.get(started["run"])["payload"])["owner"] == "eki"
+    await settle(eng.runs, started["run"], timeout=20)
+    assert selfwork.changes()[0]["state"] == "proposed" and not eng.swaps     # propose: not applied
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_below_eki_s_own_work_everything_is_eki_s_and_the_checkout_is_off_limits(eng, monkeypatch):
+    monkeypatch.setattr(builds, "source", lambda: eng.root)
+    parent = _eki_thread(eng)
+    assert eng.owner_of(parent) == "eki" and eng.owner_of("") == "person"
+    with pytest.raises(ValueError):
+        await eng.ask("fix the supervisor", repo=str(eng.root / "eki"), via="agent", parent_thread=parent)
+    with pytest.raises(ValueError):
+        await eng.ask("tidy the builds", repo=str(builds.BUILDS), via="agent", parent_thread=parent)
+    child = await eng.ask("review this", via="agent", parent_thread=parent)
+    got = json.loads(eng.runs.get(child["run"])["payload"])
+    assert got["owner"] == "eki" and got["parent_thread"] == parent
+    await settle(eng.runs, child["run"], timeout=20)
+    # yours: the same folder is fine
+    mine = await eng.ask("fix the supervisor", repo=str(eng.root), via="agent", parent_thread="")
+    assert "owner" not in json.loads(eng.runs.get(mine["run"])["payload"] or "{}")
+    await settle(eng.runs, mine["run"], timeout=20)
+    # a change asked for from inside it is eki's too: never applied on its say-so
+    got = await eng.self_ask("make VALUE three", when="later", apply=True, parent=parent)
+    it = selfloop.get(got["item"])
+    assert it.by == "eki" and not it.apply and selfloop.owner(it) == "eki"
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_eki_s_tools_say_which_thread_asks(eng):
+    from eki import mcpbridge
+    parent = _eki_thread(eng)
+    bridge = mcpbridge.Bridge(eng, parent, depth=1)
+    await bridge.ask("say hi")
+    child = next(r for r in eng.runs.recent(5) if r["conversation_id"] != parent)
+    assert json.loads(eng.runs.get(child["id"])["payload"])["owner"] == "eki"
+    assert eng._harness_env(parent)["EKI_PARENT"] == parent and eng._harness_env("") is None
+    await eng.runner.stop()
+
+
+def test_codex_s_eki_server_is_told_the_thread(tmp_path, monkeypatch):
+    from eki import mcpregistry
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(mcpregistry, "CODEX_CONFIG", cfg)
+    assert mcpregistry.codex_eki_env(parent="abc") == []                    # no eki server: nothing to change
+    cfg.write_text(mcpregistry.codex_block({}, ["python", "-m", "eki.cli", "mcp"]))
+    assert mcpregistry.codex_eki_env() == []
+    flags = mcpregistry.codex_eki_env(screen=False, parent="abc")
+    assert 'EKI_PARENT = "abc"' in flags[1] and 'EKI_SCREEN = "0"' in flags[1]
+    assert "EKI_SCREEN" not in mcpregistry.codex_eki_env(parent="abc")[1]
+
+
+def test_the_persons_switches_are_refused_to_eki_s_own_work(monkeypatch):
+    from fastapi.testclient import TestClient
+    from eki import service
+
+    class Fake:
+        def owner_of(self, cid):
+            return "eki" if cid == "mine-not" else "person"
+
+        def self_settings(self, **kw):
+            return {"ok": True, **kw}
+
+    monkeypatch.setitem(service.STATE, "engine", Fake())
+    client = TestClient(service.app)
+    assert service.person_only("POST", "/api/self/changes/abc/apply")
+    assert not service.person_only("POST", "/api/self/changes/abc/discard")
+    r = client.put("/api/self/settings", json={"autonomy": "apply"}, headers={"X-Eki-Parent": "mine-not"})
+    assert r.status_code == 403 and "only you" in r.json()["detail"]
+    assert client.put("/api/self/settings", json={"autonomy": "apply"},
+                      headers={"X-Eki-Parent": "yours"}).status_code == 200
+    assert client.put("/api/self/settings", json={"autonomy": "apply"}).status_code == 200
+
+
+def test_the_command_line_says_which_thread_asks(monkeypatch):
+    from eki import cli
+    monkeypatch.delenv("EKI_PARENT", raising=False)
+    assert cli.parent_headers() == {}
+    monkeypatch.setenv("EKI_PARENT", "abc")
+    assert cli.parent_headers() == {"X-Eki-Parent": "abc"}

@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -272,6 +273,30 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="eki", lifespan=lifespan)
 #: set in the engine's environment; the CLI reads it (see cli.cmd_ask)
 INSIDE = "EKI_INSIDE"
+#: the thread a request comes from, when a program eki started makes it (cli.parent_headers)
+PARENT_HEADER = "X-Eki-Parent"
+#: what only the person may do: how far eki goes alone, what it applies to
+#: itself, the settings and the routing policy
+PERSON_ONLY = (("PUT", re.compile(r"^/api/(self/)?settings$")),
+               ("PUT", re.compile(r"^/api/policy$")),
+               ("POST", re.compile(r"^/api/self/on$")),
+               ("POST", re.compile(r"^/api/self/changes/[^/]+/(apply|undo)$")))
+
+
+def person_only(method: str, path: str) -> bool:
+    return any(method == m and rx.match(path) for m, rx in PERSON_ONLY)
+
+
+@app.middleware("http")
+async def not_for_eki_alone(request: Request, call_next: Any) -> Any:
+    """Work eki started on its own — and anything below it — is refused the
+    switches that are the person's (selfloop.owner): it can't apply a change
+    to eki, raise its own autonomy, or change the settings it runs under."""
+    parent = request.headers.get(PARENT_HEADER, "")
+    if parent and person_only(request.method, request.url.path) and engine().owner_of(parent) == "eki":
+        return JSONResponse({"detail": "refused: this was asked from work eki started on its own, "
+                                       "and only you can do that"}, status_code=403)
+    return await call_next(request)
 
 
 class AskBody(BaseModel):
@@ -299,6 +324,8 @@ class AskBody(BaseModel):
     #: how deep the asker is, and the run it asks from (see nesting)
     depth: int = 0
     parent_run: str = ""
+    #: the thread of the program asking, when a program asks (engine.owner_of)
+    parent_thread: str = ""
 
 
 class AttachmentBody(BaseModel):
@@ -346,9 +373,12 @@ async def ask(body: AskBody) -> Any:
                                   attachments=body.attachments, via=body.via, parent=body.parent,
                                   wants={"read_only": body.read_only, "commands": body.commands,
                                          "paths": body.paths},
-                                  depth=body.depth, parent_run=body.parent_run)
+                                  depth=body.depth, parent_run=body.parent_run,
+                                  parent_thread=body.parent_thread)
     except nesting.TooDeep as e:
         raise HTTPException(429, str(e))
+    except ValueError as e:
+        raise HTTPException(403, str(e))
 
 
 @app.get("/api/runs")
@@ -820,7 +850,7 @@ def self_view() -> Any:
 
 
 @app.post("/api/self")
-async def self_ask(body: Dict[str, Any]) -> Any:
+async def self_ask(body: Dict[str, Any], request: Request) -> Any:
     """A change to eki: `when` now (a run, in its own thread) or later (the loop takes it)."""
     when = str(body.get("when") or "now")
     if when not in ("now", "later"):
@@ -829,7 +859,8 @@ async def self_ask(body: Dict[str, Any]) -> Any:
                              conversation=str(body.get("conversation") or ""),
                              apply=bool(body.get("apply")), base=str(body.get("base") or ""),
                              check_base=bool(body.get("check_base", True)),
-                             backend=str(body.get("backend") or ""), title=str(body.get("title") or ""))
+                             backend=str(body.get("backend") or ""), title=str(body.get("title") or ""),
+                             parent=request.headers.get(PARENT_HEADER, ""))
 
 
 @app.post("/api/self/on")

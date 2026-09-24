@@ -100,17 +100,22 @@ class SelfLoop:
 
     async def self_ask(self, request: str, *, when: str = "now", conversation: str = "",
                        apply: bool = False, base: str = "", check_base: bool = True,
-                       backend: str = "", title: str = "") -> Dict[str, Any]:
+                       backend: str = "", title: str = "", parent: str = "") -> Dict[str, Any]:
         """Something you want changed in eki: at once, in a thread you can
-        watch; or later, when the loop has room for it."""
+        watch; or later, when the loop has room for it.
+
+        `parent` is the thread of the program asking, when a program asks: if
+        that is work eki started on its own, so is this — it follows the
+        autonomy setting, and `apply` isn't its to give itself."""
         why = self._self_why_not()
         if why:
             raise ValueError(why)
         if not request.strip():
             raise ValueError("say what to change")
+        by = "eki" if parent and self.owner_of(parent) == "eki" else ""   # type: ignore[attr-defined]
         first = title or request.strip().splitlines()[0]
-        it = selfloop.add("asked", first, request, when=when, apply=apply, base=base,
-                          check_base=check_base, backend=backend, conversation=conversation)
+        it = selfloop.add("asked", first, request, when=when, apply=apply and not by, base=base,
+                          check_base=check_base, backend=backend, conversation=conversation, by=by)
         if when == "later":
             self._self_wake()
             g = self._self_goal()
@@ -130,6 +135,8 @@ class SelfLoop:
         shown = ("[eki · self] Carrying on: " if it.state == "working" else "[eki · self] ") + it.title
         meta: Dict[str, Any] = {"self_item": it.id}
         payload: Dict[str, Any] = {"self_item": it.id, "route": it.title or it.request}
+        if selfloop.owner(it) == "eki":
+            payload["owner"] = "eki"                # not the person's: see selfloop.owner
         if goal is not None:
             meta["goal"] = goal.id
             payload.update(goal=goal.id, allowed=list(allowed or []), planned=planned)
@@ -257,7 +264,7 @@ class SelfLoop:
                 python=python, check=self.self_check, before_commit=tick)
         applied: Dict[str, Any] = {}
         if prop.commit and prop.fit and not prop.protected:
-            mode = "apply" if it.apply or merging else \
+            mode = "apply" if (it.apply and selfloop.owner(it) == "person") or merging else \
                 selfloop.autonomy_for(prop.files, self.settings)       # type: ignore[attr-defined]
             if mode == "apply":
                 # finished changes are applied one at a time, in the order they

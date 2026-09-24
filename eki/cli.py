@@ -58,6 +58,8 @@ from .store import Store
 
 DEFAULT_SERVICE = "http://127.0.0.1:8787"
 ROOT = Path(__file__).resolve().parent.parent
+#: the thread a request comes from, when a program eki started makes it (service.py)
+PARENT_HEADER = "X-Eki-Parent"
 
 
 # ---- reaching the engine ---------------------------------------------
@@ -93,8 +95,17 @@ def ensure_engine(service: str) -> None:
     raise SystemExit(1)
 
 
+def parent_headers() -> Dict[str, str]:
+    """Run from inside a thread's program (EKI_PARENT, set by the engine): the
+    engine hears whose work is asking, and refuses eki's own work what only
+    the person may do."""
+    parent = os.environ.get("EKI_PARENT", "")
+    return {PARENT_HEADER: parent} if parent else {}
+
+
 def call(method: str, path: str, service: str, **kw) -> Any:
     ensure_engine(service)
+    kw["headers"] = {**(kw.get("headers") or {}), **parent_headers()}
     try:
         r = httpx.request(method, service + path, timeout=30, **kw)
     except httpx.HTTPError as e:
@@ -119,7 +130,7 @@ def cmd_ask(cfg, args) -> int:
     body = {"prompt": args.prompt, "conversation": conversation,
             "backend": args.backend or "", "repo": args.repo or "",
             "images": bool(args.image)}
-    if os.environ.get("EKI_INSIDE") or os.environ.get(grant_mod.ENV):
+    if os.environ.get("EKI_INSIDE") or os.environ.get(grant_mod.ENV) or os.environ.get("EKI_PARENT"):
         # run by a program the engine started (a goal's agent testing eki, say):
         # its request, not yours — a goal's turn doesn't step aside for it,
         # and it gets what the run asking hands it, never more (eki/grant.py)
@@ -128,6 +139,7 @@ def cmd_ask(cfg, args) -> int:
         body.update(read_only=bool(getattr(args, "read_only", False)),
                     commands=getattr(args, "allow", None) or [],
                     paths=getattr(args, "write", None) or [])
+        body["parent_thread"] = os.environ.get("EKI_PARENT", "")
     from . import nesting
     depth, parent_run = nesting.caller()
     if depth or parent_run:
@@ -315,7 +327,8 @@ def cmd_policy(cfg, args) -> int:
     print(f"saved {path}")
     # the running engine holds its own copy; tell it, if it's there
     if engine_up(args.service):
-        httpx.put(f"{args.service}/api/policy", json=current.to_json(), timeout=5)
+        httpx.put(f"{args.service}/api/policy", json=current.to_json(), timeout=5,
+                  headers=parent_headers())
     return cmd_policy(cfg, argparse.Namespace(action="show", key="", value=None,
                                               service=args.service))
 
@@ -654,7 +667,8 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
               file=sys.stderr)
     try:
         # applying may rebase and re-run the checks: longer than an ordinary call
-        r = httpx.post(f"{s}/api/self/changes/{arg}/{verb}", json=body or None, timeout=1800)
+        r = httpx.post(f"{s}/api/self/changes/{arg}/{verb}", json=body or None, timeout=1800,
+                       headers=parent_headers())
     except httpx.HTTPError as e:
         print(f"! lost the engine: {e}", file=sys.stderr)
         return 1
@@ -1266,8 +1280,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         from . import settings as settings_mod
         # EKI_SCREEN=0: started for a thread that mustn't use the screen (a goal's)
         screen = bool(settings_mod.load().get("claude_screen", True)) and os.environ.get("EKI_SCREEN") != "0"
+        # EKI_PARENT: the thread whose program started this server (Codex's)
         bridge = mcpbridge.RemoteBridge(mcpbridge.RemoteEngine(args.service), depth=depth,
-                                        screen=screen, parent=parent)
+                                        screen=screen, parent=parent,
+                                        conversation=os.environ.get("EKI_PARENT", ""))
         asyncio.run(mcpbridge.serve_stdio(bridge))
         return 0
     if args.cmd == "serve":

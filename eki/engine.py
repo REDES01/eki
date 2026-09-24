@@ -105,6 +105,18 @@ def _goal_of(run: Dict[str, Any]) -> str:
     return str(_payload(run).get("goal") or "")
 
 
+def _eki_own(folder: str) -> bool:
+    """Whether a folder is eki's own source checkout or its builds — where the
+    supervisor, the way back and the credentials rule live."""
+    from . import builds as builds_mod
+    where = os.path.realpath(os.path.expanduser(folder))
+    for root in (builds_mod.source(), builds_mod.BUILDS):
+        top = os.path.realpath(str(root))
+        if where == top or where.startswith(top + os.sep):
+            return True
+    return False
+
+
 #: a goal that uses the screen, waiting for you to leave it
 SCREEN_WAIT = "uses the screen — waits until you're away"
 
@@ -524,7 +536,8 @@ class Engine(SelfLoop):
                   attachments: Optional[List[str]] = None, via: str = "",
                   parent: Optional[Dict[str, Any]] = None,
                   wants: Optional[Dict[str, Any]] = None,
-                  depth: int = 0, parent_run: str = "") -> Dict[str, str]:
+                  depth: int = 0, parent_run: str = "",
+                  parent_thread: str = "") -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
@@ -539,8 +552,16 @@ class Engine(SelfLoop):
         `depth` and `parent_run` say an agent is asking from inside another
         run (see nesting): refused past the limit before anything is
         written, and the run takes its parent's budget.
+
+        `parent_thread` is the thread of the program asking, when a program
+        asks through eki: a run below work eki started on its own is eki's
+        too (`owner_of`), and is never given eki's own checkout or builds.
         """
         nesting.check(depth)
+        owner = self.owner_of(parent_thread) if parent_thread else "person"
+        if owner == "eki" and repo and _eki_own(repo):
+            raise ValueError("work eki started on its own can't be given eki's own source or builds — "
+                             "its changes to eki go through self-work, in a worktree of their own")
         cid = conversation or self.store.new_conversation()
         attached = [p for p in (attachments or []) if p and os.path.isfile(os.path.expanduser(p))]
         shown = prompt + "".join(f"\n\n![attachment]({p.replace(' ', '%20')})" for p in attached)
@@ -569,6 +590,10 @@ class Engine(SelfLoop):
             allowed = _allowed_of(self.runs.get(parent_run) or {})
             if allowed is not None:
                 payload["allowed"] = allowed
+        if parent_thread:
+            payload["parent_thread"] = parent_thread
+        if owner == "eki":
+            payload["owner"] = "eki"
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
                                payload=json.dumps(payload) if payload else "")
@@ -577,6 +602,21 @@ class Engine(SelfLoop):
             self._shift_step_out("your request comes first")
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
+
+    def owner_of(self, conversation: str) -> str:
+        """"eki" | "person" — whose the work going on in a thread is.
+
+        The person's, unless the run the thread is waiting on was started by
+        eki on its own (a fault's fix, selfloop.owner) or below such a run.
+        Asked while that run works — a program asking eki from inside it —
+        so the run it is waiting on is the one asking."""
+        run = self.runs.active(conversation) if conversation else None
+        return "eki" if run and _payload(run).get("owner") == "eki" else "person"
+
+    def _harness_env(self, cid: str) -> Optional[Dict[str, str]]:
+        """The environment of a program eki starts for a thread: the thread's
+        id, so `eki` run from inside it says who is asking (EKI_PARENT)."""
+        return {**os.environ, "EKI_PARENT": cid} if cid else None
 
     def _carry(self, run: Dict[str, Any]) -> str:
         """How a run the previous engine took with it carries on by itself:
@@ -760,8 +800,9 @@ class Engine(SelfLoop):
                 if was.get("self_item") else {}
             if carried and not self._self_on(str(carried["self_item"]), rid):
                 return None                         # its item has moved on, or is taken up already
-            # carrying on is not a way out of what the run was handed
-            carried.update({k: was[k] for k in ("via", "grant") if k in was})
+            # carrying on is not a way out of what the run was handed, nor
+            # does it change whose work it is
+            carried.update({k: was[k] for k in ("via", "grant", "owner", "parent_thread") if k in was})
             # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
                                    requested=backend, images=False, user_turn=turn,
@@ -2436,7 +2477,8 @@ class Engine(SelfLoop):
             if warm is not None:
                 self.warm[cwd] = warm                   # not ours to take
             return await self._codex_session(cid, backend, cwd, model, resume)
-        if warm is not None and warm.alive and not warm.busy and not resume:
+        if warm is not None and warm.alive and not warm.busy and not resume \
+                and self.owner_of(cid) == "person":
             if cid:
                 self.live[cid] = warm
             warm.backend_key = backend.key                                 # type: ignore[attr-defined]
@@ -2476,7 +2518,7 @@ class Engine(SelfLoop):
                            if b.info.kind == "claude_code"), "") or ""
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
                                           learn_mod.agent_note(self.settings)) if x)
-        session = live.LiveSession(argv, cwd, nesting.child_env(), prompt,
+        session = live.LiveSession(argv, cwd, nesting.child_env(self._harness_env(cid)), prompt,
                                    bridge=bridge,
                                    extra_servers=mcpregistry.builtin_for_claude(claude_bin))
         session.screen = self._screen_for(cid)                             # type: ignore[attr-defined]
@@ -2847,23 +2889,23 @@ class Engine(SelfLoop):
                              resume: Optional[str]) -> codex_live.CodexSession:
         argv = backend.live_argv()                                          # type: ignore[attr-defined]
         screen = self._screen_for(cid)
-        if not screen:
-            # Codex reaches eki's tools through `eki mcp`: that one, without the screen
-            argv = argv[:-1] + mcpregistry.codex_screen_off() + argv[-1:]
+        # Codex reaches eki's tools through `eki mcp`: told the thread, and
+        # started without the screen tools for a thread that mustn't use them
+        argv = argv[:-1] + mcpregistry.codex_eki_env(screen=screen, parent=cid) + argv[-1:]
         wanted = model or str(self.options.get(backend.key, {}).get("model") or "")
         permissions = str(self.settings.get("permissions", "auto"))
         local = bool(self.options.get(backend.key, {}).get("local_model"))
         guidance = "\n\n".join(x for x in (codex_live.LOCAL_INSTRUCTIONS if local else "",
                                             learn_mod.agent_note(self.settings)) if x)
-        session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(), model=wanted,
-                                          permissions=permissions, resume=resume or "",
+        session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(self._harness_env(cid)),
+                                          model=wanted, permissions=permissions, resume=resume or "",
                                           developer_instructions=guidance)
         try:
             await session.start()
         except RuntimeError as e:
             if resume:
-                session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(), model=wanted,
-                                                  permissions=permissions,
+                session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(self._harness_env(cid)),
+                                                  model=wanted, permissions=permissions,
                                                   developer_instructions=guidance)
                 await session.start()
             else:

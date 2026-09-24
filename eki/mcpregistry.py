@@ -412,18 +412,31 @@ def eki_stdio_command() -> List[str]:
     return [sys.executable, "-m", "eki.cli", "mcp"]
 
 
-def codex_screen_off() -> List[str]:
-    """Flags for a Codex whose thread mustn't use the screen (a goal's that
-    may not): eki's tool server started without the screen tools. Only when
-    this Codex has eki's server — a `-c` for one it hasn't would make half a
-    server it can't start."""
+def codex_eki_env(screen: bool = True, parent: str = "") -> List[str]:
+    """Flags for eki's tool server under one Codex thread: the thread it
+    serves (EKI_PARENT — a run it starts is below that thread's), and no
+    screen tools for a thread that mustn't use them (a goal's that may not).
+    Only when this Codex has eki's server — a `-c` for one it hasn't would
+    make half a server it can't start."""
+    if screen and not parent:
+        return []
     try:
         if "[mcp_servers.eki]" not in CODEX_CONFIG.read_text():
             return []
     except OSError:
         return []
     root = str(Path(__file__).resolve().parent.parent)
-    return ["-c", "mcp_servers.eki.env={ PYTHONPATH = " + _toml_str(root) + ', EKI_SCREEN = "0" }']
+    env = "PYTHONPATH = " + _toml_str(root)
+    if not screen:
+        env += ', EKI_SCREEN = "0"'
+    if parent:
+        env += ", EKI_PARENT = " + _toml_str(parent)
+    return ["-c", "mcp_servers.eki.env={ " + env + " }"]
+
+
+def codex_screen_off() -> List[str]:
+    """eki's tool server for a Codex without the screen tools."""
+    return codex_eki_env(screen=False)
 
 
 def import_from_claude(status: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[str, Any]]:

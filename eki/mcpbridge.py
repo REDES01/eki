@@ -269,10 +269,12 @@ class Bridge:
 
     async def _run(self, prompt: str, **kw: Any) -> str:
         """A run of its own in a fresh thread, waited for; the answer text.
-        It gets what this server's run hands it, never more (eki/grant.py)."""
+        It gets what this server's run hands it, never more (eki/grant.py).
+        Below the thread this server serves: whose work it is carries down."""
         started = await self.engine.ask(prompt, conversation="", via="agent",
                                         parent=grant_mod.from_env().to_json(),
-                                        depth=self.depth, parent_run=self.parent, **kw)
+                                        depth=self.depth, parent_run=self.parent,
+                                        parent_thread=self.conversation, **kw)
         rid = started["run"]
         runner = self.engine.runner
         q = runner.subscribe(rid)
@@ -502,7 +504,8 @@ class RemoteEngine:
                 "via": "agent", "repo": kw.get("repo") or "",
                 "parent": kw.get("parent") or {},
                 "read_only": bool(wants.get("read_only")), "commands": wants.get("commands") or [],
-                "depth": int(kw.get("depth") or 0), "parent_run": kw.get("parent_run") or ""}
+                "depth": int(kw.get("depth") or 0), "parent_run": kw.get("parent_run") or "",
+                "parent_thread": kw.get("parent_thread") or ""}
         image = kw.get("image") or {}
         for k in ("width", "height", "batch"):
             if image.get(k):
@@ -536,7 +539,8 @@ class RemoteBridge(Bridge):
     async def _run(self, prompt: str, **kw: Any) -> str:
         started = await self.engine.ask(prompt, conversation="", via="agent",
                                         parent=grant_mod.from_env().to_json(),
-                                        depth=self.depth, parent_run=self.parent, **kw)
+                                        depth=self.depth, parent_run=self.parent,
+                                        parent_thread=self.conversation, **kw)
         run = await self.engine.wait(started["run"])
         if run.get("state") == "failed":
             raise RuntimeError(run.get("error") or "the run failed")

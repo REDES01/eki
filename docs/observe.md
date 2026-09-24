@@ -24,7 +24,8 @@ working on itself (`eki self on`) the loop takes it first, when there's room;
 otherwise it starts at once. The agent works in its own worktree of the code
 that's running, adds a regression test, and the candidate check judges it.
 The result is a `self/…` branch and a verdict — applied only at the `apply`
-autonomy setting (docs/self-build.md). At most once a week per fault, three
+autonomy setting (docs/self-build.md) — it is eki's work, not yours, and
+nothing below it can apply it or change that setting. At most once a week per fault, three
 a day, one at a time. A fault inside the self-work machinery
 (`selfwork`, `candidate`, `builds`, the supervisor, this module) or a
 protected path is left for a person: it would be asked to fix itself.

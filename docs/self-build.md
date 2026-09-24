@@ -333,6 +333,21 @@ unconfirmed apply of a protected change (`{"confirm": true}` on
 protected path once it's rebased goes back to waiting for you. No more
 merging by hand and `eki swap`.
 
+**Whose work it is.** A fault's fix is work eki started on its own, with
+nobody asking, so it isn't yours (`selfloop.owner`): it goes exactly as far as
+the autonomy setting lets it — never `--apply` for itself — and so does
+everything below it. Its run carries `owner: eki`; the programs eki starts
+for a thread are told the thread (`EKI_PARENT`, and eki's tool server under
+Codex), so a run the agent starts through eki — `eki_ask`, `eki ask`, `eki
+self` — is eki's too, at any depth. Such work is refused, not asked: eki's
+own checkout or builds as a folder (a change to eki goes through self-work,
+in a worktree of its own); applying or undoing a change, raising the
+autonomy, turning the loop on, and changing the settings or the routing
+policy (403, "only you can do that"). A change it asks for is queued as
+eki's, never applied on its say-so. Roadmap items and the weekly note are
+turns of the goal you set up, so they are yours. What the harness itself
+may touch — the sandbox a narrowed run gets — is Stage 2's permissions.
+
 **Applying.** If your checkout has moved on since the change was made, it is
 rebased onto your checkout first and judged again. If the rebase stops on a
 conflict, it isn't handed back to you: eki opens a run in the change's thread

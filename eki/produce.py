@@ -74,6 +74,16 @@ def from_agent(body: Dict[str, Any], *, read_only: bool = False,
     return body
 
 
+def located(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Say where the call is made from, so its run belongs to the project
+    that folder is in (eki/projects.py). Shared with `eki ask`."""
+    try:
+        body.setdefault("where", os.getcwd())
+    except OSError:                                 # the folder was deleted under us
+        pass
+    return body
+
+
 def _client(service: str) -> httpx.Client:
     parent = os.environ.get("EKI_PARENT", "")
     return httpx.Client(base_url=service, timeout=30,
@@ -127,7 +137,7 @@ def wait_for(http: httpx.Client, rid: str, timeout: float) -> Tuple[Dict[str, An
 def run_and_wait(service: str, body: Dict[str, Any], timeout: float,
                  ensure: Callable[[str], None]) -> Tuple[Dict[str, Any], str, str]:
     """Start one run and wait for it to end: (run, conversation, answer)."""
-    from_agent(body)
+    from_agent(located(body))
     _reach(service, ensure)
     try:
         with _client(service) as http:
@@ -231,7 +241,7 @@ def submit(args: Any, ensure: Callable[[str], None]) -> int:
     body: Dict[str, Any] = {"prompt": args.prompt, "backend": args.model or "",
                             "repo": os.path.abspath(os.path.expanduser(args.repo)) if args.repo else "",
                             "images": bool(args.image)}
-    from_agent(body, read_only=args.read_only, commands=args.allow, paths=args.write)
+    from_agent(located(body), read_only=args.read_only, commands=args.allow, paths=args.write)
     try:
         _reach(args.service, ensure)
         with _client(args.service) as http:

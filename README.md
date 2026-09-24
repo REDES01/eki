@@ -111,7 +111,17 @@ eki models              # what's loaded, what it costs in memory
 eki agent status
 eki context            # the one AGENTS.md Claude Code and Codex both read
 eki context use .       # a project: eki's section in AGENTS.md, `eki` allowed for Claude Code
+eki project init        # this folder is a project: calls made in it belong to it
+eki project             # which project you're in, and what was asked there
+eki runs --here         # only this project's runs
 ```
+
+A project is a folder with `.eki/` in it (`eki project init` makes one, with
+a `project.json` naming it — keep it in the repo). Every call made in it or
+any folder below — `eki ask`, `eki image`, `eki submit`, and whatever an
+agent working there asks in turn — is recorded as the project's
+(`eki/projects.py`). Your home folder's `.eki` is eki's own store, never a
+project.
 
 An agent calling `eki ask` hands the run only what it needs — read-only by
 default, a folder's copy with `--repo`, the commands it may use with

@@ -20,7 +20,8 @@ For an agent with a shell — blocking, quiet, a path out, real exit codes:
 Every ask is a run in the engine, not in this terminal: Ctrl-C stops
 *watching*, never the work. Pick it back up with `eki watch <run>`.
 
-    eki runs                             what's running and what finished
+    eki runs [--here]                    what's running and what finished
+    eki project [init]                   a folder with .eki/: calls inside it belong to it
     eki watch <run>                      follow one, from the start
     eki cancel <run>                     stop it (its CLI child dies with it)
     eki diff <run>                       what it changed in the repo
@@ -55,6 +56,7 @@ from . import agent
 from . import config as config_mod
 from . import grant as grant_mod
 from . import migrate
+from . import projects
 from .engine import Engine
 from .runs import TERMINAL
 from .store import Store
@@ -131,12 +133,14 @@ def cmd_ask(cfg, args) -> int:
     if args.continue_:
         conversation = Store(cfg.db).latest_conversation() or ""
     body = {"prompt": args.prompt, "conversation": conversation,
-            "backend": args.backend or "", "repo": args.repo or "",
+            "backend": args.backend or "",
+            # the engine's folder isn't yours: `--repo .` means here
+            "repo": os.path.abspath(os.path.expanduser(args.repo)) if args.repo else "",
             "images": bool(args.image)}
     # run by a program the engine started (a goal's agent testing eki, say):
     # its request, not yours, one level down from the run asking
     from . import produce
-    produce.from_agent(body, read_only=bool(getattr(args, "read_only", False)),
+    produce.from_agent(produce.located(body), read_only=bool(getattr(args, "read_only", False)),
                        commands=getattr(args, "allow", None), paths=getattr(args, "write", None))
     started = call("POST", "/api/ask", args.service, json=body)
     if args.detach:
@@ -195,15 +199,51 @@ def watch(rid: str, service: str, quiet: bool = False, conversation: str = "") -
 
 
 def cmd_runs(args) -> int:
-    rows = call("GET", f"/api/runs?limit={args.limit}", args.service)
+    query = {"limit": args.limit}
+    if args.here:
+        here = projects.find(os.getcwd())
+        if not here:
+            print("not in a project (no .eki/ here or above) — eki project init makes one",
+                  file=sys.stderr)
+            return 1
+        query["project"] = str(here)
+    rows = call("GET", "/api/runs", args.service, params=query)
     if not rows:
-        print("nothing has run yet")
+        print("nothing has run here yet" if args.here else "nothing has run yet")
         return 0
     for r in rows:
         prompt = (r["prompt"] or "").replace("\n", " ")[:44]
         backend = r["backend"] or "-"
         folder = " ⌂" if r.get("cwd") else "  "
-        print(f"{r['id']}  {r['state']:<11} {backend:<7}{folder} {prompt}")
+        where = "" if args.here or not r.get("project") else f"  [{Path(r['project']).name}]"
+        print(f"{r['id']}  {r['state']:<11} {backend:<7}{folder} {prompt}{where}")
+    return 0
+
+
+def cmd_project(args) -> int:
+    """Make a folder a project, or say which project a folder is in and
+    what was asked there."""
+    folder = os.path.abspath(os.path.expanduser(args.folder or "."))
+    if args.action == "init":
+        try:
+            p = projects.init(folder, args.name)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        print(f"{'made' if p['made'] else 'already'} a project: {p['name']} ({p['root']})")
+        print("calls made in this folder, or any folder inside it, belong to it")
+        return 0
+    about = projects.describe(folder)
+    if not about:
+        print("not in a project (no .eki/ here or above) — eki project init makes one")
+        return 1
+    print(f"{about['name']}  {about['root']}")
+    rows = call("GET", "/api/runs", args.service, params={"limit": args.limit, "project": about["root"]})
+    for r in rows:
+        prompt = (r["prompt"] or "").replace("\n", " ")[:50]
+        print(f"  {r['id']}  {r['state']:<11} {r['backend'] or '-':<7} {prompt}")
+    if not rows:
+        print("  nothing asked here yet")
     return 0
 
 
@@ -1237,6 +1277,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     r = sub.add_parser("runs", help="what's running and what finished")
     r.add_argument("-n", "--limit", type=int, default=30)
+    r.add_argument("--here", action="store_true", help="only the project this folder is in")
+
+    pj = sub.add_parser("project", help="a folder with .eki/ in it: calls made inside belong to it")
+    pj.add_argument("action", nargs="?", default="show", choices=["show", "init"])
+    pj.add_argument("folder", nargs="?", default="", help="default: here")
+    pj.add_argument("--name", default="", help="init: what to call it (default: the folder's name)")
+    pj.add_argument("-n", "--limit", type=int, default=15)
     for name, helptext in (("watch", "follow a run"), ("cancel", "stop a run"),
                            ("diff", "what a run changed"),
                            ("allow", "allow what a run was refused, and run it again")):
@@ -1410,6 +1457,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd in ("image", "write", "capabilities", "submit", "wait"):
         from . import produce
         return getattr(produce, args.cmd)(args, ensure_engine)
+    if args.cmd == "project":
+        return cmd_project(args)
     if args.cmd == "runs":
         return cmd_runs(args)
     if args.cmd == "watch":

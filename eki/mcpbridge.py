@@ -502,6 +502,9 @@ class RemoteEngine:
                 "read_only": bool(wants.get("read_only")), "commands": wants.get("commands") or [],
                 "depth": int(kw.get("depth") or 0), "parent_run": kw.get("parent_run") or "",
                 "parent_thread": kw.get("parent_thread") or ""}
+        # Codex starts this server in its own folder: calls from it belong
+        # to the project that folder is in
+        produce.located(body)
         image = kw.get("image") or {}
         for k in ("width", "height", "batch"):
             if image.get(k):

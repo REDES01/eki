@@ -51,6 +51,7 @@ from . import grant as grant_mod
 from . import shift as shift_mod
 from . import models as models_mod
 from . import nesting
+from . import projects as projects_mod
 from . import table as table_mod
 from . import capacity as capacity_mod
 from . import prefs as prefs_mod
@@ -546,7 +547,7 @@ class Engine(SelfLoop):
                   parent: Optional[Dict[str, Any]] = None,
                   wants: Optional[Dict[str, Any]] = None,
                   depth: int = 0, parent_run: str = "",
-                  parent_thread: str = "") -> Dict[str, str]:
+                  parent_thread: str = "", where: str = "") -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
@@ -565,6 +566,11 @@ class Engine(SelfLoop):
         `parent_thread` is the thread of the program asking, when a program
         asks through eki: a run below work eki started on its own is eki's
         too (`owner_of`), and is never given eki's own checkout or builds.
+
+        `where` is the folder the call was made from (`eki ask` sends its
+        own): the run belongs to the project of the run asking, so an
+        agent's calls stay in its project, else to the one that folder — or
+        the repo it is given — is in (eki/projects.py).
         """
         nesting.check(depth)
         owner = self.owner_of(parent_thread) if parent_thread else "person"
@@ -605,12 +611,25 @@ class Engine(SelfLoop):
             payload["owner"] = "eki"
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
-                               payload=json.dumps(payload) if payload else "")
+                               payload=json.dumps(payload) if payload else "",
+                               project=self._project_of(repo or where, parent_run, parent_thread))
         if self._shift_local and via != "agent":
             # a goal's turn on the model your request may need: yours first
             self._shift_step_out("your request comes first")
         await self.runner.submit(rid)
         return {"run": rid, "conversation": cid}
+
+    def _project_of(self, folder: str, parent_run: str = "", parent_thread: str = "") -> str:
+        """The root of the project a call belongs to: the run asking's, when
+        an agent asks — it works in a copy of the folder (~/.eki/worktrees),
+        whose `.eki/` is the copy's, not the project — else the one its
+        folder is in; "" for none."""
+        asking = (self.runs.get(parent_run) if parent_run else None) or \
+            (self.runs.active(parent_thread) if parent_thread else None)
+        if (asking or {}).get("project"):
+            return str(asking["project"])
+        root = projects_mod.find(folder)
+        return str(root) if root else ""
 
     def owner_of(self, conversation: str) -> str:
         """"eki" | "person" — whose the work going on in a thread is.
@@ -858,7 +877,7 @@ class Engine(SelfLoop):
             # does it change whose work it is
             carried.update({k: was[k] for k in ("via", "grant", "owner", "parent_thread") if k in was})
             # resume_of: the same copy of the folder, as the run left it
-            new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
+            new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"], project=old.get("project") or "",
                                    requested=backend, images=False, user_turn=turn,
                                    payload=json.dumps({"resume_of": rid,
                                                        "carries": 1 if cid in self._follow_on else _carries(was),
@@ -891,7 +910,7 @@ class Engine(SelfLoop):
         was = _payload(old)
         kept = {k: v for k, v in was.items() if k in ("via", "grant")}
         new = self.runs.create(old["prompt"], conversation=old["conversation_id"],
-                               cwd=old["cwd"], requested=old["requested"],
+                               cwd=old["cwd"], requested=old["requested"], project=old.get("project") or "",
                                images=bool(old["images"]), user_turn=old["user_turn"],
                                payload=json.dumps({"retry_of": rid, "carries": _carries(was), **kept}))
         await self.runner.submit(new)
@@ -934,7 +953,7 @@ class Engine(SelfLoop):
         payload = {"retry_of": rid, "carries": _carries(was), "via": was.get("via") or "agent",
                    "grant": wider.to_json()}
         new = self.runs.create(old["prompt"], conversation=old["conversation_id"],
-                               cwd=old["cwd"], requested=old["requested"],
+                               cwd=old["cwd"], requested=old["requested"], project=old.get("project") or "",
                                images=bool(old["images"]), user_turn=old["user_turn"],
                                payload=json.dumps(payload))
         await self.runner.submit(new)
@@ -3755,7 +3774,7 @@ class Engine(SelfLoop):
         if g.screen:
             payload["screen"] = True
         rid = self.runs.create(text, conversation=cid, cwd=g.folder, user_turn=turn,
-                               payload=json.dumps(payload))
+                               payload=json.dumps(payload), project=self._project_of(g.folder))
         goals_mod.update(g.id, conversation=cid, turns=g.turns + 1, last_turn=turn,
                          last_turn_at=now, note="")
         self._shift_run, self._shift_goal, self._shift_local = rid, g.id, on_machine

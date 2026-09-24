@@ -95,6 +95,9 @@ class RunStore:
             self._conn.execute("ALTER TABLE runs ADD COLUMN label TEXT NOT NULL DEFAULT ''")
         if "payload" not in cols:
             self._conn.execute("ALTER TABLE runs ADD COLUMN payload TEXT NOT NULL DEFAULT ''")
+        # the project the call was made in (eki/projects.py): its root folder
+        if "project" not in cols:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN project TEXT NOT NULL DEFAULT ''")
         self._adopt_old_jobs()
         #: runs this engine found still "live" from a previous one, now
         #: interrupted — the engine writes a note into their threads
@@ -125,15 +128,15 @@ class RunStore:
 
     def create(self, prompt: str, *, conversation: str = "", cwd: str = "",
                requested: str = "", images: bool = False, user_turn: int = 0,
-               kind: str = "ask", payload: str = "") -> str:
+               kind: str = "ask", payload: str = "", project: str = "") -> str:
         rid = uuid.uuid4().hex[:12]
         with self._lock:
             self._conn.execute(
                 "INSERT INTO runs (id, conversation_id, prompt, cwd, requested,"
-                " images, user_turn, state, created_at, kind, payload)"
-                " VALUES (?,?,?,?,?,?,?,'queued',?,?,?)",
+                " images, user_turn, state, created_at, kind, payload, project)"
+                " VALUES (?,?,?,?,?,?,?,'queued',?,?,?,?)",
                 (rid, conversation, prompt, cwd, requested, int(images),
-                 user_turn, int(time.time()), kind, payload))
+                 user_turn, int(time.time()), kind, payload, project))
             self._conn.commit()
         return rid
 
@@ -157,14 +160,16 @@ class RunStore:
             row = self._conn.execute("SELECT * FROM runs WHERE id = ?", (rid,)).fetchone()
         return dict(row) if row else None
 
-    def recent(self, limit: int = 30) -> List[Dict[str, Any]]:
+    def recent(self, limit: int = 30, project: str = "") -> List[Dict[str, Any]]:
+        """The latest runs; only one project's when `project` (its root) is given."""
+        where, args = ("WHERE project = ?", (project,)) if project else ("", ())
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, conversation_id, prompt, backend, state, cwd, kind,"
-                " created_at, ended_at, length(output) AS output_len FROM runs"
+                "SELECT id, conversation_id, prompt, backend, state, cwd, kind, project,"
+                f" created_at, ended_at, length(output) AS output_len FROM runs {where}"
                 # rowid breaks the tie: two runs started in the same second
                 # would otherwise come back in whatever order sqlite felt like
-                " ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
+                " ORDER BY created_at DESC, rowid DESC LIMIT ?", (*args, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def active(self, conversation: str) -> Optional[Dict[str, Any]]:

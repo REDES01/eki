@@ -367,6 +367,8 @@ class AskBody(BaseModel):
     parent_run: str = ""
     #: the thread of the program asking, when a program asks (engine.owner_of)
     parent_thread: str = ""
+    #: the folder the call was made from: the run belongs to its project
+    where: str = ""
 
 
 class AttachmentBody(BaseModel):
@@ -415,7 +417,7 @@ async def ask(body: AskBody) -> Any:
                                   wants={"read_only": body.read_only, "commands": body.commands,
                                          "paths": body.paths},
                                   depth=body.depth, parent_run=body.parent_run,
-                                  parent_thread=body.parent_thread)
+                                  parent_thread=body.parent_thread, where=body.where)
     except nesting.TooDeep as e:
         raise HTTPException(429, str(e))
     except ValueError as e:
@@ -423,8 +425,9 @@ async def ask(body: AskBody) -> Any:
 
 
 @app.get("/api/runs")
-def runs(limit: int = 40) -> Any:
-    return engine().runs.recent(limit)
+def runs(limit: int = 40, project: str = "") -> Any:
+    """The latest runs; with `project` (a project's root), only its own."""
+    return engine().runs.recent(limit, project=project)
 
 
 @app.get("/api/runs/{rid}")

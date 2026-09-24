@@ -236,11 +236,18 @@ work (`selfloop.area_of`) — from the paths and files it names (a cheap look
 at the repo finds `Views.swift` is the Mac app) and then its words: *the Mac
 app*, *the board*, *the command line*, *routing*, *self-work*, *the engine*;
 docs and tests go with the code they're about, and are a lane of their own
-only when nothing else is named. An item with nothing to go on runs alone.
-An item doesn't start while one working shares its area — so the Mac app,
-of which there is one, is changed by one at a time — and a later item in
-another area goes ahead of it. The guess only has to be good enough: what
-collides anyway is resolved when it's applied.
+only when nothing else is named. An item that names none of these is looked
+up in the repo: its distinctive words (*swipe*, *trackpad* — not *fix* or
+*real*) are found in file names and with `git grep`, each hit counted to
+the lane of its file (a file named after the word counts more; the docs and
+the tests, which mention everything, don't count); most hits wins, a tie
+gives several lanes. A word found all over only hints. An item whose area
+still can't be told doesn't hold up the rest: it goes beside the others and
+waits only for another like it — and for one in the Mac app, when the hints
+point there. An item doesn't start while one working shares its area — so
+the Mac app, of which there is one, is changed by one at a time — and a
+later item in another area goes ahead of it. The guess only has to be good
+enough: what collides anyway is resolved when it's applied.
 
 **The merge queue.** A change that is to be applied (its autonomy says so,
 or `--apply`) joins the queue when its checks finish; changes are applied
@@ -269,6 +276,15 @@ line of its answer:
 | `partial` | commits the slice without a tick; the item comes back after it's applied |
 | `already` | the file lagged the code: a commit that only ticks the item |
 | `person` | nothing to commit; the item is *left for you* with the agent's reason |
+
+An item that ends with no change — `ITEM: person`, or nothing said — is
+*left for you* (`eki self`, and *Left for you* on the Self board) and isn't
+taken again on its own unless its entry in `ROADMAP.md` is reworded since;
+*Let eki try* (`eki self retry`) takes it at once. What needs your hands or
+real hardware — trying something on a real trackpad — is asked to end as
+`person`, not be tried again. One you marked *Leave for me* stays yours
+whatever the file says. An item cut off by a restart after its change was
+judged is closed with that change, not started over.
 
 **How far it goes alone.** `self_autonomy` is *propose* (a branch, a diff and
 its checks; you apply it) or *apply* (a fit change that touches nothing

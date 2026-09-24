@@ -20,22 +20,29 @@ fault had happened twice. This is the loop around it:
 Several at once (`self_parallel`, default 2), when there's room: each
 subscription carries only what its spare room allows, the models on this
 machine one between them; an item doesn't start beside another that works
-in the same area (area_of), and the Mac app is changed by one at a time.
+in the same area (area_of, which looks its words up in the repo when it
+names no file), and the Mac app is changed by one at a time. An item whose
+area can't be told still goes beside the others — the merge queue sorts out
+what collides — and only waits for another like it.
 What they make is applied one after another, in the order it was finished
 (the merge queue) — each put on top of what landed before it.
 
 It never takes more of your attention than you give it: while
 `self_review_max` fit changes wait for you, it starts nothing new except what
 you asked for. And it doesn't try forever: an item whose change fails its
-checks twice is left for you.
+checks twice is left for you, and a roadmap item that ended with no change
+(or the agent said it's a person's) isn't taken again unless its entry in
+ROADMAP.md changes.
 
 This module holds the items and the choices — no model, no engine. The
 engine drives them (eki/selfengine.py).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import subprocess
 import threading
 import time
 import uuid
@@ -83,6 +90,9 @@ class Item:
     open: Dict[str, Any] = field(default_factory=dict)
     attempts: int = 0
     note: str = ""                  # why it stopped; what an earlier attempt got wrong; what's left
+    #: a roadmap item: its entry as it read when last taken (entry_print) —
+    #: one left for you after changing nothing is taken again only once that changes
+    seen: str = ""
     base: str = ""                  # a fault fix starts from the code that's running
     check_base: bool = True
     apply: bool = False             # applied when fit, whatever the autonomy (asked with --apply)
@@ -179,28 +189,34 @@ SETTLED = ("working", "review", "done", "person", "gave up", "dropped")
 
 def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
          live: Iterable[str] = (), home: Optional[Path] = None, parallel: int = 1,
-         files: Optional[Dict[str, str]] = None) -> Tuple[Optional[Item], str]:
+         files: Optional[Dict[str, str]] = None, root: Optional[Path] = None) -> Tuple[Optional[Item], str]:
     """The next piece of self-work, and why — or None and why not.
 
     `waiting`: fit changes waiting for you; `live`: runs still going (an item
     whose run is one of them is being worked on already); `parallel`: how
-    many may be worked on at once; `files`: the repo's files by name, for
-    guessing an item's area (repo_files). An item doesn't start beside one
-    whose area it shares; one whose change is only waiting its turn to be
-    applied ("merging") takes no room."""
+    many may be worked on at once; `files`: the repo's files by name, and
+    `root`: the repo, for guessing an item's area (repo_files, area_of). An
+    item doesn't start beside one whose area it shares; one whose change is
+    only waiting its turn to be applied ("merging") takes no room. A roadmap
+    item left for you after changing nothing comes back only once its entry
+    in ROADMAP.md reads differently."""
     live = set(live)
     all_ = _load(home)
     files = files or {}
+
+    def guess(text: str) -> List[str]:
+        return area_of(text, files, root)
+
     # something already begun, cut off (you came back, the engine restarted): carry on
     for it in all_:
         if it.state == "working" and not (it.run and it.run in live):
-            return _with_area(it, roadmap_text, files, home), "carrying on where it stopped"
+            return _with_area(it, roadmap_text, guess, home), "carrying on where it stopped"
     busy = [i for i in all_ if i.state == "working" and i.phase != "merging"]
     if len(busy) >= max(1, parallel):
         if len(busy) == 1:
             return None, f"working on “{busy[0].title[:60]}”"
         return None, f"working on {len(busy)} things at once: " + ", ".join(f"“{i.title[:40]}”" for i in busy)
-    areas = {i.id: i.area or area_of(text_of(i, roadmap_text), files) for i in busy}
+    areas = {i.id: i.area or guess(text_of(i, roadmap_text)) for i in busy}
     held: List[Tuple[str, List[str], Item]] = []           # what waits for an area, and for whom
 
     def free(title: str, area: List[str]) -> bool:
@@ -211,7 +227,7 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
 
     queued = [i for i in all_ if i.state == "queued"]
     for it in (i for i in queued if i.source in ("asked", "undo")):
-        area = it.area or area_of(text_of(it, roadmap_text), files)
+        area = it.area or guess(text_of(it, roadmap_text))
         if free(it.title, area):
             return update(it.id, home, area=area), "you asked for it"
     if waiting >= review_max:
@@ -219,21 +235,27 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
                       "(Self, or `eki self`) — nothing new until then")
     for source, why in (("fault", "a fault in eki's own code"), ("note", "the weekly note is due")):
         for it in (i for i in queued if i.source == source):
-            area = it.area or area_of(text_of(it, roadmap_text), files)
+            area = it.area or guess(text_of(it, roadmap_text))
             if free(it.title, area):
                 return update(it.id, home, area=area), why
     known = {i.key: i for i in all_ if i.source == "roadmap"}
     for entry in roadmap.workable(roadmap.parse(roadmap_text)):
         it = known.get(entry.key)
-        if it is not None and it.state in SETTLED:
+        seen = entry_print(entry.text)
+        again = it is not None and it.state == "person" and bool(it.seen) and it.seen != seen
+        if it is not None and it.state in SETTLED and not again:
             continue
-        area = area_of(f"{entry.title}\n{entry.text}", files)
+        area = guess(f"{entry.title}\n{entry.text}")
         if not free(entry.title, area):
             continue
         if it is None:
             it = add("roadmap", entry.title, key=entry.key, home=home)
-        return update(it.id, home, area=area), \
-            f"the next open item in ROADMAP.md ({entry.section.split(' — ')[0]})"
+        fields: Dict[str, Any] = {"area": area, "seen": seen}
+        if again:
+            fields.update(state="queued", attempts=0, note="", open={}, phase="", run="")
+        return update(it.id, home, **fields), \
+            (f"its entry in ROADMAP.md changed since it was left for you ({entry.section.split(' — ')[0]})"
+             if again else f"the next open item in ROADMAP.md ({entry.section.split(' — ')[0]})")
     if held:
         title, area, other = held[0]
         return None, (f"“{title[:60]}” waits: it touches {', '.join(lane_name(a) for a in area)}, "
@@ -241,20 +263,27 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     return None, "nothing to do — ROADMAP.md has no open item eki may take, and nothing is queued"
 
 
-def _with_area(it: Item, roadmap_text: str, files: Dict[str, str], home: Optional[Path]) -> Item:
+def _with_area(it: Item, roadmap_text: str, guess: Any, home: Optional[Path]) -> Item:
     if it.area:
         return it
-    return update(it.id, home, area=area_of(text_of(it, roadmap_text), files))
+    return update(it.id, home, area=guess(text_of(it, roadmap_text)))
+
+
+def entry_print(text: str) -> str:
+    """A roadmap entry as it reads, give or take spacing: has it changed since?"""
+    return hashlib.sha1(" ".join(text.split()).encode()).hexdigest()[:10]
 
 
 # ---- side by side: areas, room, and the merge queue --------------------------------
 #
 # Two agents changing the same files make two changes that don't go on top
 # of each other. So before an item starts beside others, eki guesses where
-# it will work — from its words and the files it names — and waits while
-# that area is taken. The guess only has to be good enough: what does
-# collide is put on top of what landed first when it's applied, conflicts
-# resolved (the merge queue, eki/selfengine.py).
+# it will work — from the files it names, its words, and failing those
+# where its words turn up in the repo — and waits while that area is taken.
+# The guess only has to be good enough: what does collide is put on top of
+# what landed first when it's applied, conflicts resolved (the merge queue,
+# eki/selfengine.py). So an item whose area can't be told doesn't hold up
+# the rest: it only waits for another like it.
 
 #: path prefix → lane; the longest match wins, the rest of eki/ is the engine
 LANES = {
@@ -268,7 +297,7 @@ LANES = {
 }
 LANE_NAMES = {"mac": "the Mac app", "board": "the board", "cli": "the command line", "docs": "the docs",
               "tests": "the tests", "routing": "routing", "self": "self-work", "engine": "the engine",
-              "note": "the weekly note", "*": "anything (its area couldn't be told)"}
+              "note": "the weekly note", "*": "somewhere it couldn't tell"}
 #: words that say where a request works, when it names no file
 _WORDS = (
     ("mac", re.compile(r"\b(mac app|eki\.app|the app|swift(ui)?|menu ?bar|dock icon|onboarding"
@@ -284,6 +313,22 @@ _WORDS = (
 )
 _PATH = re.compile(r"\b(?:eki|mac|docs|tests)/[\w./-]*[\w/]|\b(?:README|ROADMAP|AGENTS)\.md\b")
 _FILE = re.compile(r"\b([A-Za-z_]\w+\.(?:py|swift|md|html|sh))\b")
+#: the words of an item worth looking up in the repo — not these
+_TOKEN = re.compile(r"[a-z][a-z0-9]{3,}")
+_COMMON = frozenset("""
+    about above after again against also always another anything around because been before being
+    below between both cannot change changed changes check could does doing done each either else
+    even every fine first from have here into item items itself just keep kept like make makes many
+    more most much must need needs never next nothing once only other others over real really right
+    same should show shown since some something still such sure than that their them then there these
+    they thing things this those through under until upon very want wants what when where which while
+    will with without work works would your confirm
+""".split())
+#: a word in more files than this says little about where the work is
+DISTINCT = 12
+#: the repo's answers, for a while — the loop asks every turn
+LOOK_TTL = 600
+_looked: Dict[Tuple[str, str], Tuple[float, List[str]]] = {}
 
 
 def lane_of(path: str) -> str:
@@ -304,6 +349,62 @@ def repo_files(root: Path) -> Dict[str, str]:
     return out
 
 
+def words_of(text: str, limit: int = 12) -> List[str]:
+    """An item's distinctive words, in order: swipe, trackpad — not fix, real."""
+    out: List[str] = []
+    for w in _TOKEN.findall(text.lower()):
+        if w not in _COMMON and w not in out:
+            out.append(w)
+    return out[:limit]
+
+
+def look(root: Path, word: str) -> List[str]:
+    """The repo's files that name `word`: in their path, or in their text
+    (git grep, whole words). Nothing when git can't say."""
+    key, now = (str(root), word), time.time()
+    got = _looked.get(key)
+    if got and now - got[0] < LOOK_TTL:
+        return got[1]
+    try:
+        named = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True,
+                               text=True, timeout=10).stdout.split()
+        said = subprocess.run(["git", "-C", str(root), "grep", "-I", "-i", "-w", "-l", "-e", word],
+                              capture_output=True, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return []
+    hits = sorted({p for p in named if word in p.lower().rsplit("/", 1)[-1]} | set(said))
+    _looked[key] = (now, hits)
+    return hits
+
+
+def repo_lanes(text: str, root: Path) -> Tuple[List[str], List[str]]:
+    """Where an item's words turn up in the repo: (lanes, hint). A word found
+    in a handful of files counts one hit per file, a file named after it two
+    more; the lane with most hits wins, a tie gives several. Words found all
+    over say nothing on their own — only a hint of where it might be. The
+    docs and the tests mention everything (the roadmap holds the item
+    itself), so they aren't counted."""
+    hits: Dict[str, int] = {}
+    spread: Dict[str, int] = {}
+    for word in words_of(text):
+        paths = look(root, word)
+        for path in paths:
+            lane = lane_of(path)
+            if lane in ("docs", "tests"):
+                continue
+            spread[lane] = spread.get(lane, 0) + 1
+            if len(paths) <= DISTINCT:
+                named = word in path.lower().rsplit("/", 1)[-1]
+                hits[lane] = hits.get(lane, 0) + (3 if named else 1)
+    return _most(hits), _most(spread)
+
+
+def _most(counts: Dict[str, int]) -> List[str]:
+    """The lanes with most hits — several when they tie."""
+    top = max(counts.values(), default=0)
+    return sorted(k for k, n in counts.items() if n == top and n > 0)
+
+
 def text_of(it: Item, roadmap_text: str = "") -> str:
     """What an item says about itself: its title, its request, its roadmap entry."""
     if it.source == "note":
@@ -312,12 +413,15 @@ def text_of(it: Item, roadmap_text: str = "") -> str:
     return "\n".join(x for x in (it.title, it.request, entry.text if entry else "") if x)
 
 
-def area_of(text: str, files: Optional[Dict[str, str]] = None) -> List[str]:
+def area_of(text: str, files: Optional[Dict[str, str]] = None, root: Optional[Path] = None) -> List[str]:
     """The lanes a piece of work is likely to touch: the paths and files it
-    names, then the words it uses. Docs and tests go with the code they're
-    about — they're a lane of their own only when nothing else is named.
-    Nothing to go on: ["*"], and it runs alone. The weekly note writes no
-    code: ["note"]."""
+    names, then the words it uses, then — given the repo's `root` — where
+    its distinctive words turn up in the repo (repo_lanes). Docs and tests
+    go with the code they're about — they're a lane of their own only when
+    nothing else is named. Nothing to go on: ["*"], which waits only for
+    another ["*"] — and ["*", "mac"] when the repo hints at the app, since
+    there's one app to change at a time. The weekly note writes no code:
+    ["note"]."""
     if not text.strip():
         return ["note"]
     files = files or {}
@@ -329,12 +433,18 @@ def area_of(text: str, files: Optional[Dict[str, str]] = None) -> List[str]:
     words = _FILE.sub(" ", _PATH.sub(" ", text))           # a path's words aren't what it's about
     found |= {lane for lane, rx in _WORDS if rx.search(words)}
     code = found - {"docs", "tests"}
-    return sorted(code or found) or ["*"]
+    if code or found or root is None:
+        return sorted(code or found) or ["*"]
+    lanes, hint = repo_lanes(text, root)
+    if lanes:
+        return lanes
+    return ["*", "mac"] if "mac" in hint else ["*"]
 
 
 def overlaps(a: Iterable[str], b: Iterable[str]) -> bool:
-    a, b = set(a), set(b)
-    return bool(a and b) and ("*" in a or "*" in b or bool(a & b))
+    """Do two areas share a lane? One that couldn't be told ("*") shares
+    only with another like it: what collides is sorted out when applied."""
+    return bool(set(a) & set(b))
 
 
 def room(parallel: int, slots: Dict[str, int], busy: Dict[str, int],
@@ -442,8 +552,9 @@ def request_for(it: Item, roadmap_text: str = "") -> str:
         "- The file can lag behind the code. If the item is already done, change nothing and "
         "say where it's done.\n"
         "- If it can't be done as a change to this repository by an agent working alone — it "
-        "needs a person, hardware, an account, money, a release, or a decision only the person "
-        "can make — change nothing and say why.\n"
+        "needs a person's hands or real hardware (trying it on a real device, a trackpad, a "
+        "screen), an account, money, a release, or a decision only the person can make — change "
+        "nothing, say why, and end with `ITEM: person`; it isn't tried again.\n"
         "- If it's too big for one change a person can review in a sitting, do the first slice "
         "that stands on its own, and say what's left.\n"
         "- Don't tick ROADMAP.md yourself; eki ticks it when your change lands.\n"
@@ -527,6 +638,8 @@ def after_change(it: Item, change: Dict[str, Any], home: Optional[Path] = None) 
         elif state == "not started":
             fields.update(state="queued" if it.source != "asked" else "done",
                           note=(change.get("verdict") or "")[:300])
+        elif it.source == "roadmap":        # not taken again until its entry changes
+            fields.update(state="person", note=change.get("why") or "the agent changed nothing")
         else:
             fields.update(state="done" if it.source in ("asked", "undo", "fault") else "gave up",
                           note="the agent changed nothing")

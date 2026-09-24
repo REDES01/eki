@@ -132,6 +132,23 @@ def test_after_the_verdict():
                                        "why": "needs a trackpad"}).state == "person"
     mine = selfloop.add("asked", "x", "x")
     assert selfloop.after_change(mine, {"id": "c5", "state": "unfit"}).state == "done"   # asked: tried once
+    quiet = selfloop.add("roadmap", "Quiet", key="q")                    # changed nothing, said nothing
+    left = selfloop.after_change(quiet, {"id": "c6", "state": "no change", "why": "it needs your hands"})
+    assert left.state == "person" and left.note == "it needs your hands"
+
+
+def test_an_item_left_for_you_comes_back_only_when_its_entry_changes():
+    first, _ = selfloop.pick(PLAN)
+    assert first.seen == selfloop.entry_print("**Commit the working tree:** the image edits.")
+    selfloop.after_change(first, {"id": "c1", "state": "no change", "said": "person", "why": "your hands"})
+    assert selfloop.pick(PLAN)[0].title == "One standing context"          # not taken again as it is
+    reworded = PLAN.replace("the image edits.", "the image edits, and the icon.")
+    again, why = selfloop.pick(reworded)
+    assert again.id == first.id and again.state == "queued" and "changed since it was left for you" in why
+    assert again.seen == selfloop.entry_print("**Commit the working tree:** the image edits, and the icon.")
+    # one you said you'd do yourself (seen cleared) stays yours, whatever the file says
+    selfloop.update(first.id, state="person", note="you're doing this one", seen="")
+    assert selfloop.pick(PLAN.replace("the image edits.", "the edits."))[0].title == "One standing context"
 
 
 def test_a_chat_message_that_asks_eki_to_change_itself():
@@ -338,6 +355,26 @@ async def test_an_item_for_a_person_is_left_and_two_failed_attempts_give_up(eng)
     assert "An earlier attempt at this didn't pass eki's checks: tests: stand-in" in Agent.seen[-1][1]
     assert selfloop.get(second.id).state == "gave up"
     assert "nothing to do" in (await turn(eng))["why"]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_item_cut_off_after_its_change_was_judged_isnt_started_over(eng):
+    eng.self_on(True)
+    eng.settings = {**eng.settings, "self_parallel": 1}
+    Agent.answers = ["Someone has to try it on a real trackpad.\nITEM: person"]
+    await turn(eng)
+    first = next(i for i in selfloop.items() if i.source == "roadmap")
+    asked = len(Agent.seen)
+    # as if the engine restarted between the verdict and the item following it
+    c = selfwork.change(first.change)
+    selfloop.update(first.id, state="working", run="gone", phase="checking",
+                    open={**{k: c[k] for k in ("id", "request", "root", "base")},
+                          "worktree": str(eng.root.parent / "gone"), "reason": "a real trackpad"})
+    await turn(eng)
+    assert len(Agent.seen) == asked                                        # no second attempt
+    it = selfloop.get(first.id)
+    assert it.state == "person" and it.changes == [c["id"]] and not it.open
     await eng.runner.stop()
 
 
@@ -581,7 +618,58 @@ def test_an_items_area_comes_from_the_files_and_words_it_names():
     assert selfloop.area_of("tidy things up") == ["*"]                                 # nothing to go on
     assert selfloop.area_of("") == ["note"]
     assert selfloop.overlaps(["mac"], ["engine", "mac"]) and not selfloop.overlaps(["mac"], ["engine"])
-    assert selfloop.overlaps(["*"], ["docs"]) and not selfloop.overlaps(["note"], ["engine"])
+    assert not selfloop.overlaps(["note"], ["engine"])
+    # an area that couldn't be told waits only for another like it (and the app, if it hints at it)
+    assert selfloop.overlaps(["*"], ["*"]) and not selfloop.overlaps(["*"], ["engine"])
+    assert selfloop.overlaps(["*", "mac"], ["mac"]) and not selfloop.overlaps(["*", "mac"], ["routing"])
+
+
+def small_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "look"
+    for name, text in {"mac/Swipes.swift": "// a two-finger swipe on the trackpad\n",
+                       "mac/ImageViewer.swift": "// swipe between pictures\n",
+                       "mac/Chat.swift": "// the window\n", "mac/Rail.swift": "// the window\n",
+                       "eki/router.py": "# picks a backend; the trackpad has nothing to do with it\n",
+                       "eki/engine.py": "# the engine: bananas\n", "eki/runner.py": "# runs: bananas\n",
+                       "ROADMAP.md": "- [ ] Confirm the swipe fix on a real trackpad\n",
+                       "tests/test_swipe.py": "# swipe trackpad\n"}.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    git(root.parent, "init", "-q", str(root))
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def test_an_item_that_names_no_file_is_looked_up_in_the_repo(tmp_path, monkeypatch):
+    root = small_repo(tmp_path)
+    selfloop._looked.clear()
+    assert selfloop.words_of("Confirm the hold-then-release swipe fix on a real trackpad") == \
+        ["hold", "release", "swipe", "trackpad"]
+    # swipe: two files in the app, one named after it; trackpad: one in the app, one in routing
+    assert selfloop.area_of("Confirm the hold-then-release swipe fix on a real trackpad", {}, root) == ["mac"]
+    assert selfloop.area_of("bananas everywhere", {}, root) == ["engine"]
+    assert selfloop.area_of("the trackpad", {}, root) == ["mac", "routing"]              # a tie: both
+    assert selfloop.area_of("tidy things up", {}, root) == ["*"]                         # still can't tell
+    # a word found all over says nothing on its own — but it hints at the app
+    monkeypatch.setattr(selfloop, "DISTINCT", 1)
+    assert selfloop.area_of("the window", {}, root) == ["*", "mac"]
+    assert selfloop.area_of("tidy things up") == ["*"]                                  # no repo: no look
+
+
+def test_an_item_whose_area_cant_be_told_goes_beside_the_rest():
+    engine = selfloop.add("asked", "the runner", "the engine's runner, faster")
+    vague = selfloop.add("asked", "tidy up", "tidy things up")
+    vaguer = selfloop.add("asked", "polish", "polish it")
+    assert selfloop.pick("", parallel=3)[0].id == engine.id
+    selfloop.update(engine.id, state="working", run="r1")
+    it, _ = selfloop.pick("", parallel=3, live=["r1"])
+    assert it.id == vague.id and it.area == ["*"]                         # it doesn't wait for the engine
+    selfloop.update(vague.id, state="working", run="r2")
+    got, why = selfloop.pick("", parallel=3, live=["r1", "r2"])           # but two unknowns don't go together
+    assert got is None and "“polish” waits" in why and "somewhere it couldn't tell" in why
+    selfloop.update(vague.id, state="done")
+    assert selfloop.pick("", parallel=3, live=["r1"])[0].id == vaguer.id
 
 
 def test_several_items_are_worked_on_at_once_each_in_its_own_area():

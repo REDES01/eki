@@ -253,3 +253,83 @@ def test_one_swap_at_a_time(stage):
     got = supervise(stage, stage["two"])
     assert got.returncode == 3
     assert Path(os.readlink(builds.BUILDS / "current")) == stage["one"]
+
+
+# ---- the line: nothing the engine runs is dropped by the next build ---------------------
+
+def _running(src, branch="self/abc", text="v2\n"):
+    """A healthy self-change the engine runs, that your checkout didn't take."""
+    sh(src, "checkout", "-q", "-b", branch)
+    (src / "README.md").write_text(text)
+    sh(src, "commit", "-q", "-am", f"{branch}: running")
+    sh(src, "checkout", "-q", "main")
+    b = builds.make(src, branch)
+    builds._point(builds.BUILDS / "current", b)
+    return sh(src, "rev-parse", branch)
+
+
+def test_what_the_engine_runs_but_your_checkout_lacks_is_noticed(src):
+    assert builds.behind(src) == ""                              # nothing running from a build yet
+    running = _running(src)
+    assert builds.behind(src) == running
+    assert builds.behind(src, "self/abc") == ""                  # that ref has it
+    assert builds.base(src) == running                           # your checkout is only behind
+
+
+def test_new_work_goes_on_your_commits_and_what_runs_together(src):
+    running = _running(src)
+    (src / "notes.md").write_text("mine\n")
+    sh(src, "add", "notes.md")
+    sh(src, "commit", "-q", "-m", "yours, since")
+    mine = sh(src, "rev-parse", "HEAD")
+    both = builds.base(src)
+    assert sh(src, "rev-list", "--parents", "-n1", both).split()[1:] == [mine, running]
+    assert sh(src, "show", f"{both}:README.md") == "v2" and sh(src, "show", f"{both}:notes.md") == "mine"
+    assert sh(src, "rev-parse", "HEAD") == mine and not (src / ".git" / "MERGE_HEAD").exists()
+
+
+def test_a_checkout_that_conflicts_with_what_runs_is_named_not_guessed(src):
+    _running(src)
+    (src / "README.md").write_text("yours\n")
+    sh(src, "commit", "-q", "-am", "yours")
+    with pytest.raises(ValueError, match="README.md"):
+        builds.base(src)
+    from eki import selfwork
+    with pytest.raises(selfwork.SelfWorkError, match="conflict"):
+        selfwork.line(src)
+
+
+def test_the_missed_merge_goes_in_once_your_checkout_allows(src):
+    running = _running(src)
+    (src / "eki" / "__init__.py").write_text("# editing\n")
+    assert builds.catch_up(src).startswith("not merged: your checkout has uncommitted changes")
+    sh(src, "commit", "-q", "-am", "yours, committed")
+    assert builds.catch_up(src) == "merged into your checkout, alongside your commits since"
+    assert (src / "README.md").read_text() == "v2\n" and (src / "eki" / "__init__.py").read_text() == "# editing\n"
+    assert builds.behind(src) == "" and builds.catch_up(src) == ""
+    assert sh(src, "merge-base", "--is-ancestor", running, "HEAD") == ""
+
+
+def test_a_swap_still_waiting_counts_as_running_and_is_superseded(src, tmp_path):
+    sup = tmp_path / "sup.sh"
+    sup.write_text("#!/bin/sh\nsleep 30\n")
+    sup.chmod(0o755)
+    first = builds.make(src)
+    builds.swap(first, supervisor=sup)
+    pid = builds._swap_pid()
+    assert pid and builds.live()["commit"] == builds.info(first)["commit"]
+    (src / "README.md").write_text("v3\n")
+    sh(src, "commit", "-q", "-am", "v3")
+    second = builds.make(src)
+    builds.swap(second, supervisor=sup)
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.05)
+        except OSError:
+            break
+    else:
+        pytest.fail("the waiting swap was left running")
+    assert builds._swap_pid() != pid and builds.live()["commit"] == builds.info(second)["commit"]
+    assert "superseded the waiting swap" in (builds.SELF_HOME / "swap.log").read_text()
+    os.kill(builds._swap_pid(), 15)

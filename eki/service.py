@@ -128,6 +128,12 @@ async def lifespan(app: FastAPI):
                 await eng.settle_swap()
             except Exception:                       # noqa: BLE001
                 log.exception("swap outcome")
+            if ticks % 5 == 2:
+                try:
+                    # what the engine runs but your checkout missed: in, once it can go
+                    await eng.catch_up_checkout()
+                except Exception:                   # noqa: BLE001
+                    log.exception("catch up")
             try:
                 stopped = await eng.models.reap_idle()
                 if stopped:

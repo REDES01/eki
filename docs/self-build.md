@@ -121,6 +121,25 @@ eki swap swap-test --no-check   # (how the rollback was tested)
 The app bundle is swapped the same way when a change touches `mac/`, and only
 while the app isn't frontmost.
 
+**Nothing running is dropped.** A healthy build goes into your checkout only
+when it can (edits you haven't committed stop it), so the engine can run
+something your checkout lacks. Three things keep the next build from
+dropping it (`builds.live` / `behind` / `base` / `catch_up`):
+
+- *What runs* is the current build — or a swap still waiting or swapping,
+  since it will run.
+- New work goes on top of your checkout **with** what runs: HEAD if it has
+  it, the running commit if your checkout is only behind, otherwise the two
+  merged in git's store without touching your files. If they conflict, apply
+  says where rather than guessing.
+- The missed merge is brought in as soon as your checkout allows — after a
+  healthy swap, every five minutes, and before `eki swap` (fast-forward, or a
+  merge alongside commits you made since). `eki swap` refuses a build that
+  would still drop something (`--force` overrides).
+
+One swap at a time, newest wins: a swap still waiting is superseded (the new
+build contains it); one already swapping finishes its watch first.
+
 ## The supervisor  (built: `eki/supervisor.sh`)
 
 Small on purpose — a hundred lines of shell, no imports from eki, so that

@@ -174,13 +174,119 @@ def swap(target: Path, *, wait: int = 600, watch: int = 180, self_id: str = "",
     if not os.access(sup, os.X_OK):
         raise RuntimeError(f"no supervisor at {sup} — a person installs it with `eki agent install`")
     SELF_HOME.mkdir(parents=True, exist_ok=True)
-    (SELF_HOME / "swap.json").write_text(json.dumps(
-        {"state": "waiting", "target": str(target), "self": self_id, "at": int(time.time())}))
+    # One swap at a time, newest wins. A build made now contains what was
+    # waiting to go in (`live()` counts it), so a swap still waiting is
+    # superseded; one already swapping finishes its watch first.
+    before, pid = last_swap(), _swap_pid()
+    cmd = [str(sup), str(target), str(wait), str(watch), self_id]
     with open(SELF_HOME / "swap.log", "a") as log:
-        subprocess.Popen([str(sup), str(target), str(wait), str(watch), self_id],
-                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                         start_new_session=True)
+        if pid and before.get("state") == "waiting":
+            try:
+                os.kill(pid, 15)
+                log.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} superseded the waiting swap to "
+                          f"{before.get('target')} (the new build contains it)\n")
+            except OSError:
+                pass
+        elif pid and before.get("state") == "swapping":
+            cmd = ["/bin/sh", "-c", 'while kill -0 "$0" 2>/dev/null; do sleep 2; done; exec "$@"',
+                   str(pid), *cmd]
+        (SELF_HOME / "swap.json").write_text(json.dumps(
+            {"state": "waiting", "target": str(target), "self": self_id, "at": int(time.time())}))
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                start_new_session=True)
+    (SELF_HOME / "swap.pid").write_text(str(proc.pid))
     return {"target": str(target), "log": str(SELF_HOME / "swap.log")}
+
+
+def _swap_pid() -> int:
+    """The supervisor of the last swap, while it's still alive."""
+    try:
+        pid = int((SELF_HOME / "swap.pid").read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return 0
+
+
+# ---- the line: nothing the engine runs is dropped by the next build -------------
+#
+# A healthy build is brought into your checkout — but only when that can
+# happen cleanly, and edits you haven't committed stop it. Until then the
+# engine runs something your checkout doesn't have, and a build made from
+# your checkout would quietly drop it (2026-09-24: a Gemini change, for two
+# minutes). So new work is built on your checkout *with* what's running, the
+# missed merge is caught up as soon as your checkout allows, and `eki swap`
+# refuses a build that would drop anything.
+
+def _g(src: Path, *a: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(src), *a], capture_output=True, text=True, timeout=60)
+
+
+def live() -> Dict[str, Any]:
+    """What the engine runs — or is about to: a swap still waiting or
+    swapping counts as run, since it will be."""
+    s = last_swap()
+    if s.get("state") in ("waiting", "swapping") and s.get("target") and _swap_pid():
+        return info(Path(s["target"]))
+    cur = _target("current")
+    return info(cur) if cur is not None else running()
+
+
+def behind(src: Path, ref: str = "HEAD") -> str:
+    """The commit the engine runs, when `ref` in your checkout doesn't have
+    it — a build of `ref` would drop it. "" when nothing would be lost."""
+    lv = live()
+    commit = str(lv.get("commit") or "")
+    if lv.get("dev") or not commit:
+        return ""                   # running your checkout itself
+    if _g(src, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
+        return ""                   # not from this checkout (a release)
+    return "" if _g(src, "merge-base", "--is-ancestor", commit, ref).returncode == 0 else commit
+
+
+def base(src: Path) -> str:
+    """The commit new work goes on top of: your checkout's HEAD with what the
+    engine runs in it. HEAD when it has it; the running commit when your
+    checkout is only behind; otherwise the two merged — made in git's store,
+    not in your files. ValueError when they conflict."""
+    head = _g(src, "rev-parse", "HEAD").stdout.strip()
+    missing = behind(src)
+    if not missing:
+        return head
+    if _g(src, "merge-base", "--is-ancestor", head, missing).returncode == 0:
+        return missing
+    tree = _g(src, "merge-tree", "--write-tree", "--name-only", "--no-messages", head, missing)
+    lines = tree.stdout.split()
+    if tree.returncode != 0 or not lines:
+        raise ValueError(f"your checkout and the running engine ({missing[:10]}) conflict in "
+                         + (", ".join(lines[1:]) or "some files") + " — merge it into your checkout")
+    made = _g(src, "-c", "user.name=eki", "-c", "user.email=eki@localhost", "commit-tree", lines[0],
+              "-p", head, "-p", missing, "-m", "eki: your checkout, with what the engine runs")
+    if made.returncode != 0:
+        raise ValueError(f"couldn't put your checkout and the running engine together: {made.stderr.strip()[:160]}")
+    return made.stdout.strip()
+
+
+def catch_up(src: Path, commit: str = "") -> str:
+    """Bring what the engine runs (or `commit`) into your checkout, if it's
+    missing and your checkout allows. "" when nothing was missing;
+    "merged …" when it went in; "not merged: …" when it's still waiting."""
+    missing = commit if commit else behind(src)
+    if not missing or _g(src, "merge-base", "--is-ancestor", missing, "HEAD").returncode == 0:
+        return ""
+    if _g(src, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        return ("not merged: your checkout has uncommitted changes — the running engine's "
+                "changes go in once they're committed")
+    if _g(src, "merge-base", "--is-ancestor", "HEAD", missing).returncode == 0:
+        got = _g(src, "merge", "--ff-only", "-q", missing)
+        return "merged into your checkout" if got.returncode == 0 else f"not merged: {got.stderr.strip()[:160]}"
+    got = _g(src, "-c", "user.name=eki", "-c", "user.email=eki@localhost", "merge", "--no-edit", "-q",
+             "-m", "eki: bring in what the engine runs", missing)
+    if got.returncode == 0:
+        return "merged into your checkout, alongside your commits since"
+    _g(src, "merge", "--abort")
+    return (f"not merged: it conflicts with your commits since — merge {missing[:10]} "
+            "into your checkout yourself")
 
 
 def last_swap() -> Dict[str, Any]:
@@ -202,25 +308,10 @@ def settle_swap() -> Dict[str, Any]:
     if s["state"] == "healthy" and s.get("self"):
         build = info(Path(s["target"]))
         src = Path(build.get("source") or source())
-        done["merged"] = _fast_forward(src, build.get("commit") or "")
+        done["merged"] = catch_up(src, build.get("commit") or "") or "merged into your checkout"
     s["seen"] = int(time.time())
     (SELF_HOME / "swap.json").write_text(json.dumps(s))
     return done
-
-
-def _fast_forward(src: Path, commit: str) -> str:
-    def git(*a: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", str(src), *a], capture_output=True, text=True, timeout=30)
-    if not commit:
-        return "no commit to bring in"
-    # files you haven't added to git don't stop it (git refuses by itself if
-    # the merge would overwrite one); edits to tracked files do
-    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
-        return "not merged: your checkout has uncommitted changes"
-    if git("merge-base", "--is-ancestor", "HEAD", commit).returncode != 0:
-        return "not merged: your checkout has moved on; merge the self/ branch when you're ready"
-    got = git("merge", "--ff-only", "-q", commit)
-    return "merged into your checkout" if got.returncode == 0 else f"not merged: {got.stderr.strip()[:120]}"
 
 
 def prune(now: Optional[float] = None) -> List[str]:

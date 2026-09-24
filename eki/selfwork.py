@@ -535,6 +535,19 @@ def is_in(root: Path | str, commit: str, ref: str = "HEAD") -> bool:
     return bool(commit) and _ok(root, "merge-base", "--is-ancestor", commit, ref)
 
 
+def line(root: Path) -> str:
+    """What a change goes on top of: your checkout's HEAD with whatever the
+    engine runs in it (eki/builds.py `base`) — never a base that would drop
+    a change already running because your checkout hadn't taken it yet."""
+    from . import builds
+    try:
+        return builds.base(root)
+    except ValueError as e:
+        raise SelfWorkError(str(e)) from None
+    except (OSError, subprocess.SubprocessError):
+        return git(root, "rev-parse", "HEAD")
+
+
 def fast_forward(root: Path, commit: str) -> str:
     """Bring `commit` into your checkout, fast-forward only. Files you haven't
     added to git don't stop it; edits to tracked files do."""
@@ -602,7 +615,7 @@ def begin_rebase(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     c = change(cid, home)
     root = Path(c["root"])
     where = ensure_worktree(c, home)
-    onto = git(root, "rev-parse", "HEAD")
+    onto = line(root)
     _put_back(where, "")                        # a rebase left stopped by an earlier try
     got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
                           "user.email=eki@localhost", "rebase", "-q", onto],
@@ -713,7 +726,7 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     root = Path(c["root"])
     where = ensure_worktree(c, home)
     commit = c["commit"]
-    head = git(root, "rev-parse", "HEAD")
+    head = line(root)
     p = Proposal(**{k: v for k, v in c.items() if k in Proposal.__dataclass_fields__})
     p.worktree = str(where)
     if not is_in(root, head, commit):

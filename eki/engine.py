@@ -567,6 +567,21 @@ class Engine(SelfLoop):
         self._to_resume = []
         return started
 
+    async def catch_up_checkout(self) -> str:
+        """What the engine runs that your checkout missed (a healthy swap
+        couldn't merge — you had edits in it): brought in once it can go
+        in, and said once. Nothing while the checkout still has edits."""
+        from . import builds as builds_mod
+        src = builds_mod.source()
+        if not await asyncio.to_thread(builds_mod.behind, src):
+            return ""
+        got = await asyncio.to_thread(builds_mod.catch_up, src)
+        if got.startswith("merged"):
+            observe_mod.note("history", what="caught up", how=got)
+            if self.settings.get("notify_learned", True):
+                await self._notify("eki · your checkout caught up", got[:200])
+        return got
+
     async def settle_swap(self) -> Dict[str, Any]:
         """A swap the supervisor finished: bring a healthy self-change into
         your checkout if it goes in cleanly, and say how it went — once."""

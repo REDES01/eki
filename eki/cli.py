@@ -870,6 +870,18 @@ def cmd_swap(args) -> int:
     elif args.dev:
         target = src
     else:
+        # what the engine runs goes into your checkout first, if it can; a
+        # build that would still drop it is refused (eki/builds.py, the line)
+        caught = builds.catch_up(src)
+        if caught:
+            print(f"· {caught}", file=sys.stderr)
+        lost = builds.behind(src, args.ref)
+        if lost and not args.force:
+            subject = builds._g(src, "log", "-1", "--format=%s", lost).stdout.strip()
+            print(f"! the engine runs {lost[:10]} ({subject}), which {args.ref} doesn't have — "
+                  f"swapping would drop it. Commit your edits so eki can bring it into your "
+                  f"checkout, or merge {lost[:10]}; --force swaps anyway", file=sys.stderr)
+            return 1
         try:
             target = builds.make(src, args.ref)
         except (ValueError, RuntimeError) as e:
@@ -990,6 +1002,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sp.add_argument("--dev", action="store_true", help="back to running your checkout itself")
     sp.add_argument("--no-check", action="store_true", help="skip the candidate check")
     sp.add_argument("--skip-tests", action="store_true", help="candidate check without the test suite")
+    sp.add_argument("--force", action="store_true",
+                    help="swap even if it drops something the engine runs now")
     sp.add_argument("--wait", type=int, default=600, help="seconds to wait for runs to finish")
     sp.add_argument("--watch", type=int, default=180, help="seconds it must stay healthy")
 

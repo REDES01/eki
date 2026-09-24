@@ -413,7 +413,8 @@ next piece of self-work, taken in this order:
 2. what you asked for, queued;
 3. faults in eki's own code;
 4. the weekly note, when a week has passed;
-5. the next open item in `ROADMAP.md`, in the file's order.
+5. the next open item in `ROADMAP.md`, in the file's order — inside a stage,
+   only once the open items above it have landed (see *The roadmap*).
 
 **Budget.** By default eki's own code is worked on by your subscriptions'
 spare room only — under pace for the week, never the last 30% of a window —
@@ -466,7 +467,21 @@ more, told what failed; after two it is *left for you*.
 **The roadmap.** `eki/roadmap.py` reads `ROADMAP.md`: an item is a `- [ ]`
 line under a `## ` section, with its indented lines. Items that say
 `(for a person)`, and anything under *Not planned*, are never taken; an item
-that says `(waiting on …)` isn't taken until that's removed. The agent
+that says `(waiting on …)` isn't taken until that's removed.
+
+*Order inside a stage.* The items of a `## Stage …` section are in order: an
+open item waits until every open item above it in that stage has landed
+(ticked, or its change applied), because the one below usually builds on the
+one above — two agents starting Stage 7's second and third items before its
+first would each invent their own memory store, and clash when applied. An
+item marked `(independent)` neither waits nor holds anything up, and can go
+beside the others. Later stages don't wait on earlier ones — the file's
+order is already the loop's — and items in any other section (*Alongside
+every stage*, *What eki keeps current*, an *Inbox*) are independent anyway.
+`eki self next`, `eki self` and the board show what a waiting item waits for:
+`after: <the item above>` (`roadmap.after`).
+
+The agent
 gets the item, what its stage is for, and four ways to finish, as the last
 line of its answer:
 

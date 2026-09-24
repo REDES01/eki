@@ -18,6 +18,14 @@ two changes conflict.
 Never taken: an item that says `(for a person)` anywhere in it, and
 anything under *Not planned* or *Keeping this file*. Not taken yet: an item
 that says `(waiting on …)` — it needs something else to land first.
+
+Inside a stage (a `## Stage …` section) the items are in order: an open item
+waits until every open item above it has landed, because the one below
+usually builds on it — two agents each inventing the memory store the first
+item was to make clash when they're applied. An item marked `(independent)`
+neither waits nor holds anything up. Later stages don't wait on earlier ones
+(the file's order is already the loop's), and items in any other section —
+*Alongside every stage*, *What eki keeps current* — are independent anyway.
 """
 from __future__ import annotations
 
@@ -32,6 +40,7 @@ BOX = re.compile(r"^- \[( |x|X)\] (.*)$")
 SECTION = re.compile(r"^##\s+(.*?)\s*$")
 PERSON = re.compile(r"\(for a person\b[^)]*\)", re.I)
 WAITING = re.compile(r"\(waiting on\b[^)]*\)", re.I)
+INDEPENDENT = re.compile(r"\(independent\)", re.I)
 #: sections whose bullets are never work
 SKIP = ("not planned", "keeping this file")
 
@@ -110,6 +119,25 @@ def workable(items: Iterable[Item]) -> List[Item]:
     """What eki may take: open, not a person's, not waiting, not under Not planned."""
     return [i for i in items if not i.done and not i.person and not WAITING.search(i.text)
             and not any(i.section.lower().startswith(s) for s in SKIP)]
+
+
+def ordered(section: str) -> bool:
+    """A stage: its items are taken in the order the file gives them."""
+    return section.lower().startswith("stage")
+
+
+def after(items: Iterable[Item], item: Item, landed: Iterable[str] = ()) -> Optional[Item]:
+    """The open item above `item` in its stage it waits for — the nearest —
+    or None if it may start. An item waits on every open one above it that
+    hasn't landed (`landed`: keys a change was applied for, ticked or not),
+    unless one of the two is marked `(independent)` or the section isn't a
+    stage."""
+    if not ordered(item.section) or INDEPENDENT.search(item.text):
+        return None
+    landed = set(landed)
+    above = [i for i in items if i.section == item.section and i.order < item.order
+             and not i.done and i.key not in landed and not INDEPENDENT.search(i.text)]
+    return above[-1] if above else None
 
 
 def find(text: str, key: str) -> Optional[Item]:

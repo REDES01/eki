@@ -173,6 +173,65 @@ def test_an_item_whose_change_was_applied_isnt_taken_again_ticked_or_not():
     assert selfloop.pick(reworded, landed=[part.key])[0].id == part.id
 
 
+STAGED = """# Roadmap
+
+## Stage 7 — Project memory
+
+- [ ] **Remember and recall.** List, read, search and write notes.
+- [ ] **Auto-memory lands there.** Instead of in skills.
+- [ ] **Memory in the app.** Edit or remove it.
+- [ ] **A memory size meter** *(independent)*: how big the folder is.
+
+## Stage 8 — Orchestration
+
+- [ ] **A task graph over runs.**
+
+## Alongside every stage — eki builds eki
+
+- [ ] **A daily digest.**
+- [ ] **Work picked by impact.**
+"""
+
+
+def test_inside_a_stage_an_item_waits_for_the_open_ones_above_it():
+    plan = roadmap.parse(STAGED)
+    first, second, third, meter, graph, digest, impact = plan
+    assert roadmap.after(plan, first) is None
+    assert roadmap.after(plan, second) is first and roadmap.after(plan, third) is second
+    assert roadmap.after(plan, meter) is None                              # (independent)
+    assert roadmap.after(plan, graph) is None                              # a later stage doesn't wait
+    assert roadmap.after(plan, impact) is None                             # outside the stages
+    assert roadmap.after(plan, second, landed=[first.key]) is None         # applied, not ticked yet
+    ticked = roadmap.parse(roadmap.tick(STAGED, first.key, "*(eki: self/ab12)*"))
+    assert roadmap.after(ticked, ticked[1]) is None and roadmap.after(ticked, ticked[2]).title == second.title
+
+
+def test_a_stage_gives_only_its_first_open_item_and_the_independent_one_beside_it(monkeypatch):
+    monkeypatch.setattr(selfloop, "area_of", lambda text, files, root: [text.split("\n")[0]])  # order only
+    taken, live = [], []
+    while True:
+        it, why = selfloop.pick(STAGED, parallel=9, live=live)
+        if it is None:
+            break
+        live.append(f"r{len(live)}")
+        selfloop.update(it.id, state="working", run=live[-1])
+        taken.append(it.title)
+    assert taken == ["Remember and recall", "A memory size meter", "A task graph over runs",
+                     "A daily digest", "Work picked by impact"]
+    assert why == "“Auto-memory lands there” waits — after: “Remember and recall”"
+
+
+def test_landing_the_first_item_frees_the_second():
+    first, _ = selfloop.pick(STAGED)
+    selfloop.update(first.id, state="review")                              # proposed, not landed yet
+    for _ in range(4):                                                     # the rest of the file, done
+        selfloop.update(selfloop.pick(STAGED)[0].id, state="done")
+    assert selfloop.pick(STAGED) == (None, "“Auto-memory lands there” waits — after: “Remember and recall”")
+    second, _ = selfloop.pick(STAGED, landed=[first.key])                  # applied: the next may go
+    assert second.title == "Auto-memory lands there"
+    assert selfloop.pick(roadmap.tick(STAGED, first.key, "*(eki: self/ab12)*"))[0].id == second.id
+
+
 def test_a_chat_message_that_asks_eki_to_change_itself():
     yes = ["eki, make the chat list show the project name", "improve yourself so the board loads faster",
            "change eki's code so runs show how long they took", "eki: hide the dock icon"]
@@ -837,6 +896,10 @@ async def test_the_view_says_what_it_is_doing_and_what_waits(eng):
     assert v["can"] and v["goal"]["kind"] == "self" and v["autonomy"] == "propose"
     assert [c["title"] for c in v["waiting"]] == ["Commit the working tree"]
     assert v["roadmap"]["next"][0]["title"] == "One standing context"
+    assert v["roadmap"]["next"][0]["after"] == ""
+    (eng.root / "ROADMAP.md").write_text(STAGED)
+    nexts = {n["title"]: n["after"] for n in eng.self_view()["roadmap"]["next"]}
+    assert nexts["Auto-memory lands there"] == "Remember and recall" and nexts["A memory size meter"] == ""
     eng.self_on(False)
     assert goals.all_goals()[0].state == "paused"
     with pytest.raises(ValueError):

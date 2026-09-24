@@ -613,11 +613,12 @@ def _self_status(service: str, limit: int) -> int:
             print(f"  self/{c['id']}  {c.get('source', ''):<7} {c['title'][:58]}"
                   f"\n              eki self diff {c['id']} · eki self apply {c['id']} · eki self discard {c['id']}")
     ahead = v["queue"]
-    nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}" for n in v["roadmap"]["next"][:3]]
+    nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}{_after(n)}"
+             for n in v["roadmap"]["next"][:3]]
     if ahead or nexts:
         print("\nup next:")
         for i in ahead:
-            print(f"  {i['source']:<7} {i['title'][:70]}")
+            print(f"  {i['source']:<7} {i['title'][:70]}{_after(i)}")
         for line in nexts:
             print(line)
     if v["left"]:
@@ -635,6 +636,11 @@ def _self_status(service: str, limit: int) -> int:
         print(f"\nweekly note ({note['id']}): {len(note.get('suggestions') or [])} suggestions — "
               "on the board (Goals → Self)")
     return 0
+
+
+def _after(row: Dict[str, Any]) -> str:
+    """A roadmap item waiting for the one above it in its stage says so."""
+    return f"  (after: {row['after'][:60]})" if row.get("after") else ""
 
 
 def _self_verb(args, verb: str, rest: List[str]) -> int:
@@ -685,9 +691,9 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     if verb == "next":
         v = call("GET", "/api/self", s)
         for i in v["working"] + v["queue"]:
-            print(f"{i['source']:<8} {i['title']}")
+            print(f"{i['source']:<8} {i['title']}{_after(i)}")
         for n in v["roadmap"]["next"]:
-            print(f"roadmap  {n['section']}: {n['title']}")
+            print(f"roadmap  {n['section']}: {n['title']}{_after(n)}")
         return 0
     if verb == "note":
         v = call("GET", "/api/self", s)

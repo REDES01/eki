@@ -25,6 +25,9 @@ in the same area (area_of, which looks its words up in the repo when it
 names no file), and the Mac app is changed by one at a time. An item whose
 area can't be told still goes beside the others — the merge queue sorts out
 what collides — and only waits for another like it.
+Inside a stage of ROADMAP.md the items go in order: one waits until those
+above it have landed, unless it is marked `(independent)` (roadmap.after) —
+the one below usually builds on the one above.
 What they make is applied one after another, in the order it was finished
 (the merge queue) — each put on top of what landed before it.
 
@@ -220,7 +223,8 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     item left for you after changing nothing comes back only once its entry
     in ROADMAP.md reads differently. `landed`: keys of roadmap items a change
     was applied for — never taken again on their own, ticked or not, unless
-    left for you and reworded since."""
+    left for you and reworded since. Inside a stage an item waits for the
+    open ones above it (roadmap.after)."""
     live, landed = set(live), set(landed)
     all_ = _load(home)
     files = files or {}
@@ -260,13 +264,19 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
             if free(it.title, area):
                 return update(it.id, home, area=area), why
     known = {i.key: i for i in all_ if i.source == "roadmap"}
-    for entry in roadmap.workable(roadmap.parse(roadmap_text)):
+    plan = roadmap.parse(roadmap_text)
+    ordered: List[Tuple[roadmap.Item, roadmap.Item]] = []     # what waits for the item above it
+    for entry in roadmap.workable(plan):
         it = known.get(entry.key)
         seen = entry_print(entry.text)
         again = it is not None and it.state == "person" and bool(it.seen) and it.seen != seen
         if it is not None and it.state in SETTLED and not again:
             continue
         if entry.key in landed and not again:
+            continue
+        above = roadmap.after(plan, entry, landed)
+        if above is not None:
+            ordered.append((entry, above))
             continue
         area = guess(f"{entry.title}\n{entry.text}")
         if not free(entry.title, area):
@@ -283,6 +293,9 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
         title, area, other = held[0]
         return None, (f"“{title[:60]}” waits: it touches {', '.join(lane_name(a) for a in area)}, "
                       f"like “{other.title[:60]}”, being worked on now")
+    if ordered:
+        entry, above = ordered[0]
+        return None, f"“{entry.title[:60]}” waits — after: “{above.title[:60]}”"
     return None, "nothing to do — ROADMAP.md has no open item eki may take, and nothing is queued"
 
 

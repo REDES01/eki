@@ -1308,8 +1308,15 @@ class SelfLoop:
         text = roadmap.read(root) if not why_not else ""
         plan = roadmap.parse(text)
         known = {i.key: i for i in items if i.source == "roadmap"}
+        landed = [c["ticks"] for c in selfwork.changes() if c.get("ticks") and c["state"] == "applied"]
         upcoming = [e for e in roadmap.workable(plan)
                     if e.key not in known or known[e.key].state not in selfloop.SETTLED][:5]
+        by_key = {e.key: e for e in plan}
+
+        def waits(key: str) -> str:
+            """The item above it in its stage that it waits for, if any."""
+            above = roadmap.after(plan, by_key[key], landed) if key in by_key else None
+            return above.title if above else ""
         by_id = {c["id"]: c for c in rows}
         live = set(self.runner.running)                                 # type: ignore[attr-defined]
 
@@ -1318,6 +1325,8 @@ class SelfLoop:
             row.pop("open", None)
             row["live"] = i.run in live
             row["areas"] = [selfloop.lane_name(a) for a in i.area]
+            if i.source == "roadmap" and i.state == "queued":
+                row["after"] = waits(i.key)
             if i.change and i.change in by_id:
                 row["change_state"] = by_id[i.change]["state"]
             step = steps.of_item(i.id) if i.state == "working" else {}
@@ -1356,7 +1365,7 @@ class SelfLoop:
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],
             "waiting": [c for c in rows if c["state"] in ("proposed", "conflicts") and c.get("fit")],
             "changes": rows[:40],
-            "roadmap": {**roadmap.counts(plan), "next": [e.to_json() for e in upcoming]},
+            "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key)} for e in upcoming]},
             "note": selfloop.latest_note(),
             "shift": self._shift_state,                                 # type: ignore[attr-defined]
         }

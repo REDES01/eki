@@ -422,6 +422,8 @@ function goalPage(r) {
 }
 
 // ---- eki working on itself ------------------------------------------------------------------------
+// a roadmap item waiting for the open one above it in its stage
+const afterNote = r => r.after ? ` <span class="muted" title="Items in a stage go in order; mark one (independent) in ROADMAP.md to let it go beside">— after: ${esc(r.after)}</span>` : "";
 const SOURCE = { asked: "you asked", fault: "a fault", roadmap: "ROADMAP", note: "weekly note", undo: "undo" };
 const CSTATE = { proposed: "Waiting for you", conflicts: "Doesn't fit on top", applying: "Applying", applied: "Applied",
   "rolled back": "Rolled back", discarded: "Discarded", unfit: "Didn't pass", stopped: "Didn't finish",
@@ -558,10 +560,10 @@ function selfPage() {
   const ahead = v.queue, nexts = v.roadmap?.next || [];
   if (ahead.length || nexts.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}</span>
+    for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${afterNote(i)}</span>
       ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
       ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
-    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted">· ${esc(n.section.split(" — ")[0])}</span></span>
+    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
       <button class="btn small" data-ract="person" data-key="${esc(n.key)}" title="eki won't take this one">Leave for me</button></div>`;
     h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
   }

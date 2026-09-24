@@ -551,6 +551,13 @@ Anyone — a person, an agent, eki — who finishes an item ticks it and names t
 commit (eki names the change, `self/<id>`, in the same commit). An item only a
 person can do says `(for a person)`; eki never takes it. An item that needs
 something else to land first says `(waiting on …)`; eki leaves it until the
-mark is removed. New ideas go under
+mark is removed. Inside a stage the items are in order: eki takes an open item
+only once every open item above it in the same stage has landed, because the
+one below usually builds on the one above. An item that doesn't — that could
+be built on its own, beside the others — says `(independent)`; it neither
+waits nor holds anything up. Later stages don't wait on earlier ones, and
+items under *Alongside every stage* and *What eki keeps current* are
+independent without the mark. `eki self next` and the board say what an item
+waits for (`after: …`). New ideas go under
 the stage they belong to, or under a new stage if they change the order. Don't delete history; move what's abandoned to
 *Not planned* with a line saying why.

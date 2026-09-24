@@ -567,6 +567,27 @@ class Engine(SelfLoop):
         self._to_resume = []
         return started
 
+    async def app_tick(self, build: str = "") -> str:
+        """The Mac app, rebuilt from the running build when its mac/ changed
+        (eki/appbuild.py) — after a healthy swap, or later if you were using
+        the app then. One at a time; said once when it lands."""
+        from . import appbuild
+        from . import builds as builds_mod
+        target = build or str(appbuild.state().get("pending") or "")
+        app = builds_mod.source() / "Eki.app"
+        if not target or not app.exists() or getattr(self, "_app_building", False):
+            return ""
+        self._app_building = True
+        try:
+            got = await asyncio.to_thread(appbuild.install, Path(target), app)
+        finally:
+            self._app_building = False
+        if got and not got.startswith("waiting"):
+            observe_mod.note("history", what="app", how=got[:200], build=target)
+            if self.settings.get("notify_learned", True):
+                await self._notify("eki · the app", got[:200])
+        return got
+
     async def catch_up_checkout(self) -> str:
         """What the engine runs that your checkout missed (a healthy swap
         couldn't merge — you had edits in it): brought in once it can go
@@ -606,6 +627,8 @@ class Engine(SelfLoop):
                     self._self_follow(cid)
             except Exception:                       # noqa: BLE001
                 pass
+            # the app follows the engine when the change touched mac/
+            asyncio.create_task(self.app_tick(str(done.get("target") or "")))
             title = f"now running {what}"
             body = done.get("merged") or "the new build is healthy"
         else:

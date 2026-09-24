@@ -53,7 +53,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-ORDER = ("tests", "boots", "answers", "data", "leavable")
+ORDER = ("tests", "app", "boots", "answers", "data", "leavable")
 STUB_MODEL = "candidate-stub"
 TERMINAL = ("done", "failed", "cancelled", "interrupted")
 
@@ -402,6 +402,26 @@ def default_db() -> Path:
     return Path("~/.eki/eki.db").expanduser()
 
 
+def check_app(root: Path, report: "Report", step: Callable[[str, Callable[[], str]], bool],
+              skipping: set) -> None:
+    """The Mac app compiles — checked only when mac/ differs from what the
+    installed app was built from (eki/appbuild.py); a Mac without Xcode's
+    tools can't tell, and says so."""
+    from . import appbuild
+    if "app" in skipping or not appbuild.sources_hash(root):
+        report.checks.append(Check("app", True, "no app here" if "app" not in skipping
+                                   else "skipped on request", skipped=True))
+        return
+    if not appbuild.changed(root):
+        report.checks.append(Check("app", True, "the app is unchanged", skipped=True))
+        return
+    import shutil
+    if not shutil.which("swiftc"):                   # pragma: no cover — a Mac without Xcode's tools
+        report.checks.append(Check("app", True, "no swiftc here to compile the app", skipped=True))
+        return
+    step("app", lambda: appbuild.typecheck(root))
+
+
 def check(checkout: Path | str, *, python: Optional[str] = None,
           db: Optional[Path | str] = None, skip: Iterable[str] = (),
           keep: bool = False, say: Optional[Callable[[str], None]] = None) -> Report:
@@ -439,6 +459,7 @@ def check(checkout: Path | str, *, python: Optional[str] = None,
     work = Path(tempfile.mkdtemp(prefix="eki-candidate-"))
     try:
         step("tests", lambda: check_tests(root, py))
+        check_app(root, report, step, skipping)
 
         # a fresh install: empty home, the stub as its only provider
         with Stub() as stub:

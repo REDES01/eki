@@ -118,8 +118,14 @@ eki swap HEAD                   # candidate check, then the supervisor swaps
 eki swap swap-test --no-check   # (how the rollback was tested)
 ```
 
-The app bundle is swapped the same way when a change touches `mac/`, and only
-while the app isn't frontmost.
+**The app follows** (`eki/appbuild.py`). The Mac app is its own program,
+built from `mac/` (every `mac/*.swift` is part of it). When a change touches
+`mac/`, the candidate check typechecks the app (*app*), so Swift that doesn't
+compile is never fit. After a healthy swap whose `mac/` differs from what the
+installed `Eki.app` was built from, eki rebuilds it from the running build
+and puts it in place, quitting and reopening it — only while it isn't the app
+in front; otherwise it waits and tries again every five minutes. A build that
+fails leaves the app as it was. `~/.eki/app.json` says what it was built from.
 
 **Nothing running is dropped.** A healthy build goes into your checkout only
 when it can (edits you haven't committed stop it), so the engine can run

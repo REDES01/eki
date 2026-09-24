@@ -60,10 +60,7 @@ echo "compiling…"
 swiftc -O -target arm64-apple-macos14.0 \
   -framework AppKit -framework SwiftUI -framework ServiceManagement -framework WebKit \
   -o "$MACOS/Eki" \
-  EkiApp.swift Client.swift Model.swift Theme.swift Scale.swift Markdown.swift \
-  Artifacts.swift Gallery.swift Images.swift ImageViewer.swift Swipes.swift \
-  Views.swift Downloads.swift Models.swift Live.swift ClaudeCode.swift \
-  Preferences.swift MenuBarMeters.swift Usage.swift SettingsView.swift Providers.swift Capability.swift Onboarding.swift Goals.swift
+  ./*.swift          # every Swift file here is the app (tools/ holds the helpers)
 
 # The input helper behind eki's screen tools (eki/mcpbridge.py): a tiny
 # CGEvent program, so the Python engine never links AppKit itself.

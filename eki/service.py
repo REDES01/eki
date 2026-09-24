@@ -139,6 +139,11 @@ async def lifespan(app: FastAPI):
                     await eng.catch_up_checkout()
                 except Exception:                   # noqa: BLE001
                     log.exception("catch up")
+                try:
+                    # an app rebuild that waited while you were using it
+                    await eng.app_tick()
+                except Exception:                   # noqa: BLE001
+                    log.exception("app rebuild")
             try:
                 stopped = await eng.models.reap_idle()
                 if stopped:

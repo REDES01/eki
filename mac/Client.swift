@@ -47,8 +47,10 @@ struct ConversationRow: Codable, Identifiable, Hashable {
     var live: Bool? = false         // a run in it is working right now
     var pinned: Int? = 0
     var archived: Int? = 0
+    var updated_at: Int? = nil      // seconds since 1970; the rail groups by it
 
     var isPinned: Bool { (pinned ?? 0) != 0 }
+    var updated: Date? { updated_at.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
     var isArchived: Bool { (archived ?? 0) != 0 }
 }
 

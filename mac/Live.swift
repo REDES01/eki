@@ -7,25 +7,57 @@
 import AppKit
 import SwiftUI
 
-/// The tool calls of the turn in progress, the way the terminal lists them.
+/// The tool calls of the turn in progress: one quiet line with the latest,
+/// the rest a click away. A box listing every step would outweigh the answer
+/// it's working towards.
 struct ActivityLines: View {
     let lines: [String]
+    @State private var open = false
+
+    private var failed: Bool { lines.last?.hasPrefix("⚠") == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            ForEach(Array(lines.suffix(12).enumerated()), id: \.offset) { i, line in
-                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                    Text(i == lines.suffix(12).count - 1 ? "●" : "○")
-                        .font(.hubGlyph.weighted(.regular))
-                        .foregroundStyle(line.hasPrefix("⚠") ? Palette.danger : Palette.inkFaint)
-                    Text(line)
+            Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+                HStack(spacing: Space.s) {
+                    Image(systemName: failed ? "exclamationmark.triangle" : "wrench.and.screwdriver")
+                        .font(.hubIconSmall)
+                        .foregroundStyle(failed ? Palette.danger : Palette.inkFaint)
+                    Text(lines.last ?? "")
                         .font(.hubMonoSmall)
-                        .foregroundStyle(line.hasPrefix("⚠") ? Palette.danger : Palette.inkMuted)
+                        .foregroundStyle(failed ? Palette.danger : Palette.inkMuted)
                         .lineLimit(1)
+                        .truncationMode(.middle)
+                    if lines.count > 1 {
+                        Text("\(lines.count) steps")
+                            .font(.hubCaption)
+                            .foregroundStyle(Palette.inkFaint)
+                    }
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.hubGlyph)
+                        .foregroundStyle(Palette.inkFaint)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if open {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    ForEach(Array(lines.suffix(40).enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.hubMonoSmall)
+                            .foregroundStyle(line.hasPrefix("⚠") ? Palette.danger : Palette.inkFaint)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .padding(.leading, Space.m)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(Palette.hairline).frame(width: 1)
+                }
+                .padding(.leading, Space.xs)
             }
         }
-        .card(padding: Space.m)
     }
 }
 

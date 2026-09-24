@@ -109,24 +109,40 @@ enum Space {
     static let xxl: Pt = 32
 }
 
-/// Three corners: small things you click, cards, and the large soft shapes
-/// of the chat (the composer, your messages).
+/// The corners: small things you click, cards and code, and the large soft
+/// shapes of the chat — your messages, and the composer, the roundest thing
+/// on the page because it's the one you keep coming back to.
 enum Radius {
     static let small: CGFloat = 8
-    static let card: CGFloat = 12
+    static let card: CGFloat = 10
     static let large: CGFloat = 18
+    static let composer: CGFloat = 20
 }
 
 enum Metric {
     /// A reading measure, not a window width: long lines are hard to track.
-    static let column: CGFloat = 720
+    static let column: CGFloat = 700
     static let gutter: Pt = 24                // a Pt, so it follows the zoom
-    /// The extra space between lines of prose, for long answers.
+    /// The extra space between lines of prose: 15-pt text on a line about
+    /// one and a half times its size, so a long answer reads like a page.
     static let leading: CGFloat = 5
+    /// Between one turn and the next — more than between paragraphs, so a
+    /// question and its answer read as two voices without a rule between.
+    static let turn: Pt = 28
     /// The height of a pill or icon button, so a row of them lines up.
     static let control: Pt = 28
-    /// How far your own messages stop short of the left edge of the column.
-    static let indent: Pt = 64
+    /// The round send button, a step larger than the controls beside it.
+    static let send: Pt = 32
+    /// The composer at its smallest; it grows a line at a time from here.
+    static let composer: Pt = 56
+    /// How far your own messages stop short of the left edge of the column:
+    /// a fifth of it, so a question is never wider than four fifths.
+    static let indent: Pt = 140
+    /// Inside your message's bubble: a little wider than tall.
+    static let bubbleX: Pt = 14
+    static let bubbleY: Pt = 10
+    /// The rail's width at rest.
+    static let rail: CGFloat = 240
     static let radius: CGFloat = Radius.card
     static let smallRadius: CGFloat = Radius.small
 }
@@ -192,12 +208,18 @@ struct Face {
 
     /// the one large line on an empty page
     static let hubDisplay = Face(size: 22, weight: .semibold)
+    /// the greeting on a new chat: a serif, set large and light, so the empty
+    /// page reads as an invitation rather than a form
+    static let hubGreeting = Face(size: 30, design: .serif)
     /// a pane's or a sheet's title
     static let hubTitle = Face(size: 15, weight: .semibold)
     /// a card's title, a question
     static let hubHeading = Face(size: 13.5, weight: .medium)
+    /// headings inside an answer, a step or two above the text
+    static let hubAnswerTitle = Face(size: 19, weight: .semibold)
+    static let hubAnswerHeading = Face(size: 16.5, weight: .semibold)
     /// what you read: messages and answers
-    static let hubBody = Face(size: 14.5)
+    static let hubBody = Face(size: 15)
     static let hubMessage = hubBody
     /// a row in a list: the rail, a menu
     static let hubRow = Face(size: 13)
@@ -353,7 +375,7 @@ extension View {
     }
 
     /// The one shadow, for the one thing that floats: the composer.
-    func raised() -> some View { shadow(color: Palette.shadow, radius: 12, y: 3) }
+    func raised() -> some View { shadow(color: Palette.shadow, radius: 16, y: 4) }
 }
 
 /// A card. Everything raised off the canvas uses this one, so the app has a

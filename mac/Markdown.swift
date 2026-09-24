@@ -152,10 +152,13 @@ enum MarkdownParser {
         guard var attributed = try? AttributedString(markdown: text, options: options) else {
             return AttributedString(text)
         }
-        // SwiftUI renders `code` in the body font unless told otherwise
+        // SwiftUI renders `code` in the body font unless told otherwise. It
+        // stays in the ink on a faint fill: in the accent, a paragraph that
+        // names a few files turns into a rash of orange.
         for run in attributed.runs where run.inlinePresentationIntent == .code {
             attributed[run.range].font = Face.hubMono.font(at: zoom)
-            attributed[run.range].foregroundColor = Palette.accent
+            attributed[run.range].foregroundColor = Palette.ink
+            attributed[run.range].backgroundColor = Palette.fill
         }
         return attributed
     }
@@ -166,21 +169,25 @@ struct MarkdownText: View {
     @Environment(\.zoom) private var zoom
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
+        VStack(alignment: .leading, spacing: Space.l) {
             ForEach(MarkdownParser.blocks(content)) { block in
                 switch block {
                 case .text(let text):
                     Text(MarkdownParser.inline(text, zoom: zoom))
                         .font(.hubMessage)
-                        .lineSpacing(Metric.leading)
+                        .lineSpacing(Metric.leading * zoom)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .heading(let text, let level):
+                    // a heading belongs to what follows it: more room above
+                    // than below
                     Text(MarkdownParser.inline(text, zoom: zoom))
-                        .font(level <= 2 ? Face.hubTitle.weighted(.semibold) : .hubBody.weighted(.semibold))
-                        .padding(.top, Space.xs)
+                        .font(level <= 1 ? .hubAnswerTitle
+                              : level == 2 ? .hubAnswerHeading : .hubBody.weighted(.semibold))
+                        .padding(.top, Space.s)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
 
                 case .bullet(let items):
                     VStack(alignment: .leading, spacing: Space.s) {
@@ -191,12 +198,11 @@ struct MarkdownText: View {
                             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                                 Text(split.marker)
                                     .font(.hubMessage)
-                                    .foregroundStyle(Palette.inkFaint)
-                                    .frame(minWidth: split.marker == "•" ? 0 : 17,
-                                           alignment: .trailing)
+                                    .foregroundStyle(Palette.inkMuted)
+                                    .frame(minWidth: 17, alignment: .trailing)
                                 Text(MarkdownParser.inline(split.body, zoom: zoom))
                                     .font(.hubMessage)
-                                    .lineSpacing(Metric.leading)
+                                    .lineSpacing(Metric.leading * zoom)
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -218,19 +224,23 @@ struct MarkdownText: View {
     }
 }
 
+/// Code, on its own surface. The language sits quietly at the top; the copy
+/// button waits until the pointer is over the block, so a page of answers
+/// isn't a page of buttons.
 struct CodeBlock: View {
     let code: String
     let language: String
     @State private var copied = false
+    @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language)
-                    .font(.hubCaption.weighted(.medium))
+                    .font(.hubCaption)
                     .foregroundStyle(Palette.inkFaint)
                 Spacer()
-                Button(copied ? "copied" : "copy") {
+                Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(code, forType: .string)
                     copied = true
@@ -238,24 +248,29 @@ struct CodeBlock: View {
                         try? await Task.sleep(for: .seconds(1.5))
                         copied = false
                     }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(GhostButton())
+                .opacity(hovering || copied ? 1 : 0)
             }
             .padding(.leading, Space.m)
             .padding(.trailing, Space.xs)
-            .background(Palette.fill)
+            .padding(.top, Space.xs)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
                     .font(.hubMono)
-                    .lineSpacing(Space.xxs.value)
+                    .lineSpacing(Space.xs.value)
                     .textSelection(.enabled)
-                    .padding(.all, Space.m)
+                    .padding(.horizontal, Space.m)
+                    .padding(.bottom, Space.m)
             }
         }
-        .background(Palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: Radius.card))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card)
             .strokeBorder(Palette.hairline, lineWidth: 1))
+        .onHover { hovering = $0 }
     }
 }

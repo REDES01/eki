@@ -27,7 +27,9 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(pane: $pane)
-                .navigationSplitViewColumnWidth(min: 210 * zoom, ideal: 248 * zoom, max: 330 * zoom)
+                .navigationSplitViewColumnWidth(min: (Metric.rail - 40) * zoom,
+                                                ideal: Metric.rail * zoom,
+                                                max: (Metric.rail + 80) * zoom)
         } detail: {
             Group {
                 switch pane {
@@ -41,7 +43,11 @@ struct ContentView: View {
             .frame(minWidth: 520, minHeight: 400)
             .background(Palette.canvas)
         }
+        // The top bar says where you are and nothing else: the chat's title,
+        // quiet, and the engine only when it needs you.
+        .modifier(QuietTitle(title: title))
         .toolbar {
+            // pushes the engine's dot to the far right, away from the title
             ToolbarItem(placement: .principal) { Spacer() }
             ToolbarItem(placement: .primaryAction) { EngineBadge() }
         }
@@ -67,9 +73,82 @@ struct ContentView: View {
             }
         }
     }
+
+    private var title: String {
+        switch pane {
+        case .chat: return model.chatTitle
+        case .usage: return "Usage"
+        case .models: return "Models & routing"
+        case .artifacts: return "Artifacts"
+        case .goals: return "Goals"
+        }
+    }
+}
+
+/// The window's title in the top bar, in the muted row type rather than the
+/// system's bold. Swapping the system title out takes macOS 15; before that
+/// it stays, which is still the right words.
+private struct QuietTitle: ViewModifier {
+    let title: String
+    @Environment(\.zoom) private var zoom
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .navigationTitle(title)
+                .toolbar(removing: .title)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Text(title)
+                            .font(.hubRow.weighted(.medium))
+                            .foregroundStyle(Palette.inkMuted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: Metric.column * zoom, alignment: .leading)
+                    }
+                }
+        } else {
+            content.navigationTitle(title)
+        }
+    }
+}
+
+extension AppModel {
+    /// The open chat's name, for the top bar: its title as the rail has it,
+    /// or its first question until the rail catches up.
+    var chatTitle: String {
+        if conversationID.isEmpty && turns.isEmpty { return "New chat" }
+        if let row = conversations.first(where: { $0.id == conversationID }),
+           let t = row.title, !t.isEmpty {
+            return t.replacingOccurrences(of: "\n", with: " ")
+        }
+        let first = turns.first { $0.role == "user" }?.content ?? ""
+        return first.isEmpty ? "eki" : String(first.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+    }
 }
 
 // MARK: - the rail
+
+/// How long ago a chat was last touched, in the words the rail groups by.
+enum ChatAge: String, CaseIterable {
+    case today = "Today"
+    case yesterday = "Yesterday"
+    case week = "Previous 7 days"
+    case older = "Older"
+
+    /// Calendar days, not 24-hour spans: a chat from 11 pm is "Yesterday"
+    /// at 9 the next morning, as you'd say it.
+    static func of(_ date: Date?, now: Date = Date(), calendar: Calendar = .current) -> ChatAge {
+        guard let date else { return .older }
+        let today = calendar.startOfDay(for: now)
+        if date >= today { return .today }
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+              let weekAgo = calendar.date(byAdding: .day, value: -7, to: today) else { return .older }
+        if date >= yesterday { return .yesterday }
+        if date >= weekAgo { return .week }
+        return .older
+    }
+}
 
 struct Sidebar: View {
     @EnvironmentObject var model: AppModel
@@ -98,40 +177,38 @@ struct Sidebar: View {
                     RailRow(icon: "square.grid.2x2", title: "Goals",
                             selected: pane == .goals) { choose(.goals) }
 
-                    // what you're waiting on comes first, then what you keep
-                    let working = model.conversations.filter { $0.live == true }
-                    let pinned = model.conversations.filter { $0.isPinned && $0.live != true }
-                    let rest = model.conversations.filter { !$0.isPinned && $0.live != true }
-                    if !working.isEmpty && model.search.isEmpty {
-                        RailHeader(text: "Working")
-                        ForEach(working) { row in
-                            ChatRow(row: row, selected: pane == .chat(row.id),
-                                    rename: { renaming = row }) { choose(.chat(row.id)) }
+                    if !model.search.isEmpty {
+                        RailHeader(text: "Results")
+                        rows(model.conversations)
+                    } else if model.showArchived {
+                        RailHeader(text: "Archived") {
+                            Button("Back") { toggleArchived() }
+                                .buttonStyle(.plain)
+                                .font(.hubCaption.weighted(.medium))
+                                .foregroundStyle(Palette.inkFaint)
                         }
-                    }
-                    if !pinned.isEmpty && model.search.isEmpty {
-                        RailHeader(text: "Pinned")
-                        ForEach(pinned) { row in
-                            ChatRow(row: row, selected: pane == .chat(row.id),
-                                    rename: { renaming = row }) { choose(.chat(row.id)) }
+                        rows(model.conversations)
+                    } else {
+                        // what you're waiting on comes first, then what you
+                        // keep, then the rest by when you last touched it
+                        let working = model.conversations.filter { $0.live == true }
+                        let pinned = model.conversations.filter { $0.isPinned && $0.live != true }
+                        let rest = model.conversations.filter { !$0.isPinned && $0.live != true }
+                        let byAge = Dictionary(grouping: rest) { ChatAge.of($0.updated) }
+                        if !working.isEmpty {
+                            RailHeader(text: "Working")
+                            rows(working)
                         }
-                    }
-                    RailHeader(text: !model.search.isEmpty ? "Results"
-                               : model.showArchived ? "Archived" : "Chats") {
-                        if model.search.isEmpty {
-                            Button(model.showArchived ? "Back" : "Archived") {
-                                model.showArchived.toggle()
-                                Task { await model.refreshConversations() }
+                        if !pinned.isEmpty {
+                            RailHeader(text: "Pinned")
+                            rows(pinned)
+                        }
+                        ForEach(ChatAge.allCases, id: \.self) { age in
+                            if let group = byAge[age], !group.isEmpty {
+                                RailHeader(text: age.rawValue)
+                                rows(group)
                             }
-                            .buttonStyle(.plain)
-                            .font(.hubCaption.weighted(.medium))
-                            .foregroundStyle(Palette.inkFaint)
                         }
-                    }
-
-                    ForEach(model.search.isEmpty ? rest : model.conversations) { row in
-                        ChatRow(row: row, selected: pane == .chat(row.id),
-                                rename: { renaming = row }) { choose(.chat(row.id)) }
                     }
                     if model.conversations.isEmpty {
                         Text(!model.search.isEmpty ? "No matches"
@@ -140,6 +217,11 @@ struct Sidebar: View {
                             .foregroundStyle(Palette.inkFaint)
                             .padding(.horizontal, Space.s)
                             .padding(.top, Space.xs)
+                    }
+                    if model.search.isEmpty && !model.showArchived {
+                        RailRow(icon: "archivebox", title: "Archived", selected: false,
+                                quiet: true) { toggleArchived() }
+                            .padding(.top, Space.l)
                     }
                 }
                 .padding(.horizontal, Space.s)
@@ -151,6 +233,18 @@ struct Sidebar: View {
             Task { await model.refreshConversations() }
         }
         .sheet(item: $renaming) { row in RenameSheet(row: row) }
+    }
+
+    private func rows(_ list: [ConversationRow]) -> some View {
+        ForEach(list) { row in
+            ChatRow(row: row, selected: pane == .chat(row.id),
+                    rename: { renaming = row }) { choose(.chat(row.id)) }
+        }
+    }
+
+    private func toggleArchived() {
+        model.showArchived.toggle()
+        Task { await model.refreshConversations() }
     }
 
     private func choose(_ value: Pane) {
@@ -181,7 +275,7 @@ struct RailHeader<Trailing: View>: View {
             trailing()
         }
         .padding(.horizontal, Space.s)
-        .padding(.top, Space.l)
+        .padding(.top, Space.xl)
         .padding(.bottom, Space.xs)
     }
 }
@@ -223,6 +317,8 @@ struct RailRow: View {
     var trailing: String? = nil
     var iconColor: Color? = nil
     let selected: Bool
+    /// muted, for a row that's a way somewhere rather than a place
+    var quiet: Bool = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -234,6 +330,8 @@ struct RailRow: View {
                     .foregroundStyle(iconColor ?? Palette.inkMuted)
                     .frame(width: 16)
                 Text(title).font(.hubRow)
+                    .foregroundStyle(quiet ? Palette.inkMuted : Palette.ink)
+                    .lineLimit(1)
                 Spacer()
                 if let trailing {
                     Text(trailing)
@@ -256,24 +354,31 @@ struct ChatRow: View {
     var rename: () -> Void = {}
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.zoom) private var zoom
     @State private var confirmDelete = false
     @State private var problem = ""
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            HStack(spacing: Space.s) {
                 VStack(alignment: .leading, spacing: Space.xxs) {
                     Text(title)
                         .font(.hubRow)
                         .lineLimit(1)
-                    if let subtitle {
-                        Text(subtitle)
+                        .truncationMode(.tail)
+                    if let hit {
+                        Text(hit)
                             .font(.hubCaption)
-                            .foregroundStyle(row.live == true ? Palette.ok : Palette.inkFaint)
+                            .foregroundStyle(Palette.inkFaint)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
+                if row.live == true {
+                    // being answered right now
+                    Dot(color: Palette.ok, size: 6, pulsing: true)
+                        .help("Working…")
+                }
                 if hovering || selected {
                     Menu { menuItems } label: {
                         IconChip(systemName: "ellipsis", fill: .clear, size: 20)
@@ -289,15 +394,10 @@ struct ChatRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 20 * zoom)      // as tall as the menu that shows on hover
             .listRow(selected: selected, hovering: hovering)
-            .overlay(alignment: .leading) {
-                if row.live == true {
-                    // being answered right now: a pulse at the very left
-                    Dot(color: Palette.ok, size: 5, pulsing: true)
-                        .padding(.leading, Space.xxs)
-                }
-            }
         }
+        .help(title)
         .buttonStyle(.plain)
         .foregroundStyle(Palette.ink)
         .onHover { hovering = $0 }
@@ -337,14 +437,12 @@ struct ChatRow: View {
         return t.isEmpty ? row.id : t
     }
 
-    /// While searching, the row says what matched instead of a turn count.
-    private var subtitle: String? {
-        if row.live == true { return "working…" }
-        if !model.search.isEmpty, let hit = row.hit {
-            let line = hit.replacingOccurrences(of: "\n", with: " ")
-            if !line.hasPrefix(title) { return line }
-        }
-        return "\(row.n) turns"
+    /// While searching, the row says what matched under its title; otherwise
+    /// a row is its title and nothing more.
+    private var hit: String? {
+        guard !model.search.isEmpty, let hit = row.hit else { return nil }
+        let line = hit.replacingOccurrences(of: "\n", with: " ")
+        return line.hasPrefix(title) ? nil : line
     }
 }
 
@@ -352,16 +450,19 @@ struct EngineBadge: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
+        // a running engine is the normal case and says nothing but a dot;
+        // the word appears when it's starting or gone
         HStack(spacing: Space.s) {
             Dot(color: color, size: 6, pulsing: model.engine == .starting)
-            Text(label)
-                .font(.hubCaption)
-                .foregroundStyle(Palette.inkMuted)
+            if model.engine != .up {
+                Text(label)
+                    .font(.hubCaption)
+                    .foregroundStyle(Palette.inkMuted)
+            }
         }
         .padding(.horizontal, Space.s)
         .padding(.vertical, Space.xs)
-        .background(Palette.fill, in: Capsule())
-        .help(detail)
+        .help(model.engine == .up ? "engine running\n" + detail : detail)
     }
 
     private var color: Color {
@@ -432,18 +533,21 @@ struct ChatPane: View {
                     Button("OK") { permissionsNoticed = true }.buttonStyle(GhostButton())
                 }
             }
-            transcript
-            if let need = model.permissionNeed {
-                PermissionNeedCard(need: need)
+            if fresh {
+                // a new chat: the greeting, the composer right under it, and
+                // a few ways to begin — the whole page is the invitation
+                VStack(spacing: Space.xl) {
+                    Spacer(minLength: 0)
+                    Greeting()
+                    footer
+                    StarterChips { model.draftRequest = $0 }
+                    Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
+            } else {
+                transcript
+                footer
             }
-            if !model.notice.isEmpty {
-                Text(model.notice)
-                    .font(.hubCaption).foregroundStyle(Palette.inkMuted)
-                    .padding(.horizontal, Space.m).padding(.vertical, Space.xs)
-                    .background(Palette.fill, in: Capsule())
-                    .transition(.opacity)
-            }
-            Composer(draft: $draft, repo: $repo)
         }
         .background(Palette.canvas)
         .onAppear { repo = model.lastRepo }
@@ -453,13 +557,30 @@ struct ChatPane: View {
         }
     }
 
+    /// Nothing said yet and nothing on its way.
+    private var fresh: Bool {
+        model.turns.isEmpty && model.streaming.isEmpty && !model.sending
+            && model.prompt == nil && model.chatError.isEmpty
+    }
+
+    @ViewBuilder private var footer: some View {
+        if let need = model.permissionNeed {
+            PermissionNeedCard(need: need)
+        }
+        if !model.notice.isEmpty {
+            Text(model.notice)
+                .font(.hubCaption).foregroundStyle(Palette.inkMuted)
+                .padding(.horizontal, Space.m).padding(.vertical, Space.xs)
+                .background(Palette.fill, in: Capsule())
+                .transition(.opacity)
+        }
+        Composer(draft: $draft, repo: $repo)
+    }
+
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Space.xl) {
-                    if model.turns.isEmpty && model.streaming.isEmpty && !model.sending {
-                        EmptyChat()
-                    }
+                LazyVStack(alignment: .leading, spacing: Metric.turn) {
                     ForEach(model.turns) { turn in
                         MessageView(turn: turn)
                     }
@@ -496,6 +617,18 @@ struct ChatPane: View {
                 .padding(.horizontal, Metric.gutter)
                 .padding(.vertical, Space.xxl)
             }
+            // the page fades into the composer rather than stopping at a line
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: Space.xl)
+                    .allowsHitTesting(false)
+            }
+            // opened from a new chat, the transcript is made with its turns
+            // already in, so no count changes: start at the latest here
+            .onAppear {
+                DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
             .onChange(of: model.turns.count) {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom") }
             }
@@ -509,83 +642,85 @@ struct ChatPane: View {
     }
 }
 
-struct EmptyChat: View {
-    @EnvironmentObject var model: AppModel
+/// The top of a new chat: eki's mark and one line, large and light.
+struct Greeting: View {
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 40, height: 40)
+            Text("What are we doing?")
+                .font(.hubGreeting)
+                .foregroundStyle(Palette.ink)
+        }
+        .help("Auto sends this to the cheapest backend that can do the job and still has "
+              + "quota. Give it a folder and only the ones that can edit files are considered.")
+        .padding(.horizontal, Metric.gutter)
+    }
+}
+
+/// A few ways to begin, under the composer on a new chat. Each one starts
+/// the question for you; you finish it.
+struct StarterChips: View {
+    let pick: (String) -> Void
+
+    private static let all: [(icon: String, label: String, start: String)] = [
+        ("pencil.line", "Write", "Help me write "),
+        ("chevron.left.forwardslash.chevron.right", "Code", "In this folder, "),
+        ("photo", "Draw", "Draw a picture of "),
+        ("lightbulb", "Explain", "Explain "),
+    ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            Text("What are we doing?")
-                .font(.hubDisplay)
-            Text("Auto sends this to the cheapest backend that can do the job "
-                 + "and still has quota. Give it a folder and only the ones that "
-                 + "can edit files are considered.")
-                .font(.hubRow)
-                .foregroundStyle(Palette.inkMuted)
-                .lineSpacing(Metric.leading)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: Space.s) {
-                ForEach(model.backends.filter { $0.ok && $0.answers }) { backend in
+        HStack(spacing: Space.s) {
+            ForEach(Self.all, id: \.label) { s in
+                Button { pick(s.start) } label: {
                     HStack(spacing: Space.xs) {
-                        Dot(color: Palette.backend(backend.key), size: 6)
-                        Text(backend.key).font(.hubCaption)
-                            .foregroundStyle(Palette.inkMuted)
+                        Image(systemName: s.icon).font(.hubIconSmall)
+                        Text(s.label)
                     }
-                    .padding(.horizontal, Space.s)
-                    .padding(.vertical, Space.xs)
-                    .background(Palette.fill, in: Capsule())
+                    .foregroundStyle(Palette.inkMuted)
+                    .pill(fill: .clear)
+                    .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
+                    .contentShape(Capsule())
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.top, Space.xs)
         }
-        .padding(.vertical, Space.xxl)
+        .padding(.horizontal, Metric.gutter)
     }
 }
 
 struct MessageView: View {
     let turn: Turn
     var streaming: Bool = false
+    @Environment(\.zoom) private var zoom
 
     private var isUser: Bool { turn.role == "user" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            if isUser {
-                // the question: a quiet bubble on the right, stopping well
-                // short of the left margin so the two voices read apart
-                Text(turn.content)
-                    .font(.hubMessage)
-                    .lineSpacing(Metric.leading)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Space.l)
-                    .padding(.vertical, Space.m)
-                    .background(Palette.surface,
-                                in: RoundedRectangle(cornerRadius: Radius.large))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.large)
-                        .strokeBorder(Palette.hairline, lineWidth: 1))
-                    .padding(.leading, Metric.indent)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            } else {
-                HStack(spacing: Space.s) {
-                    Dot(color: Palette.backend(turn.backend ?? ""), size: 7,
-                        pulsing: streaming)
-                    Text((turn.backend ?? "assistant").uppercased())
-                        .font(.hubLabel)
-                        .tracking(0.6)
-                        .foregroundStyle(Palette.inkMuted)
-                    if turn.continued {
-                        Tag(text: "carried on by itself", color: Palette.accent)
-                            .help("The program did this on its own — a background task finished "
-                                  + "and it picked up where it left off, the way it would in a terminal.")
-                    } else if let reason = turn.reason, !reason.isEmpty {
-                        Text(reason)
-                            .font(.hubCaption)
-                            .foregroundStyle(Palette.inkFaint)
-                            .lineLimit(1)
-                    }
-                }
+        if isUser {
+            // the question: a soft filled bubble on the right, never wider
+            // than four fifths of the column, so the two voices read apart
+            Text(turn.content)
+                .font(.hubMessage)
+                .lineSpacing(Metric.leading * zoom)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Metric.bubbleX)
+                .padding(.vertical, Metric.bubbleY)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: Radius.large))
+                .padding(.leading, Metric.indent)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            // the answer: plain text on the page; who wrote it is said once,
+            // small, at the end, with the actions
+            VStack(alignment: .leading, spacing: Space.m) {
                 MarkdownText(content: turn.content)
-                if !streaming {
+                if streaming {
+                    Dot(color: Palette.backend(turn.backend ?? ""), size: 7, pulsing: true)
+                } else {
                     TurnActions(turn: turn)
                 }
             }
@@ -613,6 +748,7 @@ struct TurnActions: View {
                       systemImage: copied ? "checkmark" : "doc.on.doc")
             }
             .buttonStyle(GhostButton())
+            .help(copied ? "Copied" : "Copy")
 
             // an answer that worked in a folder may have changed files there;
             // the change is what you actually need to look at
@@ -626,7 +762,7 @@ struct TurnActions: View {
                     Label("Review changes", systemImage: "plusminus")
                 }
                 .buttonStyle(GhostButton())
-                .help(cwd)
+                .help("Review changes in " + cwd)
             }
 
             if turn.checkpoint != nil, let cwd = turn.cwd, !cwd.isEmpty {
@@ -658,9 +794,25 @@ struct TurnActions: View {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(GhostButton())
+                .help("Retry")
+            }
+
+            // who answered, once, small; why it was them on hover
+            if let backend = turn.backend, !backend.isEmpty {
+                Text(backend)
+                    .font(.hubCaption)
+                    .foregroundStyle(Palette.inkFaint)
+                    .padding(.leading, Space.s)
+                    .help(turn.reason ?? backend)
+            }
+            if turn.continued {
+                Tag(text: "carried on by itself", color: Palette.accent)
+                    .padding(.leading, Space.xs)
+                    .help("The program did this on its own — a background task finished "
+                          + "and it picked up where it left off, the way it would in a terminal.")
             }
         }
-        .labelStyle(.titleAndIcon)
+        .labelStyle(.iconOnly)
         .padding(.leading, -Space.s.value)        // align the ghost text with the answer
         .sheet(isPresented: $showingDiff) {
             DiffSheet(folder: turn.cwd ?? "", diff: diff)
@@ -738,6 +890,7 @@ struct Composer: View {
     @FocusState private var focused: Bool
     @State private var picked = 0
     @State private var keys = MenuKeys()
+    @Environment(\.zoom) private var zoom
 
     private var empty: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -815,15 +968,20 @@ struct Composer: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Hairline()
                 }
+                if !model.attachments.isEmpty {
+                    AttachmentStrip()
+                }
                 // A vertical TextField rather than a TextEditor: an editor
                 // takes every point of height offered and the composer ends up
-                // half the window. This grows line by line and stops at eight.
-                TextField("Ask anything…", text: $draft, axis: .vertical)
+                // half the window. This grows line by line and stops at ten.
+                TextField("", text: $draft,
+                          prompt: Text("Ask anything…").foregroundColor(Palette.inkFaint),
+                          axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.hubMessage)
-                    .lineLimit(1...8)
+                    .lineLimit(1...10)
                     .padding(.horizontal, Space.l)
-                    .padding(.top, Space.m)
+                    .padding(.top, Space.l)
                     .focused($focused)
                     .onSubmit(submit)        // ⇧↩ still makes a new line
                     .onChange(of: draft) { _, now in
@@ -839,7 +997,14 @@ struct Composer: View {
                         focused = true
                     }
 
-                HStack(spacing: Space.s) {
+                // one row of controls inside the card: where it goes on the
+                // left, the send button on the right
+                HStack(spacing: Space.xs) {
+                    Button(action: pickPictures) {
+                        IconChip(systemName: "plus", fill: .clear)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add pictures (or drop them here)")
                     BackendPicker()
                     RepoField(repo: $repo)
                     if model.usesAgent {
@@ -854,8 +1019,8 @@ struct Composer: View {
                             Image(systemName: "stop.fill")
                                 .font(.hubIconSmall)
                                 .foregroundStyle(Palette.onAccent)
-                                .frame(width: Metric.control, height: Metric.control)
-                                .background(Palette.inkMuted, in: Circle())
+                                .frame(width: Metric.send, height: Metric.send)
+                                .background(Palette.ink, in: Circle())
                         }
                         .buttonStyle(.plain)
                         .help("Stop this run. (Closing the window doesn't — it keeps going.)")
@@ -863,36 +1028,47 @@ struct Composer: View {
                         Button(action: send) {
                             Image(systemName: "arrow.up")
                                 .font(.hubIcon.weighted(.bold))
-                                .foregroundStyle(empty ? Palette.inkFaint : Palette.onAccent)
-                                .frame(width: Metric.control, height: Metric.control)
-                                .background(empty ? Palette.fill : Palette.accent,
-                                            in: Circle())
+                                .foregroundStyle(Palette.onAccent)
+                                .frame(width: Metric.send, height: Metric.send)
+                                .background(Palette.accent.opacity(empty ? 0.35 : 1), in: Circle())
                         }
                         .buttonStyle(.plain)
                         .disabled(empty)
                         .keyboardShortcut(.return, modifiers: .command)
+                        .help("↩ to send · ⇧↩ for a new line")
                     }
                 }
                 .padding(.horizontal, Space.s)
-                .padding(.vertical, Space.s)
+                .padding(.top, Space.s)
+                .padding(.bottom, Space.s)
             }
+            .frame(minHeight: Metric.composer.value * zoom)
             .background(Palette.surface,
-                        in: RoundedRectangle(cornerRadius: Radius.large))
-            .overlay(RoundedRectangle(cornerRadius: Radius.large)
-                .strokeBorder(focused ? Palette.inkFaint : Palette.hairline, lineWidth: 1))
+                        in: RoundedRectangle(cornerRadius: Radius.composer))
+            .overlay(RoundedRectangle(cornerRadius: Radius.composer)
+                .strokeBorder(Palette.hairline, lineWidth: 1))
             .raised()
-
-            Text("↩ to send · ⇧↩ for a new line")
-                .font(.hubCaption)
-                .foregroundStyle(Palette.inkFaint)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal, Space.s)
+            .onDrop(of: [.fileURL, .image], isTargeted: nil, perform: dropped)
         }
         .column()
         .frame(maxWidth: .infinity)
         .padding(.horizontal, Metric.gutter)
-        .padding(.bottom, Space.m)
+        .padding(.bottom, Space.l)
         .onAppear { focused = true }
+    }
+
+    /// Pictures from a file, to go with the next question.
+    private func pickPictures() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let image = NSImage(contentsOf: url) {
+                model.attach(image: image, name: url.lastPathComponent)
+            }
+        }
     }
 
     private func send() {
@@ -1117,7 +1293,7 @@ struct BackendPicker: View {
                 Image(systemName: "chevron.down").font(.hubGlyph)
             }
             .foregroundStyle(Palette.inkMuted)
-            .pill()
+            .pill(fill: .clear)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -1159,7 +1335,7 @@ struct RepoField: View {
                 .buttonStyle(.plain)
             }
         }
-        .pill(fill: repo.isEmpty ? Palette.fill : Palette.accentSoft)
+        .pill(fill: repo.isEmpty ? .clear : Palette.accentSoft)
         .help("Give the answer a working folder — only backends that can edit "
               + "files are considered")
     }
@@ -1195,8 +1371,8 @@ struct CostStrip: View {
             }
         }
         .font(.hubCaption.monospacedDigit())
-        .foregroundStyle(Palette.inkMuted)
-        .padding(.horizontal, Space.s)
+        .foregroundStyle(Palette.inkFaint)
+        .padding(.horizontal, Space.m)
     }
 }
 

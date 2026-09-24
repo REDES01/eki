@@ -69,3 +69,45 @@ def test_cards_and_rows_come_from_one_place():
         assert "Palette.accent.opacity(0.16)" not in text, name
     views = source("Views.swift")
     assert views.count(".listRow(") >= 3            # rail rows, chat rows, the file menu
+
+
+def _metric(name: str) -> float:
+    block = source("Theme.swift").split("enum Metric")[1].split("\n}")[0]
+    return float(re.search(rf"static let {name}: \w+ = ([\d.]+)", block).group(1))
+
+
+def test_the_chat_reads_like_a_page():
+    # slice 2 of the look: 15-pt text in a ~700-pt column, room between turns,
+    # a round composer — the numbers the redesign was judged by
+    theme = source("Theme.swift")
+    assert re.search(r"static let hubBody = Face\(size: 15\)", theme)
+    assert _metric("column") == 700
+    assert _metric("turn") == 28
+    assert _metric("composer") >= 56
+    assert re.search(r"static let composer: CGFloat = 20", theme)
+    views = source("Views.swift")
+    assert "spacing: Metric.turn" in views
+    assert "cornerRadius: Radius.composer" in views
+
+
+def test_answers_have_no_heavy_label():
+    # the backend is named once, small, beside the actions — not in capitals
+    # above every answer
+    views = source("Views.swift")
+    assert ".uppercased()" not in views.split("struct MessageView")[1].split("struct TurnActions")[0]
+
+
+def test_the_rail_groups_chats_by_day():
+    views = source("Views.swift")
+    for group in ["Today", "Yesterday", "Previous 7 days", "Older"]:
+        assert f'"{group}"' in views, group
+    assert "updated_at" in source("Client.swift")
+
+
+def test_the_engine_sends_what_the_rail_groups_by(tmp_path):
+    # the rail's Today / Yesterday comes from updated_at in the list
+    from eki.store import Store
+    store = Store(tmp_path / "eki.db")
+    cid = store.new_conversation("hello")
+    rows = store.conversations()
+    assert rows and rows[0]["id"] == cid and rows[0]["updated_at"] > 0

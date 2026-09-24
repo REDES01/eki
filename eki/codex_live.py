@@ -25,6 +25,7 @@ import logging
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
+from . import steps
 from . import workers
 
 log = logging.getLogger("eki.codex_live")
@@ -207,6 +208,9 @@ class CodexSession:
             raise RuntimeError("Codex is not running" + (f": {self.exit_error}" if self.exit_error else ""))
         try:
             self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        except workers.InputStalled as e:
+            # cut off, not failed: its step is taken up again (eki/steps.py)
+            raise steps.Interrupted(f"Codex stopped reading: {e}") from None
         except (BrokenPipeError, OSError) as e:
             raise RuntimeError(f"Codex is not reading: {e}")
 
@@ -487,7 +491,10 @@ class CodexSession:
         except Exception:                           # noqa: BLE001
             err = ""
         self.exit_error = err or f"exited with code {self.proc.returncode}"
-        self._events.put_nowait({"kind": "exit", "error": self.exit_error})
+        stalled = str(getattr(self.proc, "stalled", "") or "")
+        if stalled:
+            self.exit_error = f"stopped: {stalled}"
+        self._events.put_nowait({"kind": "exit", "error": self.exit_error, "cut_off": bool(stalled)})
         for fut in self._waiting.values():
             if not fut.done():
                 fut.set_exception(RuntimeError(self.exit_error))

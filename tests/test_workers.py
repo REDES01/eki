@@ -294,6 +294,108 @@ def test_housekeeping_forgets_old_work_and_kills_an_orphan_after_its_grace(tmp_p
     assert got["removed"] == 2 and not workers.scan()
 
 
-def test_launchd_leaves_the_workers_when_it_stops_the_engine(tmp_path):
+def test_launchd_stops_the_whole_engine_but_not_the_workers(tmp_path):
+    """The launcher and the engine under it go together (a killed launcher
+    left the engine holding the port, 2026-09-24); the workers are in
+    sessions of their own, so they stay."""
     from eki import agent
-    assert agent.plist_for(tmp_path)["AbandonProcessGroup"] is True
+    assert agent.plist_for(tmp_path)["AbandonProcessGroup"] is False
+    w = workers.start([sys.executable, "-c", "import time; time.sleep(30)"], key="own", run="r")
+    deadline = time.time() + 10
+    while not w.pid and time.time() < deadline:
+        time.sleep(0.05)
+    assert os.getpgid(w.pid) != os.getpgid(0)
+    w.kill()
+
+
+def test_the_watchdog_asks_the_supervisor_every_half_minute():
+    from eki import agent, builds
+    job = agent.watchdog_plist()
+    assert job["ProgramArguments"] == ["/bin/bash", str(builds.SUPERVISOR), "--watchdog"]
+    assert job["StartInterval"] == agent.WATCHDOG_EVERY == 30
+
+
+# ---- a program that stops reading its input ----------------------------------------------
+
+DEAF = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+async def _ticking(gaps):
+    last = time.monotonic()
+    while True:
+        await asyncio.sleep(0.02)
+        now = time.monotonic()
+        gaps.append(now - last)
+        last = now
+
+
+def test_the_keeper_drains_what_a_busy_program_hasnt_read(tmp_path):
+    """2026-09-24: the engine wrote to a program that wasn't reading, the
+    fifo filled, and one blocking write froze the whole engine. The keeper
+    now takes it all in, and the engine never waits."""
+    async def go():
+        proc = await workers.start_proc(DEAF, None, None, kind="test")
+        gaps = []
+        tick = asyncio.create_task(_ticking(gaps))
+        for _ in range(32):
+            proc.stdin.write(b"x" * 65536)              # 2 MB the program reads none of
+        await until(lambda: proc.stdin.waiting == 0, within=10)
+        tick.cancel()
+        assert proc.returncode is None and not proc.stalled
+        assert max(gaps) < 0.5                          # the loop never stood still
+        proc.worker.kill()
+    run(go())
+
+
+def test_a_program_that_takes_none_of_its_input_is_stopped_not_waited_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(workers, "INPUT_CAP", 64 * 1024)   # the keeper holds little
+    monkeypatch.setattr(workers, "STALL", 1.0)
+
+    async def go():
+        proc = await workers.start_proc(DEAF, None, None, kind="test")
+        proc.stdin.cap = 64 << 20                           # the engine would wait on more
+        gaps = []
+        tick = asyncio.create_task(_ticking(gaps))
+        began = time.monotonic()
+        proc.stdin.write(b"x" * (1 << 20))
+        assert time.monotonic() - began < 0.5
+        assert proc.stdin.waiting > 0
+        code = await asyncio.wait_for(proc.wait(), timeout=10)
+        tick.cancel()
+        assert max(gaps) < 0.5
+        assert "took none of its input" in proc.stalled
+        assert steps.cut_off(code)                          # stopped: cut off, not failed
+        with pytest.raises(workers.InputStalled):
+            proc.stdin.write(b"more\n")
+    run(go())
+
+
+def test_too_much_waiting_input_stops_it_at_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(workers, "INPUT_CAP", 64 * 1024)
+
+    async def go():
+        proc = await workers.start_proc(DEAF, None, None, kind="test")
+        with pytest.raises(workers.InputStalled):
+            for _ in range(64):
+                proc.stdin.write(b"x" * 65536)
+        assert "KB of its input waiting" in proc.stalled
+        await asyncio.wait_for(proc.wait(), timeout=10)
+    run(go())
+
+
+def test_a_stalled_program_is_cut_off_for_the_session_too():
+    """What a session makes of it: an interruption (its step taken up again),
+    not "Claude Code is not reading" as a failure."""
+    from eki import codex_live, live
+
+    class Stdin:
+        def write(self, data):
+            raise workers.InputStalled("the worker stopped reading: it took none of its input for 60s")
+
+    class P:
+        returncode = None
+        stdin = Stdin()
+    for session in (live.LiveSession(["claude"], None, None), codex_live.CodexSession(["codex"], None, None)):
+        session.proc = P()
+        with pytest.raises(steps.Interrupted):
+            session._write({"type": "user"})

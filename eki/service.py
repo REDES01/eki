@@ -1849,6 +1849,91 @@ def _go_with_launcher() -> None:
     threading.Thread(target=watch, daemon=True, name="launcher-watch").start()
 
 
+def _managed() -> bool:
+    """Started by launchd as eki's engine (or the drill's), not by hand."""
+    return bool(os.environ.get("EKI_LAUNCHER")) or \
+        os.environ.get("XPC_SERVICE_NAME", "").startswith("local.eki.")
+
+
+def _eki_engine(pid: int) -> bool:
+    """`pid` is an eki engine: `eki serve`, or eki.service run itself."""
+    import subprocess
+    try:
+        cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return ("eki.cli" in cmd and " serve" in cmd) or "eki.service" in cmd
+
+
+def _holding(host: str, port: int) -> List[int]:
+    """Who holds the port: the pid its /api/health gives — and, for an
+    engine too stuck to answer, whoever listens there."""
+    import subprocess
+    pids: List[int] = []
+    try:
+        pid = int(httpx.get(f"http://{host}:{port}/api/health", timeout=3).json().get("pid") or 0)
+        if pid:
+            pids.append(pid)
+    except (httpx.HTTPError, ValueError, AttributeError):
+        pass
+    try:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                             capture_output=True, text=True, timeout=5).stdout.split()
+        pids += [int(x) for x in out if x.isdigit() and int(x) not in pids]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return [p for p in pids if p != os.getpid()]
+
+
+def _gone_within(pid: int, seconds: float) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def _port_taken(host: str, port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+
+def take_port(host: str, port: int, grace: float = 10.0) -> List[int]:
+    """An older eki engine still on the port — its launcher killed, left
+    behind (2026-09-24, 22:46–22:56: every new engine died with "address
+    already in use" until a person killed it) — is stopped before this one
+    binds: TERM, then KILL. Anything else on the port is left alone, and
+    this engine fails to bind as before. The pids stopped."""
+    import signal
+    if not _port_taken(host, port):
+        return []
+    stopped = []
+    for pid in _holding(host, port):
+        if not _eki_engine(pid):
+            continue
+        log.warning("an older engine (pid %d) holds %s:%d; stopping it", pid, host, port)
+        for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 5.0)):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                break                       # gone already, or not ours to stop
+            if _gone_within(pid, wait):
+                break
+        stopped.append(pid)
+    deadline = time.time() + 5
+    while stopped and _port_taken(host, port) and time.time() < deadline:
+        time.sleep(0.1)
+    return stopped
+
+
 def main(argv: Optional[list] = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="eki-service")
@@ -1860,6 +1945,8 @@ def main(argv: Optional[list] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if os.environ.get("EKI_LAUNCHER"):
         _go_with_launcher()
+    if _managed():
+        take_port(args.host, args.port)     # before taking up anyone's work
     for note in migrate.run(Path(__file__).resolve().parent.parent):
         log.info("migrated: %s", note)
     logging.getLogger("httpx").setLevel(logging.WARNING)

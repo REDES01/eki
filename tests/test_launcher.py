@@ -38,3 +38,54 @@ def test_no_swift_compiler_no_launcher(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher, "APP", tmp_path / "eki.app")
     monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
     assert launcher.build() is None
+
+
+# ---- an older engine left on the port ----------------------------------------------------
+
+LISTENER = ("import signal, socket, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"      # as stuck as the one of 2026-09-24
+            "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            "s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(); time.sleep(60)\n")
+
+
+def _hold_port(*words):
+    import socket
+    import subprocess
+    import sys
+    import time
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    proc = subprocess.Popen([sys.executable, "-c", LISTENER, str(port), *words])
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.05)
+    return port, proc
+
+
+def test_an_older_engine_on_the_port_is_stopped_before_binding():
+    """2026-09-24: an engine outlived its launcher, kept the port, and every
+    new one died with "address already in use". A stuck one that doesn't
+    answer and ignores TERM too."""
+    from eki import service
+    port, proc = _hold_port("eki.cli", "serve")
+    try:
+        assert service.take_port("127.0.0.1", port, grace=1.0) == [proc.pid]
+        assert proc.wait(timeout=5) is not None
+        assert not service._port_taken("127.0.0.1", port)
+    finally:
+        proc.kill()
+
+
+def test_something_else_on_the_port_is_left_alone():
+    from eki import service
+    port, proc = _hold_port("not-eki")
+    try:
+        assert service.take_port("127.0.0.1", port, grace=1.0) == []
+        assert proc.poll() is None
+    finally:
+        proc.kill()
+        proc.wait()

@@ -20,6 +20,11 @@ than a pipe it holds:
 A small keeper — this file, run as a script, stdlib only — starts the
 program, holds its `in` open (so no engine going away is an end of input),
 and waits for it, so an exit while no engine is up is still written down.
+It always drains `in`, passing it on to the program as the program reads
+(up to INPUT_CAP waiting), and the engine never waits on it: its writes go
+through the event loop, and a program that takes none of its input for
+STALL seconds is stopped and its step taken up again. On 2026-09-24 one
+blocking write to a program that wasn't reading froze the whole engine.
 
 A new engine looks here (`scan`): a worker still running is taken up again
 where its reading stood; one that finished is concluded from its files; one
@@ -31,14 +36,17 @@ on purpose (`Worker.kill`).
 from __future__ import annotations
 
 import asyncio
-import fcntl
+import collections
 import hashlib
 import json
+import logging
 import os
+import select
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -55,6 +63,12 @@ FRESH = 30 * 60
 POLL = 0.05
 #: a keeper that hasn't said the program's pid in this long never will
 STARTING = 15.0
+#: input waiting for a program — in the engine, and again in its keeper
+INPUT_CAP = int(os.environ.get("EKI_WORKER_INPUT_CAP") or 8 << 20)
+#: a program that takes none of its input for this long has stopped reading
+STALL = float(os.environ.get("EKI_WORKER_STALL") or 60)
+
+log = logging.getLogger("eki.workers")
 
 #: workers this engine has in hand: not orphans, whatever their run says
 _held: Dict[str, float] = {}
@@ -286,7 +300,7 @@ def start(argv: List[str], *, cwd: Optional[str] = None, env: Optional[Dict[str,
     if talk:
         os.mkfifo(d / "in", 0o600)
     spec = {"argv": [str(a) for a in argv], "cwd": str(cwd or ""), "talk": talk,
-            "merge": merge, "out": str(out or ""), "at": time.time(),
+            "merge": merge, "out": str(out or ""), "at": time.time(), "input_cap": INPUT_CAP,
             **{k: v for k, v in meta.items() if v not in (None, "")}}
     _write_json(d / "spec.json", spec)
     keeper = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "keep", str(d)],
@@ -447,28 +461,137 @@ class _Out:
             self._f = None
 
 
+class InputStalled(BrokenPipeError):
+    """The program stopped taking its input: its work is cut off (taken up
+    again, eki/steps.py), not failed."""
+
+
 class _In:
-    """The worker's fifo. Opened when first written; the keeper holds its own
-    end open, so closing this is not an end of input for the program."""
+    """The worker's fifo, written without ever blocking the engine: what the
+    fifo has no room for waits here and goes as the loop finds room
+    (`add_writer`). The keeper holds its own end open, so closing this is
+    not an end of input for the program.
 
-    def __init__(self, worker: Worker):
+    A program that takes none of its input for `stall` seconds, or lets more
+    than `cap` pile up here, has stopped reading: nothing more is written, what
+    waited is dropped, and `on_stall` is told (Proc stops the worker, so its
+    step goes the resume way)."""
+
+    def __init__(self, worker: Worker, on_stall: Optional[Callable[[str], None]] = None,
+                 cap: int = 0, stall: float = 0.0):
         self.worker = worker
+        self.on_stall = on_stall
+        self.cap = cap or INPUT_CAP
+        self.stall = stall or STALL
+        self.stalled = ""                   # why writing stopped, once it has
         self._fd: Optional[int] = None
+        self._pending = bytearray()
+        self._since = 0.0                   # when the fifo last took something, while some waited
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._timer: Optional[asyncio.TimerHandle] = None
 
-    def write(self, data: bytes) -> None:
+    @property
+    def waiting(self) -> int:
+        return len(self._pending)
+
+    def _open(self) -> int:
         if self._fd is None:
             try:
-                fd = os.open(self.worker.dir / "in", os.O_WRONLY | os.O_NONBLOCK)
+                self._fd = os.open(self.worker.dir / "in", os.O_WRONLY | os.O_NONBLOCK)
             except OSError as e:
                 raise BrokenPipeError(f"the worker isn't reading: {e}") from None
-            # blocking from here: a long message waits for room, not lost
-            fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
-            self._fd = fd
-        view = memoryview(data)
-        while view:
-            view = view[os.write(self._fd, view):]
+        return self._fd
+
+    @staticmethod
+    def _put(fd: int, data: Any) -> int:
+        try:
+            return os.write(fd, data)
+        except (BlockingIOError, InterruptedError):
+            return 0
+
+    def write(self, data: bytes) -> None:
+        if self.stalled:
+            raise InputStalled(self.stalled)
+        fd = self._open()
+        if len(self._pending) > self.cap:
+            # one message of any size goes; a backlog past the cap doesn't grow
+            self._stop(f"more than {self.cap // 1024} KB of its input waiting")
+            raise InputStalled(self.stalled)
+        if not self._pending:
+            data = data[self._put(fd, data):]
+            if not data:
+                return
+            self._since = time.monotonic()
+        self._pending += data
+        self._arm()
+
+    def _arm(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._wait_out()                # not on a loop: a thread may wait, briefly
+            return
+        if self._loop is None and self._fd is not None:
+            self._loop = loop
+            loop.add_writer(self._fd, self._flush)
+            self._timer = loop.call_later(self.stall, self._check)
+
+    def _disarm(self) -> None:
+        if self._loop is not None and self._fd is not None:
+            try:
+                self._loop.remove_writer(self._fd)
+            except (ValueError, RuntimeError):
+                pass
+        if self._timer is not None:
+            self._timer.cancel()
+        self._loop = self._timer = None
+
+    def _flush(self) -> None:
+        if self._fd is None:
+            return
+        try:
+            n = self._put(self._fd, self._pending)
+        except OSError as e:
+            self._stop(f"its input closed: {e}")
+            return
+        if n:
+            del self._pending[:n]
+            self._since = time.monotonic()
+        if not self._pending:
+            self._disarm()
+
+    def _check(self) -> None:
+        self._timer = None
+        if not self._pending or self._loop is None:
+            return
+        idle = time.monotonic() - self._since
+        if idle >= self.stall:
+            self._stop(f"it took none of its input for {idle:.0f}s")
+        else:
+            self._timer = self._loop.call_later(self.stall - idle, self._check)
+
+    def _wait_out(self) -> None:
+        while self._pending and self._fd is not None and not self.stalled:
+            idle = time.monotonic() - self._since
+            if idle >= self.stall:
+                self._stop(f"it took none of its input for {idle:.0f}s")
+                raise InputStalled(self.stalled)
+            select.select([], [self._fd], [], min(1.0, self.stall - idle))
+            self._flush()
+
+    def _stop(self, why: str) -> None:
+        self.stalled = f"the worker stopped reading: {why}"
+        log.warning("%s: %s", self.worker.id, self.stalled)
+        self.close()
+        if self.on_stall is not None:
+            try:
+                self.on_stall(self.stalled)
+            except Exception:               # noqa: BLE001 — noticing never blocks the engine
+                log.exception("stalled worker %s", self.worker.id)
 
     def close(self) -> None:
+        self._disarm()
+        self._pending.clear()
         if self._fd is not None:
             try:
                 os.close(self._fd)
@@ -486,7 +609,7 @@ class Proc:
 
     def __init__(self, worker: Worker, offset: int = 0):
         self.worker = worker
-        self.stdin = _In(worker)
+        self.stdin = _In(worker, on_stall=self._stalled)
         self.stdout = _Out(worker, "out", offset)
         self.stderr = _Out(worker, "err")
         self._code: Optional[int] = None
@@ -511,6 +634,22 @@ class Proc:
         while self.returncode is None:
             await asyncio.sleep(POLL * 2)
         return self._code                                   # type: ignore[return-value]
+
+    @property
+    def stalled(self) -> str:
+        """Why it was stopped for not reading its input; "" if it wasn't."""
+        return self.stdin.stalled
+
+    def _stalled(self, why: str) -> None:
+        """It stopped reading: stopped, so its session ends as cut off and
+        its step is taken up again (eki/steps.py) — not left deaf."""
+        st = self.worker.state
+        st.setdefault("why", why)
+        try:
+            _write_json(self.worker.dir / "state.json", st)
+        except OSError:
+            pass
+        self.worker.signal(signal.SIGTERM)
 
     def terminate(self) -> None:
         self.worker.signal(signal.SIGTERM)
@@ -631,6 +770,56 @@ def owners(workers: Iterable[Worker]) -> Dict[str, List[Worker]]:
 
 # ---- the keeper --------------------------------------------------------------------------
 
+def _relay(fifo: int, feed: int, cap: int) -> None:
+    """Drain `in` always, and pass it on as the program reads. Up to `cap`
+    waits here; past it the keeper stops draining, `in` fills, and the
+    engine sees a program that stopped reading. Once the program is gone,
+    what comes is dropped."""
+    held: collections.deque = collections.deque()
+    size = [0]
+    cond = threading.Condition()
+
+    def take() -> None:
+        while True:
+            with cond:
+                while size[0] >= cap:
+                    cond.wait()
+            try:
+                chunk = os.read(fifo, 65536)
+            except InterruptedError:
+                continue
+            except OSError:
+                return
+            if not chunk:
+                return
+            with cond:
+                held.append(chunk)
+                size[0] += len(chunk)
+                cond.notify_all()
+
+    def give() -> None:
+        gone = False
+        while True:
+            with cond:
+                while not held:
+                    cond.wait()
+                chunk = held.popleft()
+            view = memoryview(chunk)
+            while view and not gone:
+                try:
+                    view = view[os.write(feed, view):]
+                except InterruptedError:
+                    continue
+                except OSError:
+                    gone = True
+            with cond:
+                size[0] -= len(chunk)
+                cond.notify_all()
+
+    for fn in (take, give):
+        threading.Thread(target=fn, daemon=True).start()
+
+
 def _keep(d: Path) -> int:
     """Start the program, stay its parent, write down how it ended. The
     signal that stops the worker reaches the program too (one session); the
@@ -639,7 +828,13 @@ def _keep(d: Path) -> int:
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda *a: None)
     state: Dict[str, Any] = {"keeper": os.getpid(), "keeper_started": started_at(os.getpid())}
-    stdin = os.open(d / "in", os.O_RDWR) if spec.get("talk") else os.open(os.devnull, os.O_RDONLY)
+    fifo = -1
+    if spec.get("talk"):
+        # the program reads a pipe of the keeper's; `in` is drained into it
+        fifo = os.open(d / "in", os.O_RDWR)
+        stdin, feed = os.pipe()
+    else:
+        stdin, feed = os.open(os.devnull, os.O_RDONLY), -1
     out_path = Path(spec["out"]) if spec.get("out") else d / "out"
     out = open(out_path, "ab")
     err = out if spec.get("merge") else open(d / "err", "ab")
@@ -652,6 +847,9 @@ def _keep(d: Path) -> int:
         state.update(exit=127, ended=time.time())
         _write_json(d / "state.json", state)
         return 127
+    if fifo >= 0:
+        os.close(stdin)
+        _relay(fifo, feed, int(spec.get("input_cap") or INPUT_CAP))
     state.update(pid=proc.pid, started=started_at(proc.pid), at=time.time())
     _write_json(d / "state.json", state)
     while True:

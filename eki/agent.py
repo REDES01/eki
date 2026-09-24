@@ -22,6 +22,11 @@ from typing import Tuple
 LABEL = "local.eki.engine"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOG = Path.home() / ".eki" / "engine.log"
+#: the supervisor's watchdog: an engine that stops answering is restarted
+WATCHDOG = "local.eki.watchdog"
+WATCHDOG_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{WATCHDOG}.plist"
+#: how often it looks
+WATCHDOG_EVERY = 30
 
 
 def _domain() -> str:
@@ -58,11 +63,13 @@ def plist_for(root: Path) -> dict:
         # can't start at all (a port someone else holds, say)
         "KeepAlive": True,
         "ThrottleInterval": 10,
-        # a stop or a restart (`kickstart -k`, a swap) ends the engine, not
-        # the work it started: Claude Code, Codex, a test run are workers in
-        # sessions of their own (eki/workers.py) and the next engine takes
-        # them up again. Only a person's cancel kills one.
-        "AbandonProcessGroup": True,
+        # a stop or a restart (`kickstart -k`, a swap) ends the whole engine
+        # — the launcher and the python under it: with the group abandoned, a
+        # killed launcher left the engine holding the port (2026-09-24). The
+        # work it started isn't in that group: Claude Code, Codex, a test run
+        # are workers in sessions of their own (eki/workers.py), and the next
+        # engine takes them up again. Only a person's cancel kills one.
+        "AbandonProcessGroup": False,
         "StandardOutPath": str(LOG),
         "StandardErrorPath": str(LOG),
         # launchd's PATH is /usr/bin:/bin. The CLIs eki drives live in these,
@@ -79,6 +86,35 @@ def plist_for(root: Path) -> dict:
         # an engine answering a chat should not be throttled like a daemon
         "ProcessType": "Interactive",
     }
+
+
+def watchdog_plist() -> dict:
+    """The supervisor, every WATCHDOG_EVERY seconds, with one question: does
+    the engine answer? (eki/supervisor.sh --watchdog)"""
+    from . import builds
+    return {
+        "Label": WATCHDOG,
+        "ProgramArguments": ["/bin/bash", str(builds.SUPERVISOR), "--watchdog"],
+        "StartInterval": WATCHDOG_EVERY,
+        "StandardOutPath": "/dev/null",
+        "StandardErrorPath": "/dev/null",
+        "EnvironmentVariables": {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+        "ProcessType": "Background",
+    }
+
+
+def _install_watchdog() -> None:
+    target = f"{_domain()}/{WATCHDOG}"
+    code, _ = _launchctl("print", target)
+    if code == 0:
+        _launchctl("bootout", target)
+        for _ in range(50):
+            if _launchctl("print", target)[0] != 0:
+                break
+            time.sleep(0.1)
+    with WATCHDOG_PLIST.open("wb") as f:
+        plistlib.dump(watchdog_plist(), f)
+    _launchctl("bootstrap", _domain(), str(WATCHDOG_PLIST))
 
 
 def _brew_owned() -> bool:
@@ -152,6 +188,7 @@ def install(root: Path) -> str:
         code, out = _launchctl("bootstrap", _domain(), str(PLIST))
     if code != 0:
         return f"wrote {PLIST}, but launchd refused it: {out}"
+    _install_watchdog()
     return f"installed — the engine now starts at login ({PLIST})"
 
 
@@ -159,6 +196,8 @@ def uninstall() -> str:
     if _brew_owned():
         code, out = _brew("stop")
         return "removed — the engine will no longer start at login" if code == 0 else out
+    _launchctl("bootout", f"{_domain()}/{WATCHDOG}")
+    WATCHDOG_PLIST.unlink(missing_ok=True)
     if loaded():
         _launchctl("bootout", f"{_domain()}/{LABEL}")
     if PLIST.exists():

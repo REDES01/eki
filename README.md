@@ -121,7 +121,9 @@ For an agent with a shell there are commands that make one thing and hand
 back a file: `eki image "…" -o assets/` and `eki write "…" --model <key>`
 block until it's done, save the result (never over an existing file), print
 only its path, and say how it went in the exit code — `--json` for one JSON
-object instead (see `eki/produce.py`).
+object instead (see `eki/produce.py`). `eki capabilities` says which
+backends are up right now, what each does, and the command that reaches it
+(`--json` for a program).
 
 ## Adding things
 

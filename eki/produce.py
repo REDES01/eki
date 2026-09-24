@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Capability commands: `eki image`, `eki write` — one per kind of work.
+"""Capability commands: `eki image`, `eki write` — one per kind of work —
+and `eki capabilities`, what this Mac can do right now.
 
 `eki ask` is for a person watching a terminal: it streams, it can be let go
 of, it prints the route. These are for an agent with a shell that wants a
@@ -12,6 +13,11 @@ and say how it went in the exit code:
     3  the engine couldn't be reached or refused the request
     4  the run finished but made nothing (no picture in the answer)
     5  it took longer than --timeout (the run carries on in the engine)
+
+`eki capabilities` is what an agent reads before these: every backend the
+engine has, whether it is up, what it does, and the command that reaches
+it — plus how deep the caller already is, since past the limit eki refuses
+(eki/nesting.py). Exit 0, or 3 when the engine can't be reached.
 
 Files are the handoff: what is made lands where `-o` says — the current
 folder by default — never over a file that is already there, and the path
@@ -29,6 +35,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
+
+from . import nesting
 
 OK, FAILED, UNREACHABLE, NOTHING, TIMEOUT = 0, 1, 3, 4, 5
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+\.(?:png|jpe?g|webp|gif))\)", re.I)
@@ -163,6 +171,90 @@ def write(args: Any, ensure: Callable[[str], None]) -> int:
         return [dest]
 
     return _finish(args, body, ensure, make, extra)
+
+
+# ---- what this Mac can do ----------------------------------------------------
+
+def does(caps: Dict[str, Any]) -> str:
+    """What a backend does, in a few words: the flags it has, what it makes,
+    what a request must bring. Shared with the `eki_capabilities` tool."""
+    said = ", ".join(k for k in ("repo", "tools", "vision", "images_out", "text", "web") if caps.get(k))
+    if caps.get("produces"):
+        said += ("; " if said else "") + "makes " + "/".join(caps["produces"])
+    if caps.get("needs"):
+        said += ("; " if said else "") + "needs " + "/".join(caps["needs"])
+    return said
+
+
+def reach(b: Dict[str, Any]) -> List[str]:
+    """The commands that reach this backend, most specific first."""
+    key, caps = b.get("key", ""), b.get("capabilities") or {}
+    made = set(caps.get("produces") or [])
+    use: List[str] = []
+    if caps.get("images_out") or "image" in made:
+        use.append(f'eki image "…" -m {key} -o <folder>/')
+    if caps.get("text", True) and not caps.get("repo"):
+        use.append(f'eki write "…" -m {key} -o <file>')
+    if caps.get("repo"):
+        use.append(f'eki ask "…" --backend {key} -r <folder>')
+    elif caps.get("text", True):
+        use.append(f'eki ask "…" --backend {key}')
+    return use
+
+
+def capabilities(args: Any, ensure: Callable[[str], None]) -> int:
+    """Every backend the running engine has, up or down, and what reaches
+    it: the engine's own view (it knows what is healthy right now), not a
+    reading of the config file."""
+    try:
+        ensure(args.service)
+        with httpx.Client(base_url=args.service, timeout=30) as http:
+            r = http.get("/api/backends")
+            if r.status_code >= 400:
+                raise Failure(UNREACHABLE, f"the engine refused it: {r.status_code} {r.text[:200]}")
+            rows = r.json()
+    except SystemExit:
+        return _unreachable(args, f"the engine isn't running on {args.service}")
+    except httpx.HTTPError as e:
+        return _unreachable(args, f"lost the engine: {e}")
+    except Failure as f:
+        return _unreachable(args, str(f))
+    depth, _ = nesting.caller()
+    backends = [{"key": b.get("key", ""), "label": b.get("label") or "", "kind": b.get("kind") or "",
+                 "up": bool(b.get("ok")), "tier": b.get("tier"), "does": does(b.get("capabilities") or {}),
+                 "capabilities": b.get("capabilities") or {}, "detail": b.get("detail") or "",
+                 "use": reach(b) if b.get("ok") else []}
+                for b in rows]
+    if args.json:
+        print(json.dumps({"ok": True, "depth": depth, "max_depth": nesting.MAX_DEPTH,
+                          "can_ask": depth < nesting.MAX_DEPTH, "backends": backends, "error": ""}))
+        return OK
+    up = [b for b in backends if b["up"]]
+    print(f"eki on this Mac: {len(up)} of {len(backends)} backends up.")
+    if depth >= nesting.MAX_DEPTH:
+        print(f"You are at nesting depth {depth} of {nesting.MAX_DEPTH}: eki will refuse what you ask — "
+              "do this step yourself.")
+    elif depth:
+        print(f"You are at nesting depth {depth} of {nesting.MAX_DEPTH}: eki takes requests below that.")
+    for group, rows_ in (("up", up), ("down", [b for b in backends if not b["up"]])):
+        if not rows_:
+            continue
+        print(f"\n{group}:")
+        for b in rows_:
+            print(f"  {b['key']}: {b['label']} [{b['kind']}]"
+                  + (f" ({b['does']})" if b["does"] else "")
+                  + (f" — {b['detail']}" if b["detail"] else ""))
+            for cmd in b["use"]:
+                print(f"      {cmd}")
+    return OK
+
+
+def _unreachable(args: Any, error: str) -> int:
+    if args.json:
+        print(json.dumps({"ok": False, "backends": [], "error": error}))
+    else:
+        print(f"! {error}", file=sys.stderr)
+    return UNREACHABLE
 
 
 def _finish(args: Any, body: Dict[str, Any], ensure: Callable[[str], None],

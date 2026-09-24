@@ -566,12 +566,12 @@ context.
 
 ```
 eki ask "…"                       # routed; prints the answer as it streams
-eki ask "…" --backend <key>       # a backend by key (see `eki backends`)
+eki ask "…" --backend <key>       # a backend by key (see `eki capabilities`)
 eki ask "a watercolor fox" --image  # a picture; the path is in the answer
 eki ask "…" -r <folder>           # a program that may edit that folder
 eki ask "…" -d                    # detached: prints a run id
 eki runs | eki watch <id> | eki cancel <id> | eki diff <id>
-eki backends                      # what is available and healthy
+eki capabilities                  # what this Mac can do now, and the command for each
 eki models [list|start|stop] <key>
 eki skills                        # the skills every backend shares
 ```

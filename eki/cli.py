@@ -10,6 +10,7 @@
 
 For an agent with a shell — blocking, quiet, a path out, real exit codes:
 
+    eki capabilities                     what this Mac can do right now
     eki image "a brass compass" -o art/  a picture, saved; its path printed
     eki write "a sea shanty" -m qwen     text from that model into a file
     ... --json                           one JSON object instead
@@ -1143,6 +1144,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             c.add_argument("--height", type=int, default=0)
             c.add_argument("-n", "--count", type=int, default=0, help="how many (1-4)")
 
+    cp = sub.add_parser("capabilities", help="what this Mac can do right now, and how to reach it (for agents)")
+    cp.add_argument("--json", action="store_true",
+                    help="one JSON object: ok, depth, max_depth, can_ask, backends, error")
+
     r = sub.add_parser("runs", help="what's running and what finished")
     r.add_argument("-n", "--limit", type=int, default=30)
     for name, helptext in (("watch", "follow a run"), ("cancel", "stop a run"),
@@ -1310,7 +1315,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_agent(args)
     if args.cmd == "self":
         return cmd_self(args)
-    if args.cmd in ("image", "write"):
+    if args.cmd in ("image", "write", "capabilities"):
         from . import produce
         return getattr(produce, args.cmd)(args, ensure_engine)
     if args.cmd == "runs":

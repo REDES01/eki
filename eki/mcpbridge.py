@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from . import grant as grant_mod
 from . import nesting
+from . import produce
 
 log = logging.getLogger("eki.mcp")
 
@@ -225,12 +226,7 @@ class Bridge:
         for b in rows:
             ok = b.get("ok", b.get("healthy"))
             state = "up" if ok else "down"
-            caps = b.get("capabilities") or {}
-            does = ", ".join(k for k in ("repo", "tools", "vision", "images_out", "text") if caps.get(k))
-            if caps.get("produces"):
-                does += ("; " if does else "") + "makes " + "/".join(caps["produces"])
-            if caps.get("needs"):
-                does += "; needs " + "/".join(caps["needs"])
+            does = produce.does(b.get("capabilities") or {})
             lines.append(f"- {b.get('key')}: {b.get('label') or ''} [{b.get('kind')}] {state}"
                          + (f" ({does})" if does else "")
                          + (f" — {b.get('detail')}" if b.get("detail") else ""))

@@ -117,3 +117,70 @@ def test_asked_from_inside_an_agent_it_says_so(monkeypatch, tmp_path):
 @pytest.mark.parametrize("prompt,name", [("", "text"), ("Ünïcode!! ok", "n-code-ok")])
 def test_slug(prompt, name):
     assert produce.slug(prompt, "text") == name
+
+
+BACKENDS = [
+    {"key": "qwen", "label": "Qwen", "kind": "mlx", "ok": True, "tier": 0, "detail": "",
+     "capabilities": {"text": True, "context_tokens": 128000, "produces": ["prose"]}},
+    {"key": "comfyui", "label": "Flux", "kind": "comfyui", "ok": True, "tier": 0, "detail": "",
+     "capabilities": {"text": False, "images_out": True, "produces": ["image"]}},
+    {"key": "claude_code", "label": "Claude Code", "kind": "claude_code", "ok": True, "tier": 3,
+     "detail": "", "capabilities": {"text": True, "repo": True, "tools": True, "web": True}},
+    {"key": "gpt", "label": "GPT", "kind": "openai", "ok": False, "tier": 2,
+     "detail": "no key", "capabilities": {"text": True}},
+]
+
+
+def backends_engine(monkeypatch, status=200):
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/backends":
+            return httpx.Response(status, json=BACKENDS if status == 200 else {"detail": "no"})
+        return httpx.Response(404)
+
+    real = httpx.Client
+    monkeypatch.setattr(produce.httpx, "Client",
+                        lambda **kw: real(transport=httpx.MockTransport(handle), **kw))
+    monkeypatch.setattr(migrate, "run", lambda root: None)
+    monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
+
+
+def test_capabilities_says_what_is_up_and_the_command_for_each(monkeypatch, capsys):
+    backends_engine(monkeypatch)
+    monkeypatch.delenv("EKI_DEPTH", raising=False)
+    assert cli.main(["capabilities"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("eki on this Mac: 3 of 4 backends up.")
+    assert 'eki image "…" -m comfyui -o <folder>/' in out
+    assert 'eki write "…" -m qwen -o <file>' in out
+    assert 'eki ask "…" --backend claude_code -r <folder>' in out
+    assert "eki write \"…\" -m comfyui" not in out          # it only draws
+    down = out.split("down:")[1]
+    assert "gpt: GPT [openai]" in down and "no key" in down and "eki " not in down
+    assert "depth" not in out                               # a person's shell: nothing to say
+
+
+def test_capabilities_json_carries_the_depth(monkeypatch, capsys):
+    backends_engine(monkeypatch)
+    monkeypatch.setenv("EKI_DEPTH", str(produce.nesting.MAX_DEPTH))
+    assert cli.main(["capabilities", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["ok"] and got["can_ask"] is False and got["depth"] == produce.nesting.MAX_DEPTH
+    by = {b["key"]: b for b in got["backends"]}
+    assert by["claude_code"]["does"] == "repo, tools, text, web"
+    assert by["gpt"]["up"] is False and by["gpt"]["use"] == []
+    monkeypatch.setenv("EKI_DEPTH", str(produce.nesting.MAX_DEPTH))
+    assert cli.main(["capabilities"]) == 0
+    assert "eki will refuse" in capsys.readouterr().out
+
+
+def test_capabilities_without_an_engine_exits_3(monkeypatch, capsys):
+    backends_engine(monkeypatch, status=500)
+    assert cli.main(["capabilities", "--json"]) == produce.UNREACHABLE
+    got = json.loads(capsys.readouterr().out)
+    assert got["ok"] is False and "refused" in got["error"]
+
+    def down(service):
+        raise SystemExit(1)
+    monkeypatch.setattr(cli, "ensure_engine", down)
+    assert cli.main(["capabilities"]) == produce.UNREACHABLE
+    assert "isn't running" in capsys.readouterr().err

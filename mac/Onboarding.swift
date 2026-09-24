@@ -60,6 +60,8 @@ enum Engine {
             "RunAtLoad": true,
             "KeepAlive": true,
             "ThrottleInterval": 10,
+            // a restart ends the engine, not the work it started (eki/workers.py)
+            "AbandonProcessGroup": true,
             "ProcessType": "Interactive",
             "StandardOutPath": NSHomeDirectory() + "/.eki/engine.log",
             "StandardErrorPath": NSHomeDirectory() + "/.eki/engine.log",

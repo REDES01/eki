@@ -25,6 +25,8 @@ import logging
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
+from . import workers
+
 log = logging.getLogger("eki.codex_live")
 
 INIT_TIMEOUT = 60.0
@@ -76,7 +78,10 @@ class CodexSession:
         self.last_used = time.time()
         self.busy = False
         self.exit_error = ""
-        self._events: asyncio.Queue = asyncio.Queue()
+        #: what the worker serves, written in its folder: thread, backend, run
+        self.worker_meta: Dict[str, Any] = {}
+        self._reading = workers.Reading(None)
+        self._events: asyncio.Queue = workers.Tagged()
         self._waiting: Dict[int, asyncio.Future] = {}
         self._pending: Dict[str, Dict[str, Any]] = {}
         self._reader: Optional[asyncio.Task] = None
@@ -90,11 +95,50 @@ class CodexSession:
     def alive(self) -> bool:
         return self.proc is not None and self.proc.returncode is None
 
+    @property
+    def worker(self) -> Optional[workers.Worker]:
+        return getattr(self.proc, "worker", None)
+
+    def serve(self, **fields: Any) -> None:
+        """Say in the worker's folder what it works for now."""
+        self.worker_meta.update(fields)
+        if self.worker is not None:
+            try:
+                self.worker.update(**fields)
+            except OSError:
+                pass
+
+    @classmethod
+    def attach(cls, worker: workers.Worker, permissions: str = "auto") -> "CodexSession":
+        """A Codex a previous engine started, still working: read on from
+        where that engine's reading stood (see LiveSession.attach)."""
+        spec = worker.spec
+        session = cls(list(spec.get("argv") or []), spec.get("cwd") or None, None,
+                      model=str(spec.get("model") or ""), permissions=permissions)
+        session.worker_meta = {k: spec[k] for k in ("thread", "backend", "run") if spec.get(k)}
+        session.session_id = str(spec.get("session") or "")
+        # our request ids start where the last engine's can't have reached
+        session._next_id = int(time.time() * 1000) % 10**12
+        session.proc = workers.attach(worker)
+        session._reading = workers.Reading(session.proc)
+        session._had_text = True                    # perhaps mid-message (see LiveSession.attach)
+        session._reader = asyncio.get_running_loop().create_task(session._pump())
+        return session
+
+    async def detach(self) -> None:
+        """The engine is going away: leave Codex working for the next one."""
+        if self._reader:
+            self._reader.cancel()
+        if getattr(self.proc, "detached", False):
+            self.proc.detach()
+        for fut in self._waiting.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("the engine is restarting"))
+
     async def start(self) -> None:
-        self.proc = await asyncio.create_subprocess_exec(
-            *self.argv, cwd=self.cwd, env=self.env,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024)
+        self.proc = await workers.start_proc(self.argv, self.cwd, self.env, kind="codex",
+                                             **self.worker_meta)
+        self._reading = workers.Reading(self.proc)
         self._reader = asyncio.create_task(self._pump())
         try:
             await asyncio.wait_for(self._request("initialize", {
@@ -117,6 +161,7 @@ class CodexSession:
             raise RuntimeError(str(e))
         thread = (result or {}).get("thread") or {}
         self.session_id = thread.get("id") or (result or {}).get("threadId") or self.resume
+        self.serve(session=self.session_id, model=self.model)
 
     def _thread_params(self) -> Dict[str, Any]:
         # "never" would make Codex refuse anything its rules flag (rm -rf,
@@ -143,10 +188,14 @@ class CodexSession:
                 self.proc.stdin.close()
             except Exception:                       # noqa: BLE001
                 pass
+            if getattr(self.proc, "detached", False):
+                self.proc.terminate()               # its worker never ends its input
             try:
                 await asyncio.wait_for(self.proc.wait(), timeout=3)
             except asyncio.TimeoutError:
                 self.proc.kill()
+        if getattr(self.proc, "detached", False):
+            self.proc.detach()
         for fut in self._waiting.values():
             if not fut.done():
                 fut.set_exception(RuntimeError("session closed"))
@@ -156,7 +205,10 @@ class CodexSession:
     def _write(self, obj: Dict[str, Any]) -> None:
         if not self.alive:
             raise RuntimeError("Codex is not running" + (f": {self.exit_error}" if self.exit_error else ""))
-        self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        try:
+            self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        except (BrokenPipeError, OSError) as e:
+            raise RuntimeError(f"Codex is not reading: {e}")
 
     def _notify(self, method: str, params: Dict[str, Any]) -> None:
         self._write({"jsonrpc": "2.0", "method": method, "params": params})
@@ -365,6 +417,7 @@ class CodexSession:
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return False
+        self._reading.paid(request_id)
         rid, method, params = pending["id"], pending["method"], pending["params"]
         allow = response.get("behavior", "allow") == "allow"
         if method == "item/tool/requestUserInput":
@@ -406,14 +459,25 @@ class CodexSession:
         assert self.proc and self.proc.stdout
         try:
             while True:
+                self._reading.before_line()
                 line = await self.proc.stdout.readline()
                 if not line:
                     break
+                _, end = self._reading.after_line()
                 try:
                     msg = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(msg, dict):
+                    continue
+                if self._reading.replaying() and not (
+                        "id" in msg and msg.get("method")
+                        and self._reading.again(f"{msg['method']}#{msg['id']}")):
+                    continue                        # handled by the engine before this one
+                self._events.pos = end              # type: ignore[attr-defined]
                 self._handle(msg)
+                if self._events.empty():
+                    self._reading.handled(end)
         except asyncio.CancelledError:
             raise
         except Exception as e:                      # noqa: BLE001
@@ -536,6 +600,7 @@ class CodexSession:
             self._events.put_nowait({"kind": "activity", "tool": "approved", "input": {"text": what}})
             return
         self._pending[key] = {"id": rid, "method": method, "params": params, "request_id": key}
+        self._reading.owe(key)                      # asked again after a restart, until answered
         if method == "item/tool/requestUserInput":
             questions = [{"question": q.get("question", ""), "header": q.get("header", ""),
                           "multiSelect": False,
@@ -566,6 +631,7 @@ class CodexSession:
         else:
             # elicitations, dynamic tools, attestation: not hosted here
             self._pending.pop(key, None)
+            self._reading.paid(key)
             self._write({"jsonrpc": "2.0", "id": rid,
                          "error": {"code": -32601, "message": f"eki doesn't handle {method}"}})
 
@@ -585,7 +651,9 @@ class CodexSession:
                         return
                     raise RuntimeError("Codex went quiet for too long")
                 self.last_used = time.time()
+                pos = ev.pop("_pos", None)
                 yield ev
+                self._reading.handled(pos)
                 if ev["kind"] in ("result", "exit"):
                     return
         finally:

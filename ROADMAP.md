@@ -105,7 +105,11 @@ unless it needs them.
   agent's turn carries on in its session; a check, a git step or a
   conflict resolution is taken up again from where it stands, once — and
   *interrupted* is never *failed*: a program killed by a restart, a test run
-  cut off, is carried on, not reported as broken (`eki/steps.py`).
+  cut off, is carried on, not reported as broken (`eki/steps.py`). The
+  engine is a manager, not a parent: the programs doing the work run on
+  their own and a restart leaves them running — the next engine follows
+  them again where it left off, and concludes what finished in the gap
+  (`eki/workers.py`). Only a person's cancel kills one.
 - **Read what others know about models; don't work it out.** Which model
   a vendor recommends for what is on its own page; which local model
   people run and how its makers measured it is on Ollama. eki reads those

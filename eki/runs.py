@@ -271,6 +271,9 @@ class Runner:
         #: (run, exception) for a run that ended in an error — the engine
         #: tells eki's faults apart from a provider saying no (eki/observe.py)
         self.on_error: Optional[Callable[[Dict[str, Any], BaseException], None]] = None
+        #: a run cancelled by a person: the engine kills its workers — the
+        #: one thing that ends a program a restart would leave working
+        self.on_cancel: Optional[Callable[[str], None]] = None
 
     @property
     def running(self) -> List[str]:
@@ -309,6 +312,11 @@ class Runner:
         self.tasks[rid] = asyncio.create_task(self._execute(run))
 
     def cancel(self, rid: str) -> bool:
+        if self.on_cancel is not None:
+            try:
+                self.on_cancel(rid)
+            except Exception:                     # noqa: BLE001
+                pass                              # the cancel itself goes on
         task = self.tasks.get(rid)
         if task and not task.done():
             task.cancel()

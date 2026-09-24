@@ -207,6 +207,20 @@ while True:
         else:
             text("Understood, I won't.")
             result("Understood, I won't.")
+    elif "slowly" in prompt:
+        # a long turn, a word at a time: long enough for an engine to go
+        # away and come back in the middle of it (eki/workers.py)
+        import re as _re
+        import time as _t
+        n = int((_re.search(r"to (\d+)", prompt) or [0, 20])[1])
+        out({"type": "stream_event", "event": {"type": "message_start"}})
+        for i in range(1, n + 1):
+            out({"type": "stream_event", "event": {"type": "content_block_delta",
+                                                   "delta": {"type": "text_delta", "text": f"{i} "}}})
+            _t.sleep(0.1)
+        whole = "".join(f"{i} " for i in range(1, n + 1))
+        out({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": whole}]}})
+        result(whole)
     elif "fail" in prompt:
         result("Something went wrong", err=True)
     elif "tools" in prompt:

@@ -11,7 +11,10 @@ terminal shows can therefore be shown by eki instead, drawn its own way,
 while the genuine program does the work on its own login.
 
 One session per conversation, kept open while the engine runs; a thread
-reopened later resumes the same conversation by its session id.
+reopened later resumes the same conversation by its session id. The program
+runs as a worker (eki/workers.py): the engine restarting leaves it working,
+and the next engine takes the session up again where its reading stood
+(`attach`).
 
 Nothing here reads or forwards the program's credentials; eki only runs it.
 """
@@ -25,6 +28,8 @@ import re
 import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
+
+from . import workers
 
 log = logging.getLogger("eki.live")
 
@@ -80,7 +85,10 @@ class LiveSession:
         self.rate_limits: Dict[str, Any] = {}
         self.last_used = time.time()
         self.busy = False
-        self._events: asyncio.Queue = asyncio.Queue()
+        #: what the worker serves, written in its folder: thread, backend, run
+        self.worker_meta: Dict[str, Any] = {}
+        self._reading = workers.Reading(None)
+        self._events: asyncio.Queue = workers.Tagged()
         self._waiting: Dict[str, asyncio.Future] = {}        # our control requests
         self._pending: Dict[str, Dict[str, Any]] = {}        # its requests to us
         self._reader: Optional[asyncio.Task] = None
@@ -95,11 +103,24 @@ class LiveSession:
     def alive(self) -> bool:
         return self.proc is not None and self.proc.returncode is None
 
+    @property
+    def worker(self) -> Optional[workers.Worker]:
+        return getattr(self.proc, "worker", None)
+
+    def serve(self, **fields: Any) -> None:
+        """Say in the worker's folder what it works for now (the run of a
+        turn), so a new engine knows whose it is."""
+        self.worker_meta.update(fields)
+        if self.worker is not None:
+            try:
+                self.worker.update(**fields)
+            except OSError:
+                pass
+
     async def start(self) -> None:
-        self.proc = await asyncio.create_subprocess_exec(
-            *self.argv, cwd=self.cwd, env=self.env,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024)
+        self.proc = await workers.start_proc(self.argv, self.cwd, self.env, kind="claude",
+                                             **self.worker_meta)
+        self._reading = workers.Reading(self.proc)
         self._init_seen = asyncio.Event()
         self._reader = asyncio.create_task(self._pump())
         init: Dict[str, Any] = {"subtype": "initialize"}
@@ -134,7 +155,28 @@ class LiveSession:
             except (RuntimeError, asyncio.TimeoutError) as e:
                 log.warning("extra MCP servers: %s", e)
 
+    @classmethod
+    def attach(cls, worker: workers.Worker, bridge: Any = None,
+               extra_servers: Optional[Dict[str, Dict[str, Any]]] = None) -> "LiveSession":
+        """A session a previous engine started, still working: read on from
+        where that engine's reading stood — no line twice, and what the
+        program still waits on (a permission, a tool call) asked again."""
+        spec = worker.spec
+        session = cls(list(spec.get("argv") or []), spec.get("cwd") or None, None,
+                      bridge=bridge, extra_servers=extra_servers)
+        session.worker_meta = {k: spec[k] for k in ("thread", "backend", "run") if spec.get(k)}
+        session.session_id = str(spec.get("session") or "")
+        session.proc = workers.attach(worker)
+        session._reading = workers.Reading(session.proc)
+        # perhaps mid-message: its deltas were read, so the whole message
+        # that closes it isn't text again
+        session._got_delta = True
+        session._reader = asyncio.get_running_loop().create_task(session._pump())
+        return session
+
     async def close(self) -> None:
+        """Ended on purpose: the program goes (it would never see an end of
+        input — its worker keeps that open across restarts)."""
         if self._reader:
             self._reader.cancel()
         if self.proc and self.proc.returncode is None:
@@ -142,13 +184,28 @@ class LiveSession:
                 self.proc.stdin.close()
             except Exception:                       # noqa: BLE001
                 pass
+            if getattr(self.proc, "detached", False):
+                self.proc.terminate()
             try:
                 await asyncio.wait_for(self.proc.wait(), timeout=3)
             except asyncio.TimeoutError:
                 self.proc.kill()
+        if getattr(self.proc, "detached", False):
+            self.proc.detach()
         for fut in self._waiting.values():
             if not fut.done():
                 fut.set_exception(RuntimeError("session closed"))
+
+    async def detach(self) -> None:
+        """The engine is going away: stop reading, leave the program working
+        for the next engine to take up (`attach`)."""
+        if self._reader:
+            self._reader.cancel()
+        if getattr(self.proc, "detached", False):
+            self.proc.detach()
+        for fut in self._waiting.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("the engine is restarting"))
 
     # ---- talking -----------------------------------------------------
 
@@ -156,7 +213,10 @@ class LiveSession:
         if not self.alive:
             raise RuntimeError("Claude Code is not running" +
                                (f": {self.exit_error}" if self.exit_error else ""))
-        self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        try:
+            self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        except (BrokenPipeError, OSError) as e:
+            raise RuntimeError(f"Claude Code is not reading: {e}")
 
     async def _request(self, request: Dict[str, Any]) -> Any:
         rid = uuid.uuid4().hex[:12]
@@ -193,6 +253,7 @@ class LiveSession:
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return False
+        self._reading.paid(request_id)
         body = dict(response)
         if pending.get("tool_use_id") and "toolUseID" not in body:
             body["toolUseID"] = pending["tool_use_id"]
@@ -324,15 +385,21 @@ class LiveSession:
         assert self.proc and self.proc.stdout
         try:
             while True:
+                self._reading.before_line()
                 line = await self.proc.stdout.readline()
                 if not line:
                     break
+                _, end = self._reading.after_line()
                 try:
                     event = json.loads(line)
                 except ValueError:
                     continue
                 if not isinstance(event, dict):
                     continue
+                if self._reading.replaying() and not (event.get("type") == "control_request"
+                                                      and self._reading.again(event.get("request_id"))):
+                    continue                        # handled by the engine before this one
+                self._events.pos = end              # type: ignore[attr-defined]
                 try:
                     self._handle(event)
                 except Exception as e:              # noqa: BLE001
@@ -341,6 +408,9 @@ class LiveSession:
                     # a fault (eki/observe.py) and reading carries on.
                     log.exception("live reader: %s in a %r event: %s", type(e).__name__,
                                   event.get("type"), json.dumps(event)[:400])
+                if self._events.empty():
+                    # nothing of it waits to be handled: read past it for good
+                    self._reading.handled(end)
         except asyncio.CancelledError:
             raise
         except Exception as e:                      # noqa: BLE001
@@ -374,8 +444,11 @@ class LiveSession:
                     and req.get("server_name") == self.bridge.name:
                 # one JSON-RPC message for eki's own tools; answered in a
                 # task so a slow tool (a picture) doesn't stall the reader
+                self._reading.owe(rid)
                 asyncio.get_running_loop().create_task(self._serve_bridge(rid, req.get("message")))
                 return
+            if sub in ("elicitation", "request_user_dialog", "can_use_tool"):
+                self._reading.owe(rid)              # asked again after a restart, until answered
             if sub == "elicitation":
                 # an MCP server asking you something: a form, or a URL to
                 # visit (its own sign-in, say) — a card either way
@@ -418,6 +491,7 @@ class LiveSession:
             return
         if t == "control_cancel_request":
             rid = event.get("request_id", "")
+            self._reading.paid(rid)
             if self._pending.pop(rid, None) is not None:
                 self._events.put_nowait({"kind": "cancel", "request_id": rid})
             return
@@ -425,6 +499,8 @@ class LiveSession:
             sub = event.get("subtype")
             if sub == "init":
                 self.session_id = event.get("session_id") or self.session_id
+                if self.session_id and self.worker_meta.get("session") != self.session_id:
+                    self.serve(session=self.session_id)
                 self.model = event.get("model") or self.model
                 self.context_window = known_window(self.model) or self.context_window
                 self.permission_mode = event.get("permissionMode") or ""
@@ -552,6 +628,7 @@ class LiveSession:
             self._write({"type": "control_response",
                          "response": {"subtype": "success", "request_id": rid,
                                       "response": {"mcp_response": reply}}})
+            self._reading.paid(rid)
         except RuntimeError:
             pass
 
@@ -581,7 +658,10 @@ class LiveSession:
                         return
                     raise RuntimeError("Claude Code went quiet for too long")
                 self.last_used = time.time()
+                pos = ev.pop("_pos", None)
                 yield ev
+                # handled — the reading moves past its line for good
+                self._reading.handled(pos)
                 if ev["kind"] in ("result", "exit"):
                     return
         finally:

@@ -142,6 +142,11 @@ async def lifespan(app: FastAPI):
                 await eng.self_release()
             except Exception:                       # noqa: BLE001
                 log.exception("self-work steps")
+            try:
+                # finished work dirs after a week; a worker nobody took up, killed
+                await asyncio.to_thread(eng.sweep_workers)
+            except Exception:                       # noqa: BLE001
+                log.exception("worker housekeeping")
             if ticks % 5 == 2:
                 try:
                     # what the engine runs but your checkout missed: in, once it can go
@@ -190,6 +195,14 @@ async def lifespan(app: FastAPI):
             except Exception as e:                  # noqa: BLE001
                 log.info("claude probe: %s", e)
 
+    try:
+        # the programs the last engine left working (eki/workers.py): taken
+        # up again before anything decides what to carry on
+        kept = eng.reattach_workers()
+        if kept:
+            log.info("took up %d program(s) still working", kept)
+    except Exception:                               # noqa: BLE001
+        log.exception("reattaching workers")
     try:
         noted = eng.note_interruptions()
         if noted:

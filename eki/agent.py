@@ -58,6 +58,11 @@ def plist_for(root: Path) -> dict:
         # can't start at all (a port someone else holds, say)
         "KeepAlive": True,
         "ThrottleInterval": 10,
+        # a stop or a restart (`kickstart -k`, a swap) ends the engine, not
+        # the work it started: Claude Code, Codex, a test run are workers in
+        # sessions of their own (eki/workers.py) and the next engine takes
+        # them up again. Only a person's cancel kills one.
+        "AbandonProcessGroup": True,
         "StandardOutPath": str(LOG),
         "StandardErrorPath": str(LOG),
         # launchd's PATH is /usr/bin:/bin. The CLIs eki drives live in these,

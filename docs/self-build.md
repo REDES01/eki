@@ -184,10 +184,44 @@ no change to eki can break it. `eki agent install` copies it to
    fast-forwards it into your checkout if nothing there is uncommitted or
    newer.
 
-**Runs cut off by a swap** (or any restart) aren't cancelled. The engine
-going away marks each run it cuts off *handed over* (`Runner.stop`); the
-next engine marks them interrupted, says so in their threads, and carries
-them on (`Engine._carry`, `resume_interrupted`):
+**Runs cut off by a swap** (or any restart) aren't cancelled — and mostly
+aren't even cut off. The programs doing the work are **workers**
+(`eki/workers.py`), not children of the engine: Claude Code and Codex, the
+test runs of a check, the candidate engine, a rebase. Each is started in a
+session of its own under a small keeper, with its output in files the
+engine reads rather than a pipe it holds:
+
+    ~/.eki/work/<id>/  spec.json (command, run, step, thread)
+                       state.json (pid, start time, exit code once it ends)
+                       out, err, in (a fifo, for a program eki talks to)
+                       read (how far the engine has read `out`)
+
+launchd leaves them when it stops the engine (`AbandonProcessGroup` in the
+plist `eki agent install` writes; `kickstart -k` and the supervisor's swap
+are such stops). The engine going away detaches from them (`Engine.close`)
+and the next one takes them up at start (`Engine.reattach_workers`):
+
+- a program still working is **followed again** — read on from where the
+  last engine's reading stood, so no line twice and nothing dropped; a
+  permission or a tool call it was still waiting on is asked again. Its
+  thread keeps what was said, notes the restart, and the next run follows
+  the turn in progress (nothing is sent to the program);
+- one that finished its turn while no engine was up is read to its end, and
+  the turn concluded as usual;
+- a check joins the test run still going (the same code: folder, commit and
+  uncommitted state) or takes the result that came in the gap; a rebase
+  still going is joined;
+- only a worker dead with nothing written goes the way below.
+
+A pid is believed only with its start time (`ps -o lstart`): a pid reused by
+another program is neither followed nor killed. A person's cancel kills the
+run's workers, on purpose. Housekeeping, every minute: finished work dirs
+go after a week; a worker nobody took up — no run of this engine, not in its
+hand — is killed after ten minutes, with a line in the journal.
+
+When there's nothing to follow, the next engine marks the run interrupted,
+says so in its thread, and carries it on (`Engine._carry`,
+`resume_interrupted`):
 
 - in Claude Code or Codex, in their session and in the copy of the folder
   they were working in — the session id is saved as soon as the program
@@ -224,8 +258,10 @@ every piece of self-work is a **step**, written down in
 | `swap` | the go-live | the supervisor runs outside the engine; only one lost before it said how it went is asked for again |
 
 A step is *running*, then *succeeded*, *failed* or **interrupted**.
-Interrupted — the engine going away, a program killed by a signal (143,
-137, -15), a test run cut off, a child lost — is never failed: the check
+Interrupted — a program killed by a signal (143, 137, -15), a test run
+cut off, a worker lost with nothing written — is never failed (the engine
+going away alone no longer interrupts one: its workers carry on, see *Runs
+cut off by a swap*): the check
 raises `steps.Interrupted` instead of a verdict, and a run cut off that way
 is marked interrupted, not failed. On start the new engine marks every step
 the old one left running interrupted (`steps.recover`) and takes each up

@@ -37,7 +37,6 @@ import argparse
 import json
 import os
 import shutil
-import signal
 import socket
 import sqlite3
 import subprocess
@@ -54,6 +53,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from . import steps                                   # standard library only, too
+from . import workers                                 # and this
 
 ORDER = ("tests", "app", "boots", "answers", "data", "leavable")
 STUB_MODEL = "candidate-stub"
@@ -262,7 +262,10 @@ class Candidate:
         self.boot_seconds = boot_seconds
         self.port = free_port()
         self.log = home / "engine.log"
-        self.proc: Optional[subprocess.Popen] = None
+        #: the candidate engine runs as a worker (eki/workers.py): a restart
+        #: of the engine checking it leaves it be, and a check taken up
+        #: again stops the one it left before starting its own
+        self.worker: Optional[workers.Worker] = None
 
     @property
     def url(self) -> str:
@@ -281,16 +284,18 @@ class Candidate:
 
     def start(self) -> None:
         self.home.mkdir(parents=True, exist_ok=True)
-        with open(self.log, "ab") as log:
-            self.proc = subprocess.Popen(
-                [self.python, "-m", "eki.cli", "-c", str(self.config),
-                 "serve", "--port", str(self.port)],
-                cwd=str(self.checkout), env=self.env(), stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True)
+        key = workers.key_of("candidate", os.path.realpath(self.checkout), self.home.name)
+        for old in workers.find(key=key):
+            old.kill(why="its check was taken up again")
+            old.collect()
+        self.worker = workers.start(
+            [self.python, "-m", "eki.cli", "-c", str(self.config), "serve", "--port", str(self.port)],
+            cwd=str(self.checkout), env=self.env(), out=self.log, merge=True,
+            kind="candidate", key=key)
         deadline = time.time() + self.boot_seconds
         while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise RuntimeError(f"exited with {self.proc.returncode} while starting: "
+            if not self.worker.alive(strict=False):
+                raise RuntimeError(f"exited with {self.worker.exit} while starting: "
                                    f"{_tail(self.log)}")
             try:
                 if (_get(f"{self.url}/api/health", timeout=2) or {}).get("ok"):
@@ -301,19 +306,10 @@ class Candidate:
         raise RuntimeError(f"not healthy after {self.boot_seconds:.0f}s: {_tail(self.log)}")
 
     def stop(self) -> None:
-        proc = self.proc
-        if not proc or proc.poll() is not None:
+        if self.worker is None:
             return
-        for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
-            try:
-                os.killpg(proc.pid, sig)
-            except (ProcessLookupError, PermissionError):
-                break
-            try:
-                proc.wait(timeout=wait)
-                break
-            except subprocess.TimeoutExpired:
-                continue
+        self.worker.kill(grace=10, why="checked")
+        self.worker.collect()
 
     def __enter__(self) -> "Candidate":
         self.start()
@@ -331,21 +327,37 @@ def check_tests(checkout: Path, python: str, timeout: float = 1200.0) -> str:
     env = {k: v for k, v in os.environ.items() if not k.startswith("EKI_")}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        got = subprocess.run([python, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
-                             cwd=str(checkout), env=env, capture_output=True,
-                             text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
+        # a worker (eki/workers.py): a restart doesn't cut it off, and the
+        # check taken up again joins it — or takes its result, if it
+        # finished while no engine was up — rather than starting over
+        code, out, err = workers.run([python, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+                                     key=_tests_key(checkout, python), cwd=str(checkout), env=env,
+                                     timeout=timeout, kind="tests")
+    except TimeoutError:
         raise RuntimeError(f"still running after {timeout:.0f}s") from None
-    last = ([ln for ln in got.stdout.strip().splitlines() if ln.strip()] or ["no output"])[-1]
-    if steps.cut_off(got.returncode):
-        # stopped by a signal — the engine going away took it along: a check
-        # cut off, not tests that failed (2026-09-24: "tests ✗", a row of dots)
-        raise steps.Interrupted(f"the tests were cut off (exit {got.returncode})")
-    if got.returncode != 0:
-        failed = [ln for ln in got.stdout.splitlines() if ln.startswith(("FAILED", "ERROR"))]
-        more = "; ".join(failed[:5]) or got.stderr.strip()[-300:]
+    last = ([ln for ln in out.strip().splitlines() if ln.strip()] or ["no output"])[-1]
+    if steps.cut_off(code):
+        # stopped by a signal — a cancel, or lost with nothing written: a
+        # check cut off, not tests that failed (2026-09-24: "tests ✗", a row of dots)
+        raise steps.Interrupted(f"the tests were cut off (exit {code})")
+    if code != 0:
+        failed = [ln for ln in out.splitlines() if ln.startswith(("FAILED", "ERROR"))]
+        more = "; ".join(failed[:5]) or err.strip()[-300:]
         raise RuntimeError(f"{last.strip('= ')} — {more}"[:600])
     return last.strip("= ")
+
+
+def _tests_key(checkout: Path, python: str) -> str:
+    """The same tests of the same code: the folder, its commit and what's
+    uncommitted in it — so a check joins only a run of exactly what it checks."""
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(["git", "-C", str(checkout), *args], capture_output=True,
+                                  text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return workers.key_of("pytest", os.path.realpath(checkout), python,
+                          git("rev-parse", "HEAD"), git("status", "--porcelain"))
 
 
 def check_answers(cand: Candidate, stub: Stub, timeout: float = 60.0) -> str:
@@ -482,7 +494,7 @@ def check(checkout: Path | str, *, python: Optional[str] = None,
                 return f"healthy on :{cand.port}, in an empty home"
 
             def answers() -> str:
-                if cand.proc is None:                 # boots was skipped
+                if cand.worker is None:               # boots was skipped
                     cand.start()
                 return check_answers(cand, stub)
 

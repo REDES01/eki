@@ -65,6 +65,11 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(selfloop, "HOME", root / "eki" / "self")
     from eki import steps
     monkeypatch.setattr(steps, "HOME", root / "eki" / "self")
+    # the programs eki starts as workers, and what they print
+    from eki import workers
+    monkeypatch.setattr(workers, "HOME", root / "eki" / "work")
+    monkeypatch.setattr(workers, "_held", {})
+    monkeypatch.setattr(workers, "_orphan_since", {})
     monkeypatch.setattr(builds, "SUPERVISOR", root / "eki" / "bin" / "eki-supervisor")
     from eki import goals, shift, launcher
     # no test builds, or sees, this Mac's eki.app
@@ -87,3 +92,14 @@ def private_models(tmp_path, monkeypatch, request):
     monkeypatch.setattr(models.ModelManager, "STARTED_FILE", tmp_path / "_home" / "started.json")
     if "real_processes" not in request.keywords:
         monkeypatch.setattr(models, "started_by_eki", lambda port: False)
+
+
+@pytest.fixture(autouse=True)
+def no_workers_left(private_skills):
+    """A worker outlives the engine on purpose (eki/workers.py) — and would
+    outlive the test, so each one a test started is stopped when it ends."""
+    yield
+    from eki import workers
+    for w in workers.scan():
+        if w.alive(strict=False):
+            w.signal(9)

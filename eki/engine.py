@@ -61,6 +61,7 @@ from . import steps as steps_mod
 from . import selfengine as selfengine_mod
 from .selfengine import SelfLoop
 from . import workspace as workspace_mod
+from . import workers as workers_mod
 from . import live
 from . import mcpbridge
 from . import mcpregistry
@@ -174,6 +175,10 @@ class Engine(SelfLoop):
         self._build()
         self.runner = Runner(self.runs, self._dispatch)
         self.runner.on_error = self._on_run_error
+        self.runner.on_cancel = self._kill_workers_of
+        #: threads whose program kept working through a restart, mid-turn:
+        #: the next turn there follows it rather than asking again (reattach)
+        self._follow_on: Dict[str, str] = {}
         self._fixing = asyncio.Lock()
         self._watching = asyncio.Lock()
         self._health: Dict[str, Tuple[float, Any]] = {}
@@ -636,6 +641,11 @@ class Engine(SelfLoop):
         if not self.settings.get("resume_interrupted", True) or not cid:
             return ""
         p = _payload(run)
+        if self._follow_on.get(cid) == run["id"]:
+            # its program is still at it (eki/workers.py): followed, not
+            # redone — and following isn't a loop, so no count of carries
+            return "self" if p.get("self_resolve") or \
+                (p.get("self_item") and not self.store.session(cid, backend)) else "session"
         if p.get("self_resolve"):
             # a change's conflicts being resolved: its step is carried on, in
             # the change's worktree where the rebase stands (eki/steps.py)
@@ -667,7 +677,13 @@ class Engine(SelfLoop):
             how = self._carry(run)
             if how:
                 self._to_resume.append((run["id"], how))
-            self.store.add_turn(cid, "assistant", "*[interrupted — the engine restarted"
+            kept = self._follow_on.get(cid) == run["id"]
+            # what it had said so far stays in the thread; the rest follows
+            said = (str((self.runs.get(run["id"]) or {}).get("output") or "").rstrip() + "\n\n") \
+                if kept else ""
+            self.store.add_turn(cid, "assistant", said.lstrip() + "*[the engine restarted; its program "
+                                "kept working — following it again]*" if kept else
+                                "*[interrupted — the engine restarted"
                                 + ("; carrying on]*" if how else "]*"),
                                 run.get("backend") or "", run.get("reason") or "",
                                 meta={"run": run["id"], "interrupted": True,
@@ -818,9 +834,10 @@ class Engine(SelfLoop):
             return None                             # already carried on: never twice
         cid = old["conversation_id"]
         backend = old.get("backend") or ""
-        if cid and backend and self.store.session(cid, backend):
+        if cid and backend and (self.store.session(cid, backend) or cid in self._follow_on):
             prompt = "Carry on where you left off."
-            turn = self.store.add_turn(cid, "user", prompt)
+            # a program that kept working is followed, not told anything
+            turn = old["user_turn"] if cid in self._follow_on else self.store.add_turn(cid, "user", prompt)
             # a change to eki itself carries on as one: the same item, its worktree
             was = _payload(old)
             carried = {k: was[k] for k in ("self_item", "goal", "allowed", "route") if k in was} \
@@ -834,7 +851,8 @@ class Engine(SelfLoop):
             # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
                                    requested=backend, images=False, user_turn=turn,
-                                   payload=json.dumps({"resume_of": rid, "carries": _carries(was),
+                                   payload=json.dumps({"resume_of": rid,
+                                                       "carries": 1 if cid in self._follow_on else _carries(was),
                                                        **carried}))
             if carried:
                 # the item follows the new run at once, so the loop doesn't
@@ -2565,6 +2583,7 @@ class Engine(SelfLoop):
         import uuid
         argv = backend.live_argv(cwd or None, resume, str(uuid.uuid4()))   # type: ignore[attr-defined]
         session = self._new_live(argv, cwd or None, cid)
+        session.worker_meta["backend"] = backend.key
         try:
             await session.start()
         except RuntimeError as e:
@@ -2572,6 +2591,7 @@ class Engine(SelfLoop):
                 # the old session is gone (deleted, or another machine's): start over
                 argv = backend.live_argv(cwd or None, None, str(uuid.uuid4()))  # type: ignore[attr-defined]
                 session = self._new_live(argv, cwd or None, cid)
+                session.worker_meta["backend"] = backend.key
                 await session.start()
             else:
                 raise BackendError(str(e))
@@ -2580,26 +2600,91 @@ class Engine(SelfLoop):
         session.backend_key = backend.key                                  # type: ignore[attr-defined]
         return session
 
+    def _bridge_for(self, cid: str) -> Optional[mcpbridge.Bridge]:
+        """eki's own tools for a thread's Claude Code, served in-process
+        (Settings → Claude tools)."""
+        if not self.settings.get("claude_tools", True):
+            return None
+        depth, parent = nesting.current()
+        # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
+        # built-in server needs an approval dialog only its own front
+        # ends show, so it is opt-in beside these (claude_builtin_computer_use)
+        return mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid),
+                                parent=parent)
+
+    def _claude_extra(self) -> Dict[str, Dict[str, Any]]:
+        claude_bin = next((getattr(b, "bin", "") for b in self.backends
+                           if b.info.kind == "claude_code"), "") or ""
+        return mcpregistry.builtin_for_claude(claude_bin)
+
     def _new_live(self, argv: List[str], cwd: Optional[str], cid: str = "") -> live.LiveSession:
         """A Claude Code session under eki: its system prompt addition, and
         eki's own tools served in-process (Settings → Claude tools)."""
-        bridge = None
-        if self.settings.get("claude_tools", True):
-            depth, parent = nesting.current()
-            # the screen: eki's own tools (mac/tools/hid.swift). Claude Code's
-            # built-in server needs an approval dialog only its own front
-            # ends show, so it is opt-in beside these (claude_builtin_computer_use)
-            bridge = mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid),
-                                      parent=parent)
-        claude_bin = next((getattr(b, "bin", "") for b in self.backends
-                           if b.info.kind == "claude_code"), "") or ""
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
                                           learn_mod.agent_note(self.settings)) if x)
         session = live.LiveSession(argv, cwd, nesting.child_env(self._harness_env(cid)), prompt,
-                                   bridge=bridge,
-                                   extra_servers=mcpregistry.builtin_for_claude(claude_bin))
+                                   bridge=self._bridge_for(cid), extra_servers=self._claude_extra())
         session.screen = self._screen_for(cid)                             # type: ignore[attr-defined]
+        if cid:
+            session.worker_meta["thread"] = cid
         return session
+
+    # ---- workers: the programs that outlive the engine (eki/workers.py) ----------------
+
+    def reattach_workers(self) -> int:
+        """At start: every Claude Code and Codex the last engine left working
+        for a thread is taken up again where its reading stood — mid-turn,
+        the thread's next run follows it (`_follow_on`); idle, it waits for
+        the next message as if nothing happened. One that ended while no
+        engine was up but left a turn's result unread is read to its end."""
+        taken = 0
+        for w in workers_mod.scan():
+            spec = w.spec
+            cid, kind = str(spec.get("thread") or ""), spec.get("kind")
+            if kind not in ("claude", "codex") or not cid or spec.get("collected"):
+                continue
+            if cid in self.live:
+                continue
+            _, seen = w.reading()
+            done = b'"type":"result"' if kind == "claude" else b'"turn/completed"'
+            if not w.alive() and not (w.exit is not None and w.said_after(seen, done)):
+                continue
+            try:
+                if kind == "claude":
+                    session: Any = live.LiveSession.attach(w, bridge=self._bridge_for(cid),
+                                                           extra_servers=self._claude_extra())
+                    session.screen = self._screen_for(cid)                 # type: ignore[attr-defined]
+                else:
+                    session = codex_live.CodexSession.attach(
+                        w, permissions=str(self.settings.get("permissions", "auto")))
+                    session.screen = self._screen_for(cid)                 # type: ignore[attr-defined]
+            except Exception as e:                  # noqa: BLE001
+                observe_mod.note("fault", what="reattach", worker=w.id, why=repr(e)[:300])
+                continue
+            session.backend_key = str(spec.get("backend") or "")          # type: ignore[attr-defined]
+            self.live[cid] = session
+            run = str(spec.get("run") or "")
+            if run and any(r["id"] == run for r in self.runs.just_interrupted):
+                self._follow_on[cid] = run
+            taken += 1
+        return taken
+
+    def sweep_workers(self) -> Dict[str, int]:
+        """Housekeeping: finished work dirs gone after a week, a worker
+        nobody took up killed after a grace period and said so."""
+        running = set(self.runner.running)
+        return workers_mod.sweep(lambda w: str(w.spec.get("run") or "") in running,
+                                 note=observe_mod.note)
+
+    def _kill_workers_of(self, rid: str) -> None:
+        """A person's cancel: the run's workers go with it, on purpose — the
+        program answering it, a check it started."""
+        def kill() -> None:
+            for w in workers_mod.find(run=rid):
+                w.kill(why="cancelled")
+        task = asyncio.get_running_loop().run_in_executor(None, kill)
+        self._side_tasks.add(task)                                         # type: ignore[arg-type]
+        task.add_done_callback(self._side_tasks.discard)                   # type: ignore[arg-type]
 
     def _screen_for(self, cid: str) -> bool:
         """May the thread's agent use the screen tools? Yours, if Settings say so;
@@ -2977,6 +3062,7 @@ class Engine(SelfLoop):
         session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(self._harness_env(cid)),
                                           model=wanted, permissions=permissions, resume=resume or "",
                                           developer_instructions=guidance)
+        session.worker_meta = {"thread": cid, "backend": backend.key} if cid else {}
         try:
             await session.start()
         except RuntimeError as e:
@@ -2984,6 +3070,7 @@ class Engine(SelfLoop):
                 session = codex_live.CodexSession(argv, cwd or None, nesting.child_env(self._harness_env(cid)),
                                                   model=wanted, permissions=permissions,
                                                   developer_instructions=guidance)
+                session.worker_meta = {"thread": cid, "backend": backend.key} if cid else {}
                 await session.start()
             else:
                 raise BackendError(str(e))
@@ -3058,6 +3145,12 @@ class Engine(SelfLoop):
         activity as lines, questions and permission prompts as events the
         app turns into cards and answers through `answer()`."""
         session = await self._live_session(cid, backend, run["cwd"] or "", model)
+        if cid and self._follow_on.pop(cid, None) and session.busy is False:
+            # its program kept working through a restart: follow the turn
+            # it is in the middle of — asking again would be a second turn
+            send, model = False, ""
+        if hasattr(session, "serve"):
+            session.serve(run=run["id"])
         saved_session = ""
         if cid and session.session_id:
             # known from the handshake: a turn cut short can still be resumed
@@ -3151,7 +3244,9 @@ class Engine(SelfLoop):
                 break
         except (asyncio.CancelledError, GeneratorExit):
             self.pending.pop(rid, None)
-            if session.alive:
+            if session.alive and not self.runner.stopping:
+                # cancelled: stopped, not left for a restart (the engine
+                # going away leaves it working, for the next one to follow)
                 await session.interrupt()
             raise
         except RuntimeError as e:
@@ -4150,7 +4245,15 @@ class Engine(SelfLoop):
         return (stat.stdout + "\n" + full.stdout).strip()
 
     async def close(self) -> None:
-        for session in list(self.live.values()) + list(self.warm.values()):
+        """The engine going away: a thread's program is left working, for the
+        next engine to take up (eki/workers.py); a warm one serving no thread
+        has nothing to keep and is closed."""
+        for session in list(self.live.values()):
+            try:
+                await (session.detach() if hasattr(session, "detach") else session.close())
+            except Exception:                       # noqa: BLE001
+                pass
+        for session in list(self.warm.values()):
             try:
                 await session.close()
             except Exception:                       # noqa: BLE001

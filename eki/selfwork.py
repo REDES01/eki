@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import candidate, roadmap
+from . import candidate, roadmap, workers
 
 HOME = Path("~/.eki/self").expanduser()
 #: screenshots an agent takes of the app it changed, by change id
@@ -851,7 +851,12 @@ def _rebase(where: Path, *args: str) -> Tuple[subprocess.CompletedProcess, List[
     cmd = ["git", "-C", str(where), "-c", "user.name=eki", "-c", "user.email=eki@localhost",
            "-c", "core.editor=true", "rebase"]
     env = {**os.environ, "GIT_EDITOR": "true"}
-    got = subprocess.run(cmd + list(args), capture_output=True, text=True, env=env)
+    # a worker (eki/workers.py): a restart doesn't kill it halfway, and the
+    # step taken up again joins it rather than starting a second rebase over
+    # the first (one that ended is not taken: the step puts things back first)
+    code, out, err = workers.run(cmd + list(args), cwd=str(where), env=env, kind="git", finished=False,
+                                 key=workers.key_of("rebase", os.path.realpath(where), *args))
+    got = subprocess.CompletedProcess(cmd + list(args), code, out, err)
     return got, (unmerged(where) if got.returncode and rebasing(where) else [])
 
 

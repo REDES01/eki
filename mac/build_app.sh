@@ -133,6 +133,8 @@ SH
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
+  <!-- a restart ends the engine, not the work it started (eki/workers.py) -->
+  <key>AbandonProcessGroup</key><true/>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>

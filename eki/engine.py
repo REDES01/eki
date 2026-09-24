@@ -46,6 +46,7 @@ from . import learn as learn_mod
 from . import handoff as handoff_mod
 from . import failover as failover_mod
 from . import goals as goals_mod
+from . import grant as grant_mod
 from . import shift as shift_mod
 from . import models as models_mod
 from . import table as table_mod
@@ -488,13 +489,19 @@ class Engine(SelfLoop):
     async def ask(self, prompt: str, *, conversation: str = "", backend_key: str = "",
                   repo: str = "", images: bool = False,
                   image: Optional[Dict[str, Any]] = None,
-                  attachments: Optional[List[str]] = None, via: str = "") -> Dict[str, str]:
+                  attachments: Optional[List[str]] = None, via: str = "",
+                  parent: Optional[Dict[str, Any]] = None,
+                  wants: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """Write the question down and start answering it. Returns at once.
 
         The question is stored before anything runs, so a conversation
         reopened mid-answer already shows what was asked. Attachments are
         pictures on this Mac, shown with the question and given to the
         program that answers (Claude Code and Codex take them).
+
+        An agent's request (`via="agent"`) is given what it asks for
+        (`wants`: read_only, commands, paths), bounded by what the run
+        asking has (`parent`, a grant) — never more (eki/grant.py).
         """
         cid = conversation or self.store.new_conversation()
         attached = [p for p in (attachments or []) if p and os.path.isfile(os.path.expanduser(p))]
@@ -508,8 +515,14 @@ class Engine(SelfLoop):
             payload["image"] = image
         if attached:
             payload["attachments"] = attached
+        if parent and grant_mod.load(parent).narrowed:
+            via = "agent"                           # asked from inside a narrowed run
         if via:
             payload["via"] = via                    # "agent": a program asking through eki's tools
+        if via == "agent":
+            wanted = {k: v for k, v in (wants or {}).items() if k in ("read_only", "commands", "paths")}
+            payload["grant"] = grant_mod.for_agent(grant_mod.load(parent), repo=bool(repo),
+                                                   images=images or bool(image), **wanted).to_json()
         rid = self.runs.create(prompt, conversation=cid, cwd=repo,
                                requested=backend_key, images=images or bool(image), user_turn=turn,
                                payload=json.dumps(payload) if payload else "")
@@ -660,6 +673,8 @@ class Engine(SelfLoop):
             was = _payload(old)
             carried = {k: was[k] for k in ("self_item", "goal", "allowed", "route") if k in was} \
                 if was.get("self_item") else {}
+            # carrying on is not a way out of what the run was handed
+            carried.update({k: was[k] for k in ("via", "grant") if k in was})
             # resume_of: the same copy of the folder, as the run left it
             new = self.runs.create(prompt, conversation=cid, cwd=old["cwd"],
                                    requested=backend, images=False, user_turn=turn,
@@ -682,9 +697,12 @@ class Engine(SelfLoop):
         old = self.runs.get(rid)
         if not old or old["state"] not in ("failed", "cancelled", "interrupted"):
             return None
+        # the same question under the same grant: retrying doesn't widen it
+        kept = {k: v for k, v in _payload(old).items() if k in ("via", "grant")}
         new = self.runs.create(old["prompt"], conversation=old["conversation_id"],
                                cwd=old["cwd"], requested=old["requested"],
-                               images=bool(old["images"]), user_turn=old["user_turn"])
+                               images=bool(old["images"]), user_turn=old["user_turn"],
+                               payload=json.dumps(kept) if kept else "")
         await self.runner.submit(new)
         return {"run": new, "conversation": old["conversation_id"]}
 
@@ -792,6 +810,9 @@ class Engine(SelfLoop):
             raise BackendError(why)
 
         reason = choice.reason
+        grant = grant_mod.load(_payload(run).get("grant"))
+        if grant.narrowed:
+            reason += f"; handed {grant.describe()}"
         paused = self._yield_measurements(choice.backend.key)
         if paused:
             reason += "; paused a measurement to make way"
@@ -916,6 +937,11 @@ class Engine(SelfLoop):
             meta["failover"] = {k: fo[k] for k in ("from", "why", "hops", "tried") if k in fo}
         if run["cwd"]:
             meta["cwd"] = run["cwd"]
+        if grant.narrowed:
+            # what it may do, rendered by the adapter into the program's own
+            # permission settings; headless, so what it may not is refused
+            kw["grant"] = grant
+            meta["grant"] = grant.to_json()
         if ws is not None and ws.mode == "worktree":
             meta["worktree"] = {"path": ws.path, "branch": ws.branch}
         if drawn:
@@ -931,7 +957,7 @@ class Engine(SelfLoop):
             if as_tool:
                 kw["tools"] = [handoff_mod.tool(hand_to)]
             history = [Message("system", handoff_mod.instructions(hand_to, as_tool))] + history
-        if self._lives(backend):
+        if self._lives(backend) and not grant.narrowed:
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
             stream = self._skilled(backend, history, kw, meta)

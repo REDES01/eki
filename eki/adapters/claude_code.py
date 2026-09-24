@@ -19,6 +19,7 @@ import shutil
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from .. import grant as grant_mod
 from .. import learn
 from .. import mcpregistry
 from .. import settings as settings_mod
@@ -86,7 +87,8 @@ class ClaudeCodeBackend(Backend):
             return "--no-bare"
         return None
 
-    def _argv(self, prompt: str, resume: Optional[str], cwd: Optional[str]) -> List[str]:
+    def _argv(self, prompt: str, resume: Optional[str], cwd: Optional[str],
+              grant: grant_mod.Grant = grant_mod.FULL) -> List[str]:
         argv = [self.bin, "-p", prompt,
                 "--output-format", "stream-json", "--verbose"]
         keep_login = self._no_bare_flag()
@@ -100,11 +102,14 @@ class ClaudeCodeBackend(Backend):
         note = learn.agent_note(settings_mod.load())
         if note:
             argv += ["--append-system-prompt", note]    # remembering is eki's (eki/learn.py)
-        if self._auto():
+        if grant.narrowed:
+            # a run an agent started: what its parent handed it (eki/grant.py)
+            argv += grant_mod.claude_argv(grant)
+        elif self._auto():
             argv.append("--dangerously-skip-permissions")
         if cwd:
             argv += ["--add-dir", cwd]
-            if not self._auto():
+            if not self._auto() and not grant.narrowed:
                 # Headless, there is nobody to answer a permission prompt:
                 # without a mode the run ends with "I don't have permission to
                 # write". Only a run that was given a folder gets edit rights,
@@ -155,10 +160,11 @@ class ClaudeCodeBackend(Backend):
             raise BackendError("no user message to send")
 
         cwd = kw.get("cwd") or self.options.get("cwd")
-        argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd)
+        grant = kw.get("grant") or grant_mod.FULL
+        argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd, grant)
 
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd,
+            *argv, cwd=cwd, env=grant_mod.env(grant),
             # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
             # input instead of answering ("Reading additional input from stdin")
             stdin=asyncio.subprocess.DEVNULL,

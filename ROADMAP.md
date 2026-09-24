@@ -229,12 +229,12 @@ a thread has to be able to move to another harness without losing its place.
       permission: any file, the network, push, install. It is their Mac and
       their request. Rendered as the backends' full-access modes, so it never
       stops on a prompt either
-- [ ] **Permissions exist to narrow what's below it.** A run started by an
+- [x] **Permissions exist to narrow what's below it.** A run started by an
       agent through `eki` gets what its parent hands it, never more: the
       output path for `eki image`, read-only for a review, a worktree and a
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
-      modes, and the harness the local models borrow
+      modes, and the harness the local models borrow *(eki: self/71242570)*
 - [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
       thread says what it wanted, with *allow and rerun*

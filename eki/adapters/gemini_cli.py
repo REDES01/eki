@@ -16,6 +16,7 @@ import asyncio
 import json
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
+from .. import grant as grant_mod
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
 from .claude_code import _find_binary
@@ -71,7 +72,8 @@ class GeminiCliBackend(Backend):
             return Health(False, "gemini --version failed")
         return Health(True, "Gemini CLI " + out.decode().strip().split("\n")[0])
 
-    def _argv(self, prompt: str, resume: Optional[str], cwd: Optional[str]) -> List[str]:
+    def _argv(self, prompt: str, resume: Optional[str], cwd: Optional[str],
+              grant: grant_mod.Grant = grant_mod.FULL) -> List[str]:
         argv = [self.bin, "-p", prompt, "--output-format", "stream-json"]
         if self.model:
             argv += ["-m", self.model]
@@ -80,7 +82,10 @@ class GeminiCliBackend(Backend):
         # Headless, nobody answers an approval prompt: Settings → Permissions
         # "auto" is the program's own yolo mode; otherwise a run given a
         # folder may edit it, and a chat turn keeps the default (read-only)
-        if settings_mod.load().get("permissions", "auto") == "auto":
+        if grant.narrowed:
+            # a run an agent started: what its parent handed it (eki/grant.py)
+            argv += ["--approval-mode", grant_mod.gemini_mode(grant)]
+        elif settings_mod.load().get("permissions", "auto") == "auto":
             argv += ["--approval-mode", "yolo"]
         elif cwd:
             argv += ["--approval-mode", self.approval_mode]
@@ -95,9 +100,10 @@ class GeminiCliBackend(Backend):
             raise BackendError("no user message to send")
 
         cwd = kw.get("cwd") or self.options.get("cwd")
-        argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd)
+        grant = kw.get("grant") or grant_mod.FULL
+        argv = self._argv(prompt, kw.get("resume") or self.options.get("resume"), cwd, grant)
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd,
+            *argv, cwd=cwd, env=grant_mod.env(grant),
             # DEVNULL: with a pipe on stdin the CLI reads it as more prompt
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

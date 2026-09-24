@@ -288,6 +288,13 @@ class AskBody(BaseModel):
     attachments: List[str] = []
     #: "agent": a program asking through eki's tools, not a person
     via: str = ""
+    #: an agent's request: the grant of the run asking, and what it hands
+    #: on — read-only, the commands the child may run, paths it may write
+    #: (eki/grant.py). The child gets no more than the parent has.
+    parent: Dict[str, Any] = {}
+    read_only: bool = False
+    commands: List[str] = []
+    paths: List[str] = []
 
 
 class AttachmentBody(BaseModel):
@@ -331,7 +338,9 @@ async def ask(body: AskBody) -> Any:
                               backend_key=body.backend, repo=body.repo,
                               images=body.images,
                               image={"width": body.width, "height": body.height, "batch": body.batch},
-                              attachments=body.attachments, via=body.via)
+                              attachments=body.attachments, via=body.via, parent=body.parent,
+                              wants={"read_only": body.read_only, "commands": body.commands,
+                                     "paths": body.paths})
 
 
 @app.get("/api/runs")

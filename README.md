@@ -111,6 +111,11 @@ eki agent status
 eki context            # the one AGENTS.md Claude Code and Codex both read
 ```
 
+An agent calling `eki ask` hands the run only what it needs — read-only by
+default, a folder's copy with `--repo`, the commands it may use with
+`--allow pytest` — and never more than it has itself
+([docs/permissions.md](docs/permissions.md)).
+
 ## Adding things
 
 **A provider** is anything that can answer: Claude Code, Codex, Gemini CLI,

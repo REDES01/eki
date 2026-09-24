@@ -29,6 +29,8 @@ import tempfile
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from . import grant as grant_mod
+
 log = logging.getLogger("eki.mcp")
 
 PROTOCOL = "2025-06-18"
@@ -151,12 +153,22 @@ class Bridge:
                       "Ask another model on this Mac through eki and get its answer: a local "
                       "model for a cheap or private step, a prose model for writing, or let "
                       "eki's router pick. Runs as its own thread; the answer is returned "
-                      "whole. Not for work you can do yourself.",
+                      "whole. Not for work you can do yourself. The run gets only what you "
+                      "hand it: read-only unless you give it a repo, and in a repo only the "
+                      "commands you list.",
                       {"type": "object",
                        "properties": {"prompt": {"type": "string"},
                                       "backend": {"type": "string",
                                                   "description": "a provider key from eki_capabilities; "
-                                                                 "empty lets eki route"}},
+                                                                 "empty lets eki route"},
+                                      "repo": {"type": "string",
+                                               "description": "a folder to work on, in its own copy; "
+                                                              "empty for a question or a review"},
+                                      "commands": {"type": "array", "items": {"type": "string"},
+                                                   "description": "commands the run may use, e.g. "
+                                                                  "'pytest', 'git diff'"},
+                                      "read_only": {"type": "boolean",
+                                                    "description": "look at the repo, change nothing"}},
                        "required": ["prompt"]}, self.ask))
         self.add(Tool("eki_image",
                       "Generate a picture with the image model on this Mac (ComfyUI through "
@@ -218,12 +230,16 @@ class Bridge:
         return [text("Backends on this Mac (key: label [kind] state (what it does)):\n"
                      + "\n".join(lines))]
 
-    async def ask(self, prompt: str, backend: str = "") -> List[Dict[str, Any]]:
+    async def ask(self, prompt: str, backend: str = "", repo: str = "",
+                  commands: Optional[List[str]] = None, read_only: bool = False
+                  ) -> List[Dict[str, Any]]:
         if self.engine is None:
             return [text("eki engine not attached")]
         if self.depth >= MAX_DEPTH:
             return [text(f"eki_ask refused: nesting depth {self.depth} reached")]
-        content = await self._run(prompt, backend_key=backend)
+        content = await self._run(prompt, backend_key=backend, repo=os.path.expanduser(repo) if repo else "",
+                                  wants={"read_only": bool(read_only),
+                                         "commands": [str(c) for c in commands or []]})
         return [text(content)]
 
     async def image(self, prompt: str, width: int = 0, height: int = 0, count: int = 1
@@ -243,8 +259,10 @@ class Bridge:
         return blocks or [text(content)]
 
     async def _run(self, prompt: str, **kw: Any) -> str:
-        """A run of its own in a fresh thread, waited for; the answer text."""
-        started = await self.engine.ask(prompt, conversation="", via="agent", **kw)
+        """A run of its own in a fresh thread, waited for; the answer text.
+        It gets what this server's run hands it, never more (eki/grant.py)."""
+        started = await self.engine.ask(prompt, conversation="", via="agent",
+                                        parent=grant_mod.from_env().to_json(), **kw)
         rid = started["run"]
         runner = self.engine.runner
         q = runner.subscribe(rid)
@@ -468,9 +486,12 @@ class RemoteEngine:
         return r.json()
 
     async def ask(self, prompt: str, conversation: str = "", **kw: Any) -> Dict[str, str]:
+        wants = kw.get("wants") or {}
         body = {"prompt": prompt, "conversation": conversation,
                 "backend": kw.get("backend_key", "") or "", "images": bool(kw.get("images")),
-                "via": "agent"}
+                "via": "agent", "repo": kw.get("repo") or "",
+                "parent": kw.get("parent") or {},
+                "read_only": bool(wants.get("read_only")), "commands": wants.get("commands") or []}
         image = kw.get("image") or {}
         for k in ("width", "height", "batch"):
             if image.get(k):
@@ -502,7 +523,8 @@ class RemoteBridge(Bridge):
     """The same tools, over the HTTP API."""
 
     async def _run(self, prompt: str, **kw: Any) -> str:
-        started = await self.engine.ask(prompt, conversation="", via="agent", **kw)
+        started = await self.engine.ask(prompt, conversation="", via="agent",
+                                        parent=grant_mod.from_env().to_json(), **kw)
         run = await self.engine.wait(started["run"])
         if run.get("state") == "failed":
             raise RuntimeError(run.get("error") or "the run failed")

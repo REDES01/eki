@@ -18,6 +18,7 @@ import shutil
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from . import _codex_events as events
+from .. import grant as grant_mod
 from .. import learn
 from .. import settings as settings_mod
 from .base import Backend, BackendError, Health, Message, register
@@ -135,7 +136,11 @@ class CodexBackend(Backend):
         auto = settings_mod.load().get("permissions", "auto") == "auto"
         # Settings → Permissions "auto": Codex's own skip-everything mode;
         # otherwise the sandbox keeps it to the folder
+        grant = kw.get("grant") or grant_mod.FULL
         guard = ["--dangerously-bypass-approvals-and-sandbox"] if auto else ["-s", sandbox]
+        if grant.narrowed:
+            # a run an agent started: what its parent handed it (eki/grant.py)
+            guard = grant_mod.codex_argv(grant)
         argv = [self.bin, "exec", "--json", *guard]
         if resume:
             argv = [self.bin, "exec", "resume", resume, "--json", *guard]
@@ -156,7 +161,7 @@ class CodexBackend(Backend):
         argv.append(prompt)
 
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd,
+            *argv, cwd=cwd, env=grant_mod.env(grant),
             # DEVNULL, not inherit: with a pipe on stdin the CLI waits for more
             # input instead of answering ("Reading additional input from stdin")
             stdin=asyncio.subprocess.DEVNULL,

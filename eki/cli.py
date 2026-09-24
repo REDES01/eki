@@ -44,6 +44,7 @@ import httpx
 
 from . import agent
 from . import config as config_mod
+from . import grant as grant_mod
 from . import migrate
 from .engine import Engine
 from .runs import TERMINAL
@@ -108,10 +109,15 @@ def cmd_ask(cfg, args) -> int:
     body = {"prompt": args.prompt, "conversation": conversation,
             "backend": args.backend or "", "repo": args.repo or "",
             "images": bool(args.image)}
-    if os.environ.get("EKI_INSIDE"):
+    if os.environ.get("EKI_INSIDE") or os.environ.get(grant_mod.ENV):
         # run by a program the engine started (a goal's agent testing eki, say):
-        # its request, not yours — a goal's turn doesn't step aside for it
+        # its request, not yours — a goal's turn doesn't step aside for it,
+        # and it gets what the run asking hands it, never more (eki/grant.py)
         body["via"] = "agent"
+        body["parent"] = grant_mod.from_env().to_json()
+        body.update(read_only=bool(getattr(args, "read_only", False)),
+                    commands=getattr(args, "allow", None) or [],
+                    paths=getattr(args, "write", None) or [])
     started = call("POST", "/api/ask", args.service, json=body)
     if args.detach:
         print(started["run"])
@@ -1009,6 +1015,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     a.add_argument("-r", "--repo", help="a folder it may edit")
     a.add_argument("--image", action="store_true",
                    help="the answer is a picture — only image backends apply")
+    a.add_argument("--read-only", action="store_true",
+                   help="from an agent: the run may read, not edit (a review)")
+    a.add_argument("--allow", action="append", metavar="CMD",
+                   help="from an agent: a command the run may use, e.g. 'pytest' (repeatable)")
+    a.add_argument("--write", action="append", metavar="PATH",
+                   help="from an agent: a path the run may write besides its copy (repeatable)")
     a.add_argument("--continue", dest="continue_", action="store_true",
                    help="continue the most recent conversation")
     a.add_argument("-d", "--detach", action="store_true",

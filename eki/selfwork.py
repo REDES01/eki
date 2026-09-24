@@ -106,6 +106,9 @@ class Proposal:
     #: conflicts eki had resolved when the change was put on top of your
     #: checkout: {"files": [...], "by": backend, "how": its words}
     resolved: Optional[Dict[str, Any]] = None
+    #: "you" when a person asked for it to be applied (`eki self apply`, the
+    #: board's Apply) — the only way a change touching PROTECTED gets in
+    applied_by: str = ""
 
     def to_json(self) -> Dict[str, Any]:
         return asdict(self)
@@ -133,6 +136,8 @@ class Proposal:
                 out.append(f"  {mark}  {c['name']:9} {c['detail']}".rstrip())
         if self.protected:
             out.append("  !! touches what eki may not change alone: " + ", ".join(self.protected))
+        if self.applied_by:
+            out.append(f"  applied because {self.applied_by} asked for it")
         out.append(f"  → {self.verdict}")
         if self.commit:
             out += ["",
@@ -721,11 +726,15 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
 
 def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None,
           check: Callable[..., candidate.Report] = candidate.check, say: Say = None,
-          swap: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
+          swap: Optional[Callable[..., Any]] = None, by_person: bool = False) -> Dict[str, Any]:
     """Put a proposed change to work. If your checkout has moved on since it
     was made, it's put on top of it first and judged again. Documentation
     goes straight into your checkout; code becomes a build the supervisor
-    swaps in — watched, and rolled back if it isn't healthy."""
+    swaps in — watched, and rolled back if it isn't healthy.
+
+    A change touching PROTECTED goes in only when a person asked for it
+    (`by_person`): the protection keeps eki from applying those alone, not
+    you. It takes the same path as any other, and its record says who asked."""
     say = say or (lambda _line: None)
     python = python or sys.executable
     c = change(cid, home)
@@ -734,17 +743,21 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         raise SelfWorkError(f"self/{cid} is {c['state']} — only a proposed change can be applied")
     if c.get("resolving") and time.time() - float(c.get("resolving_at") or 0) < 3600:
         raise SelfWorkError("eki is having its conflicts resolved right now — it applies it when that's done")
-    if c.get("protected"):
+    if c.get("protected") and not by_person:
         raise SelfWorkError("it touches what eki may not change alone ("
-                            + ", ".join(c["protected"]) + ") — read it and merge it yourself")
+                            + ", ".join(c["protected"]) + f") — a person applies it: `eki self apply {cid}`")
     if not c.get("fit"):
         raise SelfWorkError(f"self/{cid} didn't pass its checks")
+    if by_person:
+        set_state(cid, c["state"], home, applied_by="you", asked_at=int(time.time()))
     root = Path(c["root"])
     where = ensure_worktree(c, home)
     commit = c["commit"]
     head = line(root)
     p = Proposal(**{k: v for k, v in c.items() if k in Proposal.__dataclass_fields__})
     p.worktree = str(where)
+    if by_person:
+        p.applied_by = "you"
     if not is_in(root, head, commit):
         say("your checkout has moved on since — putting the change on top of it…")
         got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
@@ -758,6 +771,13 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
             return {"state": "conflicts", "id": cid}
         p.commit, p.base = git(where, "rev-parse", "HEAD"), head
         p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
+        p.protected = touches_protected(p.files)
+        if p.protected and not by_person:
+            p.verdict = "on top of your checkout it touches protected paths — for a person"
+            record(p, home)
+            set_state(cid, "proposed", home, why="it touches what eki may not change alone ("
+                      + ", ".join(p.protected) + ")")
+            return {"state": "proposed", "id": cid, "why": p.verdict}
         if not docs_only(p.files):
             say("judging it again, on top of your checkout…")
             report = check(where, python=python, say=say)

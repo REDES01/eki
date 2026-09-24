@@ -853,11 +853,15 @@ def self_diff(cid: str) -> Any:
 
 
 @app.post("/api/self/changes/{cid}/{action}")
-async def self_decide(cid: str, action: str) -> Any:
+async def self_decide(cid: str, action: str, body: Optional[Dict[str, Any]] = None) -> Any:
+    """A person's decision. Applying a change that touches protected paths
+    takes {"confirm": true} — sent once they've been shown which."""
     eng = engine()
     fn = {"apply": eng.self_apply, "discard": eng.self_discard, "undo": eng.self_undo}.get(action)
     if fn is None:
         raise HTTPException(404, "apply, discard or undo")
+    if action == "apply":
+        return await _self_await(fn, cid, confirmed=bool((body or {}).get("confirm")))
     return await _self_await(fn, cid)
 
 

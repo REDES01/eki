@@ -626,12 +626,20 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     if verb == "show":
         print("\n".join(call("GET", f"/api/self/changes/{arg}", s)["lines"]))
         return 0
+    body: Dict[str, Any] = {}
+    if verb == "apply":
+        c = call("GET", f"/api/self/changes/{arg}", s)
+        if c.get("protected"):
+            if not _confirm_protected(c, getattr(args, "yes", False)):
+                print("not applied", file=sys.stderr)
+                return 1
+            body["confirm"] = True
     if verb in ("apply", "undo"):
         print("· a change put on top of your checkout is judged again first — a minute or two",
               file=sys.stderr)
     try:
         # applying may rebase and re-run the checks: longer than an ordinary call
-        r = httpx.post(f"{s}/api/self/changes/{arg}/{verb}", timeout=1800)
+        r = httpx.post(f"{s}/api/self/changes/{arg}/{verb}", json=body or None, timeout=1800)
     except httpx.HTTPError as e:
         print(f"! lost the engine: {e}", file=sys.stderr)
         return 1
@@ -647,6 +655,24 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
            "discarded": "discarded", "not undone": f"not undone: {got.get('why')}"}
     print(say.get(got.get("state") or "", json.dumps(got)))
     return 0
+
+
+def _confirm_protected(c: Dict[str, Any], yes: bool) -> bool:
+    """A change touching what eki may not change alone goes in only when you
+    say so, having seen which files: a y/N prompt, or --yes."""
+    print(f"self/{c['id']} touches what eki may not change alone:", file=sys.stderr)
+    for f in c["protected"]:
+        print(f"  {f}", file=sys.stderr)
+    print(f"  (read it first: eki self diff {c['id']})", file=sys.stderr)
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        print("! not asked from a terminal — add --yes to apply it", file=sys.stderr)
+        return False
+    try:
+        return input("apply it anyway? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
 
 
 def _batch(args) -> List[str]:
@@ -1123,6 +1149,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw.add_argument("--apply", action="store_true",
                     help="if it's fit and touches nothing protected, swap it in (watched, rolled back if unhealthy)")
     sw.add_argument("--json", action="store_true")
+    sw.add_argument("-y", "--yes", action="store_true",
+                    help="eki self apply: don't ask before applying a change that touches protected paths")
 
     ro = sub.add_parser("routing", help="the routing table; explain a request; replay recent ones")
     ro.add_argument("action", nargs="?", default="show", choices=["show", "explain", "replay", "undo", "forget"])

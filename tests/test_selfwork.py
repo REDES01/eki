@@ -116,6 +116,41 @@ def test_protected_paths_are_for_a_person(tmp_path):
     assert "protected" in p.verdict and "!!" in "\n".join(p.lines())
 
 
+def test_eki_never_applies_a_protected_change_on_its_own_but_a_person_can(tmp_path):
+    root = repo(tmp_path)
+    p = propose(tmp_path, root, agent({"eki/agent.py": "# changed\n", "eki/thing.py": "VALUE = 2\n"}))
+    home, swaps = tmp_path / "self", []
+    with pytest.raises(selfwork.SelfWorkError, match="a person applies it"):
+        selfwork.apply(p.id, home=home, check=verdict(True), swap=lambda b, **kw: swaps.append(kw))
+    assert not swaps and selfwork.change(p.id, home)["state"] == "proposed"
+    got = selfwork.apply(p.id, home=home, check=verdict(True), by_person=True,
+                         swap=lambda b, **kw: swaps.append(kw))
+    assert got["state"] == "applying" and swaps == [{"self_id": p.id}]
+    c = selfwork.change(p.id, home)
+    assert c["applied_by"] == "you" and c["asked_at"]                  # who asked, written down
+    fields = {k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__}
+    assert "applied because you asked for it" in "\n".join(selfwork.Proposal(**fields).lines())
+
+
+def test_a_change_that_comes_to_touch_protected_paths_on_top_of_your_checkout_waits(tmp_path):
+    root = repo(tmp_path)
+    p = propose(tmp_path, root, agent({"eki/thing.py": "VALUE = 2\n"}))
+    home = tmp_path / "self"
+    assert not p.protected
+    # your checkout moved on, and the branch picked up a protected file since it was judged
+    (root / "README.md").write_text("moved on\n")
+    selfwork.git(root, "add", "-A")
+    selfwork.git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "yours")
+    (Path(p.worktree) / "eki" / "agent.py").write_text("# sneaked in\n")
+    subprocess.run(["git", "-C", p.worktree, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qam", "more"], check=True)
+    p.commit = selfwork.git(Path(p.worktree), "rev-parse", "HEAD")
+    selfwork.record(p, home)
+    got = selfwork.apply(p.id, home=home, check=verdict(True), swap=lambda b, **kw: None)
+    assert got["state"] == "proposed" and "protected" in got["why"]
+    assert selfwork.change(p.id, home)["protected"] == ["eki/agent.py"]
+
+
 def test_every_proposal_is_written_down(tmp_path):
     root = repo(tmp_path)
     propose(tmp_path, root, agent({"eki/thing.py": "VALUE = 2\n"}))
@@ -175,3 +210,18 @@ def test_an_app_change_is_looked_at_and_its_pictures_go_where_eki_shows_them(tmp
     said = selfwork.brief("make the chat calmer", "python", str(tmp_path / "self" / "ab12cd34"))
     assert "eki_screenshot" in said and "EKI_APP_PATH=/tmp/eki-look.app" in said
     assert str(selfwork.SHOTS / "ab12cd34") in said and "before-<view>-<light|dark>.png" in said
+
+
+def test_the_cli_asks_before_applying_a_protected_change(monkeypatch, capsys):
+    from eki import cli
+    c = {"id": "abc", "protected": ["eki/agent.py"]}
+    assert cli._confirm_protected(c, yes=True)                            # --yes
+    assert "eki/agent.py" in capsys.readouterr().err                      # shown either way
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _q: "y")
+    assert cli._confirm_protected(c, yes=False)
+    monkeypatch.setattr("builtins.input", lambda _q: "")
+    assert not cli._confirm_protected(c, yes=False)                       # N is the default
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert not cli._confirm_protected(c, yes=False)                       # nobody to ask
+    assert "--yes" in capsys.readouterr().err

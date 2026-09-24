@@ -294,14 +294,16 @@ class SelfLoop:
         finally:
             selfloop.merge_leave(cid)
 
-    async def _self_apply_now(self, cid: str, raising: bool = False) -> Dict[str, Any]:
+    async def _self_apply_now(self, cid: str, raising: bool = False,
+                              by_person: bool = False) -> Dict[str, Any]:
         """selfwork.apply, one at a time in this engine: two applies at once
-        would each build on a checkout without the other."""
+        would each build on a checkout without the other. `by_person` only
+        where a person asked — it's what lets a protected change in."""
         lock = vars(self).setdefault("_self_applying", asyncio.Lock())
         async with lock:
             try:
                 return await asyncio.to_thread(selfwork.apply, cid, python=sys.executable,
-                                               check=self.self_check)
+                                               check=self.self_check, by_person=by_person)
             except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
                 if raising:
                     raise
@@ -387,7 +389,11 @@ class SelfLoop:
                          "back to what ran before if it isn't healthy.")
         elif state == "applied":
             lines.append(str(c.get("how") or c.get("merged") or "In your checkout."))
-        elif state in ("proposed", "conflicts") and not c.get("protected"):
+        elif state in ("proposed", "conflicts") and c.get("protected"):
+            lines.append(f"eki won't apply it on its own. Read it with `eki self diff {cid}`; "
+                         f"to take it, `eki self apply {cid}` or Apply on the board "
+                         f"([Self]({self._self_board(cid)})) — it asks you to confirm first.")
+        elif state in ("proposed", "conflicts"):
             if applied.get("why"):
                 lines.append(f"Not applied: {applied['why']}")
             elif c.get("why"):
@@ -713,20 +719,29 @@ class SelfLoop:
         self._self_wake()
         return c
 
-    async def self_apply(self, cid: str) -> Dict[str, Any]:
-        got = await self._self_apply_now(cid, raising=True)
+    async def self_apply(self, cid: str, confirmed: bool = False) -> Dict[str, Any]:
+        """You apply a change (`eki self apply`, the board's Apply). One that
+        touches what eki may not change alone goes in too — once you've
+        confirmed, having been shown which protected files it touches."""
+        c = selfwork.change(cid)
+        if c.get("protected") and not confirmed:
+            raise selfwork.SelfWorkError(
+                "it touches what eki may not change alone: " + ", ".join(c["protected"])
+                + " — confirm to apply it (`eki self apply " + c["id"] + "`, or Apply on the board)")
+        got = await self._self_apply_now(cid, raising=True, by_person=True)
         if got.get("state") == "conflicts":
             # it no longer goes on top of your checkout: not handed back to
             # you — an agent resolves it, and eki applies it when that holds
-            got = await self._self_resolve_start(got.get("id") or cid) or got
+            got = await self._self_resolve_start(got.get("id") or cid, person=True) or got
         self._self_follow(got.get("id") or cid)
         return got
 
     # ---- conflicts, resolved (eki/selfwork.py begin_rebase / finish_rebase) --------------
 
-    async def _self_resolve_start(self, cid: str) -> Optional[Dict[str, Any]]:
+    async def _self_resolve_start(self, cid: str, person: bool = False) -> Optional[Dict[str, Any]]:
         """A run that has the change's conflicts resolved and then applies it,
-        in the change's own thread. None when resolving is off."""
+        in the change's own thread. None when resolving is off. `person`: you
+        asked for the apply, so it goes on as yours once resolved."""
         if not self.settings.get("self_resolve", True):                 # type: ignore[attr-defined]
             return None
         c = selfwork.change(cid)
@@ -740,7 +755,8 @@ class SelfLoop:
         wrote = c.get("backend") or ""
         rid = self.runs.create(shown, conversation=convo, user_turn=turn,  # type: ignore[attr-defined]
                                requested=wrote if self._self_can_resolve(wrote) else "",
-                               payload=json.dumps({"self_resolve": c["id"], "route": "resolve git conflicts"}))
+                               payload=json.dumps({"self_resolve": c["id"], "route": "resolve git conflicts",
+                                                   "person": person}))
         selfwork.set_state(c["id"], "conflicts", resolving=rid, resolving_at=int(time.time()),
                            why="eki is having its conflicts resolved")
         await self.runner.submit(rid)                                   # type: ignore[attr-defined]
@@ -803,7 +819,7 @@ class SelfLoop:
                 return
             yield "\n\n*eki: resolved — judging it again on top of your checkout, then applying it…*\n"
         selfwork.set_state(c["id"], "conflicts", resolving="", why="")
-        applied = await self._self_apply_now(c["id"])
+        applied = await self._self_apply_now(c["id"], by_person=bool(_payload(run).get("person")))
         now = self._self_follow(c["id"])
         it = self._self_item_of(now) or _NoItem(now)
         text = self._self_says(now, it, applied)                        # type: ignore[arg-type]

@@ -452,6 +452,46 @@ async def test_a_conflict_on_apply_is_resolved_by_an_agent_and_then_applied(eng)
 
 
 @pytest.mark.asyncio
+async def test_a_protected_change_waits_for_you_even_with_apply_and_goes_in_when_you_confirm(eng):
+    eng.settings = {**eng.settings, "self_autonomy": "apply"}
+    Agent.edits = {"eki/agent.py": "# what launchd runs, changed\n"}
+    started = await eng.self_ask("change what launchd runs", apply=True)
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    c = selfwork.change(cid)
+    assert c["state"] == "proposed" and c["protected"] == ["eki/agent.py"] and not eng.swaps
+    said = eng.store.turns(started["conversation"])[-1]["content"]
+    assert "won't apply it on its own" in said and f"eki self apply {cid}" in said
+    with pytest.raises(selfwork.SelfWorkError, match="confirm"):
+        await eng.self_apply(cid)                                          # not without a yes
+    assert not eng.swaps
+    got = await eng.self_apply(cid, confirmed=True)
+    assert got["state"] == "applying" and eng.swaps[0][1] == {"self_id": cid}
+    eng.self_settled({"self": cid, "state": "healthy", "merged": "merged into your checkout"})
+    c = selfwork.change(cid)
+    assert c["state"] == "applied" and c["applied_by"] == "you"
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_protected_change_you_apply_that_conflicts_is_resolved_and_applied_as_yours(eng):
+    Agent.edits = {"eki/agent.py": "# the agent's way\n"}
+    started = await eng.self_ask("change what launchd runs")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    (eng.root / "eki" / "agent.py").write_text("# your way\n")
+    git(eng.root, "add", "-A")
+    git(eng.root, "commit", "-qm", "yours, meanwhile")
+    Agent.edits = {"eki/agent.py": "# your way — and the agent's\n"}      # the resolution
+    got = await eng.self_apply(cid, confirmed=True)
+    assert got["state"] == "conflicts" and got["resolving"]
+    await settle(eng.runs, got["resolving"], timeout=20)
+    c = selfwork.change(cid)
+    assert c["state"] == "applying" and c["applied_by"] == "you" and eng.swaps[-1][1] == {"self_id": cid}
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_a_resolution_that_leaves_markers_puts_the_change_back_as_it_was(eng):
     cid = await _conflicting(eng)
     was = selfwork.change(cid)["commit"]

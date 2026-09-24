@@ -415,8 +415,12 @@ function changeActs(c, withDiff) {
   if (busy) return `<span class="working-line"><span class="spinner"></span>${esc(busy)}…</span>`;
   const out = [];
   if (withDiff) out.push(`<a class="btn small" href="#/self/${enc(c.id)}">Read it</a>`);
-  if (["proposed", "conflicts", "rolled back"].includes(c.state) && c.fit && !(c.protected || []).length)
-    out.push(`<button class="btn small primary" data-cact="apply" data-id="${esc(c.id)}">Apply</button>`);
+  const guarded = (c.protected || []).length;
+  if (["proposed", "conflicts", "rolled back"].includes(c.state) && c.fit)
+    out.push(!guarded ? `<button class="btn small primary" data-cact="apply" data-id="${esc(c.id)}">Apply</button>`
+      : S.confirm === "ap:" + c.id
+      ? `<span class="confirm">It touches what eki may not change alone: ${esc(c.protected.join(", "))}. Apply it anyway? It's checked, built and swapped in, watched. <button class="btn small primary" data-cact="apply" data-confirm="1" data-id="${esc(c.id)}">Apply</button><button class="btn small" data-cancel>Cancel</button></span>`
+      : `<button class="btn small primary" data-ask="ap:${esc(c.id)}">Apply…</button>`);
   if (["proposed", "conflicts", "unfit", "stopped", "rolled back"].includes(c.state))
     out.push(S.confirm === "dc:" + c.id
       ? `<span class="confirm">Discard it? Its branch goes too. <button class="btn small danger solid" data-cact="discard" data-id="${esc(c.id)}">Discard</button><button class="btn small" data-cancel>Cancel</button></span>`
@@ -429,7 +433,8 @@ function changeActs(c, withDiff) {
 }
 
 function changeCard(c) {
-  const why = (c.protected || []).length ? "Touches what eki may not change alone (" + c.protected.join(", ") + ") — read it and merge it yourself"
+  const why = (c.protected || []).length && !["applying", "applied"].includes(c.state)
+            ? "Touches what eki may not change alone (" + c.protected.join(", ") + ") — eki won't apply it; read it, and Apply it yourself if you want it"
             : c.why || "";
   return `<div class="card change">
     <div class="top"><div style="min-width:0"><div class="title">${esc(c.title)}</div>
@@ -547,7 +552,8 @@ function changePage() {
     <div class="text">${esc(c.title)}</div>
     <div class="meta"><span class="badge ${CBADGE[c.state] || ""}">${esc(CSTATE[c.state] || c.state)}</span>${srcChip(c.source || "asked")}
       <span>self/${esc(c.id)}</span><span>${c.backend && c.backend !== "eki" ? "written by " + esc(c.backend) : "made by eki"}</span>
-      ${c.base ? `<span>on ${esc(c.base.slice(0, 10))}</span>` : ""}<span>${esc(when(c.at))}</span></div>
+      ${c.base ? `<span>on ${esc(c.base.slice(0, 10))}</span>` : ""}<span>${esc(when(c.at))}</span>${c.applied_by ? `<span>applied because ${esc(c.applied_by)} asked</span>` : ""}</div>
+    ${(c.protected || []).length ? `<div class="meta" style="color:var(--wait)">Touches what eki may not change alone: ${esc(c.protected.join(", "))}</div>` : ""}
     ${c.verdict ? `<div class="note" style="background:var(--sunk)">${esc(c.verdict)}${c.why && !c.verdict.includes(c.why) ? " — " + esc(c.why) : ""}${c.merged ? " · " + esc(c.merged) : ""}</div>` : ""}
     ${checksOf(c) ? `<div class="meta" style="margin-top:10px">${checksOf(c)}</div>` : ""}
     <div class="acts">${changeActs(c, false)}</div>${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
@@ -672,7 +678,8 @@ document.addEventListener("click", async e => {
     S.acting[id] = { apply: "Applying — judged again if your checkout moved on", discard: "Discarding", undo: "Undoing" }[what];
     S.confirm = ""; draw();
     S.error = "";
-    try { await api(`/api/self/changes/${enc(id)}/${what}`, "POST"); } catch (err) { S.error = err.message; }
+    const body = cact.dataset.confirm ? { confirm: true } : undefined;
+    try { await api(`/api/self/changes/${enc(id)}/${what}`, "POST", body); } catch (err) { S.error = err.message; }
     delete S.acting[id]; S.diffFor = ""; return refresh(true);
   }
   const iact = t.closest("[data-iact]");

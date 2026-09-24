@@ -292,7 +292,22 @@ protected is applied at once). `self_autonomy_areas` overrides it per path —
 `{"ROADMAP.md": "apply", "docs/": "apply"}` — the longest match winning; a
 change is applied only if every file it touches may be. Protected paths — now
 including `selfloop.py` and `selfengine.py`, which decide what eki takes on
-and how far it goes — are never applied by eki at any setting.
+and how far it goes — are never applied by eki at any setting: not by
+autonomy, not by `eki self --apply`, not by the merge queue. That keeps eki
+from applying them alone; it doesn't keep you out.
+
+**Applying a protected change yourself.** `eki self apply <id>` lists the
+protected files the change touches and asks *apply it anyway? [y/N]*
+(`--yes` skips the question; with no terminal to ask, it needs `--yes`). On
+the Self board the button reads *Apply…* and opens a confirm step naming the
+files. Once you say yes it takes the ordinary path — rebased onto your
+checkout, conflicts resolved by an agent, judged again, built, swapped in
+watched and rolled back if it isn't healthy — and the change's record says
+`applied_by: you` (`eki self show`, the board). The engine refuses an
+unconfirmed apply of a protected change (`{"confirm": true}` on
+`POST /api/self/changes/<id>/apply`), and a change that comes to touch a
+protected path once it's rebased goes back to waiting for you. No more
+merging by hand and `eki swap`.
 
 **Applying.** If your checkout has moved on since the change was made, it is
 rebased onto your checkout first and judged again. If the rebase stops on a

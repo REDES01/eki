@@ -333,3 +333,14 @@ def test_a_swap_still_waiting_counts_as_running_and_is_superseded(src, tmp_path)
     assert builds._swap_pid() != pid and builds.live()["commit"] == builds.info(second)["commit"]
     assert "superseded the waiting swap" in (builds.SELF_HOME / "swap.log").read_text()
     os.kill(builds._swap_pid(), 15)
+
+
+def test_the_same_change_under_another_id_is_not_lost(src):
+    running = _running(src)
+    (src / "notes.md").write_text("mine\n")
+    sh(src, "add", "notes.md")
+    sh(src, "commit", "-q", "-m", "yours, since")
+    assert builds.behind(src) == running
+    sh(src, "cherry-pick", running)                              # main has it, as another commit
+    assert sh(src, "rev-parse", "HEAD") != running
+    assert builds.behind(src) == ""

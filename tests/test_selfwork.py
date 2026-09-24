@@ -152,3 +152,20 @@ def test_the_agent_is_asked_for_a_summary_and_it_is_read_back():
     assert selfwork.summary_of("no summary here") == ""
     from eki import selfloop
     assert selfloop.reason(answer) == "Changed the list."
+
+
+def test_a_change_whose_swap_was_superseded_is_applied_with_the_build_that_carries_it(tmp_path):
+    root = repo(tmp_path)
+    home = tmp_path / "self"
+    p = propose(tmp_path, root, agent({"eki/thing.py": "VALUE = 2\n"}))
+    selfwork.set_state(p.id, "applying", home)
+    # a later build, made on top of it
+    selfwork.git(root, "checkout", "-q", "-b", "later", p.commit)
+    (root / "eki" / "other.py").write_text("X = 1\n")
+    selfwork.git(root, "add", "-A")
+    selfwork.git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "later")
+    later = selfwork.git(root, "rev-parse", "HEAD")
+    assert selfwork.carried(root, selfwork.git(root, "rev-parse", "main"), home) == []   # not in that one
+    assert selfwork.carried(root, later, home) == [p.id]
+    c = selfwork.change(p.id, home)
+    assert c["state"] == "applied" and "with a later change" in c["how"]

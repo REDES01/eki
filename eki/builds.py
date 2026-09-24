@@ -241,7 +241,12 @@ def behind(src: Path, ref: str = "HEAD") -> str:
         return ""                   # running your checkout itself
     if _g(src, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
         return ""                   # not from this checkout (a release)
-    return "" if _g(src, "merge-base", "--is-ancestor", commit, ref).returncode == 0 else commit
+    if _g(src, "merge-base", "--is-ancestor", commit, ref).returncode == 0:
+        return ""
+    # the same changes under other ids (cherry-picked, rebased) aren't lost:
+    # `git cherry` marks each commit whose change `ref` already has with "-"
+    left = _g(src, "cherry", ref, commit).stdout.split("\n")
+    return commit if any(x.startswith("+") for x in left) else ""
 
 
 def base(src: Path) -> str:

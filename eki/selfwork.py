@@ -785,6 +785,20 @@ def settled(cid: str, outcome: str, merged: str = "", why: str = "",
     return set_state(c["id"], "rolled back", home, why=why or outcome)
 
 
+def carried(root: Path, commit: str, home: Optional[Path] = None) -> List[str]:
+    """Changes still "applying" that a healthy build carries anyway — their
+    own swap was superseded by a newer one built on top of them. Marked
+    applied; returns their ids."""
+    done = []
+    for c in changes(home):
+        if c["state"] != "applying" or not c.get("commit") or not commit:
+            continue
+        if is_in(root, c["commit"], commit):
+            set_state(c["id"], "applied", home, how="swapped in with a later change, healthy")
+            done.append(c["id"])
+    return done
+
+
 def discard(cid: str, home: Optional[Path] = None) -> Dict[str, Any]:
     """Drop a change nobody wants: its worktree and its branch."""
     c = change(cid, home)

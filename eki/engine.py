@@ -597,6 +597,15 @@ class Engine(SelfLoop):
             except Exception:                       # noqa: BLE001
                 pass
         if done["state"] == "healthy":
+            try:
+                # changes whose own swap a newer one superseded: it carries them
+                from . import selfwork
+                build = builds_mod.info(Path(done.get("target") or ""))
+                for cid in await asyncio.to_thread(selfwork.carried, builds_mod.source(),
+                                                   str(build.get("commit") or "")):
+                    self._self_follow(cid)
+            except Exception:                       # noqa: BLE001
+                pass
             title = f"now running {what}"
             body = done.get("merged") or "the new build is healthy"
         else:

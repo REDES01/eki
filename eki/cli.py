@@ -888,7 +888,8 @@ def cmd_routing(args) -> int:
         if not rest:
             print('eki routing explain "your request"', file=sys.stderr)
             return 1
-        d = call("POST", "/api/routing/explain", args.service, json={"prompt": rest})
+        folder = os.path.abspath(os.path.expanduser(args.folder)) if args.folder else ""
+        d = call("POST", "/api/routing/explain", args.service, json={"prompt": rest, "folder": folder})
         lab = d["label"]
         print(f"prompt check : {lab['task']} · {lab['difficulty']} ({lab['source']}) → row “{d['row_title']}” — {d['row_why']}")
         print(f"that row     : {' → '.join(d['row_targets']) or '(empty)'}   [{d['row_source']}]")
@@ -908,7 +909,9 @@ def cmd_routing(args) -> int:
         got = call("POST", f"/api/routing/forget/{rest or 'all'}", args.service)
         print(("taken back: " + ", ".join(got["removed"])) if got["removed"] else "no rule like that")
         return 0
-    print(call("GET", "/api/routing", args.service)["text"])
+    # shown from inside a project, the table is that project's (its .eki/routing.yaml)
+    here = os.path.abspath(os.path.expanduser(args.folder or "."))
+    print(call("GET", "/api/routing", args.service, params={"folder": here})["text"])
     return 0
 
 
@@ -1369,6 +1372,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ro = sub.add_parser("routing", help="the routing table; explain a request; replay recent ones")
     ro.add_argument("action", nargs="?", default="show", choices=["show", "explain", "replay", "undo", "forget"])
     ro.add_argument("rest", nargs="*")
+    ro.add_argument("-f", "--folder", default="",
+                    help="as a request in this folder (a project's .eki/routing.yaml applies); "
+                         "show: default here")
     wa = sub.add_parser("lineup", help="which models are out there: vendor ladders, local suggestions")
     wa.add_argument("action", nargs="?", default="show", choices=["show", "refresh", "take", "update"])
     wa.add_argument("name", nargs="?", default="")

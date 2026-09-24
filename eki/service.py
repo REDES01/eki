@@ -689,10 +689,11 @@ class ExplainBody(BaseModel):
 
 
 @app.get("/api/routing")
-def routing(thread: str = "") -> Any:
-    """The routing table, the rules, and the room on each subscription."""
+def routing(thread: str = "", folder: str = "") -> Any:
+    """The routing table, the rules, and the room on each subscription —
+    with a project's roster and policy when `folder` is in one."""
     eng = engine()
-    return {**eng.routing_view(thread), "text": eng.routing_text(thread)}
+    return {**eng.routing_view(thread, folder), "text": eng.routing_text(thread, folder)}
 
 
 @app.post("/api/routing/explain")

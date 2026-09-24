@@ -53,6 +53,7 @@ from . import models as models_mod
 from . import nesting
 from . import projects as projects_mod
 from . import table as table_mod
+from . import project as project_mod
 from . import capacity as capacity_mod
 from . import prefs as prefs_mod
 from . import watch as watch_mod
@@ -1478,7 +1479,7 @@ class Engine(SelfLoop):
             m = table_mod.meta_of(last)
             failed = bool(m.get("failed") or m.get("stopped"))
         row, why = table_mod.row_for(label.task, label.difficulty, failed, run["prompt"], examples)
-        cells = self.routing_table(cid)
+        cells = self.routing_table(cid, run.get("cwd") or "")
         targets = list((cells.get(row) or {}).get("targets") or [])
         fo = run.get("_failover")
         if fo:
@@ -1604,8 +1605,19 @@ class Engine(SelfLoop):
                 out[b.key] = round(got[len(got) // 2], 1)
         return out
 
-    def routing_table(self, thread: str = "") -> Dict[str, Dict[str, Any]]:
-        return table_mod.effective(self._base_table(), table_mod.load(), thread)
+    def routing_table(self, thread: str = "", folder: str = "") -> Dict[str, Dict[str, Any]]:
+        """The table for a request: yours, with the project's roster and
+        policy on top when `folder` is in one (eki/project.py)."""
+        return table_mod.effective(self._base_table(), table_mod.load(), thread,
+                                   project=self._project_policy(folder))
+
+    def _project_policy(self, folder: str) -> Optional[Dict[str, Any]]:
+        """The roster and policy of the project `folder` is in, with names
+        this Mac doesn't have set aside (kept under "unknown" to say so)."""
+        proj = project_mod.load(folder) if folder else None
+        if proj is not None:
+            proj["unknown"] = project_mod.known_only(proj, [b.key for b in self.backends])
+        return proj
 
     def _target_labels(self) -> "table_mod.Labels":
         names = {b.key: b.info.label or b.key for b in self.backends}
@@ -1765,9 +1777,10 @@ class Engine(SelfLoop):
 
     # ---- checking it -------------------------------------------------------
 
-    def routing_view(self, thread: str = "") -> Dict[str, Any]:
+    def routing_view(self, thread: str = "", folder: str = "") -> Dict[str, Any]:
         labels = self._target_labels()
-        cells = self.routing_table(thread)
+        cells = self.routing_table(thread, folder)
+        proj = self._project_policy(folder)
         secs = self._typical_seconds()
         rows = [{"id": r, "title": t, "examples": ex + ((table_mod.load().get("examples") or {}).get(r) or []),
                  "targets": [{"target": x, "label": labels.get(x, x),
@@ -1782,15 +1795,16 @@ class Engine(SelfLoop):
             subs.append({"key": b.key, "label": b.info.label,
                          **(capacity_mod.room(data, b.info.quota_source or "", reading.windows) if reading else {})})
         rules = table_mod.load()
-        return {"order": ["what can do it (running, quota, able)", "your rules", "the vendor's ladder",
+        return {"order": ["what can do it (running, quota, able)", "your rules", "the project's, in one", "the vendor's ladder",
                           "room left on each subscription"],
                 "rows": rows, "subscriptions": subs,
                 "rules": {"never": rules.get("never") or [], "backup": rules.get("backup") or [],
                           "threads": rules.get("threads") or {}},
+                "project": proj,
                 "ladders": {b.key: watch_mod.ladder(b.key) for b in self.backends if watch_mod.ladder(b.key)}}
 
-    def routing_text(self, thread: str = "") -> str:
-        v = self.routing_view(thread)
+    def routing_text(self, thread: str = "", folder: str = "") -> str:
+        v = self.routing_view(thread, folder)
         out = ["**Routing** — decided in this order: " + " → ".join(v["order"]) + ".", ""]
         out.append("| Kind of work | 1st | 2nd | 3rd | set by |")
         out.append("|---|---|---|---|---|")
@@ -1812,6 +1826,15 @@ class Engine(SelfLoop):
                 [f"only as a backup: {x['target']} (“{x['said']}”)" for x in rules["backup"]]
         if extra:
             out += ["", "Your rules: " + "; ".join(extra)]
+        proj = v.get("project")
+        if proj:
+            said = [f"roster: {', '.join(proj['roster'])}"] if proj.get("roster") else []
+            said += list(dict.fromkeys(proj["said"][r] for r, ts in proj["rows"].items() if ts))
+            out += ["", f"This project ({proj['path']}): " + ("; ".join(said) or "nothing set")]
+            if proj.get("unknown"):
+                out.append("Not backends on this Mac, left out: " + ", ".join(proj["unknown"]))
+            if proj.get("problem"):
+                out.append(proj["problem"])
         return "\n".join(out)
 
     async def _route(self, prompt: str, thread: str = "", folder: str = "",
@@ -1845,7 +1868,7 @@ class Engine(SelfLoop):
         read the thread only up to that turn (a request replayed in place)."""
         label, row_why, need, choice = await self._route(prompt, thread, folder, before_turn)
         row = need.row
-        cells = self.routing_table(thread)
+        cells = self.routing_table(thread, folder)
         labels = self._target_labels()
         return {"prompt": prompt, "label": label.to_json(), "row": row, "row_title": need.row_title,
                 "row_why": row_why, "row_targets": [labels.get(t, t) for t in need.targets],

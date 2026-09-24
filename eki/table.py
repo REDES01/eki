@@ -154,12 +154,14 @@ def save(data: Dict[str, Any]) -> None:
 
 
 def effective(base: Dict[str, List[str]], rules: Dict[str, Any], thread: str = "",
-              now: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
+              now: Optional[float] = None, project: Optional[Dict[str, Any]] = None
+              ) -> Dict[str, Dict[str, Any]]:
     """The table as routing uses it: {row: {"targets", "source", "said"}}.
 
     Order of what changes a cell: a row you (or eki, learning) set replaces
     the default; "backup" moves a provider to the end of every row; "never"
-    takes it out of every row; a rule for this thread goes first."""
+    takes it out of every row; the project's roster and policy come next
+    (eki/project.py); a rule for this thread goes first."""
     now = now or time.time()
     out: Dict[str, Dict[str, Any]] = {}
     for row, _, _ in ROWS:
@@ -176,6 +178,8 @@ def effective(base: Dict[str, List[str]], rules: Dict[str, Any], thread: str = "
         front = [t for t in ts if parse_target(t)[0] not in backups]
         back = [t for t in ts if parse_target(t)[0] in backups]
         cell["targets"] = front + back
+    if project:
+        in_project(out, project)
     t = (rules.get("threads") or {}).get(thread) if thread else None
     if t and (not t.get("until") or t["until"] > now):
         for row, cell in out.items():
@@ -186,6 +190,29 @@ def effective(base: Dict[str, List[str]], rules: Dict[str, Any], thread: str = "
             cell["source"] = "this thread"
             cell["said"] = t.get("said", "")
     return out
+
+
+def in_project(out: Dict[str, Dict[str, Any]], project: Dict[str, Any]) -> None:
+    """A project's roster and policy over the table. The roster takes
+    everyone else out of every row — except a row it would leave empty, so
+    a roster of text models doesn't stop pictures; a backend the project
+    names for a kind of work goes first in that row, roster or not."""
+    roster = {parse_target(t)[0] for t in project.get("roster") or []}
+    where = project.get("root") or "this project"
+    for row, cell in out.items():
+        named = list((project.get("rows") or {}).get(row) or [])
+        for target in reversed(named):
+            cell["targets"] = to_front(cell["targets"], target)
+        if named:
+            cell.update(source="this project",
+                        said=f"{(project.get('said') or {}).get(row, row)} in {where}")
+        if roster:
+            ok = roster | {parse_target(t)[0] for t in named}
+            kept = [t for t in cell["targets"] if parse_target(t)[0] in ok]
+            if kept and kept != cell["targets"]:
+                cell["targets"] = kept
+                if not named:
+                    cell.update(source="this project", said=f"roster in {where}")
 
 
 def to_front(targets: List[str], target: str) -> List[str]:

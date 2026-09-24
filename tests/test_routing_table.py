@@ -348,3 +348,53 @@ def test_a_local_choice_means_the_model_with_hands_when_tools_are_needed():
     c = r.choose(Need(tools=True, task="chat", difficulty="easy", row="quick", row_title="Quick question",
                       targets=quick))
     assert c.backend.key == "codex-qwen" and "1st choice" in c.reason   # tools: the same model with hands
+
+
+# ---- a project's roster and policy (eki/project.py) --------------------------------------------
+
+def _project(tmp_path, text):
+    (tmp_path / "game" / ".eki").mkdir(parents=True)
+    (tmp_path / "game" / "src").mkdir()
+    (tmp_path / "game" / ".eki" / "routing.yaml").write_text(text)
+    return tmp_path / "game"
+
+
+def test_a_project_file_is_found_from_any_folder_inside_it(tmp_path):
+    from eki import project
+    root = _project(tmp_path, "roster: [claude_code, codex]\nprose: claude_code\ncode: codex@top\nnonsense: x\n")
+    p = project.load(str(root / "src"))
+    assert p["root"] == str(root.resolve()) and p["roster"] == ["claude_code", "codex"]
+    assert p["rows"] == {"writing": ["claude_code"], "code": ["codex@top"], "code_hard": ["codex@top"]}
+    assert project.load(str(tmp_path)) is None                  # outside it: no project
+    (root / ".eki" / "routing.yaml").write_text("roster: [\n")
+    assert project.load(str(root))["problem"]                   # said, not guessed at
+
+
+def test_the_project_policy_goes_first_in_its_rows_and_its_roster_narrows_the_rest():
+    proj = {"root": "/p", "roster": ["claude_code", "qwen"], "rows": {"writing": ["claude_code"],
+                                                                      "code": ["codex"]},
+            "said": {"writing": "prose: claude_code", "code": "code: codex"}}
+    eff = table.effective(BASE, {}, project=proj)
+    assert eff["writing"]["targets"] == ["claude_code@default", "qwen"]
+    assert eff["writing"]["source"] == "this project" and "prose: claude_code" in eff["writing"]["said"]
+    # named for code, so first there, roster or not; everywhere else only the roster
+    assert eff["code"]["targets"][0] == "codex@default"
+    assert eff["explain"]["targets"] == ["claude_code@default", "qwen"]
+    # a row the roster would empty keeps its choices: pictures still work
+    assert eff["picture"]["targets"] == ["flux"] and eff["picture"]["source"] == "default"
+    # a thread rule still goes before the project's
+    rules = {"threads": {"c1": {"targets": ["qwen"], "until": None, "said": "for this thread use qwen"}}}
+    assert table.effective(BASE, rules, "c1", project=proj)["writing"]["targets"][0] == "qwen"
+
+
+@pytest.mark.asyncio
+async def test_a_request_in_a_project_folder_goes_where_the_project_says(tmp_path, monkeypatch):
+    eng = desk(tmp_path, monkeypatch)
+    root = _project(tmp_path, "code: codex\nroster: [codex, gemini]\n")
+    exp = await eng.routing_explain("fix the failing test in this repo", folder=str(root / "src"))
+    assert exp["row"] == "code" and exp["choice"].startswith("codex") and exp["row_source"] == "this project"
+    outside = await eng.routing_explain("fix the failing test in this repo", folder=str(tmp_path))
+    assert outside["choice"].startswith("claude_code")
+    text = eng.routing_text(folder=str(root))
+    assert "This project" in text and "code: codex" in text and "left out: gemini" in text
+    await eng.runner.stop()

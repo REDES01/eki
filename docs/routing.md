@@ -66,6 +66,30 @@ words). What eki recognises as a message *for it* is narrow on purpose:
 short, not in a folder, an instruction or a question about routing naming a
 model or a kind of work. "use Claude's API in this script" goes to a model.
 
+## In a project
+
+A project can say who works on it and who does what, in a file of its own —
+`.eki/routing.yaml` at its top, kept in the repo so it reads the same for
+everyone who works there:
+
+```yaml
+roster: [claude_code, codex]   # only these are chosen automatically here
+prose: claude_code             # writing, translation
+code: codex                    # code changes, big and small
+```
+
+It applies to requests whose folder is inside the project (a chat with a
+folder, `eki ask -r`, a goal's folder). Names are the backends' keys from
+`eki backends`, with a model role if you like (`claude_code@top`); besides
+`prose` and `code`, any row works — `quick`, `explain`, `research`,
+`picture`. The roster takes everyone else out of every row, except a row
+it would leave empty (a roster of text models doesn't stop pictures); a
+backend named for a kind of work goes first in that row either way. It sits
+on top of your own table; "for this thread use …" still goes before it, and
+a model picked by name is still used. `eki routing` run inside the project
+shows its table and says which names this Mac doesn't have;
+`eki routing explain -f <folder> "…"` checks one request.
+
 ## A thread stays with the model that answers
 
 The table routes a thread's **first** message. After that the thread stays
@@ -117,8 +141,8 @@ you chose it. Any other failure fails as before. Setting `failover` (on).
 
 ## Order
 
-What can do it (running, quota, able) → your rules → the vendor's ladder →
-room on each subscription. When nothing in a row can take a request, the
+What can do it (running, quota, able) → your rules → the project's → the
+vendor's ladder → room on each subscription. When nothing in a row can take a request, the
 older cheapest-fit logic still finds something and says so.
 
 ## What a backend makes, and what it needs

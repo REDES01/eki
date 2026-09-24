@@ -15,6 +15,7 @@ What the installed app was built from is a hash of mac/'s sources, kept in
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -109,8 +110,18 @@ def _running(app: Path) -> bool:
 def install(build: Path, app: Path, *, force: bool = False) -> str:
     """Rebuild the app from `build`'s mac/ and put it at `app`, reopening it
     if it was open. "" when there was nothing to do; otherwise what happened.
-    Waits (says so, remembers it) while you're using the app."""
-    build, app = Path(build), Path(app)
+    Waits (says so, remembers it) while you're using the app. One rebuild at
+    a time on this Mac, whoever asks."""
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    with open(STATE.with_suffix(".lock"), "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return "waiting: another rebuild of the app is under way"
+        return _install(Path(build), Path(app), force)
+
+
+def _install(build: Path, app: Path, force: bool) -> str:
     want = sources_hash(build)
     if not want or (want == state().get("hash") and app.exists() and not force):
         _save(pending="")

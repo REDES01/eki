@@ -628,7 +628,11 @@ class Engine(SelfLoop):
             except Exception:                       # noqa: BLE001
                 pass
             # the app follows the engine when the change touched mac/
-            asyncio.create_task(self.app_tick(str(done.get("target") or "")))
+            task = asyncio.create_task(self.app_tick(str(done.get("target") or "")))
+            self._side_tasks.add(task)
+            task.add_done_callback(self._side_tasks.discard)
+            task.add_done_callback(lambda t: t.cancelled() or not t.exception() or
+                                   observe_mod.note("fault", what="app rebuild", why=repr(t.exception())[:300]))
             title = f"now running {what}"
             body = done.get("merged") or "the new build is healthy"
         else:

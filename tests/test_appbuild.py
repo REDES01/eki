@@ -90,3 +90,15 @@ def test_the_candidate_check_compiles_the_app_only_when_it_changed(tmp_path, mon
     appbuild._save(hash=appbuild.sources_hash(root))
     candidate.check_app(root, report, step, set())
     assert len(seen) == 1 and report.checks[-1].detail == "the app is unchanged"
+
+
+def test_two_rebuilds_never_run_at_once(tmp_path, monkeypatch):
+    import fcntl
+    monkeypatch.setattr(appbuild, "frontmost", lambda: False)
+    monkeypatch.setattr(appbuild, "_running", lambda app: False)
+    build, app = tree(tmp_path / "build"), tmp_path / "Eki.app"
+    appbuild.STATE.parent.mkdir(parents=True, exist_ok=True)
+    with open(appbuild.STATE.with_suffix(".lock"), "w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert appbuild.install(build, app) == "waiting: another rebuild of the app is under way"
+    assert appbuild.install(build, app).startswith("the app was rebuilt")

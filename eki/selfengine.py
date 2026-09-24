@@ -53,6 +53,9 @@ IDLE_RECHECK = 900
 SELF_COST = 3
 #: how often a change waiting in the merge queue looks whether it's its turn
 MERGE_POLL = 2.0
+#: how many of a change's commits the agent resolves in one run before eki
+#: stops calling it a conflict and calls it a change to make again
+RESOLVE_ROUNDS = 12
 
 
 def _payload(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -800,27 +803,42 @@ class SelfLoop:
         if info["files"]:
             yield (f"*eki: it conflicts in {', '.join(info['files'])} — having them resolved in its "
                    "worktree…*\n\n")
-            landed = await asyncio.to_thread(selfwork.landed_since, c["id"], info["onto"], info["files"])
-            ask = selfwork.resolve_brief(c, info["files"], landed, sys.executable, info["where"])
-            inner = {**run, "cwd": info["where"], "_self_inner": True, "_as": ask}
             parts: List[str] = []
-            failed = ""
-            try:
-                async for piece in self._dispatch(inner):               # type: ignore[attr-defined]
-                    if isinstance(piece, str):
-                        parts.append(piece)
-                    yield piece
-            except BackendError as e:
-                failed = f"the agent couldn't resolve it: {e}"
-            fresh = self.runs.get(run["id"]) or run                     # type: ignore[attr-defined]
-            why = failed or await asyncio.to_thread(
-                selfwork.finish_rebase, c["id"], info, fresh.get("backend") or "",
-                selfloop.reason("".join(parts), 500))
-            if failed:
+            failed, why = "", ""
+            for _ in range(RESOLVE_ROUNDS):
+                landed = await asyncio.to_thread(selfwork.landed_since, c["id"], info["onto"], info["files"])
+                ask = selfwork.resolve_brief(c, info["files"], landed, sys.executable, info["where"],
+                                             info.get("step") or "")
+                inner = {**run, "cwd": info["where"], "_self_inner": True, "_as": ask}
+                try:
+                    async for piece in self._dispatch(inner):           # type: ignore[attr-defined]
+                        if isinstance(piece, str):
+                            parts.append(piece)
+                        yield piece
+                except BackendError as e:
+                    failed = f"the agent couldn't resolve it: {e}"
+                    break
+                try:
+                    more = await asyncio.to_thread(selfwork.continue_rebase, info)
+                except selfwork.SelfWorkError as e:
+                    why = str(e)
+                    break
+                if not more:
+                    break
+                # a later commit of the change conflicts too: back to the agent, same run
+                yield (f"\n\n*eki: that went on; its next commit conflicts in {', '.join(more)} — "
+                       "having those resolved too…*\n\n")
+            else:
+                why = f"it still conflicted after {RESOLVE_ROUNDS} rounds of resolving"
+            if not failed and not why:
+                fresh = self.runs.get(run["id"]) or run                 # type: ignore[attr-defined]
+                why = await asyncio.to_thread(
+                    selfwork.finish_rebase, c["id"], info, fresh.get("backend") or "",
+                    selfloop.reason("".join(parts), 500))
+            if failed or why:
                 await asyncio.to_thread(selfwork._put_back, Path(info["where"]), info.get("commit") or "")
-            if why:
                 text = give_up(f"eki had its conflicts resolved, but it didn't hold: {why}"
-                               if not failed else why)
+                               if not failed else failed)
                 self.store.add_turn(convo, "assistant", text, "eki", "self-work",  # type: ignore[attr-defined]
                                     meta={"run": run["id"], "self": c["id"]})
                 yield "\n\n" + text

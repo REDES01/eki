@@ -660,19 +660,25 @@ def landed_since(cid: str, onto: str, files: List[str], home: Optional[Path] = N
     return got.stdout.strip()[:1500]
 
 
-def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str, where: str) -> str:
-    """What the agent is told when a change stops on conflicts."""
+def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str, where: str,
+                  step: str = "") -> str:
+    """What the agent is told when a change stops on conflicts. `step`: the
+    later commit it stopped on, once an earlier one was resolved and went on."""
     what = c.get("summary") or c.get("title") or (c.get("request") or "").strip()[:600]
+    now = (f"The earlier conflicts are resolved and committed; the rebase went on and stopped "
+           f"again, at its commit “{step}” — conflicts in: {', '.join(files)}.\n\n") if step else \
+        (f"Putting it on top of the current one — a git rebase, stopped now — conflicts in: "
+         f"{', '.join(files)}.\n\n")
     return (
         f"You are resolving conflicts in eki's own source code, in {where}.\n\n"
-        f"eki's change self/{c['id']} was made on an older checkout. Putting it on top of the "
-        f"current one — a git rebase, stopped now — conflicts in: {', '.join(files)}.\n\n"
-        f"What the change does:\n{what}\n\n"
+        f"eki's change self/{c['id']} was made on an older checkout. " + now
+        + f"What the change does:\n{what}\n\n"
         + (f"What the checkout gained in those files since:\n{landed}\n\n" if landed else "")
         + "How to work here:\n"
         "- Resolve every <<<<<<< / ======= / >>>>>>> block in those files so both sides' intent "
         "survives: the checkout's side is what's current; the change's side is what it adds.\n"
-        "- Touch only what the conflicts need. Don't redo or extend the change.\n"
+        "- Touch only what the conflicts need. Don't redo or extend the change. Whatever you "
+        "edit is added to this commit, so leave no scratch files behind.\n"
         "- Don't run `git rebase --continue`, `--abort`, commit, or touch branches — eki "
         "finishes the rebase itself once the files are clean.\n"
         f"- Run the tests with `{python} -m pytest -q` and leave them passing.\n"
@@ -680,36 +686,79 @@ def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str,
         "- Finish with one line per file: how you resolved it.\n")
 
 
+def touched(where: Path) -> List[str]:
+    """What the worktree holds beyond HEAD: staged, unstaged, and new files
+    git doesn't ignore — everything an agent may have edited mid-rebase."""
+    changed = git(where, "diff", "--name-only", "HEAD").splitlines()
+    new = git(where, "ls-files", "--others", "--exclude-standard").splitlines()
+    return sorted({f for f in changed + new if f})
+
+
+def stopped_at(where: Path) -> str:
+    """The subject of the commit a rebase is stopped on."""
+    try:
+        return git(where, "log", "-1", "--format=%s", "REBASE_HEAD")
+    except SelfWorkError:
+        return ""
+
+
+def continue_rebase(info: Dict[str, Any]) -> List[str]:
+    """After the agent: add everything it resolved — the conflicted files and
+    whatever else it had to touch, since a rebase won't go on past a file left
+    unstaged — and go on, commit by commit. [] once the rebase is done; when a
+    later commit stops on conflicts of its own, their files (and `info` now
+    points at them), for the agent to resolve in the same run. Anything else
+    that stops it is a real failure: the change is put back exactly as it was
+    and SelfWorkError says why."""
+    where = Path(info["where"])
+    try:
+        if not rebasing(where):
+            return []
+        still = marked(where, sorted(set(info.get("files") or []) | set(touched(where))))
+        if still:
+            raise SelfWorkError("conflict markers are still in " + ", ".join(still))
+        git(where, "add", "-A")
+        left = unmerged(where)
+        if left:
+            raise SelfWorkError("still conflicting: " + ", ".join(left))
+        info["resolved"] = sorted(set(info.get("resolved") or []) | set(info.get("files") or []))
+        got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
+                              "user.email=eki@localhost", "-c", "core.editor=true",
+                              "rebase", "--continue"],
+                             capture_output=True, text=True, env={**os.environ, "GIT_EDITOR": "true"})
+        if not rebasing(where):
+            if got.returncode != 0:
+                raise SelfWorkError("the rebase didn't finish: "
+                                    + (got.stderr.strip() or got.stdout.strip())[-200:])
+            return []
+        more = unmerged(where)
+        if not more:
+            raise SelfWorkError("the rebase stopped for another reason: "
+                                + (got.stderr.strip() or got.stdout.strip())[-200:])
+        info["files"], info["step"] = more, stopped_at(where)
+        return more
+    except SelfWorkError:
+        _put_back(where, info.get("commit") or "")
+        raise
+
+
 def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
                   home: Optional[Path] = None) -> str:
     """After the agent: finish the rebase, and make sure it holds. "" when the
     change now sits cleanly on top of your checkout; otherwise why not — and
-    the change is put back exactly as it was."""
-    where, onto, files = Path(info["where"]), info["onto"], list(info.get("files") or [])
+    the change is put back exactly as it was. A later commit that conflicts
+    too is a why here; the engine hands those back to the agent through
+    `continue_rebase` first."""
+    where, onto = Path(info["where"]), info["onto"]
     why = ""
     try:
-        still = marked(where, files)
-        if still:
-            why = "conflict markers are still in " + ", ".join(still)
-        elif rebasing(where):
-            subprocess.run(["git", "-C", str(where), "add", "--", *files], capture_output=True)
-            left = unmerged(where)
-            if left:
-                why = "still conflicting: " + ", ".join(left)
-            else:
-                got = subprocess.run(["git", "-C", str(where), "-c", "user.name=eki", "-c",
-                                      "user.email=eki@localhost", "-c", "core.editor=true",
-                                      "rebase", "--continue"],
-                                     capture_output=True, text=True, env={**os.environ, "GIT_EDITOR": "true"})
-                if got.returncode != 0 or rebasing(where):
-                    more = unmerged(where)
-                    why = ("another of its commits conflicts too: " + ", ".join(more)) if more else \
-                        "the rebase didn't finish: " + (got.stderr.strip() or got.stdout.strip())[-200:]
+        if continue_rebase(info):
+            why = "another of its commits conflicts too: " + ", ".join(info["files"])
         if not why and not is_in(where, onto, "HEAD"):
             why = "it still isn't on top of your checkout"
         if not why:
-            touched = [f for f in git(where, "diff", "--name-only", onto, "HEAD").splitlines() if f]
-            still = marked(where, touched)
+            went = [f for f in git(where, "diff", "--name-only", onto, "HEAD").splitlines() if f]
+            still = marked(where, went)
             if still:
                 why = "conflict markers were committed in " + ", ".join(still)
     except SelfWorkError as e:
@@ -719,7 +768,8 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
         return why
     c = change(cid, home)
     p = Proposal(**{k: v for k, v in c.items() if k in Proposal.__dataclass_fields__})
-    p.resolved = {"files": files, "by": by, "how": how[:600], "onto": onto}
+    p.resolved = {"files": info.get("resolved") or list(info.get("files") or []),
+                  "by": by, "how": how[:600], "onto": onto}
     record(p, home)
     return ""
 

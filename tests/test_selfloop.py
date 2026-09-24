@@ -491,6 +491,100 @@ async def test_a_protected_change_you_apply_that_conflicts_is_resolved_and_appli
     await eng.runner.stop()
 
 
+async def _conflicting_twice(eng):
+    """A change of two commits — the README, then NOTES.md — and your own
+    commit touching both after it, so the rebase stops on each."""
+    cid = await _conflicting(eng)
+    (eng.root / "NOTES.md").write_text("notes\n")
+    git(eng.root, "add", "-A")
+    git(eng.root, "commit", "-qm", "notes")
+    c = selfwork.change(cid)
+    where = selfwork.ensure_worktree(c)
+    git(where, "rebase", "-q", c["base"])                                 # its base, before your commits
+    (where / "NOTES.md").write_text("notes, the agent's way\n")
+    (where / "eki" / "extra.py").write_text("EXTRA = 1\n")
+    git(where, "add", "-A")
+    git(where, "commit", "-qm", "the second commit")
+    p = selfwork.Proposal(**{k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__})
+    p.commit = git(where, "rev-parse", "HEAD")
+    selfwork.record(p)
+    (eng.root / "NOTES.md").write_text("notes, your way\n")
+    git(eng.root, "commit", "-qam", "yours, meanwhile, again")
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_a_change_that_conflicts_twice_is_resolved_commit_by_commit_in_one_run(eng):
+    cid = await _conflicting_twice(eng)
+    # the first round also edits a file that didn't conflict — the rebase only
+    # goes on if eki adds that too
+    Agent.per = {"conflicts in: README.md": {"README.md": "eki, your way — and the agent's\n",
+                                             "eki/thing.py": "VALUE = 1  # both\n"},
+                 "conflicts in: NOTES.md": {"NOTES.md": "notes, your way — and the agent's\n"}}
+    got = await eng.self_apply(cid)
+    run = await settle(eng.runs, got["resolving"], timeout=20)
+    assert run["state"] == "done"
+    told = [t for _, t, _ in Agent.seen if "resolving conflicts" in t]
+    assert len(told) == 2 and "conflicts in: README.md" in told[0]
+    assert "stopped again, at its commit “the second commit”" in told[1] and "NOTES.md" in told[1]
+    c = selfwork.change(cid)
+    assert c["state"] == "applying", c.get("why")
+    assert c["resolved"]["files"] == ["NOTES.md", "README.md"]
+    where = Path(c["worktree"])
+    assert not selfwork.rebasing(where)
+    assert git(where, "log", "--format=%s", f"{git(eng.root, 'rev-parse', 'HEAD')}..HEAD").splitlines()[0] \
+        == "the second commit"
+    assert (where / "README.md").read_text() == "eki, your way — and the agent's\n"
+    assert (where / "NOTES.md").read_text() == "notes, your way — and the agent's\n"
+    assert (where / "eki" / "thing.py").read_text() == "VALUE = 1  # both\n"
+    assert git(where, "status", "--porcelain") == ""
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_later_commit_left_with_markers_puts_the_whole_change_back(eng):
+    cid = await _conflicting_twice(eng)
+    was = selfwork.change(cid)["commit"]
+    Agent.per = {"conflicts in: README.md": {"README.md": "eki, your way — and the agent's\n"},
+                 "conflicts in: NOTES.md": {}}                            # gives up on the second
+    got = await eng.self_apply(cid)
+    await settle(eng.runs, got["resolving"], timeout=20)
+    c = selfwork.change(cid)
+    assert c["state"] == "conflicts" and "conflict markers are still in NOTES.md" in c["why"]
+    where = Path(c["worktree"])
+    assert not selfwork.rebasing(where) and git(where, "rev-parse", "HEAD") == was
+    await eng.runner.stop()
+
+
+def test_continue_rebase_adds_what_the_agent_touched_and_stops_at_the_next_conflict(tmp_path):
+    root = forge(tmp_path)
+    git(root, "checkout", "-qb", "change")
+    for name in ("README.md", "NOTES.md"):
+        (root / name).write_text(f"{name}, the change's way\n")
+        git(root, "add", "-A")
+        git(root, "commit", "-qm", f"change {name}")
+    was = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    (root / "README.md").write_text("README.md, yours\n")
+    (root / "NOTES.md").write_text("NOTES.md, yours\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "yours")
+    onto = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "change")
+    subprocess.run(["git", "-C", str(root), "rebase", "-q", onto], capture_output=True)
+    info = {"where": str(root), "onto": onto, "files": selfwork.unmerged(root), "commit": was}
+    assert info["files"] == ["README.md"]
+    (root / "README.md").write_text("README.md, both\n")
+    (root / "eki" / "thing.py").write_text("VALUE = 2\n")                # not a conflict, touched anyway
+    assert selfwork.continue_rebase(info) == ["NOTES.md"]
+    assert info["step"] == "change NOTES.md" and info["resolved"] == ["README.md"]
+    assert git(root, "show", "HEAD:eki/thing.py") == "VALUE = 2"
+    (root / "NOTES.md").write_text("NOTES.md, both\n")
+    assert selfwork.continue_rebase(info) == [] and not selfwork.rebasing(root)
+    assert info["resolved"] == ["NOTES.md", "README.md"]
+    assert selfwork.is_in(root, onto, "HEAD") and git(root, "status", "--porcelain") == ""
+
+
 @pytest.mark.asyncio
 async def test_a_resolution_that_leaves_markers_puts_the_change_back_as_it_was(eng):
     cid = await _conflicting(eng)

@@ -117,6 +117,12 @@ default, a folder's copy with `--repo`, the commands it may use with
 `--allow pytest` — and never more than it has itself
 ([docs/permissions.md](docs/permissions.md)).
 
+For an agent with a shell there are commands that make one thing and hand
+back a file: `eki image "…" -o assets/` and `eki write "…" --model <key>`
+block until it's done, save the result (never over an existing file), print
+only its path, and say how it went in the exit code — `--json` for one JSON
+object instead (see `eki/produce.py`).
+
 ## Adding things
 
 **A provider** is anything that can answer: Claude Code, Codex, Gemini CLI,

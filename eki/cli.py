@@ -8,6 +8,12 @@
     eki ask "..." --continue             same thread as last time
     eki ask "..." --detach               start it and return straight away
 
+For an agent with a shell — blocking, quiet, a path out, real exit codes:
+
+    eki image "a brass compass" -o art/  a picture, saved; its path printed
+    eki write "a sea shanty" -m qwen     text from that model into a file
+    ... --json                           one JSON object instead
+
 Every ask is a run in the engine, not in this terminal: Ctrl-C stops
 *watching*, never the work. Pick it back up with `eki watch <run>`.
 
@@ -1027,6 +1033,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="start it and print the run id instead of watching")
     a.add_argument("-q", "--quiet", action="store_true", help="answer only, at the end")
 
+    for name, helptext in (("image", "make a picture, save it, print its path (for agents)"),
+                           ("write", "have a model write something, save it, print its path (for agents)")):
+        c = sub.add_parser(name, help=helptext)
+        c.add_argument("prompt")
+        c.add_argument("-m", "--model", default="", help="a backend by key (see `eki backends`); default routed")
+        c.add_argument("-o", "--output", default="",
+                       help="a file or folder (default: here)" + ("; - prints the text" if name == "write" else ""))
+        c.add_argument("--json", action="store_true", help="one JSON object: ok, paths, run, backend, error")
+        c.add_argument("--timeout", type=float, default=900, help="seconds to wait (exit 5 after)")
+        if name == "image":
+            c.add_argument("--width", type=int, default=0)
+            c.add_argument("--height", type=int, default=0)
+            c.add_argument("-n", "--count", type=int, default=0, help="how many (1-4)")
+
     r = sub.add_parser("runs", help="what's running and what finished")
     r.add_argument("-n", "--limit", type=int, default=30)
     for name, helptext in (("watch", "follow a run"), ("cancel", "stop a run"),
@@ -1185,6 +1205,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_agent(args)
     if args.cmd == "self":
         return cmd_self(args)
+    if args.cmd in ("image", "write"):
+        from . import produce
+        return getattr(produce, args.cmd)(args, ensure_engine)
     if args.cmd == "runs":
         return cmd_runs(args)
     if args.cmd == "watch":

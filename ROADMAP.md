@@ -289,9 +289,9 @@ the moment you or another app need it.
 
 So that the agent doing the work can ask eki for what it can't do itself.
 
-- [ ] Capability commands: `eki image`, `eki write --model …`, and one per new
+- [x] Capability commands: `eki image`, `eki write --model …`, and one per new
       kind of work as it arrives — non-interactive, `--json`, real exit codes,
-      output written to a path and the path printed
+      output written to a path and the path printed *(eki: self/9fb5fc6b)*
 - [ ] `eki capabilities`: what this Mac can do right now, for an agent to read
 - [ ] `eki submit` / `eki wait <id>` for work too slow to block a shell on
 - [ ] A depth guard (`EKI_DEPTH`) so an agent calling eki calling an agent

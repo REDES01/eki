@@ -576,6 +576,17 @@ eki models [list|start|stop] <key>
 eki skills                        # the skills every backend shares
 ```
 
+To have something made and get a file back — these block, print only the
+path, and exit 0 when it worked (1 failed, 3 no engine, 4 nothing made,
+5 timed out):
+
+```
+eki image "a watercolor fox" -o assets/      # the picture's path
+eki write "the tavern keeper's backstory" -m <key> -o lore/  # text into a file
+eki write "…" -o -                           # the text itself, for a pipe
+eki image "…" --json                         # {"ok", "paths", "run", "backend", "error"}
+```
+
 ## As tools
 
 The `eki` MCP server gives the same through `eki_capabilities` (read it

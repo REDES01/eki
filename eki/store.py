@@ -189,17 +189,31 @@ class Store:
 
         Deliberately coarse. What counts as an artifact is decided in one
         place, by the reader that draws the chat; this only spares it the
-        answers that are plainly nothing but words."""
+        answers that are plainly nothing but words.
+
+        `files` are what the run wrote into its folder that the gallery can
+        show (`meta["made"]`, eki/files.py) — an agent's page lands in the
+        repo, not in its answer — less any since deleted."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT t.id, t.conversation_id, c.title, c.archived, t.content,"
-                "       t.backend, t.created_at"
+                "       t.backend, t.created_at, t.meta"
                 " FROM turns t JOIN conversations c ON c.id = t.conversation_id"
                 " WHERE t.role = 'assistant'"
                 "   AND (t.content LIKE '%```%' OR t.content LIKE '%![%'"
-                "        OR t.content LIKE '%.png%' OR t.content LIKE '%.jpg%')"
+                "        OR t.content LIKE '%.png%' OR t.content LIKE '%.jpg%'"
+                "        OR t.meta LIKE '%\"made\"%')"
                 " ORDER BY t.id DESC LIMIT ?", (max(1, min(int(limit), 2000)),)).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            row = dict(r)
+            try:
+                made = (json.loads(row.pop("meta") or "{}") or {}).get("made") or []
+            except (TypeError, ValueError, AttributeError):
+                made = []
+            row["files"] = [p for p in made if isinstance(p, str) and Path(p).is_file()]
+            out.append(row)
+        return out
 
     def search(self, text: str, limit: int = 30) -> List[Dict[str, Any]]:
         """Conversations containing this text, newest first, with the hit."""

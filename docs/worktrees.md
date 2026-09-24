@@ -16,6 +16,11 @@ Every folder run ends with one line saying where its changes went:
 | *the run didn't finish … on `eki/kept/<run>`* | failed or stopped: its partial work is on the branch, not in your folder |
 | (nothing) | it changed nothing |
 
+Pictures, pages, drawings and diagrams (`.png`, `.html`, `.svg`, `.mmd`…)
+a run brought back to your folder also show in the app's gallery, beside the
+chat that made them. A run worked in place counts what changed in the folder
+while it ran (`eki/files.py`).
+
 The copy is detached and adds no branch to your repo; `eki/kept/…` branches
 are the only ones eki leaves, and only when it says so.
 

@@ -22,6 +22,7 @@ struct MadeTurn: Codable {
     let content: String
     var backend: String? = nil
     var created_at: Int? = nil
+    var files: [String]? = nil      // what the run wrote into its folder that can be shown here
 }
 
 extension EngineClient {
@@ -78,8 +79,9 @@ struct MadeItem: Identifiable, Hashable {
                     mark = turn.conversation_id + artifact.id
                     name = Hidden.mark(artifact, in: turn.conversation_id)
                 case .image(let alt, let source):
-                    what = .picture(Picture(source: source, alt: alt))
-                    mark = source
+                    let picture = Picture(source: source, alt: alt)
+                    what = .picture(picture)
+                    mark = picture.url?.path ?? source
                     name = Hidden.mark(Picture(source: source))
                 default:
                     continue
@@ -91,8 +93,44 @@ struct MadeItem: Identifiable, Hashable {
                                     chat: chat.isEmpty ? "Untitled chat" : chat,
                                     backend: turn.backend ?? "", when: when))
             }
+            // Claude Code and Codex write their work into the folder, not the
+            // answer: the pages and pictures a run left there belong here too
+            for path in turn.files ?? [] {
+                guard let what = fromFile(path), seen.insert(path).inserted else { continue }
+                let name: String
+                switch what {
+                case .artifact(let a): name = Hidden.mark(a, in: turn.conversation_id)
+                case .picture(let p): name = Hidden.mark(p)
+                }
+                n += 1
+                out.append(MadeItem(id: "\(turn.id)-\(n)", mark: name, what: what,
+                                    conversation: turn.conversation_id,
+                                    chat: chat.isEmpty ? "Untitled chat" : chat,
+                                    backend: turn.backend ?? "", when: when))
+            }
         }
         return out
+    }
+
+    /// A file an agent wrote, read the way a fence of its kind would be;
+    /// nil for anything else, or too big to be a page.
+    static func fromFile(_ path: String) -> What? {
+        let ext = (path as NSString).pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext) {
+            return .picture(Picture(source: path, alt: (path as NSString).lastPathComponent))
+        }
+        let language: String
+        switch ext {
+        case "html", "htm": language = "html"
+        case "svg": language = "svg"
+        case "mmd", "mermaid": language = "mermaid"
+        default: return nil
+        }
+        let url = URL(fileURLWithPath: path)
+        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size < 2_000_000,
+              let text = try? String(contentsOf: url, encoding: .utf8),
+              let artifact = Artifact(code: text, language: language) else { return nil }
+        return .artifact(artifact)
     }
 }
 

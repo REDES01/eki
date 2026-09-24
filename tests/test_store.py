@@ -93,3 +93,16 @@ def test_made_lists_answers_that_hold_something_across_threads(tmp_path):
     assert made[0]["title"] == "draw a fox"
     assert len(s.made(limit=1)) == 1
     s.close()
+
+
+def test_made_carries_the_files_a_run_wrote_while_they_are_still_there(tmp_path):
+    s = Store(tmp_path / "t.db")
+    page, gone = tmp_path / "index.html", tmp_path / "old.png"
+    page.write_text("<html><body>hi</body></html>")
+    c = s.new_conversation()
+    s.add_turn(c, "user", "build the landing page")
+    s.add_turn(c, "assistant", "Done.", "claude_code", meta={"made": [str(page), str(gone)]})
+    s.add_turn(c, "assistant", "just words", "claude_code", meta={"cwd": str(tmp_path)})
+    made = s.made()
+    assert len(made) == 1 and made[0]["files"] == [str(page)] and "meta" not in made[0]
+    s.close()

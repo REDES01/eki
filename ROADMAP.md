@@ -56,8 +56,8 @@ stays plain Python, so a port stays possible if people ask for it.
 
 **Later**, one piece of work split across providers — an RPG with a frontier
 agent writing the code, a story model writing the lore, an image model making
-the icons, a 3D backend producing Blender assets, and one memory under all of
-them (Stages 4–8).
+the icons, Blender through its MCP server, and one memory under all of them —
+a folder of plain notes every harness can read and write (Stages 4–8).
 
 **Why no one else builds this.** Providers want your work on their servers,
 not on your machine, and no provider makes your memory portable to a
@@ -211,6 +211,9 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       (`~/.eki/mcp.json`, the `/mcp` panel), rendered into Claude Code per
       session (`--mcp-config`) and a managed block of Codex's `config.toml`;
       servers Claude Code already has can be imported (`eki/mcpregistry.py`)
+- [ ] **Blender MCP server in the `/mcp` catalog**, so 3D work reaches
+      Blender like any other server — eki doesn't build a mesh backend of
+      its own (Stage 6)
 - [x] **eki's tools for both CLIs.** Claude Code gets them in-process
       (`eki/mcpbridge.py`, an SDK MCP server over the control channel);
       Codex runs `eki mcp`, the same handlers over stdio. Screen tools
@@ -347,7 +350,8 @@ Routing is already by capability; this widens what a capability can be.
 
 - [x] Adapters declare what they produce (code, prose, image, mesh, audio) and
       what they need; routing is capability first, then quota and cost *(eki: self/d5757ace)*
-- [ ] A mesh backend that produces Blender assets into the project folder
+- 3D work goes to Blender through its MCP server, added in Stage 1's `/mcp`
+  catalog. eki builds no mesh backend: tools come from servers, not from eki.
 - [ ] Prose models chosen by the person for the kind of writing, not by benchmark
 - [ ] Text models asking for a picture mid-answer (through Stage 4's commands)
 - *Evolve:* a new kind of work gets measurement items where answers can be
@@ -355,10 +359,18 @@ Routing is already by capability; this widens what a capability can be.
 
 ## Stage 7 — Project memory
 
-- [ ] `eki remember` / `eki recall`, scoped to the project, backed by FERNme
-- [ ] Canon, decisions and conventions in one graph every backend can query
-- [ ] Memory shown in the app: what's there, where it came from, remove it
-- *Evolve:* after a run, eki files what the run decided; stale entries decay.
+One memory store every harness shares, as simple as Claude's own client
+memory: a folder of plain markdown notes, global (`~/.eki/memory`) and per
+project (the project's `.eki/memory`). No graph, no decay.
+
+- [ ] `eki remember` / `eki recall` and the same in eki's MCP tools: list,
+      read, search and write notes, global or scoped to the project
+- [ ] Claude Code's auto-memory notes and anything an agent is asked to
+      remember land there, instead of being absorbed into skills; skills
+      keep how-to, memory keeps facts
+- [ ] Memory shown in the app: what's there, where it came from, edit or remove it
+- *Evolve:* after a run, eki notes what the run decided; you prune by editing
+  the folder.
 
 ## Stage 8 — Orchestration
 
@@ -524,6 +536,10 @@ The self-build track is eki changing its code. This is the other half — what i
   Codex are treated as black boxes, trusted to do the work given clear
   instructions; a break is handled as a fault (the self-build track).
 - A separate spending cap. Budgets live in each provider's settings.
+- A mesh backend of eki's own for Blender assets. Blender is reached through
+  its MCP server in the `/mcp` catalog; eki doesn't build tools.
+- FERNme (a graph memory with decay) behind Stage 7. Shared memory only needs
+  to be searchable notes, like Claude's.
 
 ## Keeping this file
 

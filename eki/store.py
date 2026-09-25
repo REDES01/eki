@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS backend_sessions (
     updated_at      INTEGER NOT NULL,
     PRIMARY KEY (conversation_id, backend)
 );
+
+-- a long thread's older part, summarized for the next model to read it
+-- (eki/carry.py): turns up to `upto`, written by `author`
+CREATE TABLE IF NOT EXISTS summaries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    upto            INTEGER NOT NULL,
+    text            TEXT NOT NULL,
+    author          TEXT NOT NULL DEFAULT '',
+    created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS summaries_by_conversation ON summaries (conversation_id, upto);
 """
 
 
@@ -122,6 +134,7 @@ class Store:
             self._conn.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
             self._conn.execute("DELETE FROM backend_sessions WHERE conversation_id = ?",
                                (conversation_id,))
+            self._conn.execute("DELETE FROM summaries WHERE conversation_id = ?", (conversation_id,))
             cur = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
             self._conn.commit()
         return cur.rowcount > 0
@@ -280,6 +293,33 @@ class Store:
                 " WHERE conversation_id = ? AND backend = ?",
                 (conversation_id, backend)).fetchone()
         return row["session_id"] if row else None
+
+    # --- summaries (eki/carry.py) ---------------------------------------------
+
+    def add_summary(self, conversation_id: str, upto: int, text: str, author: str = "") -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO summaries (conversation_id, upto, text, author, created_at)"
+                " VALUES (?,?,?,?,?)", (conversation_id, int(upto), text, author, int(time.time())))
+            self._conn.commit()
+        return int(cur.lastrowid)
+
+    def summary(self, conversation_id: str, before: int = 0) -> Optional[Dict[str, Any]]:
+        """The latest summary covering only turns before `before` (0: any)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, upto, text, author, created_at FROM summaries"
+                " WHERE conversation_id = ? AND (? = 0 OR upto < ?)"
+                " ORDER BY upto DESC, id DESC LIMIT 1",
+                (conversation_id, int(before), int(before))).fetchone()
+        return dict(row) if row else None
+
+    def summaries(self, conversation_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, upto, text, author, created_at FROM summaries"
+                " WHERE conversation_id = ? ORDER BY upto, id", (conversation_id,)).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         with self._lock:

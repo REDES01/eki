@@ -43,6 +43,7 @@ from . import codex_live
 from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
+from . import carry as carry_mod
 from . import handoff as handoff_mod
 from . import illustrate
 from . import failover as failover_mod
@@ -1105,6 +1106,9 @@ class Engine(SelfLoop):
                    if t["id"] <= run["user_turn"]] if cid else []
         if not history:
             history = [Message("user", run["prompt"])]
+        elif backend.info.kind not in adapters.AGENT_CLIS:
+            # a long thread outgrows a small model: the older part as a summary
+            history = await self._fit(backend, cid, run, history)
 
         kw: Dict[str, Any] = {}
         # A folder run works in its thread's own copy of the folder (a git
@@ -1122,7 +1126,7 @@ class Engine(SelfLoop):
         # A program that keeps its own session (Claude Code, Codex) only ever
         # sees what was said to it. Joining a thread others have spoken in —
         # handed over, or picked — it is given the conversation so far first.
-        earlier = self._earlier_for(backend, cid, run) if cid else ""
+        earlier = await self._earlier_for(backend, cid, run) if cid else ""
         fo = run.get("_failover") or {}
         if run.get("_handoff") or earlier or fo:
             ho = run.get("_handoff") or {}
@@ -1558,32 +1562,62 @@ class Engine(SelfLoop):
         return row, f"{why}; the thread stays with {was}", table_mod.to_front(targets, was), key, False
 
     #: how much of the thread a program joining it is given
-    EARLIER_TURNS = 12
-    EARLIER_CHARS = 8000
+    EARLIER_CHARS = 16000
 
-    def _earlier_for(self, backend: Backend, cid: str, run: Dict[str, Any]) -> str:
-        """The conversation so far, for a program that keeps its own session
-        and hasn't been part of this thread — empty when it has (it
-        remembers) or when there's nothing before."""
-        if backend.info.kind not in adapters.AGENT_CLIS or self.store.session(cid, backend.key):
+    async def _earlier_for(self, backend: Backend, cid: str, run: Dict[str, Any]) -> str:
+        """What a program that keeps its own session is told of the thread
+        (eki/carry.py): resuming its session, only what others said since it
+        last answered; joining, the thread so far — summarized when long.
+        Empty for a model that reads the store every turn, or nothing before."""
+        if backend.info.kind not in adapters.AGENT_CLIS:
             return ""
-        turns = [t for t in self.store.turns(cid) if t["id"] < int(run.get("user_turn") or 0)
-                 and t["role"] in ("user", "assistant") and (t.get("content") or "").strip()]
-        if not turns:
+        before = int(run.get("user_turn") or 0)
+        names = self._names()
+        if self.store.session(cid, backend.key):
+            since = carry_mod.missed(self.store.turns(cid), backend.key, before)
+            return carry_mod.meanwhile(since, names, self.EARLIER_CHARS) if since else ""
+        summary, author, recent = await self._thread_for(cid, before, self.EARLIER_CHARS)
+        if not summary and not recent:
             return ""
-        names = {b.key: b.info.label for b in self.backends}
-        lines = []
-        for t in turns[-self.EARLIER_TURNS:]:
-            who = "Person" if t["role"] == "user" else names.get(t.get("backend") or "", t.get("backend") or "Model")
-            body = t["content"].strip()
-            if len(body) > 1500:
-                body = body[:700] + " […] " + body[-700:]
-            lines.append(f"{who}: {body}")
-        text = "\n\n".join(lines)
-        if len(text) > self.EARLIER_CHARS:
-            text = "[…]\n" + text[-self.EARLIER_CHARS:]
-        return ("[eki: you're joining a conversation that other models have been part of. "
-                f"What was said so far:]\n\n{text}\n\n[eki: the new message follows.]\n\n")
+        return carry_mod.joining(summary, author, recent, names)
+
+    def _names(self) -> Dict[str, str]:
+        return {b.key: b.info.label for b in self.backends}
+
+    async def _thread_for(self, cid: str, before: int,
+                          room: int) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """(summary, who wrote it, the turns after it word for word) — the
+        thread before turn `before`, in `room` characters. A summary is
+        written only when the thread doesn't fit, and kept in the thread."""
+        turns = carry_mod.said(self.store.turns(cid), before)
+        kept = self.store.summary(cid, before)
+        use, fold, recent = carry_mod.plan(turns, kept, room)
+        if not fold:
+            return (kept["text"], kept["author"], recent) if use and kept else ("", "", recent)
+        previous = kept["text"] if use and kept else ""
+        names = self._names()
+        writer = self._titler() if self.settings.get("thread_summary", True) else None
+        text = await carry_mod.write(writer, previous, fold, names) if writer is not None else None
+        author = writer.info.label if text and writer is not None else "eki (excerpt)"
+        if not text:
+            text = carry_mod.excerpt(previous, fold, names)
+        self.store.add_summary(cid, fold[-1]["id"], text, author)
+        observe_mod.note("history", what="summary", conversation=cid, upto=fold[-1]["id"],
+                         turns=len(fold), by=author)
+        return text, author, recent
+
+    async def _fit(self, backend: Backend, cid: str, run: Dict[str, Any],
+                   history: List[Message]) -> List[Message]:
+        """The thread for a model that reads it every turn, cut to its
+        context: the older part as a summary once it no longer fits."""
+        room = carry_mod.budget(backend.info.capabilities.context_tokens)
+        if not cid or not history or not backend.info.capabilities.text \
+                or sum(len(m.content) for m in history) <= room:
+            return history
+        last = history[-1]
+        summary, author, recent = await self._thread_for(
+            cid, int(run["user_turn"]), max(room - len(last.content), room // 4))
+        return carry_mod.as_messages(summary, author, recent) + [last]
 
     async def _with_note(self, stream: AsyncIterator[Any], ho: Dict[str, Any]) -> AsyncIterator[Any]:
         """The harness's answer, opened by a line saying who handed it over."""
@@ -4350,6 +4384,7 @@ class Engine(SelfLoop):
         """A thread, plus the run it's waiting on, so a viewer can reattach."""
         active = self.runs.active(cid)
         return {"id": cid, "turns": self.store.turns(cid),
+                "summaries": self.store.summaries(cid),
                 "active_run": active["id"] if active else None}
 
     def diff(self, rid: str) -> str:

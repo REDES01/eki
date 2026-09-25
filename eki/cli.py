@@ -29,6 +29,7 @@ Every ask is a run in the engine, not in this terminal: Ctrl-C stops
     eki history [-q text]                conversations, or a search of them
     eki show <conversation>              one thread, with who answered
     eki cost <conversation>              who answered, and what they reported
+    eki summary <conversation>           a long thread's summary, as the next model reads it
     eki backends | models | policy       what exists, what's loaded, the rules
     eki agent install|uninstall|status   run the engine from login, always
 
@@ -313,6 +314,24 @@ def cmd_show(cfg, cid: str) -> int:
         who = t["role"] if t["role"] == "user" else f"{t['role']} ({t['backend']})"
         print(f"\n--- {who} ---")
         print(t["content"])
+    return 0
+
+
+def cmd_summary(cfg, cid: str) -> int:
+    """What a long thread's older part was summarized to, for the next
+    model to read (eki/carry.py) — newest last."""
+    store = Store(cfg.db)
+    if not store.turns(cid):
+        print(f"no such conversation: {cid}", file=sys.stderr)
+        return 1
+    kept = store.summaries(cid)
+    if not kept:
+        print("no summary: every model so far has read this thread whole")
+        return 0
+    for s in kept:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(s["created_at"]))
+        print(f"\n--- up to turn {s['upto']}, by {s['author'] or 'unknown'}, {when} ---")
+        print(s["text"])
     return 0
 
 
@@ -1304,6 +1323,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     h.add_argument("-q", "--query", default="", help="only ones containing this text")
     sub.add_parser("show", help="print one conversation").add_argument("id")
     sub.add_parser("cost", help="what a conversation spent").add_argument("id")
+    sub.add_parser("summary", help="a long thread's summary, as the next model reads it").add_argument("id")
 
     p = sub.add_parser("policy", help="routing preferences")
     p.add_argument("action", nargs="?", default="show",
@@ -1493,6 +1513,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_show(cfg, args.id)
     if args.cmd == "cost":
         return cmd_cost(cfg, args.id)
+    if args.cmd == "summary":
+        return cmd_summary(cfg, args.id)
     if args.cmd == "models":
         return cmd_models(cfg, args)
     if args.cmd == "policy":

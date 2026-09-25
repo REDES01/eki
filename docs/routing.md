@@ -119,6 +119,28 @@ image model draw it — a run of its own under this one, the same one
 place (`eki/illustrate.py`). Offered only when an image model is set up
 (and, inside a goal, allowed). Setting `pictures_in_answers` (on).
 
+### Long threads (`eki/carry.py`)
+
+What a model is given of the thread follows one rule:
+
+- **A program with its own session for this thread resumes it** — its
+  session holds more than eki's store (the files it read, the commands it
+  ran). It is told only what others said since it last answered; when no
+  one did, nothing.
+- **Anything else reads the thread from the store**: a local model every
+  turn, a program joining for the first time once. Whole, while it fits —
+  half the model's context, or 16,000 characters for a program joining.
+  Past that, the older part is folded into a summary and the latest turns
+  follow word for word.
+- **A local model writes the summary** (the one that names threads: free,
+  on this Mac), folding in the summary before it, a piece at a time. With
+  nothing local up, an excerpt of each turn stands in and says so. Setting
+  `thread_summary` (on); off, it's always the excerpt.
+- **The summary is kept in the thread**, with the last turn it covers and
+  who wrote it, and the next reader starts from it rather than writing
+  another. `eki summary <thread>` prints it; the API's
+  `/api/conversations/<id>` has it beside the turns.
+
 Checked live on 2026-09-23: haiku and rewrite on the local model (2 s each),
 the disk question handed to Claude Code · Opus with a brief, the RPG idea
 built on the haiku by Opus, which had been given the thread.

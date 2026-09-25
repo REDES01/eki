@@ -481,10 +481,10 @@ still going carry over into the new version rather than holding it back
       self-work in a week went into the self-build machinery itself, the
       weekly note says so — building the builder is only worth it if the
       rest moves
-- [ ] **A daily digest instead of a stream.** One short page a day — on the
+- [x] **A daily digest instead of a stream.** One short page a day — on the
       board and as one notification — what changed, why, what helped, and
       what waits for you, in plain words. Per-change notifications only for
-      what needs you, because a stream of them is noise nobody reads
+      what needs you, because a stream of them is noise nobody reads *(eki: self/b89f39d6)*
 - [x] **Everything it did to itself is visible.** A Self pane: each change,
       who asked, which agent, the diff, the checks, and *Undo* (4909625:
       Goals → Self on the board, and `eki self`; each change has a page with

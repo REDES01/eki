@@ -4,8 +4,12 @@ plan → build → judge → proposed (docs/self-build.md).
 Everything here is a run in an ordinary thread, so a restart loses nothing
 and `eki follow` shows any of it. The engine calls `tick` every couple of
 seconds; it looks at what finished since and moves each goal or item on
-exactly once. This slice proposes: a fit item is a branch `self/<id>` in the
-source repo with its checks green, for you to merge (or `eki swap self/<id>`).
+exactly once. A fit item is a branch `self/<id>` with its checks green.
+
+Branches, worktrees and file listings live in the integration repo eki owns
+(eki/integration.py, EKI_HOME/self/repo): the source checkout (~/eki) is
+never touched by self-work. `source()` is still the source checkout — the
+folder agents are told to stay out of; `repo()` is where the branches are.
 """
 from __future__ import annotations
 
@@ -16,11 +20,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from . import builds, db, paths, selfbrief, store, workspace
+from . import builds, db, integration, paths, selfbrief, store, workspace
 
 log = logging.getLogger("eki.self")
 
 DEFAULTS = {"parallel": 3, "autonomy": "propose"}
+#: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
+#: under "apply" once it is in integration main, so the dependent is built on top of it
+FIT = {"propose": ("proposed", "locked", "queued", "resolving", "rechecking", "landed", "live", "applied"),
+       "apply": ("landed", "live")}
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
 CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python exec bin/check -q"]'
 
@@ -37,6 +45,10 @@ def source() -> Path:
     return builds.source()
 
 
+def repo() -> Path:
+    return integration.repo()
+
+
 # ---- in ---------------------------------------------------------------------------------
 
 def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, files: Optional[List[str]] = None,
@@ -44,14 +56,13 @@ def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, files: Opt
     text = (text or "").strip()
     if not text:
         raise ValueError("nothing to do")
-    repo = source()
-    base = workspace.head(repo)
+    base = integration.sync()
     gid = store.new_id()
     with db.tx(conn):
         conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
                      (gid, text, source_kind, owner, "planning" if plan else "planned", db.now()))
         if plan:
-            wt = workspace.add(repo, f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
+            wt = workspace.add(repo(), f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
             tid = store.create_thread(conn, f"plan: {text}", str(wt))
             rid = store.create_run(conn, tid, selfbrief.plan(text, base), row="code",
                                    priority="now" if owner == "you" else "background")
@@ -88,15 +99,16 @@ def tick(conn: sqlite3.Connection) -> List[str]:
 
 
 def _settle_applied(conn: sqlite3.Connection) -> List[str]:
-    """A proposed item whose commit is now in the source's main — merged by
-    you — is applied; items that depend on it may start (from a base that has it)."""
+    """A proposed item whose commit is now in main — integration main, or the
+    source's main where you merged it by hand — is applied; items that depend
+    on it may start (from a base that has it)."""
     said = []
     proposed = items_in(conn, ("proposed",))
     if not proposed:
         return said
     main = workspace.head(source())
     for it in proposed:
-        if it["commit_sha"] and _is_ancestor(it["commit_sha"], main):
+        if it["commit_sha"] and (integration.contains(it["commit_sha"]) or _is_ancestor(it["commit_sha"], main)):
             _set(conn, it["id"], state="applied")
             said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main ({main[:12]})")
     return said
@@ -148,7 +160,7 @@ def _conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
             deps = [ids[d] for d in it["deps"] if d in ids and ids[d] != ids[it["title"]]]
             _set(conn, ids[it["title"]], deps=db.dumps(deps))
         conn.execute("UPDATE goals SET state='planned' WHERE id=?", (g["id"],))
-    workspace.remove(source(), f"plan-{g['id']}", delete_branch=True)
+    workspace.remove(repo(), f"plan-{g['id']}", delete_branch=True)
     return [f"goal {g['id']}: {len(planned)} item(s) planned"]
 
 
@@ -205,8 +217,7 @@ def _start_ready(conn: sqlite3.Connection) -> List[str]:
     live = items_in(conn, ("building", "judging"))
     if len(live) >= parallel:
         return []
-    # a dependency counts once it is in main: the item then starts from a base that has it
-    done_ids = {r["id"] for r in items_in(conn, ("applied",))}
+    done_ids = {r["id"] for r in items_in(conn, FIT.get(settings()["autonomy"], FIT["propose"]))}
     taken: List[Set[str]] = [claims(x) for x in live]
     names = None
     said = []
@@ -217,7 +228,7 @@ def _start_ready(conn: sqlite3.Connection) -> List[str]:
         if any(d not in done_ids for d in deps):
             continue
         if names is None:
-            names = tracked(source())
+            names = tracked(repo())
         mine = expand(json.loads(it["files"] or "[]"), names)
         if not it["independent"] and any(mine & t for t in taken):
             continue
@@ -233,21 +244,20 @@ def _start_ready(conn: sqlite3.Connection) -> List[str]:
 
 def claims(it: sqlite3.Row) -> Set[str]:
     files = set(json.loads(it["files"] or "[]")) | set(json.loads(it["touched"] or "[]"))
-    return expand(sorted(files), tracked(source()))
+    return expand(sorted(files), tracked(repo()))
 
 
 def _start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, others) -> None:
-    repo = source()
     if not it["worktree"]:
-        base = workspace.head(repo)
-        wt = workspace.add(repo, it["id"], base=base, branch=f"self/{it['id']}")
+        base = integration.sync()
+        wt = workspace.add(repo(), it["id"], base=base, branch=f"self/{it['id']}")
         tid = store.create_thread(conn, f"self: {it['title']}", str(wt))
         _set(conn, it["id"], worktree=str(wt), branch=f"self/{it['id']}", base=base, thread_id=tid)
         it = store_item(conn, it["id"])
     failure = it["verdict"] if it["tries"] else None
     prompt = selfbrief.build(goal=goal["text"], title=it["title"], spec=it["spec"],
                              files=json.loads(it["files"] or "[]"), branch=it["branch"], base=it["base"],
-                             source=str(repo), others=others, failure=failure)
+                             source=str(source()), others=others, failure=failure)
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if goal["owner"] == "you" else "background")
     _set(conn, it["id"], state="building", run_id=rid, tries=it["tries"] + 1, error=None)
@@ -289,11 +299,12 @@ def drop(conn: sqlite3.Connection, iid: str) -> str:
     it = store_item(conn, iid)
     if it is None:
         raise KeyError(f"no item {iid}")
-    if it["run_id"]:
-        store.cancel(conn, it["run_id"])
+    for rid in (it["run_id"], it["gate2_run"]):
+        if rid:
+            store.cancel(conn, rid)
     _set(conn, it["id"], state="dropped")
     if it["worktree"]:
-        workspace.remove(source(), it["id"], delete_branch=(it["commit_sha"] is None))
+        workspace.remove(repo(), it["id"], delete_branch=(it["commit_sha"] is None))
     return it["id"]
 
 

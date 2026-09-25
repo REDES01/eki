@@ -105,7 +105,7 @@ def diff(c, iid: str) -> int:
     it = selfwork.store_item(c, iid)
     if it is None or not it["commit_sha"]:
         raise KeyError(f"no committed change for item {iid}")
-    out = subprocess.run(["git", "-C", str(selfwork.source()), "diff", f"{it['base']}..{it['commit_sha']}"],
+    out = subprocess.run(["git", "-C", str(selfwork.repo()), "diff", f"{it['base']}..{it['commit_sha']}"],
                          capture_output=True, text=True)
     print(out.stdout or out.stderr)
     return 0

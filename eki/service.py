@@ -916,9 +916,10 @@ def self_view() -> Any:
     """What eki is doing to itself, what waits for you, what's next — and
     the last release train that finished merging, so an empty board still
     shows the last one worked."""
-    from . import treemerge
+    from . import appbuild, treemerge
     out = engine().self_view()
     out["page"] = _board_version()
+    out["app"] = appbuild.versions_line()          # "app: running …, installed …"
     if out.get("can"):
         out["tree_last"] = treemerge.last()
     return out

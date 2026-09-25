@@ -98,15 +98,17 @@ def _settle_applied(conn: sqlite3.Connection) -> List[str]:
     for it in proposed:
         if it["commit_sha"] and _is_ancestor(it["commit_sha"], main):
             _set(conn, it["id"], state="applied")
-            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main")
+            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main ({main[:12]})")
     return said
 
 
 def _is_ancestor(commit: str, head: str) -> bool:
-    import subprocess
-    out = subprocess.run(["git", "-C", str(source()), "merge-base", "--is-ancestor", commit, head],
-                         capture_output=True)
-    return out.returncode == 0
+    """Is `commit` in `head`'s history? Judged by what git prints, not an exit code."""
+    if not commit or not head:
+        return False
+    base = workspace.git(source(), "merge-base", commit, head, check=False)
+    return bool(base) and base == workspace.git(source(), "rev-parse", "--verify", f"{commit}^{{commit}}",
+                                                 check=False)
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
@@ -301,5 +303,9 @@ def retry(conn: sqlite3.Connection, iid: str) -> str:
         raise KeyError(f"no item {iid}")
     if it["state"] in ("building", "judging"):
         raise ValueError(f"item {it['id']} is {it['state']}")
-    _set(conn, it["id"], state="waiting", error=None)
+    fields: Dict[str, Any] = {"state": "waiting", "error": None}
+    if it["worktree"] and not Path(it["worktree"]).exists():     # dropped: start afresh
+        fields.update(worktree=None, branch=None, base=None, commit_sha=None, tries=0,
+                      touched="[]", verdict=None, summary=None)
+    _set(conn, it["id"], **fields)
     return it["id"]

@@ -56,6 +56,7 @@ import httpx
 
 from . import agent
 from . import config as config_mod
+from . import digest as digest_mod
 from . import grant as grant_mod
 from . import migrate
 from . import projects
@@ -642,8 +643,11 @@ def _ago(t: float) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(t or 0))
 
 
-def _self_status(service: str, limit: int) -> int:
+def _self_status(service: str, limit: int, everything: bool = False) -> int:
+    """What eki is doing on itself. Lists and titles are cut to fit a
+    terminal, each saying so; `everything` (--all) cuts nothing."""
     v = call("GET", "/api/self", service)
+    cut = (lambda text, n: text) if everything else _cut
     if not v["can"]:
         print(v["why_not"])
         return 1
@@ -660,7 +664,7 @@ def _self_status(service: str, limit: int) -> int:
             print(f"now: {g['note']}")
     flow = _pipeline_lines(v)
     if flow is None:                        # an engine from before eki/pipeline.py
-        for line in (_going_live(v.get("going_live") or {}), _next_go_live(v.get("train") or {})):
+        for line in (_going_live(v.get("going_live") or {}), _next_go_live(v.get("train") or {}, everything)):
             if line:
                 print(line)
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
@@ -675,7 +679,7 @@ def _self_status(service: str, limit: int) -> int:
             where = ", ".join(i.get("areas") or []) or "?"
             step = i.get("step") or {}
             cut = step.get("state") == "interrupted" or (step and not step.get("live") and not i.get("live"))
-            print(f"  {i['source']:<7} {i['title'][:60]}  [{where}]"
+            print(f"  {i['source']:<7} {cut(i['title'], 60)}  [{where}]"
                   + ("" if i.get("live") else
                      f"  (cut off at {step.get('kind')} — carries on by itself)" if cut else
                      "  (carries on when there's room)"))
@@ -688,35 +692,39 @@ def _self_status(service: str, limit: int) -> int:
         for n, r in enumerate(v["merging"], 1):
             state = "being merged now" if r.get("applying") else "waiting for the train" \
                 if r.get("live") or r.get("person") else "cut off — back in line when it carries on"
-            print(f"  {n}. self/{r['change']}  {r.get('title', '')[:56]} — {state}")
+            print(f"  {n}. self/{r['change']}  {cut(r.get('title', ''), 56)} — {state}")
     for line in _tree(v.get("tree") or {}):
         print(line)
     if v["waiting"]:
         print("\nwaiting for you:")
         for c in v["waiting"]:
-            print(f"  self/{c['id']}  {c.get('source', ''):<7} {c['title'][:58]}"
+            print(f"  self/{c['id']}  {c.get('source', ''):<7} {cut(c['title'], 58)}"
                   f"\n              eki self diff {c['id']} · eki self apply {c['id']} · eki self discard {c['id']}")
     ahead = v["queue"]
-    nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}{_after(n)}"
-             + (f"\n          {n['worth'][:100]}" if n.get("worth") else "")
-             for n in v["roadmap"]["next"][:3]]
+    upcoming = v["roadmap"]["next"]
+    nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {cut(n['title'], 60)}{_after(n)}"
+             + (f"\n          {cut(n['worth'], 100)}" if n.get("worth") else "")
+             for n in (upcoming if everything else upcoming[:3])]
     if ahead or nexts:
         print("\nup next:")
         for i in ahead:
-            print(f"  {i['source']:<7} {i['title'][:70]}{_after(i)}")
+            print(f"  {i['source']:<7} {cut(i['title'], 70)}{_after(i)}")
         for line in nexts:
             print(line)
+        _more(len(upcoming) - len(nexts), "on the roadmap")
     if v["left"]:
         print("\nleft for you:")
         for i in v["left"]:
-            print(f"  {i['id'][:6]}  {i['title'][:60]} — {i.get('note', '')[:90]}"
+            print(f"  {i['id'][:6]}  {cut(i['title'], 60)} — {cut(i.get('note', ''), 90)}"
                   f"\n          (eki self retry {i['id'][:6]} to let it try again)")
-    rows = [c for c in v["changes"] if c["state"] not in ("proposed", "conflicts")][:limit]
+    done = [c for c in v["changes"] if c["state"] not in ("proposed", "conflicts")]
+    rows = done if everything else done[:limit]
     if rows:
         print("\nrecent:")
         for c in rows:
             said = (c.get("stage") or {}).get("label", "").lower() or c["state"]
-            print(f"  {_ago(c.get('state_at'))}  {said:<11} self/{c['id']}  {c['title'][:56]}")
+            print(f"  {_ago(c.get('state_at'))}  {said:<11} self/{c['id']}  {cut(c['title'], 56)}")
+        _more(len(done) - len(rows), "older")
     page = v.get("digest")
     if page and not page.get("quiet"):
         print(f"\ntoday's digest ({page['id']}): `eki self digest`")
@@ -725,6 +733,18 @@ def _self_status(service: str, limit: int) -> int:
         print(f"\nweekly note ({note['id']}): {len(note.get('suggestions') or [])} suggestions — "
               "on the board (Goals → Self)")
     return 0
+
+
+def _cut(text: str, n: int) -> str:
+    """A title cut to fit a line, saying it was ("…")."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def _more(n: int, what: str) -> None:
+    """A list cut short says how much was left out, and how to see it."""
+    if n > 0:
+        print(f"  … {n} more {what} — eki self --all shows them")
 
 
 def _tiers(tiers: Dict[str, Any]) -> List[str]:
@@ -836,7 +856,7 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
     if verb == "digest":
         v = call("GET", "/api/self", s)
         page = call("POST", "/api/self/digest", s) if arg == "now" or not v.get("digest") else v["digest"]
-        print(f"eki's day, {page['id']}\n\n{page['text']}")
+        print(f"eki's day, {page['id']}\n\n{digest_mod.plain(page['text'])}")
         return 0
     if verb == "note":
         v = call("GET", "/api/self", s)
@@ -1090,7 +1110,7 @@ def cmd_self(args) -> int:
         ensure_engine(args.service)
         if getattr(args, "watch", False):
             return _self_watch(args.service)
-        return _self_status(args.service, args.limit)
+        return _self_status(args.service, args.limit, args.all)
     ensure_engine(args.service)
     body = {"request": request, "when": "later" if args.later else "now", "apply": args.apply,
             "base": args.base if args.base != "HEAD" else "", "check_base": not args.anyway,
@@ -1238,14 +1258,16 @@ def cmd_observe(args) -> int:
     return 0
 
 
-def _next_go_live(t: Dict[str, Any]) -> str:
+def _next_go_live(t: Dict[str, Any], everything: bool = False) -> str:
     """"next go-live in N min, carrying: …" — the release train (builds.board)."""
     if not t or not t.get("carrying"):
         return ""
     left = int(t.get("in") or 0)
     when = "now" if left <= 0 else f"in {max(1, -(-left // 60))} min"
-    what = ", ".join(f"self/{c['id']} ({c.get('title', '')[:40]})" for c in t["carrying"][:6])
-    more = f" and {len(t['carrying']) - 6} more" if len(t["carrying"]) > 6 else ""
+    cars = t["carrying"] if everything else t["carrying"][:6]
+    what = ", ".join(f"self/{c['id']} ({c.get('title', '') if everything else _cut(c.get('title', ''), 40)})"
+                     for c in cars)
+    more = f" and {len(t['carrying']) - len(cars)} more (eki self --all)" if len(t["carrying"]) > len(cars) else ""
     return f"next go-live {when}, carrying: {what}{more}   (go now: eki self release)"
 
 
@@ -1585,7 +1607,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                    choices=["install", "uninstall", "restart", "status", "access"])
 
     sw = sub.add_parser("self", help="eki working on itself: ask for a change, see what it did, decide",
-                        description="eki self                      what it's doing, what waits for you, what's next\n"
+                        description="eki self [--all]              what it's doing, what waits for you, what's next (--all: nothing cut off)\n"
                                     "eki self \"change …\"           a change to eki, now (--later: when there's room)\n"
                                     "eki self -r \"…\" -r \"…\"         several changes, queued; they start as room allows\n"
                                     "eki self --batch FILE         the same, one request per line (- reads stdin)\n"
@@ -1614,6 +1636,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sw.add_argument("--anyway", action="store_true",
                     help="go ahead even if the base fails its own tests")
     sw.add_argument("--limit", type=int, default=20)
+    sw.add_argument("--all", action="store_true",
+                    help="eki self: every row of every list and every title whole — nothing cut off")
     sw.add_argument("--apply", action="store_true",
                     help="if it's fit and touches nothing protected, swap it in (watched, rolled back if unhealthy)")
     sw.add_argument("--json", action="store_true")

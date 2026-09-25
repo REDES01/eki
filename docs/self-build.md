@@ -705,11 +705,13 @@ ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 
 **The daily digest** (`eki/digest.py`). One short page a day, at `digest_at`
-(09:00): what changed in eki since the last page and why (you asked, a fault,
-the next ROADMAP item), what was tried and didn't land, what helped (the hours
-this Mac's own models worked, against the week's average; goal turns
-finished), and what waits for you (proposals, and items left to you since the
-last page). It is built from what eki wrote down, not by a model. It is on the
+(09:00), listing every change since the last page — none left out — one line
+each with a link to it on the board, in three groups: *Landed* (applied, going
+live, taken back — with why: you asked, a fault, the next ROADMAP item), *Went
+wrong* (didn't pass, didn't finish, rolled back, discarded…) and *Waits for
+you* (proposals, however old, and items left to you since the last page); then
+what helped (the hours this Mac's own models worked, against the week's
+average; goal turns finished). It is built from what eki wrote down, not by a model. It is on the
 board (Goals → Self → *Today's digest*), in `eki self digest`, and said in one
 notification — none on a quiet day. Per-change notifications are only for what
 needs you: a change waiting to be applied, or an item left to you. A change
@@ -738,6 +740,7 @@ eki self retry|drop|mine <item>
 eki self autonomy apply ROADMAP.md=apply docs/=apply
 eki self note [now]
 eki self digest [now]            the day's page; now: write it again
+eki self --all                   every row of every list, nothing cut off
 eki self drill [quick]           restart a sandboxed engine mid-work: is anything lost?
 ```
 

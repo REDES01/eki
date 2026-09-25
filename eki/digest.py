@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """eki's daily digest: one short page a day instead of a stream.
 
-What changed in eki since the last digest and why, what didn't land, what
-helped, and what waits for you — built from what eki wrote down (the
-changes to itself, the self-work items, the finished runs), never from a
-model's words, so it costs nothing and can't make anything up. It is kept
-under ~/.eki/self/digests, shown on the board (Goals → Self) and by
+Every change eki made to itself since the last digest, one line each with a
+link to it — what landed, what went wrong, what waits for you — and what
+helped. Built from what eki wrote down (the changes to itself, the
+self-work items, the finished runs), never from a model's words, so it
+costs nothing and can't make anything up; and nothing is left out, so a
+line missing from it means it didn't happen. It is kept under
+~/.eki/self/digests, shown on the board (Goals → Self) and by
 `eki self digest`, and sent as one notification. Per-change notifications
 are left for what needs you (docs/self-build.md, "The daily digest").
 """
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -20,18 +23,23 @@ HOME = Path("~/.eki/self").expanduser()
 DAY = 86400
 #: when the page is written, local time, unless `digest_at` says otherwise
 AT = "09:00"
-#: a list longer than this says "and N more" — the page stays short
-SHOWN = 6
 
 #: where a change came from, in the words the page uses for "why"
 WHY = {"asked": "you asked", "fault": "a fault in eki's own code", "roadmap": "the next ROADMAP item",
        "note": "the weekly note", "undo": "you took a change back"}
-#: states that mean it changed eki
-LANDED = ("applying", "applied")
+#: states that mean it changed eki (or took a change back out)
+LANDED = ("applying", "applied", "undoing", "undone")
 #: states that mean it was tried and didn't land
-MISSED = ("unfit", "stopped", "rolled back", "not started")
+MISSED = ("unfit", "stopped", "rolled back", "not started", "no change", "discarded", "gone")
 #: states that wait for a person
 WAITING = ("proposed", "conflicts")
+#: how a state reads on the page, where the state is the news
+SAID = {"applying": "going live", "undoing": "being taken back", "undone": "taken back",
+        "unfit": "didn't pass its checks", "stopped": "didn't finish", "rolled back": "rolled back",
+        "not started": "didn't start", "no change": "made no change", "discarded": "discarded",
+        "gone": "gone", "proposed": "didn't pass its checks", "conflicts": "doesn't fit on top of your checkout"}
+#: a link on the page to the change on the board: [title](#/self/<id>)
+LINK = re.compile(r"\[([^\]]*)\]\(#/self/([^)\s]+)\)")
 
 
 def _dir(home: Optional[Path] = None) -> Path:
@@ -88,11 +96,15 @@ def _cut(text: str, n: int = 160) -> str:
     return text if len(text) <= n else text[:n - 1].rstrip() + "…"
 
 
-def _list(rows: List[str]) -> List[str]:
-    shown = [f"- {r}" for r in rows[:SHOWN]]
-    if len(rows) > SHOWN:
-        shown.append(f"- and {len(rows) - SHOWN} more — Goals → Self")
-    return shown
+def _link(c: Dict[str, Any]) -> str:
+    """The change's title, linked to it on the board (Goals → Self → the change)."""
+    title = _cut(" ".join(str(c.get("title") or f"self/{c['id']}").split()), 90)
+    return f"[{title.replace('[', '(').replace(']', ')')}](#/self/{c['id']})"
+
+
+def plain(text: str) -> str:
+    """The page for a terminal: a link reads "title (self/<id>)"."""
+    return LINK.sub(lambda m: f"{m.group(1)} (self/{m.group(2)})", text or "")
 
 
 def build(changes: Iterable[Dict[str, Any]], items: Iterable[Dict[str, Any]] = (), *,
@@ -106,60 +118,53 @@ def build(changes: Iterable[Dict[str, Any]], items: Iterable[Dict[str, Any]] = (
     now = time.time() if now is None else now
     changes = list(changes)
     fresh = [c for c in changes if since <= float(c.get("state_at") or c.get("at") or 0) < now + 1]
-    landed = [c for c in fresh if c.get("state") in LANDED]
-    missed = [c for c in fresh if c.get("state") in MISSED]
-    undone = [c for c in fresh if c.get("state") == "undone"]
     waiting = [c for c in changes if c.get("state") in WAITING and c.get("fit")]
+    landed = [c for c in fresh if c.get("state") in LANDED]
+    # everything else of the window didn't land — a state added later included
+    missed = [c for c in fresh if c.get("state") not in LANDED and c not in waiting]
     left = [i for i in items if i.get("state") in ("person", "gave up")
             and since <= float(i.get("updated_at") or 0)]
 
     lines: List[str] = []
-    if landed or undone:
-        lines += ["", "**What changed**"]
-        rows = []
+    if landed:
+        lines += ["", "**Landed**"]
         for c in landed:
             said = _first_line(c.get("summary"))
             why = WHY.get(str(c.get("source") or ""), "")
-            rows.append(_cut(f"{c.get('title') or 'self/' + c['id']}"
-                             + (f" — {said}" if said and said != c.get("title") else "")
-                             + (f" (why: {why})" if why else "")
-                             + (" · going live" if c.get("state") == "applying" else ""), 240))
-        rows += [f"Taken back: {c.get('title') or 'self/' + c['id']}" for c in undone]
-        lines += _list(rows)
+            lines.append(f"- {_link(c)}" + _cut((f" — {said}" if said and said != c.get("title") else "")
+                                                 + (f" (why: {why})" if why else "")
+                                                 + (f" · {SAID[c['state']]}" if c.get("state") in SAID else ""), 200))
     if missed:
-        lines += ["", "**Tried, didn't land**"]
-        lines += _list([_cut(f"{c.get('title') or 'self/' + c['id']} — "
-                             + ("rolled back: " if c.get("state") == "rolled back" else "")
-                             + (_first_line(c.get("why") or c.get("verdict")) or str(c.get("state"))))
-                        for c in missed])
+        lines += ["", "**Went wrong**"]
+        for c in missed:
+            state = str(c.get("state") or "")
+            said = _first_line(c.get("why") or c.get("verdict"))
+            lines.append(f"- {_link(c)} — " + _cut(SAID.get(state, state) + (f": {said}" if said else ""), 160))
+    wants = [f"- {_link(c)} — "
+             + ("touches what eki may not change alone; read it line by line" if c.get("protected")
+                else "conflicts with your checkout" if c.get("state") == "conflicts"
+                else "proposed, apply or discard it")
+             for c in waiting]
+    wants += [f"- {_link({'id': i['change'], 'title': i.get('title')}) if i.get('change') else _cut(str(i.get('title')), 90)}"
+              f" — {_cut(str(i.get('note') or 'left for you'), 120)}" for i in left]
+    if wants:
+        lines += ["", "**Waits for you**"] + wants
     helped = []
     w = work or {}
     if w.get("local_hours") is not None:
         hours = float(w.get("local_hours") or 0)
         week = w.get("week_hours_a_day")
-        helped.append(f"This Mac's own models did {hours:.1f} h of work"
+        helped.append(f"- This Mac's own models did {hours:.1f} h of work"
                       + (f" (the week's average: {float(week):.1f} h a day)" if week is not None else ""))
     if w.get("goal_turns"):
-        helped.append(f"{w['goal_turns']} goal turn{'s' if w['goal_turns'] != 1 else ''} finished")
-    if landed:
-        helped.append(f"{len(landed)} change{'s' if len(landed) != 1 else ''} to eki itself landed")
+        helped.append(f"- {w['goal_turns']} goal turn{'s' if w['goal_turns'] != 1 else ''} finished")
     if helped:
-        lines += ["", "**What helped**"]
-        lines += _list(helped)
-    wants = [_cut(f"{c.get('title') or 'self/' + c['id']} — "
-                  + ("touches what eki may not change alone; read it line by line" if c.get("protected")
-                     else "conflicts with your checkout" if c.get("state") == "conflicts"
-                     else "proposed, apply or discard it"))
-             for c in waiting]
-    wants += [_cut(f"{i.get('title')} — {i.get('note') or 'left for you'}") for i in left]
-    if wants:
-        lines += ["", "**Waits for you**"]
-        lines += _list(wants)
-    quiet = not (landed or undone or missed or wants)
+        lines += ["", "**What helped**"] + helped
+    quiet = not (landed or missed or wants)
     if quiet:
         lines += ["", "A quiet day: eki didn't change itself and nothing waits for you."]
     return {"id": _day(now), "at": int(now), "since": int(since), "text": "\n".join(lines).strip(),
-            "changed": len(landed) + len(undone), "missed": len(missed), "waiting": len(wants),
+            "changed": len(landed), "missed": len(missed), "waiting": len(wants),
             "quiet": quiet}
 
 
@@ -186,7 +191,7 @@ def notification(page: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if page.get("changed"):
         bits.append(f"{page['changed']} change{'s' if page['changed'] != 1 else ''}")
     if page.get("missed"):
-        bits.append(f"{page['missed']} didn't land")
+        bits.append(f"{page['missed']} went wrong")
     if page.get("waiting"):
         bits.append(f"{page['waiting']} wait{'s' if page['waiting'] == 1 else ''} for you")
     return {"title": "eki's day", "body": " · ".join(bits) + " — Goals → Self"}

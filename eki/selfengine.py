@@ -72,6 +72,11 @@ MERGE_POLL = 2.0
 #: how many of a change's commits the agent resolves in one run before eki
 #: stops calling it a conflict and calls it a change to make again
 RESOLVE_ROUNDS = 12
+#: the Self view sends this many changes whole; older ones as a line in a list,
+#: so the board can show every one without the page it polls growing without end
+CHANGES_FULL = 40
+CHANGE_LINE = ("id", "title", "state", "state_at", "at", "source", "fit", "protected", "locked",
+               "alone", "resolving", "resolving_live", "stage")
 
 
 def _payload(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -1714,14 +1719,15 @@ class SelfLoop:
         if not why_not:
             self._self_reconcile()
         g = self._self_goal()
-        rows = selfwork.changes(limit=60)
+        rows = selfwork.changes()
         items = selfloop.items()
         text = roadmap.read(root) if not why_not else ""
         plan = roadmap.parse(text)
         known = {i.key: i for i in items if i.source == "roadmap"}
-        landed = set(selfwork.landed_keys(selfwork.changes()))
+        landed = set(selfwork.landed_keys(rows))
+        # all of them: the board shows the first few and opens the rest in place
         upcoming = [(e, worth) for e, worth in roadmap.ranked(text, plan) if e.key not in landed
-                    and (e.key not in known or known[e.key].state not in selfloop.SETTLED)][:5]
+                    and (e.key not in known or known[e.key].state not in selfloop.SETTLED)]
         by_key = {e.key: e for e in plan}
 
         def waits(key: str) -> str:
@@ -1786,7 +1792,8 @@ class SelfLoop:
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],
             "waiting": [c for c in rows if c["state"] in ("proposed", "conflicts") and c.get("fit")],
-            "changes": rows[:40],
+            # every change, the older ones only as much as a line in a list needs
+            "changes": rows[:CHANGES_FULL] + [{k: c[k] for k in CHANGE_LINE if k in c} for c in rows[CHANGES_FULL:]],
             "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key), "worth": worth}
                                                     for e, worth in upcoming]},
             "note": selfloop.latest_note(),

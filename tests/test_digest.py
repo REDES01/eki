@@ -26,16 +26,17 @@ def test_the_page_says_what_changed_why_and_what_waits():
     page = digest.build(rows, items, since=NOW - 86400, now=NOW,
                         work={"local_hours": 2.5, "week_hours_a_day": 1.2, "goal_turns": 4})
     text = page["text"]
-    assert "change a — The chat list shows the project (why: the next ROADMAP item)" in text
+    assert "[change a](#/self/a) — The chat list shows the project (why: the next ROADMAP item)" in text
     assert "change e" not in text
-    assert "**Tried, didn't land**" in text and "change b — tests failed: 3" in text
+    assert "**Went wrong**" in text and "[change b](#/self/b) — didn't pass its checks: tests failed: 3" in text
     assert "2.5 h of work (the week's average: 1.2 h a day)" in text and "4 goal turns finished" in text
-    assert "change c — proposed" in text and "change d — touches what eki may not change alone" in text
+    assert "[change c](#/self/c) — proposed" in text
+    assert "[change d](#/self/d) — touches what eki may not change alone" in text
     assert "Try it on a trackpad — needs a trackpad" in text
     assert (page["changed"], page["missed"], page["waiting"], page["quiet"]) == (1, 1, 3, False)
     assert page["id"] == "2026-09-24"
     said = digest.notification(page)
-    assert said["title"] == "eki's day" and said["body"].startswith("1 change · 1 didn't land · 3 wait")
+    assert said["title"] == "eki's day" and said["body"].startswith("1 change · 1 went wrong · 3 wait")
 
 
 def test_a_quiet_day_is_kept_but_not_said():
@@ -44,10 +45,29 @@ def test_a_quiet_day_is_kept_but_not_said():
     assert digest.notification(page) is None
 
 
-def test_a_long_list_stays_short():
-    rows = [change(str(n), "applied") for n in range(10)]
-    text = digest.build(rows, since=NOW - 86400, now=NOW)["text"]
-    assert text.count("\n- change") == digest.SHOWN and "and 4 more" in text
+def test_every_change_of_the_day_is_on_the_page_in_its_group():
+    states = ["applied", "applying", "undone", "rolled back", "unfit", "stopped", "not started",
+              "no change", "discarded", "gone"]
+    rows = [change(f"x{n}", s) for n, s in enumerate(states)]
+    rows += [change(f"a{n}", "applied") for n in range(12)]                  # a long day: nothing cut
+    rows += [change("w", "conflicts", fit=True)]
+    page = digest.build(rows, since=NOW - 86400, now=NOW)
+    text = page["text"]
+    assert "more" not in text
+    for c in rows:
+        assert text.count(f"](#/self/{c['id']})") == 1, c["id"]            # each once, linked
+    landed, wrong, waits = (text.split(f"**{h}**")[1].split("\n\n")[0]
+                            for h in ("Landed", "Went wrong", "Waits for you"))
+    assert landed.count("\n- ") == 15 and "#/self/x2) · taken back" in landed
+    assert wrong.count("\n- ") == 7 and "#/self/x3) — rolled back" in wrong
+    assert waits.count("\n- ") == 1 and "conflicts with your checkout" in waits
+    assert (page["changed"], page["missed"], page["waiting"]) == (15, 7, 1)
+
+
+def test_the_page_reads_plainly_in_a_terminal():
+    text = digest.build([change("ab12", "applied", title="Make [it] so")], since=NOW - 86400, now=NOW)["text"]
+    assert "[Make (it) so](#/self/ab12)" in text
+    assert "- Make (it) so (self/ab12)" in digest.plain(text)
 
 
 def test_once_a_day_after_its_time():
@@ -87,3 +107,14 @@ async def test_the_engine_writes_it_once_and_says_it_once(eng, monkeypatch):   #
     assert await eng.self_digest(force=False) is None
     assert (await eng.self_digest(force=True))["id"] == page["id"]         # now, when asked
     await eng.runner.stop()
+
+
+def test_the_board_gets_every_change_the_older_ones_slim(eng):   # noqa: F811
+    from eki import selfengine, selfwork
+    for n in range(selfengine.CHANGES_FULL + 5):
+        selfwork.record(selfwork.Proposal(id=f"c{n:02d}", request=f"change {n}", root="/tmp",
+                                          report={"checks": []}, at=int(NOW) + n))
+    rows = eng.self_view()["changes"]
+    assert len(rows) == selfengine.CHANGES_FULL + 5                         # none cut off
+    assert "report" in rows[0] and "report" not in rows[-1]
+    assert {"id", "title", "state", "state_at"} <= set(rows[-1])

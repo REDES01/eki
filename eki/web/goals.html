@@ -163,6 +163,8 @@
   .golive .line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; padding: 3px 0; }
   .golive .line + .line { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 5px; }
   .golive .what { color: var(--ink-3); font-size: 12.5px; }
+  .more { border: 0; background: none; padding: 0; color: var(--accent); font-size: 12.5px; cursor: pointer; }
+  .more:hover { text-decoration: underline; }
   pre.diff { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto;
              font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
   pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--danger); } pre.diff .hunk { color: var(--info); }
@@ -193,7 +195,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
 const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
-            self: null, change: null, changeThread: null, diff: null, diffFor: "", selfDraft: "", acting: {},
+            self: null, change: null, changeThread: null, diff: null, diffFor: "", selfDraft: "", acting: {}, open: {},
             draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, on_time: false, fresh: false, touched: false } };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const EXAMPLES = [
@@ -271,6 +273,7 @@ function inline(s) {
   return esc(s)
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, a, p) => /^https?:/.test(p) ? `<img alt="${a}" src="${p}">` : `<img alt="${a}" src="${imgUrl(p)}">`)
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\((#\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,;:!?)]|$)/g, "$1<em>$2</em>");
@@ -562,6 +565,16 @@ function treeOf(t) {
   return h + `</div></div><div class="muted" style="font-size:12px;margin-top:6px">${(t.rounds || []).length} round${(t.rounds || []).length === 1 ? "" : "s"}, up to ${esc(t.workers)} pairs at once — a clean pair needs no agent; a real conflict gets one resolver run told what both changes are for.</div></div>`;
 }
 
+// a long list shows its first few and a line to open the rest in place (and
+// close it again) — never items cut off without a way to see them
+const SHOWN = { did: 30, next: 5 };
+function capped(key, list) {
+  const n = SHOWN[key], open = !!S.open[key];
+  if (list.length <= n) return { rows: list, toggle: "" };
+  return { rows: open ? list : list.slice(0, n),
+    toggle: `<div class="rowline"><button class="more" data-more="${key}" aria-expanded="${open}">${open ? "Show fewer" : `… ${list.length - n} more`}</button></div>` };
+}
+
 function selfPage() {
   const v = S.self;
   if (!v) return `<div class="empty">Loading…</div>`;
@@ -615,15 +628,15 @@ function selfPage() {
     h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
   }
   h += treeOf(v.tree);
-  const ahead = v.queue, nexts = v.roadmap?.next || [];
-  if (ahead.length || nexts.length) {
+  const ahead = v.queue, nexts = capped("next", v.roadmap?.next || []);
+  if (ahead.length || nexts.rows.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
     for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${afterNote(i)}</span>
       ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
       ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
-    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
+    for (const n of nexts.rows) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
       <button class="btn small" data-ract="person" data-key="${esc(n.key)}" title="eki won't take this one">Leave for me</button></div>`;
-    h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
+    h += nexts.toggle + `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
   }
   if (v.left.length) {
     h += `<div class="section"><div class="label">Left for you</div><div class="card" style="padding:2px 14px"><div class="rows">`;
@@ -653,12 +666,13 @@ function selfPage() {
   h += `</div></div>`;
   const did = v.changes.filter(c => !(["proposed", "conflicts"].includes(c.state) && c.fit));
   if (did.length) {
-    h += `<div class="section"><div class="label">What it did</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const c of did.slice(0, 30)) h += `<div class="rowline"><span class="when">${esc(when(c.state_at))}</span>
+    h += `<div class="section"><div class="label">What it did · ${did.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    const shown = capped("did", did);
+    for (const c of shown.rows) h += `<div class="rowline"><span class="when">${esc(when(c.state_at))}</span>
       <span class="badge ${badgeOf(c)}">${esc(stateOf(c))}</span>${srcChip(c.source || "asked")}
       <a class="grow" href="#/self/${enc(c.id)}" style="color:inherit;text-decoration:none" title="${esc(c.title)}">${esc(c.title)}</a>
       ${c.state === "applied" ? changeActs(c, false) : ""}</div>`;
-    h += `</div></div></div>`;
+    h += shown.toggle + `</div></div></div>`;
   }
   return h;
 }
@@ -784,6 +798,8 @@ document.addEventListener("click", async e => {
   const t = e.target, r = route();
   const on = t.closest("[data-on]");
   if (on) return act(() => api("/api/goals/mode", "POST", { on: on.dataset.on === "1" }));
+  const more = t.closest("[data-more]");
+  if (more) { S.open[more.dataset.more] = !S.open[more.dataset.more]; return draw(); }
   // ---- the Self view
   const sOn = t.closest("[data-self-on]");
   if (sOn) return act(() => api("/api/self/on", "POST", { on: sOn.dataset.selfOn === "1" }));

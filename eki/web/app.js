@@ -188,6 +188,21 @@
   });
   window.addEventListener("hashchange", () => open(location.hash.slice(1) || null));
 
+  // The Mac window moves when dragged by its title areas; tell it where they are.
+  function reportDrag() {
+    const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.eki;
+    if (!h) return;
+    const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+    h.postMessage({
+      drag: [...document.querySelectorAll("[data-drag]")].map(box),
+      nodrag: [...document.querySelectorAll("[data-drag] button, [data-drag] a, [data-drag] input, [data-drag] select")].map(box),
+    });
+  }
+  new ResizeObserver(reportDrag).observe(document.body);
+  document.querySelectorAll("[data-drag]").forEach((el) => new ResizeObserver(reportDrag).observe(el));
+  window.addEventListener("resize", reportDrag);
+  reportDrag();
+
   open(location.hash.slice(1) || null);
   loadProviders();
   setInterval(loadProviders, 5000);

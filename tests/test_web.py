@@ -37,6 +37,7 @@ def test_ui_files_are_served(web):
     code, body = get(web + "/")
     assert code == 200 and "<title>eki</title>" in body
     assert get(web + "/ui/app.js")[0] == 200
+    assert get(web + "/ui/mark.svg")[0] == 200
     with pytest.raises(urllib.error.HTTPError):
         get(web + "/ui/../server.py")
 

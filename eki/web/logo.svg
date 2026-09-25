@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<title>eki</title>
+<defs><clipPath id="shape"><rect x="100" y="100" width="824" height="824" rx="185" ry="185"/></clipPath></defs>
+<g clip-path="url(#shape)"><g transform="translate(100 100) scale(1.609375)">
+<rect width="512" height="512" fill="#12161f"/>
+<g transform="rotate(-45 256 256)">
+<line x1="-200" y1="186" x2="712" y2="186" stroke="#2aa79a" stroke-width="40"/>
+<line x1="-200" y1="256" x2="712" y2="256" stroke="#e2452b" stroke-width="40"/>
+<line x1="-200" y1="326" x2="712" y2="326" stroke="#eba63c" stroke-width="40"/>
+<path d="M376 256 A120 120 0 1 0 340.9 340.9 M136 256 H376" fill="none" stroke="#ffffff" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g></g>
+</svg>

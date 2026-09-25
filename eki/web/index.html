@@ -5,12 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>eki</title>
 <link rel="stylesheet" href="/ui/style.css">
+<link rel="icon" href="/ui/mark.svg" type="image/svg+xml">
 </head>
 <body>
 <div id="app">
   <aside id="side">
-    <div class="side-head">
-      <span class="mark" aria-hidden="true"></span><span class="brand">eki</span>
+    <div class="side-head" data-drag>
+      <img class="mark" src="/ui/mark.svg" alt="" aria-hidden="true"><span class="brand">eki</span>
       <button id="new" class="ghost" title="New thread (⌘K)">＋ New</button>
     </div>
     <nav id="threads"></nav>
@@ -21,7 +22,7 @@
     </section>
   </aside>
   <main id="main">
-    <header id="head">
+    <header id="head" data-drag>
       <div id="title">New thread</div>
       <div id="meta" class="dim"></div>
     </header>

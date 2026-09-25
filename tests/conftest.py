@@ -62,6 +62,7 @@ def private_skills(tmp_path, monkeypatch):
     # what this Mac's Eki.app was built from; no test rebuilds or quits it
     from eki import appbuild
     monkeypatch.setattr(appbuild, "STATE", root / "eki" / "app.json")
+    monkeypatch.setattr(appbuild, "RUNNING", root / "eki" / "app-running")
     # eki's changes to itself, and the loop's items and notes
     monkeypatch.setattr(selfwork, "HOME", root / "eki" / "self")
     monkeypatch.setattr(selfwork, "SHOTS", root / "eki" / "shots")

@@ -38,6 +38,8 @@ struct EkiApp: App {
         }
         .defaultSize(width: 1040, height: 680)
         .commands {
+            // About says which build runs; Restart to Update while a newer one waits
+            CommandGroup(replacing: .appInfo) { AppMenuItems() }
             CommandGroup(after: .newItem) {
                 Button("New Chat") { model.newConversation() }
                     .keyboardShortcut("n", modifiers: .command)
@@ -86,12 +88,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu says ⌘+, but the key under that plus is "=" and nobody holds
     /// shift to zoom. Caught before the menu sees it, so it's one step either way.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppUpdate.shared.start()
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let held = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard held == .command, event.charactersIgnoringModifiers == "=" else { return event }
             Zoom.larger()
             return nil
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppUpdate.shared.forget()
     }
 
     /// Closing the last window keeps the menu bar item. eki is still there.

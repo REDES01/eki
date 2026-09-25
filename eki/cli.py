@@ -667,6 +667,8 @@ def _self_status(service: str, limit: int, everything: bool = False) -> int:
         for line in (_going_live(v.get("going_live") or {}), _next_go_live(v.get("train") or {}, everything)):
             if line:
                 print(line)
+    if v.get("app"):
+        print(v["app"])
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
           + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
@@ -1328,6 +1330,10 @@ def cmd_builds(args) -> int:
     going = _going_live(builds.going_live())
     if going:
         print(going)
+    from . import appbuild
+    line = appbuild.versions_line()
+    if line:
+        print(line)
     return 0
 
 

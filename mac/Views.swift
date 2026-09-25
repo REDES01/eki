@@ -56,12 +56,15 @@ struct ContentView: View {
             if let picture = stage.picture { PictureViewer(picture: picture) }
         }
         .overlay(alignment: .bottom) { NoticeView() }
+        .overlay(alignment: .top) { UpdateBanner() }
         .onChange(of: model.paneRequest) { _, wanted in
             if let wanted { pane = wanted; model.paneRequest = nil }
         }
         .sheet(isPresented: $showWelcome) { OnboardingSheet() }
         .task {
             model.start()
+            // a restart it wasn't asked for waits for an answer being watched
+            AppUpdate.shared.busy = { [weak model] in !(model?.liveRun.isEmpty ?? true) }
             // Only greet someone who has nothing set up yet: an upgrade from an
             // earlier build already has providers and an engine.
             await model.refreshProviders()

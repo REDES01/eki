@@ -63,22 +63,72 @@ def test_after_it_leaves_going_live_then_watching_then_live_or_rolled_back():
     target = "/b/new1"
     train = {"departed": {"build": target, "cars": ["c1", "c2"], "at": NOW - 100}}
     c = {"state": "applying", "build": target}
-    waiting = {"state": "waiting", "target": target, "deadline": NOW + 30}
-    assert at(c=c, train=train, swap=waiting, swap_alive=True)["text"] == "going live"
+    waiting = {"state": "waiting", "target": target, "deadline": NOW + 72}
+    got = at(c=c, train=train, swap=waiting, swap_alive=True)
+    assert got["text"] == "waiting for running work (1:12 left, then it goes anyway)" and got["live"]
+    # the board counts it down by itself, from when it ends
+    assert got["until"] == NOW + 72 and got["say"].replace("{left}", "1:12") == got["text"]
     lost = at(c=c, train=train, swap=waiting, swap_alive=False)
     assert lost["stalled"] and "waiting to be resumed" in lost["text"]
+    # past its deadline: the supervisor is swapping (or about to)
+    late = at(c=c, train=train, swap={**waiting, "deadline": NOW - 1}, swap_alive=True)
+    assert (late["stage"], late["text"]) == ("swapping", "swapping")
+    behind = at(c=c, train=train, swap={**waiting, "deadline": NOW - 1, "behind": 42}, swap_alive=True)
+    assert behind["text"] == "waiting for the go-live before it to settle"
     swapping = {"state": "swapping", "target": target, "at": NOW - 40}
+    assert at(c=c, train=train, swap=swapping, swap_alive=True)["text"] == "swapping — restarting on the new version"
     old = pipeline.STARTED
     pipeline.STARTED = NOW - 30
     try:
         got = at(c=c, train=train, swap=swapping, swap_alive=True, running_build="new1")
+        pipeline.STARTED = NOW - pipeline.WATCH - 5
+        over = at(c=c, train=train, swap={**swapping, "at": NOW - pipeline.WATCH - 9}, swap_alive=True,
+                  running_build="new1")
     finally:
         pipeline.STARTED = old
-    assert got["stage"] == "watching" and got["text"] == f"watching ({pipeline.WATCH - 30} s left)"
+    assert got["stage"] == "watching" and got["text"] == "watching the new version (2:30 left)"
+    assert got["until"] == NOW - 30 + pipeline.WATCH
+    assert over["text"] == "watching the new version — its verdict any moment" and "until" not in over
     assert at(c=c, train=train, swap={"state": "healthy", "target": target})["text"] == "live"
     back = at(c=c, train=train, swap={"state": "rolled back", "target": target, "why": "it didn't come up"})
-    assert back["text"] == "rolled back (it didn't come up)"
-    assert at(c={"state": "rolled back", "why": "unhealthy"})["text"] == "rolled back (unhealthy)"
+    assert back["text"] == "rolled back — it didn't come up"
+    assert at(c={"state": "rolled back", "why": "unhealthy"})["text"] == "rolled back — unhealthy"
+
+
+def test_the_clock_is_minutes_and_seconds():
+    assert [pipeline.clock(s) for s in (0, 9, 72, 151, -5)] == ["0:00", "0:09", "1:12", "2:31", "0:00"]
+
+
+def test_the_go_live_carries_what_the_supervisor_wrote_since_it_left(tmp_path):
+    t = time.mktime(time.strptime("2026-09-26 00:45:40", "%Y-%m-%d %H:%M:%S"))
+    (tmp_path / "swap.log").write_text(
+        "2026-09-26 00:38:49 healthy on 7c70d0391b after 180s\n"
+        "not a line of its\n"
+        "2026-09-26 00:47:42 runs still going after 120s; swapping anyway (the new engine carries them on)\n"
+        "2026-09-26 00:47:42 swap: /b/7c -> /b/37 (build 37)\n")
+    said = pipeline.supervisor_said(t, tmp_path)
+    assert [r["text"][:4] for r in said] == ["runs", "swap"] and said[0]["at"] == t + 122
+    assert pipeline.supervisor_said(t, tmp_path / "nowhere") == []
+    train = {"departed": {"build": "/b/37", "cars": ["a"], "at": t}}
+    g = pipeline.golive({}, train=train, leaves_at=None, swap={"state": "swapping", "target": "/b/37", "at": t + 122},
+                        swap_alive=True, running_build="7c", now=t + 125, home=tmp_path)
+    assert len(g["last"]["said"]) == 2 and g["last"]["stage"] == "swapping"
+
+
+def test_what_eki_takes_in_by_itself_is_not_waiting_for_you():
+    rows = [{"id": "p", "state": "proposed", "fit": True},
+            {"id": "q", "state": "conflicts", "fit": True, "stage": {"stage": "checking again"}},
+            {"id": "r", "state": "conflicts", "fit": True, "resolving": "run1"},
+            {"id": "u", "state": "unfit", "fit": False},
+            {"id": "c", "state": "conflicts", "fit": True}]
+    assert [c["id"] for c in pipeline.needs_you(rows)] == ["p", "c"]
+
+
+def test_a_persons_apply_a_restart_cut_off_is_theirs_again_not_waiting_to_be_resumed():
+    evs = [{"event": "queued", "at": NOW - 90, "boot": "me"}, {"event": "checking", "at": NOW - 60, "boot": "me"}]
+    got = at(c={"state": "conflicts", "fit": True}, evs=evs)
+    assert (got["text"], got["live"]) == ("checking again", True)
+    assert at(c={"state": "conflicts", "fit": True}, evs=evs, boot="later") == {}
 
 
 def test_a_change_not_on_its_way_in_has_no_stage():
@@ -118,12 +168,12 @@ def test_the_go_live_is_one_group_what_it_carries_when_it_leaves_and_how_it_came
     g = v["golive"]
     assert [c["id"] for c in g["next"]["carrying"]] == ["a", "b"] and g["next"]["in"] == 120
     assert g["last"]["carrying"] == [{"id": "old", "title": "Old"}]
-    assert g["last"]["text"] == "rolled back (it stopped)" and g["last"]["settled_at"] == NOW - 600
+    assert g["last"]["text"] == "rolled back — it stopped" and g["last"]["settled_at"] == NOW - 600
     stages = {r["id"]: r["text"] for r in v["changes"]}
-    assert stages["old"] == "rolled back (it stopped)" and stages["a"].startswith("landed, goes live at")
+    assert stages["old"] == "rolled back — it stopped" and stages["a"].startswith("landed, goes live at")
     said = "\n".join(pipeline.lines(v, now=NOW))
     assert "next go-live at" in said and "self/a, self/b" in said
-    assert "last go-live left" in said and "rolled back (it stopped)" in said
+    assert "last go-live left" in said and "rolled back — it stopped" in said
     assert "applying" not in said
 
 

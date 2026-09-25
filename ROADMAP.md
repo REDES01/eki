@@ -382,6 +382,67 @@ eki's commands is the first orchestrator; build a planner when it falls short.
 - [x] A local model with its own tool loop, so it can call eki too *(eki: self/8817b975)*
 - [ ] An MCP wrapper over the same engine API, if a client without a shell needs it
 
+## Stage 9 — Web interface in a native shell
+
+Decided 2026-09-26: the Mac app stays a Swift program only for what must be
+native — the window, the menu bar meter, permissions, the picture viewer and
+its sorting mode, file panels, starting the engine — and everything the
+person looks at becomes a page the engine serves, so a UI change goes live
+with a refresh instead of a rebuilt app waiting to relaunch. A track of its
+own, beside the others; its items are in order, smallest risk first, and
+each leaves the app working. The plan: `docs/web-ui.md`.
+
+- [ ] **Web UI foundation.** `/ui/` served from `eki/web/ui/`; one design
+      system (`base.css`, from `mac/Theme.swift`); shared modules for the
+      engine, live reload and the bridge; the UI version in `/api/health`
+      and on `/api/ui/events`; the app's web view with the one `eki` bridge
+      handler; the Goals board moved onto it. Done when the board looks as
+      before, an edit to `base.css` refreshes the open board within two
+      seconds keeping a half-typed goal, and *Choose…* still opens a sheet
+- [ ] **Web UI check in the candidate step.** A small Swift helper that
+      drives an offscreen WebKit view (`mac/tools/webshot.swift`),
+      `eki/webcheck.py`, and a `web` step for changes under `eki/web/`:
+      pages load with no errors, before/after shots in light and dark on the
+      change page, smoke tests per page. Done when a planted JS error fails
+      the check and a real change shows its pictures. It changes
+      `eki/candidate.py`, so the person applies it
+- [ ] **Usage as a page.** `/ui/usage` replaces the native pane. Done when
+      it matches in both appearances, refresh and the Claude probe work, and
+      `UsagePane` is gone from `mac/`
+- [ ] **Settings as a page.** The ⌘, window hosts `/ui/settings`; display
+      choices and the privacy buttons go through the bridge. Done when every
+      setting can be changed from the page, the menu bar meter follows, and
+      `SettingsView.swift` is gone
+- [ ] **Models, providers and scores as a page.** `/ui/models`: memory,
+      local models, routing, providers, add a provider or a model, scores,
+      downloads. Done when adding a provider, adding and downloading a model
+      and measuring one work from the page, and `Models.swift`,
+      `Providers.swift`, `Capability.swift`, `Downloads.swift` are gone
+- [ ] **The gallery as a page.** `/ui/gallery`; a picture opens the native
+      viewer through the bridge, sorting mode included. Done when the
+      gallery works as today, sorting from it still trashes and recovers,
+      and `Gallery.swift` is gone
+- [ ] **Claude Code and Codex panels as pages.** `/ui/panel/<name>`, opened
+      from the composer as a sheet — MCP, permissions, usage, context,
+      rewind, tasks, agents, hooks, status, config, memory, skills, plugins.
+      Done when each works against a live Claude Code and Codex session and
+      the panels are gone from `ClaudeCode.swift`
+- [ ] **The chat as a page.** `/ui/chat/<id>`: the transcript, Markdown,
+      live cards, pictures, artifacts, the composer with paste, drop and
+      the `@`/`/` menus, the model picker. Reachable beside the native chat
+      first, the pane after a week of real use. Done when a day of chatting
+      needs nothing from the native chat, and `Live.swift`, `Markdown.swift`,
+      `Artifacts.swift` and the chat in `Views.swift` are gone
+- [ ] **The window, onboarding and menu-bar panel as pages.** The rail moves
+      into the page, so the window is one web view; `/ui/welcome` and
+      `/ui/menu`. Done when the native split view, `OnboardingSheet` and
+      `MenuPanel` are gone and a fresh user gets from first launch to a
+      first answer
+- [ ] **A thin shell.** What's left in `mac/` beyond the shell deleted
+      (`docs/web-ui.md`, section 6); a *Restart* banner on every page when
+      the engine has built a newer shell than the one running. Done when
+      `mac/` is the shell alone and a shell change still reaches the person
+
 ## Alongside every stage — eki builds eki
 
 The loop is closed (745807a, 4909625): eki works on itself as a goal —

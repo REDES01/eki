@@ -3,7 +3,8 @@
 It behaves like a real agent CLI — a session that can be resumed, output
 over time, limits and failures on request — without spending anything.
 Words in the prompt steer it: `steps=5`, `delay=0.5`, `limit`, `fail`,
-`handoff`.
+`handoff`. `EKI_FAKE_TOUCH=a.py,b.py` makes it write those files in its
+folder; `EKI_FAKE_SAYS_FILE=<path>` is what it says at the end.
 """
 from __future__ import annotations
 
@@ -98,20 +99,21 @@ def main(argv: List[str]) -> int:
     (state_dir / sid).write_text(json.dumps(state))
     _say({"type": "session", "id": sid})
     ask = state["prompt"]
-    if "fail" in ask.split():
+    words = set(ask.strip().splitlines()[0].split()) if ask.strip() else set()   # the request line steers
+    if "fail" in words:
         _say({"type": "error", "message": "fake failure"})
         return 1
-    if "limit" in ask.split() and name in os.environ.get("EKI_FAKE_LIMITED", name).split(","):
+    if "limit" in words and name in os.environ.get("EKI_FAKE_LIMITED", name).split(","):
         _say({"type": "limit", "in": 60})
         return 1
-    if "handoff" in ask.split():
+    if "handoff" in words:
         _say({"type": "handoff", "reason": "needs tools"})
         return 0
-    if "ask" in ask.split():
+    if "ask" in words:
         _say({"type": "ask", "id": "q1", "question": "Which colour?", "options": ["red", "blue"]})
         reply = json.loads(sys.stdin.readline() or "{}")
         _say({"type": "text", "text": f"picked {reply.get('answer')}\n"})
-    if "write" in ask.split():
+    if "write" in words:
         path = Path(os.environ.get("EKI_HOME", ".")) / "made.html"
         path.write_text("<h1>made by fake</h1>")
         _say({"type": "tool", "name": "Write", "detail": str(path), "path": str(path)})
@@ -121,7 +123,14 @@ def main(argv: List[str]) -> int:
         state["done"] += 1
         (state_dir / sid).write_text(json.dumps(state))
         _say({"type": "text", "text": f"step {state['done']}/{state['steps']}\n"})
+    if os.environ.get("EKI_FAKE_TOUCH"):            # an "agent" that edits a file in its folder
+        for rel in os.environ["EKI_FAKE_TOUCH"].split(","):
+            Path(rel).parent.mkdir(parents=True, exist_ok=True)
+            Path(rel).write_text("made by fake\n")
+            _say({"type": "tool", "name": "Write", "detail": rel, "path": str(Path(rel).resolve())})
     _say({"type": "text", "text": f"{name} done: {ask.splitlines()[-1][:80]}"})
+    if os.environ.get("EKI_FAKE_SAYS_FILE"):        # what the "agent" says at the end (a plan, a verdict)
+        _say({"type": "text", "text": "\n" + Path(os.environ["EKI_FAKE_SAYS_FILE"]).read_text()})
     _say({"type": "done"})
     return 0
 

@@ -18,6 +18,8 @@ bin/eki route "fix the failing test"             # where it would go, and why
 bin/eki providers | skills | mcp
 bin/eki models [start|stop] local               # local models; kept up while there's room
 bin/eki open                                     # the window (http://127.0.0.1:7788)
+bin/eki self "split engine.py by responsibility"  # eki plans and builds a change to itself, in parallel
+bin/eki self | show <item> | diff <item>         # what's proposed (branches self/<id>), left for you
 bin/eki engine install                           # login agent: always on (the launcher)
 bin/eki swap HEAD | --back | --dev               # a new version live, checked first; go back
 bin/eki builds                                   # which build runs, which it would go back to

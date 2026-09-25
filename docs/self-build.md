@@ -204,15 +204,14 @@ eki` and can't raise the setting, turn the loop on, or touch a locked file.
 
 ## Building it, in order
 
-1. **Groundwork** — a worktree per folder run (`eki/workspace.py`); the
-   command provider (`eki/providers/command.py`). Ordinary runs need both.
-2. **Go-live** — builds, the launcher, `eki swap`, `eki builds`; a drill
-   case that swaps a sandboxed engine mid-run. Must exist before anything
-   self-applies. Creates the locked files: the last slice a person applies
-   by hand.
-3. **`eki self "…"`, propose** — the `items` table, the plan run, the
+1. ~~**Groundwork**~~ — worktrees on demand (`eki/workspace.py`); runs in
+   one folder take turns; the command provider (`eki/providers/command.py`).
+2. ~~**Go-live**~~ — builds, the launcher, `eki swap`, `eki builds`; the
+   swap drill. The locked files exist from here.
+3. ~~**`eki self "…"`, propose**~~ — goals and items, the plan run, the
    scheduler by write-sets, the build run with its brief, gate 1, `eki
-   self` to show it. From here eki proposes changes to itself, in parallel.
+   self`. eki proposes changes to itself, in parallel, as branches
+   `self/<id>` of the source repo: merge one, or `eki swap self/<id>`.
 4. **The queue** — the integration repo, speculative rebase, gate 2, the
    side path with `rerere`, landing and pushing, the train, `apply`.
 5. **The loop closes** — faults become items, the daily digest, the score.

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import builds, db, machine, models, paths, quota, store
+from . import builds, db, machine, models, paths, quota, selfwork, store
 
 log = logging.getLogger("eki.engine")
 
@@ -190,6 +190,8 @@ def refresh_quota() -> None:
 
 
 _up_since = [0.0]
+SELF_EVERY = 2.0
+_last_self = [0.0]
 
 
 def tick(conn) -> bool:
@@ -197,6 +199,13 @@ def tick(conn) -> bool:
     reap(conn)
     spawn_ready(conn)
     refresh_quota()
+    if time.time() - _last_self[0] > SELF_EVERY:
+        _last_self[0] = time.time()
+        try:
+            for line in selfwork.tick(conn):
+                log.info("self: %s", line)
+        except Exception:                                # noqa: BLE001 — self-work must not stop the rest
+            log.exception("self-work tick failed")
     if time.time() - _last_duty[0] > DUTY_EVERY:
         _last_duty[0] = time.time()
         for line in models.duty(conn):

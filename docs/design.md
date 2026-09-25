@@ -54,6 +54,7 @@ eki follow <run>  ◄── events table
 | `skills`, `mcp` | one store, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`) |
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
+| `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -119,8 +120,11 @@ newer engine opened.
 
 Designed in [self-build.md](self-build.md): items with write-sets built in
 parallel worktrees, a speculative merge queue, three judging gates, immutable
-builds swapped by a launcher that rolls back. Order of building in
-[ROADMAP.md](../ROADMAP.md).
+builds swapped by a launcher that rolls back. Built so far: `eki self "…"`
+plans a goal into items, builds them side by side in worktrees of the source
+repo, judges each with `bin/check` (gate 1), and proposes the fit ones as
+branches `self/<id>`; the go-live path (`eki swap`). Next: the queue and
+gate 2. Order of building in [ROADMAP.md](../ROADMAP.md).
 
 ## Not built yet
 

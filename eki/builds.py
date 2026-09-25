@@ -41,7 +41,10 @@ def root() -> Path:
 
 
 def source() -> Path:
-    """The checkout this code came from (a build remembers its source)."""
+    """The checkout this code came from (a build remembers its source; the
+    launcher and the tests say with EKI_SOURCE)."""
+    if os.environ.get("EKI_SOURCE"):
+        return Path(os.environ["EKI_SOURCE"]).expanduser().resolve()
     here = Path(__file__).resolve().parent.parent
     info = here / ".eki-build.json"
     if info.exists():

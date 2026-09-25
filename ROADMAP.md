@@ -16,10 +16,12 @@ ticks them as they land. Items marked *(for a person)* are never taken.
       the swap drill: a swap mid-run changes the engine and not the run, a
       build that can't start is rolled back. *(for a person: the locked
       files)*
-- [ ] **`eki self "…"`, propose.** The `items` table; the plan run that
-      splits a goal into items with write-sets and dependencies; the
-      scheduler runs disjoint items at once; the build run in a worktree
-      with its brief; gate 1; `eki self` shows what's going.
+- [x] **`eki self "…"`, propose.** Goals and items; the plan run that
+      splits a goal into items with write-sets and dependencies; disjoint
+      items build at once (`self.parallel`, 3) in worktrees `self/<id>`;
+      the build brief; gate 1 (`bin/check` as a command run, one retry with
+      the failure); `eki self` shows it; `show`, `diff`, `follow`, `drop`,
+      `retry`.
 - [ ] **The queue.** The integration repo; speculative rebase and gate 2;
       the side path for conflicts with `rerere`; landing and pushing the
       train every five minutes; `self_autonomy apply`.

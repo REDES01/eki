@@ -88,6 +88,41 @@ CREATE TABLE IF NOT EXISTS cooldowns (
     until REAL NOT NULL,
     reason TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS goals (          -- eki builds eki: what was asked for
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'ask',     -- ask | roadmap | fault
+    owner TEXT NOT NULL DEFAULT 'you',      -- you | eki
+    state TEXT NOT NULL DEFAULT 'planning', -- planning | planned | failed
+    thread_id TEXT,
+    plan_run TEXT,
+    error TEXT,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a worktree of its own
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    spec TEXT NOT NULL DEFAULT '',
+    files TEXT NOT NULL DEFAULT '[]',       -- the declared write-set (globs)
+    deps TEXT NOT NULL DEFAULT '[]',        -- item ids that must be fit first
+    independent INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | unfit | left | dropped
+    thread_id TEXT,
+    worktree TEXT,
+    branch TEXT,
+    base TEXT,                              -- the commit the worktree started from
+    commit_sha TEXT,                        -- what the agent left, committed by eki
+    touched TEXT NOT NULL DEFAULT '[]',     -- files really changed
+    run_id TEXT,                            -- the run under way, or the last one
+    tries INTEGER NOT NULL DEFAULT 0,
+    summary TEXT,
+    verdict TEXT,
+    error TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS items_state ON items(state);
 """
 
 

@@ -264,3 +264,24 @@ def test_the_command_line_says_when_the_next_go_live_is():
     line = cli._next_go_live({"in": 400, "every": 15, "carrying": [{"id": "ab12", "title": "make it so"}]})
     assert line.startswith("next go-live in 7 min, carrying: self/ab12 (make it so)")
     assert cli._next_go_live({}) == ""
+    many = {"in": 0, "carrying": [{"id": f"c{n}", "title": "x" * 50} for n in range(8)]}
+    assert "and 2 more (eki self --all)" in cli._next_go_live(many) and "x" * 50 not in cli._next_go_live(many)
+    whole = cli._next_go_live(many, everything=True)
+    assert "self/c7" in whole and "x" * 50 in whole and "more" not in whole
+
+
+def test_eki_self_all_shows_what_is_cut_off(monkeypatch, capsys):
+    from eki import cli
+    long = "a title long enough that a terminal line would cut it off somewhere " * 2
+    view = {"can": True, "goal": None, "autonomy": "propose", "review_max": 3, "areas": {}, "tiers": {},
+            "working": [], "merging": [], "waiting": [], "queue": [], "left": [],
+            "roadmap": {"next": [{"title": f"item {n}", "section": "Stage 1 — x"} for n in range(7)]},
+            "changes": [{"id": f"c{n}", "state": "applied", "state_at": 0, "title": long} for n in range(25)]}
+    monkeypatch.setattr(cli, "call", lambda *a, **kw: view)
+    cli._self_status("s", 20)
+    cut = capsys.readouterr().out
+    assert "item 2" in cut and "item 3" not in cut and "… 4 more on the roadmap — eki self --all shows them" in cut
+    assert "self/c19" in cut and "self/c20" not in cut and "… 5 more older" in cut and long.strip() not in cut
+    cli._self_status("s", 20, everything=True)
+    whole = capsys.readouterr().out
+    assert "item 6" in whole and "self/c24" in whole and long.strip() in whole and "more" not in whole

@@ -163,6 +163,16 @@
   .golive .line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; padding: 3px 0; }
   .golive .line + .line { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 5px; }
   .golive .what { color: var(--ink-3); font-size: 12.5px; }
+  .more { border: 0; background: none; padding: 0; color: var(--accent); font-size: 12.5px; cursor: pointer; }
+  .more:hover { text-decoration: underline; }
+  .golive .says { font-weight: 550; }
+  .count { font-variant-numeric: tabular-nums; }
+  .golive details { font-size: 12.5px; color: var(--ink-2); padding: 0 0 2px; }
+  .golive summary { cursor: pointer; color: var(--ink-3); width: fit-content; }
+  .golive summary:hover { color: var(--ink-2); }
+  .golive ul { margin: 5px 0 3px; padding-left: 18px; }
+  .golive li a { color: inherit; } .golive li .muted { font-size: 11.5px; }
+  .golive .said { margin-top: 5px; font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); }
   pre.diff { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto;
              font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
   pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--danger); } pre.diff .hunk { color: var(--info); }
@@ -193,7 +203,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc = encodeURIComponent;
 const S = { view: null, thread: null, threadOf: "", sig: "", confirm: "", editing: false, error: "", sending: false,
-            self: null, change: null, changeThread: null, diff: null, diffFor: "", selfDraft: "", acting: {},
+            self: null, change: null, changeThread: null, diff: null, diffFor: "", selfDraft: "", acting: {}, open: {},
             draft: { text: "", kind: "once", at: "09:00", day: "0", hours: "4", folder: "", spare: false, screen: false, on_time: false, fresh: false, touched: false } };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const EXAMPLES = [
@@ -271,6 +281,7 @@ function inline(s) {
   return esc(s)
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, a, p) => /^https?:/.test(p) ? `<img alt="${a}" src="${p}">` : `<img alt="${a}" src="${imgUrl(p)}">`)
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\((#\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,;:!?)]|$)/g, "$1<em>$2</em>");
@@ -461,7 +472,13 @@ const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", min
 // queued 21:02 → rebased 21:05 → landed 21:10
 const timelineOf = tl => (tl || []).length ? `<div class="tl">${tl.map((r, n) =>
   `${n ? `<span class="arrow">→</span>` : ""}<span title="${esc(r.note || "")}"><b>${esc(r.step)}</b> ${esc(hm(r.at))}</span>`).join("")}</div>` : "";
-const stageOf = st => `<span class="stage ${st.live ? "live" : st.stalled ? "stalled" : ""}" title="${esc(st.text)}">${esc(st.text)}</span>`;
+// 1:12 — what's left of a countdown
+const clock = s => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+// a stage with a countdown ("{left}" in what it says) counts down every second, between refreshes
+const stageText = st => st.say && st.until
+  ? esc(st.say).replace("{left}", `<span class="count" data-until="${esc(st.until)}">${clock(st.until - Date.now() / 1000)}</span>`)
+  : esc(st.text);
+const stageOf = st => `<span class="stage ${st.live ? "live" : st.stalled ? "stalled" : ""}" title="${esc(st.text)}">${stageText(st)}</span>`;
 const when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function changeActs(c, withDiff) {
@@ -527,7 +544,9 @@ function changeCard(c) {
 }
 
 // the go-live as one group: what the next one carries and when it leaves;
-// the last one, what it carried and where it stands or how it came out.
+// the last one, the stage it is at right now — waiting for running work,
+// swapping, watching the new version, each with what's left — or how it
+// came out, and (opened) what it carries and what the supervisor wrote.
 // Work isn't paused for either — runs still going then carry on in the new engine.
 function goLive(g, every) {
   const nxt = g?.next, last = g?.last;
@@ -537,10 +556,15 @@ function goLive(g, every) {
   if (nxt) h += `<div class="line"><span>Next leaves ${nxt.in ? "at " + esc(hm(nxt.leaves_at)) : "now"}, carrying ${ids(nxt.carrying)}</span>
     <button class="btn small" data-release-now title="Don't wait for the train: swap it in now">Go live now</button>
     <span class="what">— at most one every ${esc(every)} min</span></div>`;
-  if (last) h += `<div class="line">${last.live ? `<span class="spinner"></span>` : ""}
-    <span class="badge ${stageBadge(last)}">${esc(last.label)}</span>
-    <span>Left ${esc(hm(last.left_at))}, carrying ${ids(last.carrying)}</span>
-    <span class="what">— ${esc(last.text)}${last.settled_at ? " · " + esc(hm(last.settled_at)) : ""}</span></div>`;
+  if (last) {
+    const n = last.carrying.length, key = "golive:" + last.left_at;
+    h += `<div class="line">${last.live ? `<span class="spinner"></span>` : ""}
+      <span class="badge ${stageBadge(last)}">${esc(last.label)}</span>
+      <span class="says" title="${esc(last.text)}">${stageText(last)}</span>${last.settled_at ? `<span class="what">· ${esc(hm(last.settled_at))}</span>` : ""}</div>
+      <details data-keep="${esc(key)}" ${S.open[key] ? "open" : ""}><summary>Left ${esc(hm(last.left_at))}, carrying ${n} change${n === 1 ? "" : "s"}</summary>
+      <ul>${last.carrying.map(c => `<li><a href="#/self/${enc(c.id)}">${esc(c.title || "self/" + c.id)}</a> <span class="muted">self/${esc(c.id)}</span></li>`).join("")}</ul>
+      ${(last.said || []).length ? `<div class="said" title="~/.eki/self/swap.log">${last.said.map(r => `${esc(hm(r.at))} ${esc(r.text)}`).join("<br>")}</div>` : ""}</details>`;
+  }
   return h + `</div></div>`;
 }
 
@@ -560,6 +584,16 @@ function treeOf(t) {
   for (const c of t.checks || []) h += `<div class="rowline"><span class="when" style="min-width:62px">check</span>${busy(c.state) ? `<span class="spinner"></span>` : ""}<span class="grow">${c.ids.length} together${c.why ? ` <span class="muted">— ${esc(c.why)}</span>` : ""}</span><span class="muted" style="font-size:12.5px">${esc(c.state)}</span></div>`;
   for (const [id, why] of Object.entries(t.dropped || {})) h += `<div class="rowline"><span class="when" style="min-width:62px">dropped</span><span class="grow">${esc(id)} <span class="muted">— ${esc(why)}</span></span></div>`;
   return h + `</div></div><div class="muted" style="font-size:12px;margin-top:6px">${(t.rounds || []).length} round${(t.rounds || []).length === 1 ? "" : "s"}, up to ${esc(t.workers)} pairs at once — a clean pair needs no agent; a real conflict gets one resolver run told what both changes are for.</div></div>`;
+}
+
+// a long list shows its first few and a line to open the rest in place (and
+// close it again) — never items cut off without a way to see them
+const SHOWN = { did: 30, next: 5 };
+function capped(key, list) {
+  const n = SHOWN[key], open = !!S.open[key];
+  if (list.length <= n) return { rows: list, toggle: "" };
+  return { rows: open ? list : list.slice(0, n),
+    toggle: `<div class="rowline"><button class="more" data-more="${key}" aria-expanded="${open}">${open ? "Show fewer" : `… ${list.length - n} more`}</button></div>` };
 }
 
 function selfPage() {
@@ -617,15 +651,15 @@ function selfPage() {
     h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
   }
   h += treeOf(v.tree);
-  const ahead = v.queue, nexts = v.roadmap?.next || [];
-  if (ahead.length || nexts.length) {
+  const ahead = v.queue, nexts = capped("next", v.roadmap?.next || []);
+  if (ahead.length || nexts.rows.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
     for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${afterNote(i)}</span>
       ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
       ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
-    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
+    for (const n of nexts.rows) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
       <button class="btn small" data-ract="person" data-key="${esc(n.key)}" title="eki won't take this one">Leave for me</button></div>`;
-    h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
+    h += nexts.toggle + `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
   }
   if (v.left.length) {
     h += `<div class="section"><div class="label">Left for you</div><div class="card" style="padding:2px 14px"><div class="rows">`;
@@ -655,12 +689,13 @@ function selfPage() {
   h += `</div></div>`;
   const did = v.changes.filter(c => !(["proposed", "conflicts"].includes(c.state) && c.fit));
   if (did.length) {
-    h += `<div class="section"><div class="label">What it did</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const c of did.slice(0, 30)) h += `<div class="rowline"><span class="when">${esc(when(c.state_at))}</span>
+    h += `<div class="section"><div class="label">What it did · ${did.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+    const shown = capped("did", did);
+    for (const c of shown.rows) h += `<div class="rowline"><span class="when">${esc(when(c.state_at))}</span>
       <span class="badge ${badgeOf(c)}">${esc(stateOf(c))}</span>${srcChip(c.source || "asked")}
       <a class="grow" href="#/self/${enc(c.id)}" style="color:inherit;text-decoration:none" title="${esc(c.title)}">${esc(c.title)}</a>
       ${c.state === "applied" ? changeActs(c, false) : ""}</div>`;
-    h += `</div></div></div>`;
+    h += shown.toggle + `</div></div></div>`;
   }
   return h;
 }
@@ -738,7 +773,9 @@ async function refresh(force) {
       S.change = c;
       S.changeThread = c?.conversation ? await api(`/api/conversations/${enc(c.conversation)}`).catch(() => null) : null;
     }
-    const sig = JSON.stringify([v.goals, v.on, v.when, thread, r, S.self, S.change, S.changeThread, S.acting]);
+    // a countdown's seconds aren't a change: the page counts them itself (tick)
+    const sig = JSON.stringify([v.goals, v.on, v.when, thread, r, S.self, S.change, S.changeThread, S.acting],
+                               function (k, x) { return k === "left" || (k === "text" && this.say) ? undefined : x; });
     S.view = v; S.thread = thread;
     if (force || (sig !== S.sig && !busy() && !S.editing)) { S.sig = sig; draw(); } else header();
   } catch (e) {
@@ -786,6 +823,8 @@ document.addEventListener("click", async e => {
   const t = e.target, r = route();
   const on = t.closest("[data-on]");
   if (on) return act(() => api("/api/goals/mode", "POST", { on: on.dataset.on === "1" }));
+  const more = t.closest("[data-more]");
+  if (more) { S.open[more.dataset.more] = !S.open[more.dataset.more]; return draw(); }
   // ---- the Self view
   const sOn = t.closest("[data-self-on]");
   if (sOn) return act(() => api("/api/self/on", "POST", { on: sOn.dataset.selfOn === "1" }));
@@ -884,8 +923,15 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { S.confirm = ""; if (S.editing) { S.editing = false; } draw(); }
 });
 window.addEventListener("hashchange", () => { S.confirm = ""; S.editing = false; S.error = ""; S.change = null; S.diff = null; S.diffFor = ""; refresh(true); });
+// a <details> you opened stays open when the page is drawn again
+document.addEventListener("toggle", e => { const k = e.target.dataset?.keep; if (k) S.open[k] = e.target.open; }, true);
+// countdowns tick every second, without drawing the page again
+function tick() {
+  for (const el of document.querySelectorAll("[data-until]")) el.textContent = clock(Number(el.dataset.until) - Date.now() / 1000);
+}
 refresh(true);
 setInterval(() => refresh(false), 3000);
+setInterval(tick, 1000);
 </script>
 </body>
 </html>

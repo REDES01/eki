@@ -183,12 +183,25 @@ Self board say *new version going live in N min* while one is on its way
 was several stages that all said the same word. Now each change on its way in
 says its real stage and what it waits on — *in line behind self/a* ·
 *rebasing* · *fixing conflicts in x.py (run r, 4 min)* · *checking again* ·
-*building* · *landed, goes live at 21:45 with 2 others* · *going live* ·
-*watching (90 s left)* · *live* · *rolled back (why)*. A stage spins only
+*building* · *landed, goes live at 21:45 with 2 others* · *waiting for
+running work (1:12 left, then it goes anyway)* · *swapping* · *watching the
+new version (2:31 left)* · *live* · *rolled back — why*. A stage spins only
 while its worker or step is live in this engine; one a restart cut off says
-*waiting to be resumed*. The go-live is shown as one group: what the next one
-carries and when it leaves, and what the last one carried and how it came
-out. Each point a change passes is written to `~/.eki/self/pipeline.jsonl`,
+*waiting to be resumed* — except a person's own apply, which nothing carries
+on: it is theirs again. The go-live is shown as one group: what the next one
+carries and when it leaves, and the stage the last one is at, read from
+`swap.json` with a countdown the board ticks every second — opened, what it
+carries and what the supervisor wrote in `swap.log` since it left. A change
+eki is taking in by itself is under *Going in*, never *Waiting for you*,
+which holds only what needs you.
+
+**Dropped work stays dropped.** Dropping an item (or finding one dropped by
+an earlier engine) cancels its run, stops every program still working in its
+worktree, and removes that worktree — its branch too, when nothing was
+committed on it; a change it finished that still waits on you keeps its
+worktree. A program left working there is never reattached or "carried on"
+by a new engine (2026-09-26: a dropped item's Claude Code came back after
+every swap, each time failing at once). Each point a change passes is written to `~/.eki/self/pipeline.jsonl`,
 from which its timeline is read — *queued → rebased → conflicts fixed →
 rechecked → landed → live*, with times. `eki self` and the Self board
 (*Go-live*, *Going in*) show it; `eki self show <id>` prints the timeline;
@@ -711,11 +724,13 @@ ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 
 **The daily digest** (`eki/digest.py`). One short page a day, at `digest_at`
-(09:00): what changed in eki since the last page and why (you asked, a fault,
-the next ROADMAP item), what was tried and didn't land, what helped (the hours
-this Mac's own models worked, against the week's average; goal turns
-finished), and what waits for you (proposals, and items left to you since the
-last page). It is built from what eki wrote down, not by a model. It is on the
+(09:00), listing every change since the last page — none left out — one line
+each with a link to it on the board, in three groups: *Landed* (applied, going
+live, taken back — with why: you asked, a fault, the next ROADMAP item), *Went
+wrong* (didn't pass, didn't finish, rolled back, discarded…) and *Waits for
+you* (proposals, however old, and items left to you since the last page); then
+what helped (the hours this Mac's own models worked, against the week's
+average; goal turns finished). It is built from what eki wrote down, not by a model. It is on the
 board (Goals → Self → *Today's digest*), in `eki self digest`, and said in one
 notification — none on a quiet day. Per-change notifications are only for what
 needs you: a change waiting to be applied, or an item left to you. A change
@@ -744,6 +759,7 @@ eki self retry|drop|mine <item>
 eki self autonomy apply ROADMAP.md=apply docs/=apply
 eki self note [now]
 eki self digest [now]            the day's page; now: write it again
+eki self --all                   every row of every list, nothing cut off
 eki self drill [quick]           restart a sandboxed engine mid-work: is anything lost?
 ```
 

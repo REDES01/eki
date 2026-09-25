@@ -89,7 +89,9 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
             store.update_run(conn, rid, state="handed_off", ended_at=now, error=None)
             nxt = store.create_run(conn, r["thread_id"], r["prompt"], priority=r["priority"], parent=rid,
                                    exclude=[provider], row="code")
-            store.update_run(conn, nxt, why=f"handed off by {provider}: {out.reason or 'needs tools'}")
+            reason = " ".join((out.reason or "needs tools").split())
+            reason = reason if len(reason) <= 90 else reason[:89] + "…"
+            store.update_run(conn, nxt, why=f"handed off by {provider}: {reason}")
             store.add_event(conn, rid, cur["attempt"], "handoff", {"to_run": nxt, "reason": out.reason})
         elif out.state == "limited":
             until = capacity.limited(conn, provider, out.reset_at)

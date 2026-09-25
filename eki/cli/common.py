@@ -64,6 +64,7 @@ def follow(c, rid: str, *, show_tools: bool = True, poll: float = 0.2) -> int:
         if r["state"] in TERMINAL and not store.events_after(c, rid, last):
             if wrote_text:
                 sys.stdout.write("\n")
+                sys.stdout.flush()
             if r["state"] == "failed":
                 err(f"failed: {r['error']}")
                 return 1

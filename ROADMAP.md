@@ -272,7 +272,7 @@ a thread has to be able to move to another harness without losing its place.
 - [x] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
       can't change alone stay that way at any level of the tree *(eki: self/00cba77b)*
-- [ ] **Handoff between backends on long threads.** Replaying the store works
+- [x] **Handoff between backends on long threads.** *(eki: self/0532c22d)* Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
       and when to hand over a summary; who writes the summary; the summary is

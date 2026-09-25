@@ -82,8 +82,31 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         said += _conclude_build(conn, it)
     for it in items_in(conn, ("judging",)):
         said += _conclude_judge(conn, it)
+    said += _settle_applied(conn)
     said += _start_ready(conn)
     return said
+
+
+def _settle_applied(conn: sqlite3.Connection) -> List[str]:
+    """A proposed item whose commit is now in the source's main — merged by
+    you — is applied; items that depend on it may start (from a base that has it)."""
+    said = []
+    proposed = items_in(conn, ("proposed",))
+    if not proposed:
+        return said
+    main = workspace.head(source())
+    for it in proposed:
+        if it["commit_sha"] and _is_ancestor(it["commit_sha"], main):
+            _set(conn, it["id"], state="applied")
+            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main")
+    return said
+
+
+def _is_ancestor(commit: str, head: str) -> bool:
+    import subprocess
+    out = subprocess.run(["git", "-C", str(source()), "merge-base", "--is-ancestor", commit, head],
+                         capture_output=True)
+    return out.returncode == 0
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
@@ -180,7 +203,8 @@ def _start_ready(conn: sqlite3.Connection) -> List[str]:
     live = items_in(conn, ("building", "judging"))
     if len(live) >= parallel:
         return []
-    done_ids = {r["id"] for r in items_in(conn, ("proposed", "applied"))}
+    # a dependency counts once it is in main: the item then starts from a base that has it
+    done_ids = {r["id"] for r in items_in(conn, ("applied",))}
     taken: List[Set[str]] = [claims(x) for x in live]
     names = None
     said = []

@@ -75,6 +75,8 @@ def _note(c, it) -> str:
     if it["state"] == "proposed":
         files = json.loads(it["touched"] or "[]")
         return f"✓ {len(files)} files; merge {it['branch']} or `eki swap {it['branch']}`"
+    if it["state"] == "applied":
+        return f"✓ in main ({(it['commit_sha'] or '')[:12]})"
     return ""
 
 

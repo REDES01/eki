@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -89,10 +90,18 @@ def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
     states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
     assert states[first["id"]] == "building" and states[second] == "waiting"
     assert states[third] == "waiting" and states[fourth] == "building"
-    selfwork._set(conn, first["id"], state="proposed")
+    wt = item(conn, first["id"])["worktree"]
+    (Path(wt) / "eki" / "x.py").write_text("# by first\n")
+    sha = workspace.commit_all(wt, "first's change")
+    selfwork._set(conn, first["id"], state="proposed", commit_sha=sha)
     selfwork.tick(conn)
     states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
-    assert states[second] == "building" and states[third] == "building"
+    assert states[second] == "building" and states[third] == "waiting"      # its dep isn't in main yet
+    workspace.git(src, "merge", "-q", "--ff-only", sha)                    # you merge it
+    said = selfwork.tick(conn)
+    states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
+    assert states[first["id"]] == "applied" and states[third] == "building"
+    assert any("applied" in x for x in said)
 
 
 def test_failed_checks_get_one_more_try_then_unfit(conn, src, tmp_path, monkeypatch):

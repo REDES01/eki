@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a w
     files TEXT NOT NULL DEFAULT '[]',       -- the declared write-set (globs)
     deps TEXT NOT NULL DEFAULT '[]',        -- item ids that must be fit first
     independent INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | unfit | left | dropped
+    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | applied | unfit | left | dropped
     thread_id TEXT,
     worktree TEXT,
     branch TEXT,

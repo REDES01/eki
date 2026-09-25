@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a w
     files TEXT NOT NULL DEFAULT '[]',       -- the declared write-set (globs)
     deps TEXT NOT NULL DEFAULT '[]',        -- item ids that must be fit first
     independent INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | applied | unfit | left | dropped
+    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | locked | queued | resolving | rechecking | landed | live | rolled back | unfit | left | dropped
     thread_id TEXT,
     worktree TEXT,
     branch TEXT,
@@ -130,6 +130,15 @@ CREATE INDEX IF NOT EXISTS items_state ON items(state);
 #: worker from an older build keeps writing to a file a newer engine opened
 ADDED = [
     ("runs", "build", "TEXT"),          # the build the worker ran from
+    ("items", "queued_at", "REAL"),     # queue order
+    ("items", "head", "TEXT"),          # the predicted head last rebased onto (or resolving against)
+    ("items", "rebased", "TEXT"),       # the item's commit on top of head
+    ("items", "gate2_run", "TEXT"),     # the gate-2 command run
+    ("items", "gate2_on", "TEXT"),      # the rebased sha gate2_run judges
+    ("items", "gate2", "TEXT"),         # green | red | NULL
+    ("items", "landed_at", "REAL"),
+    ("items", "build", "TEXT"),         # the build that carried it live
+    ("items", "locked", "TEXT"),        # JSON list of hard-locked files it touches
 ]
 
 

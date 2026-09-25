@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import selfbrief, selfwork, store, workspace
+from eki import integration, paths, selfbrief, selfwork, store, workspace
 from conftest import run_inline
 
 PLAN = """Here is the plan.
@@ -54,9 +54,12 @@ def test_a_goal_is_planned_built_judged_and_proposed(conn, src, tmp_path, monkey
     assert any("2 item(s) planned" in s for s in said)
     items = selfwork.items_in(conn, ("building",))          # both start: disjoint write-sets
     assert [i["title"] for i in items] == ["Add a", "Add b"]
-    assert not workspace.git(src, "branch", "--list", f"eki/plan-{gid}")
+    repo = selfwork.repo()
+    assert repo == integration.repo() and repo != src
+    assert not workspace.git(repo, "branch", "--list", f"eki/plan-{gid}")
     a, b = items
-    assert a["worktree"] and a["branch"] == f"self/{a['id']}" and a["base"] == workspace.head(src)
+    assert a["worktree"] and a["branch"] == f"self/{a['id']}" and a["base"] == integration.main()
+    assert workspace.belongs(a["worktree"], repo) and not workspace.belongs(a["worktree"], src)
     build = store.run(conn, b["run_id"])
     assert "Add a" in build["prompt"] and "stay out of their files" in build["prompt"]
     assert selfwork.tick(conn) == []                                      # nothing new: nothing said
@@ -70,13 +73,15 @@ def test_a_goal_is_planned_built_judged_and_proposed(conn, src, tmp_path, monkey
     assert a["summary"] == "made a."
     judge = store.run(conn, a["run_id"])
     assert judge["provider"] == "command" and judge["prompt"] == selfwork.CHECK
-    assert ".venv" not in workspace.git(src, "show", "--stat", "--format=", a["commit_sha"])
+    assert ".venv" not in workspace.git(repo, "show", "--stat", "--format=", a["commit_sha"])
     run_inline(conn, judge["id"])
     selfwork.tick(conn)
     a = item(conn, a["id"])
     assert a["state"] == "proposed"
-    assert workspace.git(src, "log", "-1", "--format=%s", a["branch"]) == "self: Add a"
+    assert workspace.git(repo, "log", "-1", "--format=%s", a["branch"]) == "self: Add a"
     assert (src / "eki" / "a.py").exists() is False                       # the source is untouched
+    assert not workspace.git(src, "branch", "--list", "self/*", "eki/plan-*")
+    assert not workspace.git(src, "worktree", "list", "--porcelain").count("worktree ") > 1
 
 
 def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
@@ -96,12 +101,44 @@ def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
     selfwork._set(conn, first["id"], state="proposed", commit_sha=sha)
     selfwork.tick(conn)
     states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
-    assert states[second] == "building" and states[third] == "waiting"      # its dep isn't in main yet
-    workspace.git(src, "merge", "-q", "--ff-only", sha)                    # you merge it
+    assert states[second] == "building" and states[third] == "building"     # under propose, fit is enough
+    integration.fast_forward(sha)                                          # it lands in main
     said = selfwork.tick(conn)
-    states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
-    assert states[first["id"]] == "applied" and states[third] == "building"
-    assert any("applied" in x for x in said)
+    assert item(conn, first["id"])["state"] == "applied" and any("applied" in x for x in said)
+
+
+def test_under_apply_a_dependent_waits_until_its_dep_has_landed(conn, src):
+    rp = paths.config("routing")
+    rp.write_text(json.dumps({**json.loads(rp.read_text()), "self": {"autonomy": "apply"}}))
+    gid = selfwork.submit(conn, "x", plan=False, files=["eki/x.py"])
+    dep = selfwork.items_in(conn, ("waiting",))[0]
+    with conn:
+        after = selfwork.new_item(conn, gid, "after", "…", ["docs/new.md"], [dep["id"]], False)
+    selfwork.tick(conn)
+    assert item(conn, after)["state"] == "waiting"
+    wt = item(conn, dep["id"])["worktree"]
+    (Path(wt) / "eki" / "x.py").write_text("# by dep\n")
+    sha = workspace.commit_all(wt, "dep's change")
+    selfwork._set(conn, dep["id"], state="proposed", commit_sha=sha)
+    selfwork.tick(conn)
+    assert item(conn, after)["state"] == "waiting"                         # proposed isn't enough
+    integration.fast_forward(sha)
+    selfwork._set(conn, dep["id"], state="landed")
+    selfwork.tick(conn)
+    it = item(conn, after)
+    assert it["state"] == "building" and it["base"] == sha                 # built on a main that has it
+
+
+def test_drop_cancels_the_gate2_run(conn, src):
+    selfwork.submit(conn, "x", plan=False, files=["eki/x.py"])
+    selfwork.tick(conn)
+    it = selfwork.items_in(conn, ("building",))[0]
+    tid = it["thread_id"]
+    g2 = store.create_run(conn, tid, selfwork.CHECK, provider="command")
+    selfwork._set(conn, it["id"], gate2_run=g2)
+    selfwork.drop(conn, it["id"])
+    assert store.run(conn, g2)["state"] not in store.ACTIVE
+    assert store.run(conn, it["run_id"])["state"] not in store.ACTIVE
 
 
 def test_failed_checks_get_one_more_try_then_unfit(conn, src, tmp_path, monkeypatch):

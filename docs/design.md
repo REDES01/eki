@@ -96,7 +96,14 @@ session id per thread, so returning to it resumes its session.
   stop stays stopped until you start it. eki never stops a server it
   didn't start. A run sent to a stopped model starts it and waits.
 
+## Milestone 4: eki builds eki
+
+Designed in [self-build.md](self-build.md): items with write-sets built in
+parallel worktrees, a speculative merge queue, three judging gates, immutable
+builds swapped by a launcher that rolls back. Order of building in
+[ROADMAP.md](../ROADMAP.md).
+
 ## Not built yet
 
-Goals / idle shift, self-build loop, image generation, learned preferences.
-Each is built on the pieces above, not beside them.
+Goals / idle shift, image generation, learned preferences. Each is built on
+the pieces above, not beside them.

@@ -23,5 +23,5 @@ bin/build-mac                                         # build "Eki.app", the thi
 bin/eki drill                                    # prove a restart loses nothing
 ```
 
-Design: [docs/design.md](docs/design.md). Stdlib only; Python 3.11+.
+Design: [docs/design.md](docs/design.md) · plan: [ROADMAP.md](ROADMAP.md) · how eki changes itself: [docs/self-build.md](docs/self-build.md). Stdlib only; Python 3.11+.
 Apache 2.0.

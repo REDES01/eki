@@ -340,7 +340,7 @@ views into a project rather than the top of the tree.
 - [ ] Project in the app: its chats, its artifacts, its files made by agents
       (16f0c12, self/29ac7283: files Claude Code or Codex write into a repo
       now reach the gallery; the project itself waits for the `.eki/` marker)
-- [ ] Per-project roster and policy: which backend does prose here, which does code
+- [x] Per-project roster and policy: which backend does prose here, which does code *(eki: self/a8af1724)*
 - *Evolve:* a project keeps notes on what worked — which backend was redone,
   which wasn't — and its policy is adjusted from them, visibly.
 

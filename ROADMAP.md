@@ -354,7 +354,7 @@ Routing is already by capability; this widens what a capability can be.
       3D work reaches Blender like any other server — eki builds no mesh
       backend: tools come from servers, not from eki. Not needed for the
       first release, so it waits here
-- [ ] Text models asking for a picture mid-answer (through Stage 4's commands)
+- [x] Text models asking for a picture mid-answer (through Stage 4's commands) *(eki: self/d5117b72)*
 - *Evolve:* a new kind of work gets measurement items where answers can be
   checked, and outcome signals where they can't.
 

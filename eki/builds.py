@@ -187,7 +187,7 @@ def status() -> Dict[str, Any]:
                            "builds": []}
     for d in sorted(root().iterdir()):
         info = d / ".eki-build.json"
-        if d.is_dir() and info.exists():
+        if d.is_dir() and not d.is_symlink() and info.exists():
             data = json.loads(info.read_text())
             data["healthy"] = (d / ".healthy").exists()
             data["path"] = str(d)

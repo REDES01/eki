@@ -27,7 +27,9 @@ This module is the tree and the git under it; what an agent is asked, and
 what a check is, the engine passes in (eki/selfengine.py `_self_tree`). The
 tree as it stands is written to ~/.eki/self/tree.json for `eki self` and the
 Self board: its groups, its pairs round by round, and which worker merges
-what.
+what. When a train finishes, a short account of it — when, what it carried,
+how many rounds, how it came out — goes to tree-last.json, so the board can
+still say the last one worked while the next is already merging.
 """
 from __future__ import annotations
 
@@ -191,6 +193,30 @@ def state(home: Optional[Path] = None) -> Dict[str, Any]:
         return got if isinstance(got, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _last_path(home: Optional[Path]) -> Path:
+    return (home or selfwork.HOME) / "tree-last.json"
+
+
+def last(home: Optional[Path] = None) -> Dict[str, Any]:
+    """The last train that finished: {"train", "at", "ended", "changes":
+    [{"id", "title"}], "rounds", "landed", "dropped", "outcome", "why"};
+    {} before the first."""
+    try:
+        got = json.loads(_last_path(home).read_text())
+        return got if isinstance(got, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def summary(view: Dict[str, Any]) -> Dict[str, Any]:
+    """A finished train's view, cut down to what a person asks of it."""
+    changes = list(view.get("straight") or []) + [c for g in view.get("groups") or [] for c in g.get("changes") or []]
+    return {"train": view.get("train"), "at": view.get("at"), "ended": view.get("ended"),
+            "changes": changes, "rounds": len(view.get("rounds") or []),
+            "landed": list(view.get("landed") or []), "dropped": dict(view.get("dropped") or {}),
+            "outcome": view.get("state"), "why": view.get("why") or ""}
 
 
 def _names(ids: List[str]) -> str:
@@ -387,16 +413,29 @@ class Tree:
 
     async def run(self) -> Dict[str, Any]:
         """The whole train: levels, the batch, its check, a bisect if it
-        fails. {"batch": commit or "", "landed": [ids], "dropped": {id: why}}"""
-        await self.levels()
-        self.view["state"] = "checking"
-        self.save()
-        ids = [lf["ids"][0] for lf in self.leaves]
-        landed = await self.bisect(ids)
-        commit = await self.batch(set(landed)) if landed else ""
-        self.view.update(state="merged", landed=landed, batch=commit)
-        self.save()
+        fails. {"batch": commit or "", "landed": [ids], "dropped": {id: why}}
+        Either way it ends, it's written down as the last train (`last`)."""
+        try:
+            await self.levels()
+            self.view["state"] = "checking"
+            self.save()
+            ids = [lf["ids"][0] for lf in self.leaves]
+            landed = await self.bisect(ids)
+            commit = await self.batch(set(landed)) if landed else ""
+        except (MergeError, selfwork.SelfWorkError) as e:
+            self.finish(state="failed", why=str(e)[:300])
+            raise
+        self.finish(state="merged", landed=landed, batch=commit)
         return {"batch": commit, "landed": landed, "dropped": dict(self.dropped)}
+
+    def finish(self, **how: Any) -> None:
+        """The train is over: its view says so, and when; and it becomes the last train."""
+        self.view.update(how, ended=int(time.time()))
+        self.save()
+        path = _last_path(self.home)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(summary(self.view), indent=2, ensure_ascii=False))
+        tmp.replace(path)
 
 
 def _whats(n: Node) -> List[Dict[str, str]]:

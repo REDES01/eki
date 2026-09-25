@@ -687,13 +687,15 @@ def _self_status(service: str, limit: int, everything: bool = False) -> int:
                 print(f"          picked: {i['why'][:100]}")
     if flow:
         print("\n" + "\n".join(flow).lstrip("\n"))
+    if flow is not None and not v.get("pipeline"):
+        print("\ngoing in: nothing on its way right now")
     elif flow is None and v.get("merging"):
         print("\nmerge queue (the next release train merges them together):")
         for n, r in enumerate(v["merging"], 1):
             state = "being merged now" if r.get("applying") else "waiting for the train" \
                 if r.get("live") or r.get("person") else "cut off — back in line when it carries on"
             print(f"  {n}. self/{r['change']}  {cut(r.get('title', ''), 56)} — {state}")
-    for line in _tree(v.get("tree") or {}):
+    for line in _tree(v.get("tree") or {}, v.get("tree_last") or {}, (v.get("golive") or {}).get("last") or {}):
         print(line)
     if v["waiting"]:
         print("\nwaiting for you:")
@@ -928,11 +930,14 @@ _TREE_STATE = {"merging": "merging", "checking": "judging the batch", "bisecting
                "merged": "merged"}
 
 
-def _tree(t: Dict[str, Any]) -> List[str]:
+def _tree(t: Dict[str, Any], last: Optional[Dict[str, Any]] = None,
+          golive: Optional[Dict[str, Any]] = None) -> List[str]:
     """This train's merge, level by level: its groups, its pairs round by
-    round, and which worker merges what (eki/treemerge.py)."""
-    if not t:
-        return []
+    round, and which worker merges what (eki/treemerge.py). With none
+    running, it says so — and how the last one went, so you can see it worked."""
+    if not t or t.get("state") in ("merged", "failed"):
+        out = ["\ntree merge: no merge running — the next go-live merges whatever is ready"]
+        return out + _last_train(last or {}, golive or {})
     ids = lambda xs: " + ".join(x[:8] for x in xs) or "your checkout"   # noqa: E731
     n = len(t.get("straight") or []) + sum(len(g["changes"]) for g in t.get("groups") or [])
     out = [f"\ntree merge — {n} change{'s' if n != 1 else ''}, {_TREE_STATE.get(t.get('state'), t.get('state'))}"
@@ -951,6 +956,26 @@ def _tree(t: Dict[str, Any]) -> List[str]:
         out.append(f"  checked {len(c['ids'])} together — {c['state']}" + (f": {c['why'][:80]}" if c.get("why") else ""))
     for cid, why in (t.get("dropped") or {}).items():
         out.append(f"  dropped {cid}: {why[:100]}")
+    return out
+
+
+def _last_train(t: Dict[str, Any], golive: Dict[str, Any]) -> List[str]:
+    """The last train that finished: when, what it carried, how many rounds,
+    how it came out — and, once it left, how its go-live went."""
+    if not t.get("changes"):
+        return []
+    n, r = len(t["changes"]), int(t.get("rounds") or 0)
+    if t.get("outcome") == "failed":
+        how = f"failed: {t.get('why') or 'the merge broke off'}"[:120]
+    else:
+        how = f"{len(t.get('landed') or [])} landed" + (f", {len(t['dropped'])} dropped" if t.get("dropped") else "")
+        went = {c.get("id") for c in golive.get("carrying") or []}
+        if went & set(t.get("landed") or []) and golive.get("text"):
+            how += f" — {golive['text']}"
+    out = [f"  last train {_ago(t.get('ended') or t.get('at') or 0)}: {n} change{'s' if n != 1 else ''}, "
+           f"{r} round{'s' if r != 1 else ''} — {how}"]
+    out += [f"    {c['id']}  {(c.get('title') or '')[:64]}" for c in t["changes"]]
+    out += [f"    dropped {cid}: {why[:90]}" for cid, why in (t.get("dropped") or {}).items()]
     return out
 
 

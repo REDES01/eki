@@ -173,4 +173,62 @@ def test_eki_self_shows_the_tree_of_the_train():
     assert "tree merge — 5 changes, merging · 1 round(s) · up to 4 at once" in got
     assert "straight in (no file shared): x1" in got and "group 1 — eki/cli.py: a1, b2, c3, d4" in got
     assert "worker 1: a1 ⨝ b2 — resolving" in got and "worker 2: c3 ⨝ d4 — clean" in got
-    assert cli._tree({}) == []
+    assert cli._tree({}) == ["\ntree merge: no merge running — the next go-live merges whatever is ready"]
+
+
+@pytest.mark.asyncio
+async def test_a_finished_train_is_kept_as_the_last_one(repo, tmp_path):
+    leaves = [change(repo, n, {"eki/cli.py": f"value = {n}\n"}) for n in "ab"]
+    home = tmp_path / "self"
+    assert treemerge.last(home) == {}
+    tree = treemerge.Tree(repo, leaves, base=git(repo, "rev-parse", "main"), resolve=Resolver(), check=passes,
+                          home=home)
+    await tree.run()
+    last = treemerge.last(home)
+    assert last["outcome"] == "merged" and last["rounds"] == 1 and last["landed"] == ["a", "b"]
+    assert [c["id"] for c in last["changes"]] == ["a", "b"] and last["ended"] >= last["at"]
+    # the next train starting doesn't take the last one's account away
+    treemerge.Tree(repo, leaves[:1], base=git(repo, "rev-parse", "main"), resolve=Resolver(), check=passes,
+                   home=home)
+    assert treemerge.state(home)["state"] == "merging" and treemerge.last(home)["landed"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_a_train_that_breaks_off_is_kept_as_failed(repo, tmp_path):
+    leaves = [change(repo, n, {f"eki/{n}.py": "x\n"}) for n in "ab"]
+
+    async def breaks(commit):
+        raise treemerge.MergeError("the checkout went away")
+
+    tree = treemerge.Tree(repo, leaves, base=git(repo, "rev-parse", "main"), resolve=Resolver(), check=breaks,
+                          home=tmp_path / "self")
+    with pytest.raises(treemerge.MergeError):
+        await tree.run()
+    last = treemerge.last(tmp_path / "self")
+    assert last["outcome"] == "failed" and "went away" in last["why"]
+    assert treemerge.state(tmp_path / "self")["state"] == "failed"
+
+
+def test_eki_self_says_no_merge_is_running_and_how_the_last_train_went():
+    from eki import cli
+    last = {"train": "t", "at": 100, "ended": 200, "rounds": 2, "outcome": "merged",
+            "changes": [{"id": "a1", "title": "one"}, {"id": "b2", "title": "two"}, {"id": "c3", "title": "three"}],
+            "landed": ["a1", "b2"], "dropped": {"c3": "the batch failed its checks with it"}}
+    gone = {"carrying": [{"id": "a1"}, {"id": "b2"}], "text": "live"}
+    got = "\n".join(cli._tree({"state": "merged"}, last, gone))
+    assert "no merge running — the next go-live merges whatever is ready" in got
+    assert "3 changes, 2 rounds — 2 landed, 1 dropped — live" in got
+    assert "a1  one" in got and "dropped c3: the batch failed" in got
+    failed = {**last, "outcome": "failed", "why": "the checkout went away", "landed": [], "dropped": {}}
+    assert "failed: the checkout went away" in "\n".join(cli._tree({}, failed, gone))
+
+
+def test_eki_self_always_shows_going_in_and_the_tree_merge(monkeypatch, capsys):
+    from eki import cli
+    v = {"can": True, "goal": None, "autonomy": "propose", "review_max": 3, "working": [], "waiting": [],
+         "queue": [], "left": [], "changes": [], "roadmap": {"next": []}, "pipeline": [], "golive": {}, "tree": {}}
+    monkeypatch.setattr(cli, "call", lambda *a, **k: v)
+    assert cli._self_status("http://x", 5) == 0
+    out = capsys.readouterr().out
+    assert "going in: nothing on its way right now" in out
+    assert "tree merge: no merge running" in out

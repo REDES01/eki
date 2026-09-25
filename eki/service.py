@@ -908,9 +908,14 @@ async def _self_await(fn, *args, **kw) -> Any:
 
 @app.get("/api/self")
 def self_view() -> Any:
-    """What eki is doing to itself, what waits for you, what's next."""
+    """What eki is doing to itself, what waits for you, what's next — and
+    the last release train that finished merging, so an empty board still
+    shows the last one worked."""
+    from . import treemerge
     out = engine().self_view()
     out["page"] = _board_version()
+    if out.get("can"):
+        out["tree_last"] = treemerge.last()
     return out
 
 

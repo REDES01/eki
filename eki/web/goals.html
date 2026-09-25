@@ -548,9 +548,30 @@ function goLive(g, every) {
 }
 
 const TREE_STATE = {merging: "merging", checking: "judging the batch", bisecting: "bisecting a failed batch", merged: "merged"};
-function treeOf(t) {
-  // this train's merge, level by level (eki/treemerge.py): groups, pairs round by round, who merges what
-  if (!t || !t.state) return "";
+// the last train that finished merging: when, what it carried, how many rounds,
+// how it came out — and, once it left, how its go-live went
+function lastTrain(t, gone) {
+  if (!t || !(t.changes || []).length) return "";
+  const n = t.changes.length, r = t.rounds || 0, failed = t.outcome === "failed";
+  const went = new Set((gone?.carrying || []).map(c => c.id));
+  const live = !failed && (t.landed || []).some(id => went.has(id)) ? gone : null;
+  const out = failed ? `failed — ${t.why || "the merge broke off"}`
+    : `${(t.landed || []).length} landed` + (Object.keys(t.dropped || {}).length ? `, ${Object.keys(t.dropped).length} dropped` : "");
+  let h = `<div class="rowline"><span class="when" style="min-width:62px">last train</span>
+    <span class="badge ${failed ? "stuck" : live ? stageBadge(live) : "done"}">${failed ? "Failed" : live ? esc(live.label) : "Merged"}</span>
+    <span class="grow">${esc(when(t.ended || t.at))} · ${n} change${n === 1 ? "" : "s"} · ${r} round${r === 1 ? "" : "s"} <span class="muted">— ${esc(out)}${live ? " · " + esc(live.text) : ""}</span></span></div>`;
+  h += `<div class="rowline"><span class="when" style="min-width:62px">carried</span><span class="grow">${t.changes.map(c =>
+    `<a href="#/self/${enc(c.id)}" title="self/${esc(c.id)}" style="color:inherit">${esc(c.title || "self/" + c.id)}</a>`).join(", ")}</span></div>`;
+  for (const [id, why] of Object.entries(t.dropped || {})) h += `<div class="rowline"><span class="when" style="min-width:62px">dropped</span><span class="grow">${esc(id)} <span class="muted">— ${esc(why)}</span></span></div>`;
+  return h;
+}
+
+function treeOf(t, last, gone) {
+  // this train's merge, level by level (eki/treemerge.py): groups, pairs round by round, who merges what;
+  // with none running, it says so, and how the last one went
+  if (!t || !t.state || t.state === "merged" || t.state === "failed")
+    return `<div class="section"><div class="label">Tree merge</div><div class="card" style="padding:2px 14px"><div class="rows">
+      <div class="rowline"><span class="grow muted">No merge running — the next go-live merges whatever is ready</span></div>${lastTrain(last, gone)}</div></div></div>`;
   const ids = xs => xs.length ? xs.map(x => x.slice(0, 8)).join(" + ") : "your checkout";
   const n = (t.straight || []).length + (t.groups || []).reduce((k, g) => k + g.changes.length, 0);
   const busy = s => s === "merging" || s === "resolving" || s === "checking";
@@ -621,13 +642,15 @@ function selfPage() {
   }
   h += goLive(v.golive, v.train?.every || 15);
   const flow = v.pipeline || [];
-  if (flow.length) {
+  if (!flow.length)
+    h += `<div class="section"><div class="label">Going in</div><div class="card" style="padding:2px 14px"><div class="rows"><div class="rowline"><span class="grow muted">Nothing on its way right now</span></div></div></div></div>`;
+  else {
     h += `<div class="section"><div class="label">Going in · ${flow.length}</div><div class="card" style="padding:2px 14px">`;
     for (const r of flow) h += `<div class="flow"><div class="head">${r.live ? `<span class="spinner"></span>` : ""}
       <a href="#/self/${enc(r.id)}" title="self/${esc(r.id)} · ${esc(r.title)}">${esc(r.title)}</a>${stageOf(r)}</div>${timelineOf(r.timeline)}</div>`;
     h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
   }
-  h += treeOf(v.tree);
+  h += treeOf(v.tree, v.tree_last, v.golive?.last);
   const ahead = v.queue, nexts = capped("next", v.roadmap?.next || []);
   if (ahead.length || nexts.rows.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;

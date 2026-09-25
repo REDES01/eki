@@ -184,9 +184,9 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
       doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
-- [ ] **The harnesses people already use.** Claude Code and Codex now;
+- [x] **The harnesses people already use.** Claude Code and Codex now;
       Gemini CLI and other agent CLIs next, each through its official
-      program and reading the same store
+      program and reading the same store *(eki: self/b151b4d7)*
 
 - [x] **One skill store.** `~/.eki/skills/`, under git (every change a
       commit), in the Agent Skills format both CLIs read (`eki/skills.py`,

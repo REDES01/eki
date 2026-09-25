@@ -684,11 +684,13 @@ def _self_status(service: str, limit: int) -> int:
     if flow:
         print("\n" + "\n".join(flow).lstrip("\n"))
     elif flow is None and v.get("merging"):
-        print("\nmerge queue (applied one at a time, in the order they finished):")
+        print("\nmerge queue (the next release train merges them together):")
         for n, r in enumerate(v["merging"], 1):
-            state = "applying now" if r.get("applying") else "waiting its turn" if r.get("live") \
-                else "cut off — back in line when it carries on"
+            state = "being merged now" if r.get("applying") else "waiting for the train" \
+                if r.get("live") or r.get("person") else "cut off — back in line when it carries on"
             print(f"  {n}. self/{r['change']}  {r.get('title', '')[:56]} — {state}")
+    for line in _tree(v.get("tree") or {}):
+        print(line)
     if v["waiting"]:
         print("\nwaiting for you:")
         for c in v["waiting"]:
@@ -893,10 +895,43 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
                         "and goes back if it isn't healthy (eki builds)"),
            "applied": got.get("merged") or "applied",
            "conflicts": _conflicts_said(got),
-           "unfit": "it didn't pass its checks on top of your checkout",
+           "unfit": "it didn't pass its checks on top of your checkout"
+                    + (f": {got['why']}" if got.get("why") else ""),
+           "queued": f"in line: {got.get('why') or 'it lands with the next release train'}",
+           "proposed": f"not applied: {got.get('why') or 'see `eki self show ' + arg + '`'}",
            "discarded": "discarded", "not undone": f"not undone: {got.get('why')}"}
     print(say.get(got.get("state") or "", json.dumps(got)))
     return 0
+
+
+_TREE_STATE = {"merging": "merging", "checking": "judging the batch", "bisecting": "bisecting a failed batch",
+               "merged": "merged"}
+
+
+def _tree(t: Dict[str, Any]) -> List[str]:
+    """This train's merge, level by level: its groups, its pairs round by
+    round, and which worker merges what (eki/treemerge.py)."""
+    if not t:
+        return []
+    ids = lambda xs: " + ".join(x[:8] for x in xs) or "your checkout"   # noqa: E731
+    n = len(t.get("straight") or []) + sum(len(g["changes"]) for g in t.get("groups") or [])
+    out = [f"\ntree merge — {n} change{'s' if n != 1 else ''}, {_TREE_STATE.get(t.get('state'), t.get('state'))}"
+           f" · {len(t.get('rounds') or [])} round(s) · up to {t.get('workers')} at once:"]
+    if t.get("straight"):
+        out.append("  straight in (no file shared): " + ", ".join(s["id"] for s in t["straight"]))
+    for gi, g in enumerate(t.get("groups") or [], 1):
+        out.append(f"  group {gi} — {', '.join(g['files'])}: " + ", ".join(c["id"] for c in g["changes"]))
+    for ri, rows in enumerate(t.get("rounds") or [], 1):
+        out.append(f"  round {ri}:")
+        for r in rows:
+            who = f"worker {r['worker']}: " if r.get("worker") else ""
+            out.append(f"    {who}{ids(r['a'])} ⨝ {ids(r['b'])} — {r['state']}"
+                       + (f" ({r['why'][:80]})" if r.get("why") else ""))
+    for c in t.get("checks") or []:
+        out.append(f"  checked {len(c['ids'])} together — {c['state']}" + (f": {c['why'][:80]}" if c.get("why") else ""))
+    for cid, why in (t.get("dropped") or {}).items():
+        out.append(f"  dropped {cid}: {why[:100]}")
+    return out
 
 
 def _conflicts_said(got: Dict[str, Any]) -> str:

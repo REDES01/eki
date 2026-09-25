@@ -72,6 +72,10 @@ DEFAULTS: Dict[str, Any] = {
     #: applied changes go live together, at most once this many minutes (the
     #: release train); `eki self apply <id> --now` doesn't wait
     "self_release_minutes": 15,
+    #: the pairs a release train merges at the same time when changes
+    #: overlap (eki/treemerge.py): each clean pair costs nothing, each real
+    #: conflict one resolver run
+    "self_merge_workers": 4,
     #: eki's own code is worked on by your subscriptions' spare room; on,
     #: the local models (Qwen with Codex's hands) may take it too
     "self_local": False,

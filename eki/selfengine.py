@@ -14,8 +14,10 @@ whose payload names a self-work item:
 Each of those is a step written down before it starts (eki/steps.py), and so
 are a conflict resolution and a go-live: a restart at any moment loses
 nothing — a step cut off is taken up again by the next engine, once
-(`self_carry_on`), and is never reported as failed. Applied changes go live
-together, at most once every `self_release_minutes` (`self_release`), and
+(`self_carry_on`), and is never reported as failed. Changes ready to land
+wait for the release train, which merges them all at once in levels
+(`self_train`, eki/treemerge.py), judges the batch once and goes live with
+it, at most once every `self_release_minutes` (`self_release`); and
 the roadmap is ticked once a change has landed, by one writer (`_self_ticks`).
 
 Started by a chat message that asks eki to change itself (in that thread, at
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import sys
 import time
@@ -48,6 +51,7 @@ from . import selfwork
 from . import settings as settings_mod
 from . import shift as shift_mod
 from . import steps
+from . import treemerge
 from .adapters.base import BackendError
 
 
@@ -351,16 +355,17 @@ class SelfLoop:
             mode = "apply" if (it.apply and selfloop.owner(it) == "person") or merging else \
                 selfloop.autonomy_for(prop.files, self.settings)       # type: ignore[attr-defined]
             if mode == "apply":
-                # finished changes are applied one at a time, in the order they
-                # finished: in line, it takes no room from the work still going
+                # finished changes wait for the release train, which merges
+                # everyone ready at once: in line, it takes no room from the
+                # work still going
                 ahead = selfloop.merge_join(prop.id, item=it.id, title=it.title, run=run["id"], area=it.area)
                 was = pipeline.events(prop.id)
                 if not was or was[-1]["event"] in ("stopped", "rolled back"):   # not in line already
                     pipeline.mark(prop.id, "queued", ahead=ahead)
                 it = selfloop.update(it.id, phase="merging")
                 if ahead:
-                    yield (f"\n\n*eki: fit — {ahead} change{'s' if ahead != 1 else ''} finished before it; "
-                           "it's applied after, on top of what they bring…*\n")
+                    yield (f"\n\n*eki: fit — {ahead} other change{'s' if ahead != 1 else ''} wait{'' if ahead != 1 else 's'} "
+                           "to land too; the next release train merges them together…*\n")
                 with self._step("apply", it.id, item=it.id, change=prop.id, run=run["id"]) as out:
                     applied = await self._self_merge(prop.id)
                     if applied.get("state") not in ("applying", "applied"):
@@ -369,34 +374,38 @@ class SelfLoop:
             yield piece
 
     async def _self_merge(self, cid: str) -> Dict[str, Any]:
-        """Its turn in the merge queue, then applied: put on top of what landed
-        before it, judged again, boarded for the next go-live — its conflicts
-        resolved first if it no longer goes on top, and the next in line waits
-        for that. Waiting is never a failure, and a change cut off here keeps
-        its place in line."""
+        """In the merge queue until a release train takes it: everything
+        ready then is merged at once, in levels (`self_train`). Waiting is
+        never a failure, and a change cut off here keeps its place in line.
+        A guarded change still goes live alone: when nothing else is on its
+        way, it is put on top of your checkout, fully judged and swapped in
+        by itself — a batch of one."""
         keep = False
         try:
-            while not selfloop.merge_turn(cid, self.runner.running):   # type: ignore[attr-defined]
+            while True:
+                c = selfwork.change(cid)
+                if c["state"] in ("applying", "applied"):   # it went in before a restart cut this off
+                    return {"state": c["state"], "id": cid}
+                if c.get("resolving") and steps.get("resolve", cid).get("state") in ("running", "interrupted"):
+                    # its conflicts were being resolved when a restart cut both off:
+                    # the resolve is carried on (self_carry_on), and applies it
+                    return await self._self_resolved(cid)
+                if selfloop.merge_row(cid) is None:          # a train decided it
+                    return {"state": c["state"], "id": cid, "why": c.get("why") or ""}
+                if self._self_alone(c):
+                    if not selfwork.alone_blocked(cid) and not self._self_tree_busy():
+                        selfloop.merge_mark(cid, applying=True)
+                        pipeline.mark(cid, "turn")
+                        applied = await self._self_apply_now(cid, guarded=True)
+                        if applied.get("state") == "conflicts":
+                            started = await self._self_resolve_start(cid)
+                            applied = await self._self_resolved(cid) if started else applied
+                        return applied
+                else:
+                    await self.self_train()
+                    if selfloop.merge_row(cid) is None:
+                        continue
                 await asyncio.sleep(MERGE_POLL)
-            selfloop.merge_mark(cid, applying=True)
-            pipeline.mark(cid, "turn")
-            c = selfwork.change(cid)
-            if c["state"] in ("applying", "applied"):   # it went in before a restart cut this off
-                return {"state": c["state"], "id": cid}
-            if c.get("resolving") and steps.get("resolve", cid).get("state") in ("running", "interrupted"):
-                # its conflicts were being resolved when a restart cut both off:
-                # the resolve is carried on (self_carry_on), and applies it
-                return await self._self_resolved(cid)
-            guarded = bool(c.get("protected"))
-            # a guarded change goes live alone: it waits for the train and any
-            # swap to clear, and nothing else goes live until it has settled
-            while selfwork.alone_blocked(cid) if guarded else selfwork.guarded_applying():
-                await asyncio.sleep(MERGE_POLL)
-            applied = await self._self_apply_now(cid, guarded=guarded)
-            if applied.get("state") == "conflicts":
-                started = await self._self_resolve_start(cid)
-                applied = await self._self_resolved(cid) if started else applied
-            return applied
         except BaseException as e:
             keep = isinstance(e, steps.Interrupted) or self.runner.stopping   # type: ignore[attr-defined]
             raise
@@ -405,6 +414,267 @@ class SelfLoop:
                 selfloop.merge_mark(cid, applying=False)
             else:
                 selfloop.merge_leave(cid)
+
+    @staticmethod
+    def _self_alone(c: Dict[str, Any]) -> bool:
+        """A guarded change eki applies of its own accord: live alone."""
+        return bool(c.get("protected")) and c.get("applied_by") != "you"
+
+    def _self_tree_busy(self) -> bool:
+        lock = vars(self).get("_self_tree_lock")
+        return bool(lock and lock.locked())
+
+    def _self_merge_workers(self) -> int:
+        return max(1, min(16, int(self.settings.get("self_merge_workers", treemerge.WORKERS))))  # type: ignore[attr-defined]
+
+    def _self_train_due(self, rows: List[Dict[str, Any]], now: bool = False) -> bool:
+        """Time for the train to take the queue: the last one left
+        `self_release_minutes` ago, or someone wants it now — or you applied
+        one yourself, which is merged at once (it still goes live with the
+        train, unless you said now)."""
+        if now or any(r.get("now") or r.get("person") for r in rows):
+            return True
+        last = float(builds_mod.train().get("last") or 0)
+        return time.time() >= last + self._self_release_minutes() * 60
+
+    def _self_ready(self) -> List[Dict[str, Any]]:
+        """The merge queue's rows the next train may take: fit, waiting to be
+        applied, not a guarded change going alone, not being resolved. Rows
+        whose change went elsewhere (discarded, applied by hand) leave."""
+        rows = []
+        for r in selfloop.merge_queue():
+            try:
+                c = selfwork.change(r["change"])
+            except selfwork.SelfWorkError:
+                selfloop.merge_leave(r["change"])
+                continue
+            if c["state"] in ("applying", "applied") or c.get("resolving"):
+                continue                                # its own pipeline says so
+            if c["state"] not in ("proposed", "conflicts", "rolled back") or not c.get("fit"):
+                if r.get("person") or r.get("run") not in self.runner.running:   # type: ignore[attr-defined]
+                    selfloop.merge_leave(r["change"])
+                continue
+            if self._self_alone(c) or (selfwork.locked_of(c) and not r.get("person")):
+                continue
+            rows.append({**r, "c": c})
+        return rows
+
+    async def self_train(self, now: bool = False) -> Dict[str, Any]:
+        """The release train takes the merge queue, if it's time: one change
+        is applied the way it always was (on top of your checkout, judged
+        again, conflicts resolved by a run of its own); two or more are
+        merged as a tree (eki/treemerge.py), judged once as a batch, and
+        bisected if it fails. What it did — {} when it stays."""
+        lock = vars(self).setdefault("_self_tree_lock", asyncio.Lock())
+        if lock.locked():
+            return {}
+        async with lock:
+            if selfwork.guarded_applying():
+                return {}               # a guarded change is going live alone: the train waits for it
+            if any(self._self_alone(selfwork.change(r["change"])) and r.get("run") in self.runner.running  # type: ignore[attr-defined]
+                   for r in selfloop.merge_queue() if self._self_known(r["change"])):
+                return {}               # a guarded change is waiting to go alone: it goes first
+            rows = self._self_ready()
+            if not rows or not self._self_train_due(rows, now):
+                return {}
+            now = now or any(r.get("now") for r in rows)
+            if len(rows) == 1:
+                return await self._self_train_of_one(rows[0], now)
+            return await self._self_tree(rows, now)
+
+    @staticmethod
+    def _self_known(cid: str) -> bool:
+        try:
+            selfwork.change(cid)
+            return True
+        except selfwork.SelfWorkError:
+            return False
+
+    async def _self_train_of_one(self, row: Dict[str, Any], now: bool) -> Dict[str, Any]:
+        cid, person = row["change"], bool(row.get("person"))
+        selfloop.merge_mark(cid, applying=True)
+        pipeline.mark(cid, "turn")
+        try:
+            got = await self._self_apply_now(cid, by_person=person, now=now)
+            if got.get("state") == "conflicts":
+                # it no longer goes on top of your checkout: an agent resolves
+                # it in a run of its own, and eki applies it when that holds
+                got = await self._self_resolve_start(cid, person=person, now=now) or got
+        except BaseException:
+            selfloop.merge_mark(cid, applying=False)
+            raise
+        selfloop.merge_leave(cid)
+        if person:
+            self._self_follow(cid)
+        return {"landed": [cid] if got.get("state") in ("applying", "applied") else [], "one": got}
+
+    async def _self_tree(self, rows: List[Dict[str, Any]], now: bool) -> Dict[str, Any]:
+        """Two or more changes: merged in levels, the batch judged once and
+        bisected if it fails, then one build carrying everyone who passed."""
+        root = self._self_root()
+        leaves = []
+        for r in rows:
+            try:
+                leaves.append(await asyncio.to_thread(self._self_leaf, r["c"], bool(r.get("person"))))
+                selfloop.merge_mark(r["change"], applying=True)
+                pipeline.mark(r["change"], "turn", tree=len(rows))
+            except selfwork.SelfWorkError as e:
+                selfwork.set_state(r["change"], r["c"]["state"], why=str(e)[:300])
+                self._self_decided(r, str(e))
+        if not leaves:
+            return {}
+        by_id = {r["change"]: r for r in rows}
+        try:
+            base = await asyncio.to_thread(selfwork.line, root)
+            tree = treemerge.Tree(root, leaves, base=base, resolve=self._self_pair_resolve,
+                                  check=functools.partial(self._self_batch_check, base=base),
+                                  workers=self._self_merge_workers(), home=selfwork.HOME)
+            got = await tree.run()
+        except BaseException as e:
+            for lf in leaves:
+                selfloop.merge_mark(lf["ids"][0], applying=False)
+            if isinstance(e, (treemerge.MergeError, selfwork.SelfWorkError)):
+                observe_mod.note("fault", what="tree merge", why=repr(e)[:300])
+                return {}
+            raise
+        for cid, why in got["dropped"].items():
+            state = "conflicts" if why.startswith("it couldn't be merged") else "unfit"
+            selfwork.set_state(cid, state, why=why[:300])
+            pipeline.mark(cid, "stopped", why=why[:200])
+            self._self_decided(by_id[cid], why)
+        landed = got["landed"]
+        if landed:
+            await self._self_land(root, base, got["batch"], landed, [by_id[c] for c in landed], now)
+        return {"landed": landed, "dropped": got["dropped"], "batch": got["batch"]}
+
+    def _self_leaf(self, c: Dict[str, Any], person: bool) -> Dict[str, Any]:
+        """A change as the tree takes it: its worktree there, a tick it made
+        taken out of its commit, and — applied by you — said so."""
+        cid = c["id"]
+        if person:
+            selfwork.set_state(cid, c["state"], applied_by="you", asked_at=int(time.time()))
+        where = selfwork.ensure_worktree(c)
+        p = selfwork.Proposal(**{k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__})
+        p.worktree = str(where)
+        if person:
+            p.applied_by = "you"
+        if c.get("base") and not selfwork.asks_to_tick(c.get("request") or "", c.get("source") or "") \
+                and selfwork._untick_commit(where, c["base"]):
+            p.commit = selfwork.git(where, "rev-parse", "HEAD")
+            p.files = [f for f in selfwork.git(where, "diff", "--name-only", c["base"], p.commit).splitlines() if f]
+        selfwork.record(p)
+        return treemerge.leaf(cid, p.commit, p.files, title=p.headline,
+                              what=str(c.get("summary") or p.headline or c.get("request") or ""))
+
+    def _self_decided(self, row: Dict[str, Any], why: str) -> None:
+        """A change the train didn't land: out of the queue, and back to its
+        thread with why — its run says so itself if it's still waiting."""
+        cid = row["change"]
+        selfloop.merge_leave(cid)
+        if row.get("run") in self.runner.running:                    # type: ignore[attr-defined]
+            return
+        c = self._self_follow(cid)
+        if c.get("conversation"):
+            self.store.add_turn(c["conversation"], "assistant",           # type: ignore[attr-defined]
+                                f"**eki · change to itself: not in this release.**\n\n{why}",
+                                "eki", "self-work", meta={"self": cid})
+
+    async def _self_land(self, root: Path, base: str, batch: str, landed: List[str],
+                         rows: List[Dict[str, Any]], now: bool) -> None:
+        """The batch goes in as one release: documentation only straight into
+        your checkout; otherwise one build, every change aboard it, and the
+        train leaves."""
+        others = lambda cid: [f"self/{x}" for x in landed if x != cid]   # noqa: E731
+        batch = await asyncio.to_thread(self._self_batch_ticks, root, base, batch)
+        files = await asyncio.to_thread(treemerge.files_between, root, base, batch)
+        if selfwork.docs_only(files):
+            merged = await asyncio.to_thread(selfwork.fast_forward, root, batch)
+            for cid in landed:
+                if merged.startswith("merged"):
+                    selfwork.set_state(cid, "applied", merged=merged, why="",
+                                       how="into your checkout, with " + (", ".join(others(cid)) or "nothing else"))
+                    pipeline.mark(cid, "landed")
+                    pipeline.mark(cid, "live", how="documentation: straight into your checkout")
+                else:
+                    selfwork.set_state(cid, "proposed", why=merged)
+                    pipeline.mark(cid, "stopped", why=merged[:200])
+        else:
+            build = await asyncio.to_thread(builds_mod.make, root, batch,
+                                            " + ".join(f"self/{x}" for x in landed)[:200])
+            for cid in landed:
+                selfwork.set_state(cid, "applying", build=str(build), alone=False, why="",
+                                   how="merged with " + (", ".join(others(cid)) or "nothing else")
+                                   + " in one batch, judged once on top of your checkout")
+                builds_mod.board(build, self_id=cid, now=now)
+                pipeline.mark(cid, "landed", build=build.name)
+        for r in rows:
+            selfloop.merge_leave(r["change"])
+            if r.get("person") or r.get("run") not in self.runner.running:   # type: ignore[attr-defined]
+                self._self_follow(r["change"])
+        self._self_ticks()
+        if not selfwork.docs_only(files):
+            await self.self_release()
+
+    def _self_batch_ticks(self, root: Path, base: str, batch: str) -> str:
+        """A batch that would open a ticked ROADMAP item again keeps the tick."""
+        if roadmap.NAME not in treemerge.files_between(root, base, batch):
+            return batch
+        where = selfwork.HOME / "tree" / f"ticks-{batch[:10]}"
+        treemerge.open_at(root, batch, where)
+        try:
+            return selfwork.git(where, "rev-parse", "HEAD") if selfwork.keep_ticks(where, base) else batch
+        finally:
+            treemerge.close_merge(root, where)
+
+    async def _self_batch_check(self, commit: str, base: str = "") -> Tuple[bool, str]:
+        """A batch judged: its tests, then a candidate engine — once for the
+        whole train. Documentation only needs none."""
+        root = self._self_root()
+        if selfwork.docs_only(await asyncio.to_thread(treemerge.files_between, root, base, commit)):
+            return True, ""
+        where = selfwork.HOME / "tree" / f"check-{commit[:10]}"
+        await asyncio.to_thread(treemerge.open_at, root, commit, where)
+        try:
+            report = await asyncio.to_thread(self.self_check, where, python=sys.executable)
+        finally:
+            await asyncio.to_thread(treemerge.close_merge, root, where)
+        failed = next((k for k in report.checks if not k.ok and not k.skipped), None)
+        return report.fit, (f"{failed.name}: {failed.detail}" if failed else "")[:400]
+
+    async def _self_pair_resolve(self, where: Path, a: Dict[str, Any], b: Dict[str, Any],
+                                 files: List[str]) -> str:
+        """One resolver run for a pair that really conflicts, told what both
+        sides are for — in the thread of the change being merged in."""
+        cid = next((x for x in reversed(b["ids"]) if self._self_known(x)), "")
+        c = selfwork.change(cid) if cid else {}
+        convo = c.get("conversation") or ""
+        if not convo:
+            title = f"eki · merging {' + '.join(b['ids'])}"[:80]
+            convo = self.store.new_conversation(title)                  # type: ignore[attr-defined]
+            self.store.set_conversation(convo, title=title)             # type: ignore[attr-defined]
+        shown = (f"[eki · self] Merging {' + '.join('self/' + x for x in a['ids']) or 'your checkout'} "
+                 f"with {' + '.join('self/' + x for x in b['ids'])}: conflicts in {', '.join(files)}")[:200]
+        turn = self.store.add_turn(convo, "user", shown, meta={"self": cid})   # type: ignore[attr-defined]
+        wrote = c.get("backend") or ""
+        rid = self.runs.create(shown, conversation=convo, user_turn=turn,  # type: ignore[attr-defined]
+                               requested=wrote if self._self_can_resolve(wrote) else "",
+                               payload=json.dumps({"self_pair": str(where), "route": "resolve git conflicts",
+                                                   "brief": treemerge.pair_brief(a, b, files, sys.executable,
+                                                                                 where)}))
+        await self.runner.submit(rid)                                   # type: ignore[attr-defined]
+        while (self.runs.get(rid) or {}).get("state") not in ("done", "failed", "cancelled", "interrupted"):  # type: ignore[attr-defined]
+            await asyncio.sleep(MERGE_POLL)
+        run = self.runs.get(rid) or {}                                  # type: ignore[attr-defined]
+        if run.get("state") != "done":
+            raise treemerge.MergeError(f"the resolver run {run.get('state')}: {run.get('error') or ''}"[:300])
+        return selfloop.reason(run.get("output") or "", 300)
+
+    async def _self_pair(self, run: Dict[str, Any]) -> AsyncIterator[Piece]:
+        """A resolver run of the tree merge: the agent, in the pair's worktree."""
+        pay = _payload(run)
+        inner = {**run, "cwd": str(pay.get("self_pair") or ""), "_self_inner": True, "_as": pay.get("brief") or ""}
+        async for piece in self._dispatch(inner):                       # type: ignore[attr-defined]
+            yield piece
 
     async def _self_resolved(self, cid: str) -> Dict[str, Any]:
         """Wait for the change's conflicts to be resolved — by its resolve
@@ -429,6 +699,8 @@ class SelfLoop:
         asked: the newest applied build, carrying every change applied since
         the last go-live, to the supervisor. At most one go-live every
         `self_release_minutes`; work never pauses for it. {} when it stays."""
+        if not self._self_tree_busy():
+            await self.self_train(now=now)          # what's ready boards first, merged as a tree
         if now:
             t = builds_mod.train()
             if t.get("cars"):
@@ -472,6 +744,17 @@ class SelfLoop:
             except selfwork.SelfWorkError:
                 continue
         return {"in": left, "every": self._self_release_minutes(), "carrying": rows}
+
+    def _self_tree_view(self) -> Dict[str, Any]:
+        """The tree of the current train, or the last one for an hour after:
+        its groups, its pairs round by round, what each worker merges."""
+        t = treemerge.state()
+        if not t or (t.get("state") == "merged" and time.time() - float(t.get("at") or 0) > 3600):
+            return {}
+        t = {k: v for k, v in t.items() if k != "made"}
+        t["busy"] = self._self_tree_busy()
+        t["workers"] = self._self_merge_workers()
+        return t
 
     async def _self_apply_now(self, cid: str, raising: bool = False, by_person: bool = False,
                               now: bool = False, guarded: bool = False) -> Dict[str, Any]:
@@ -822,7 +1105,7 @@ class SelfLoop:
         items = {i.id: i for i in selfloop.items()}
         for row in selfloop.merge_queue():
             it = items.get(row.get("item") or "")
-            if row.get("run") in live:
+            if row.get("run") in live or row.get("person"):
                 continue
             if it is None or it.state != "working" or it.phase != "merging":
                 selfloop.merge_leave(row["change"])
@@ -1007,15 +1290,33 @@ class SelfLoop:
             raise selfwork.SelfWorkError(
                 "it touches what eki may not change alone: " + ", ".join(c["protected"])
                 + " — confirm to apply it (`eki self apply " + c["id"] + "`, or Apply on the board)")
+        if c["state"] not in ("proposed", "conflicts", "rolled back"):
+            raise selfwork.SelfWorkError(f"self/{c['id']} is {c['state']} — only a proposed change can be applied")
+        if not c.get("fit"):
+            raise selfwork.SelfWorkError(f"self/{c['id']} didn't pass its checks")
+        if c.get("resolving") and time.time() - float(c.get("resolving_at") or 0) < 3600:
+            raise selfwork.SelfWorkError("eki is having its conflicts resolved right now — it applies it when that's done")
+        # it lands with the release train, merged with whatever else is ready
+        # then; the train leaves now if it's time (or you said now)
+        selfwork.set_state(c["id"], c["state"], applied_by="you", asked_at=int(time.time()))
         if not any(r.get("change") == c["id"] for r in selfloop.merge_queue()):
             pipeline.mark(c["id"], "queued", by="you")
-        got = await self._self_apply_now(cid, raising=True, by_person=True, now=now)
-        if got.get("state") == "conflicts":
-            # it no longer goes on top of your checkout: not handed back to
-            # you — an agent resolves it, and eki applies it when that holds
-            got = await self._self_resolve_start(got.get("id") or cid, person=True, now=now) or got
-        self._self_follow(got.get("id") or cid)
-        return got
+        selfloop.merge_join(c["id"], title=c.get("title") or "", person=True, now=now)
+        went = await self.self_train(now=now)
+        if (went.get("one") or {}).get("id") == c["id"]:
+            self._self_follow(c["id"])
+            return went["one"]                      # alone on the train: as an apply always was
+        got = selfwork.change(c["id"])
+        if selfloop.merge_row(c["id"]) is not None:
+            left = max(0, int(float(builds_mod.train().get("last") or 0) + self._self_release_minutes() * 60
+                              - time.time()))
+            return {"state": "queued", "id": c["id"],
+                    "why": f"it lands with the next release train, in about {max(1, left // 60)} min — merged with "
+                           "whatever else is ready then (`eki self` shows the tree; `--now` doesn't wait)"}
+        self._self_follow(c["id"])
+        return {"state": got["state"], "id": c["id"], "why": got.get("why") or "",
+                **({"merged": got["merged"]} if got.get("merged") else {}),
+                **({"resolving": got["resolving"]} if got.get("resolving") else {})}
 
     # ---- conflicts, resolved (eki/selfwork.py begin_rebase / finish_rebase) --------------
 
@@ -1480,6 +1781,7 @@ class SelfLoop:
             "train": self._self_train(),                               # the next go-live, and what it carries
             "pipeline": flow["changes"],                               # each change on its way in, at its stage
             "golive": flow["golive"],                                  # the next go-live, and the last one
+            "tree": self._self_tree_view(),                            # this train's merge, level by level
             "working": [item_row(i) for i in items if i.state == "working"],
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],

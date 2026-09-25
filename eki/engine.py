@@ -677,6 +677,9 @@ class Engine(SelfLoop):
             # redone — and following isn't a loop, so no count of carries
             return "self" if p.get("self_resolve") or \
                 (p.get("self_item") and not self.store.session(cid, backend)) else "session"
+        if p.get("self_pair"):
+            # a pair of the tree merge: the next train merges it again
+            return ""
         if p.get("self_resolve"):
             # a change's conflicts being resolved: its step is carried on, in
             # the change's worktree where the rebase stands (eki/steps.py)
@@ -992,6 +995,11 @@ class Engine(SelfLoop):
         if _payload(run).get("self_resolve") and not run.get("_self_inner"):
             # a change to eki that conflicts with your checkout: resolved, then applied
             async for piece in self._self_resolve(run):
+                yield piece
+            return
+        if _payload(run).get("self_pair") and not run.get("_self_inner"):
+            # two changes landing together that conflict: resolved in the tree merge
+            async for piece in self._self_pair(run):
                 yield piece
             return
         if _payload(run).get("self_item") and not run.get("_self_inner"):

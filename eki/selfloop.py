@@ -535,28 +535,30 @@ def _save_merge(rows: List[Dict[str, Any]], home: Optional[Path] = None) -> None
 
 
 def merge_join(change: str, *, item: str = "", title: str = "", run: str = "", area: Iterable[str] = (),
-               home: Optional[Path] = None) -> int:
-    """Into the merge queue, at the back — or where it already stood (a run
-    carried on after a restart keeps its place). Returns how many are ahead."""
+               person: bool = False, now: bool = False, home: Optional[Path] = None) -> int:
+    """Ready to land: into the merge queue, at the back — or where it already
+    stood (a run carried on after a restart keeps its place). The next
+    release train takes everyone in it at once (eki/treemerge.py). `person`:
+    you applied it; `now`: you want it live without waiting for the train.
+    Returns how many are ahead."""
     with _lock:
         rows = merge_queue(home)
         mine = next((r for r in rows if r["change"] == change), None)
         if mine is None:
             rows.append({"change": change, "item": item, "title": title[:120], "run": run,
-                         "area": list(area), "at": int(time.time()), "applying": False})
+                         "area": list(area), "at": int(time.time()), "applying": False,
+                         "person": bool(person), "now": bool(now)})
         else:
             mine["run"] = run or mine.get("run", "")
+            mine["person"] = bool(mine.get("person")) or bool(person)
+            mine["now"] = bool(mine.get("now")) or bool(now)
         _save_merge(rows, home)
         return next(n for n, r in enumerate(rows) if r["change"] == change)
 
 
-def merge_turn(change: str, live: Iterable[str], home: Optional[Path] = None) -> bool:
-    """Is it this change's turn? The first in line whose run is still going
-    goes; one whose run was cut off keeps its place, and doesn't hold up the
-    rest until it's carried on."""
-    live = set(live)
-    first = next((r for r in merge_queue(home) if r.get("run") in live), None)
-    return first is not None and first["change"] == change
+def merge_row(change: str, home: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Its place in the merge queue; None once a train has decided it."""
+    return next((r for r in merge_queue(home) if r["change"] == change), None)
 
 
 def merge_mark(change: str, home: Optional[Path] = None, **fields: Any) -> None:

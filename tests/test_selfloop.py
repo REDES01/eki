@@ -1304,17 +1304,15 @@ def test_spare_room_leaves_the_part_kept_for_you():
     assert capacity.spare(data, "claude", [Window("five_hour", "5H", 0.8)], 0.3) == 0.0
 
 
-def test_the_merge_queue_goes_in_the_order_changes_finished():
+def test_the_merge_queue_keeps_the_order_changes_finished_in():
     assert selfloop.merge_join("a", run="ra") == 0
     assert selfloop.merge_join("b", run="rb") == 1
-    assert selfloop.merge_join("c", run="rc") == 2
-    assert selfloop.merge_join("a", run="ra2") == 0                     # carried on: keeps its place
-    live = ["ra2", "rb", "rc"]
-    assert selfloop.merge_turn("a", live) and not selfloop.merge_turn("b", live)
+    assert selfloop.merge_join("c", person=True) == 2
+    assert selfloop.merge_join("a", run="ra2", now=True) == 0            # carried on: keeps its place
+    assert selfloop.merge_row("a")["run"] == "ra2" and selfloop.merge_row("a")["now"]
+    assert selfloop.merge_row("c")["person"] and not selfloop.merge_row("b")["person"]
     selfloop.merge_leave("a")
-    assert selfloop.merge_turn("b", live) and not selfloop.merge_turn("c", live)
-    # one whose run was cut off keeps its place, but doesn't hold up the rest
-    assert selfloop.merge_turn("c", ["rc"])
+    assert selfloop.merge_row("a") is None
     assert [r["change"] for r in selfloop.merge_queue()] == ["b", "c"]
 
 
@@ -1361,31 +1359,42 @@ async def test_the_loop_starts_several_when_theres_room_and_applies_them_one_by_
 
 
 @pytest.mark.asyncio
-async def test_a_finished_change_waits_its_turn_to_be_applied_and_isnt_failed(eng, monkeypatch):
+async def test_finished_changes_wait_for_the_train_which_merges_them_as_a_tree(eng, monkeypatch):
     import asyncio
-    from eki import selfengine
+    from eki import selfengine, treemerge
     monkeypatch.setattr(selfengine, "MERGE_POLL", 0.05)
-    # a change that finished first, still in line (its run going)
-    eng.runner.tasks["first"] = asyncio.create_task(asyncio.sleep(30))
-    selfloop.merge_join("before", title="finished first", run="first")
-    Agent.edits = {"README.md": "eki, reworded\n"}
-    started = await eng.self_ask("reword the README", apply=True)
-    for _ in range(200):
-        it = selfloop.get(started["item"])
-        if it.phase == "merging":
+    builds._save_train({"cars": [], "last": int(time.time())})          # a train just left
+    # the resolver is asked first: its brief names both changes
+    Agent.per = {"resolving a merge": {"eki/thing.py": "VALUE = 5\n"},
+                 "twenty": {"eki/thing.py": "VALUE = 20\n"}, "thirty": {"eki/thing.py": "VALUE = 30\n"}}
+    one = await eng.self_ask("make VALUE twenty", apply=True)
+    two = await eng.self_ask("make VALUE thirty", apply=True)
+    for _ in range(400):
+        items = [selfloop.get(x["item"]) for x in (one, two)]
+        if all(i.phase == "merging" for i in items) and len(selfloop.merge_queue()) == 2:
             break
         await asyncio.sleep(0.05)
-    assert it.state == "working" and it.phase == "merging"               # in line: waiting, not failed
-    assert [r["change"] for r in selfloop.merge_queue()] == ["before", it.change]
+    assert all(i.state == "working" and i.phase == "merging" for i in items)   # in line: waiting, not failed
     assert selfloop.pick("", parallel=1, live=eng.runner.running)[1].startswith("nothing to do")  # holds no room
-    assert eng.self_view()["merging"][1]["live"]
+    assert [r["live"] for r in eng.self_view()["merging"]] == [True, True]
     await asyncio.sleep(0.3)
-    assert selfwork.change(it.change)["state"] == "proposed"               # not before its turn
-    selfloop.merge_leave("before")                                        # the first one is through
-    eng.runner.tasks.pop("first").cancel()
-    assert (await settle(eng.runs, started["run"], timeout=20))["state"] == "done"
-    assert selfwork.change(it.change)["state"] == "applied" and not selfloop.merge_queue()
-    assert "1 change finished before it" in eng.runs.get(started["run"])["output"]
+    assert {selfwork.change(i.change)["state"] for i in items} == {"proposed"}   # not before the train
+    builds._save_train({"cars": [], "last": 0})                         # the train's time
+    for x in (one, two):
+        assert (await settle(eng.runs, x["run"], timeout=30))["state"] == "done"
+    got = [selfwork.change(i.change) for i in items]
+    assert {c["state"] for c in got} == {"applying"} and got[0]["build"] == got[1]["build"]   # one release
+    assert "in one batch" in got[0]["how"] and not selfloop.merge_queue()
+    assert len(eng.swaps) == 1                                          # it went live once, carrying both
+    tree = eng.self_view()["tree"]
+    [[pair]] = tree["rounds"]                                           # one round, one pair
+    assert pair["state"] == "resolved" and {*pair["a"], *pair["b"]} == {i.change for i in items}
+    assert tree["groups"][0]["files"] == ["eki/thing.py"] and tree["landed"]
+    told = next(m for _, m, _ in Agent.seen if "resolving a merge" in m)
+    assert "make VALUE twenty" in told and "make VALUE thirty" in told  # what both sides are for
+    batch = treemerge.state()["batch"]
+    assert git(eng.root, "show", f"{batch}:eki/thing.py") == "VALUE = 5"
+    assert any("1 other change waits to land too" in eng.runs.get(x["run"])["output"] for x in (one, two))
     await eng.runner.stop()
 
 
@@ -1532,7 +1541,8 @@ async def test_applying_shows_each_real_stage_the_go_live_and_a_timeline(eng, mo
     assert row["text"] == "going live" and row["live"]
     assert v["golive"]["last"]["carrying"][0]["id"] == cid and v["golive"]["last"]["stage"] == "going live"
     assert next(c for c in v["changes"] if c["id"] == cid)["stage"]["label"] == "Going live"
-    assert [e["event"] for e in pipeline.events(cid)] == ["queued", "rebasing", "rebased", "checking",
+    # your apply takes its turn on the release train (alone on it: rebased, as ever)
+    assert [e["event"] for e in pipeline.events(cid)] == ["queued", "turn", "rebasing", "rebased", "checking",
                                                           "rechecked", "landed", "leaving"]
     eng.self_settled({"state": "healthy", "target": build, "cars": [cid]})
     got = eng.self_stage(cid)

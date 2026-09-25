@@ -544,6 +544,24 @@ function goLive(g, every) {
   return h + `</div></div>`;
 }
 
+const TREE_STATE = {merging: "merging", checking: "judging the batch", bisecting: "bisecting a failed batch", merged: "merged"};
+function treeOf(t) {
+  // this train's merge, level by level (eki/treemerge.py): groups, pairs round by round, who merges what
+  if (!t || !t.state) return "";
+  const ids = xs => xs.length ? xs.map(x => x.slice(0, 8)).join(" + ") : "your checkout";
+  const n = (t.straight || []).length + (t.groups || []).reduce((k, g) => k + g.changes.length, 0);
+  const busy = s => s === "merging" || s === "resolving" || s === "checking";
+  let h = `<div class="section"><div class="label">Tree merge · ${n} change${n === 1 ? "" : "s"} · ${esc(TREE_STATE[t.state] || t.state)}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
+  if ((t.straight || []).length)
+    h += `<div class="rowline"><span class="when" style="min-width:62px">straight</span><span class="grow">${t.straight.map(c => `<span title="${esc(c.title)}">${esc(c.id)}</span>`).join(", ")}</span><span class="muted" style="font-size:12.5px">no file shared — git merges them</span></div>`;
+  (t.groups || []).forEach((g, i) => h += `<div class="rowline"><span class="when" style="min-width:62px">group ${i + 1}</span><span class="grow">${g.changes.map(c => `<span title="${esc(c.title)}">${esc(c.id)}</span>`).join(", ")}</span>${g.files.map(f => `<span class="chipk" title="Touched by more than one of them">${esc(f)}</span>`).join("")}</div>`);
+  (t.rounds || []).forEach((rows, i) => rows.forEach((r, k) => h += `<div class="rowline"><span class="when" style="min-width:62px">${k ? "" : `round ${i + 1}`}</span>${busy(r.state) ? `<span class="spinner"></span>` : ""}<span class="grow">${esc(ids(r.a))} ⨝ ${esc(ids(r.b))}${r.why ? ` <span class="muted">— ${esc(r.why)}</span>` : ""}</span>
+    ${r.worker ? `<span class="chipk" title="Merged at the same time as the other workers' pairs">worker ${esc(r.worker)}</span>` : ""}<span class="muted" style="font-size:12.5px">${esc(r.state)}</span></div>`));
+  for (const c of t.checks || []) h += `<div class="rowline"><span class="when" style="min-width:62px">check</span>${busy(c.state) ? `<span class="spinner"></span>` : ""}<span class="grow">${c.ids.length} together${c.why ? ` <span class="muted">— ${esc(c.why)}</span>` : ""}</span><span class="muted" style="font-size:12.5px">${esc(c.state)}</span></div>`;
+  for (const [id, why] of Object.entries(t.dropped || {})) h += `<div class="rowline"><span class="when" style="min-width:62px">dropped</span><span class="grow">${esc(id)} <span class="muted">— ${esc(why)}</span></span></div>`;
+  return h + `</div></div><div class="muted" style="font-size:12px;margin-top:6px">${(t.rounds || []).length} round${(t.rounds || []).length === 1 ? "" : "s"}, up to ${esc(t.workers)} pairs at once — a clean pair needs no agent; a real conflict gets one resolver run told what both changes are for.</div></div>`;
+}
+
 function selfPage() {
   const v = S.self;
   if (!v) return `<div class="empty">Loading…</div>`;
@@ -594,8 +612,9 @@ function selfPage() {
     h += `<div class="section"><div class="label">Going in · ${flow.length}</div><div class="card" style="padding:2px 14px">`;
     for (const r of flow) h += `<div class="flow"><div class="head">${r.live ? `<span class="spinner"></span>` : ""}
       <a href="#/self/${enc(r.id)}" title="self/${esc(r.id)} · ${esc(r.title)}">${esc(r.title)}</a>${stageOf(r)}</div>${timelineOf(r.timeline)}</div>`;
-    h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes are applied one at a time, in the order they finished — each put on top of what landed before it and judged again — then go live together. A spinner means its worker is running now.</div></div>`;
+    h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
   }
+  h += treeOf(v.tree);
   const ahead = v.queue, nexts = v.roadmap?.next || [];
   if (ahead.length || nexts.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;

@@ -294,7 +294,7 @@ every piece of self-work is a **step**, written down in
 | `begin` | the worktree, the base's own tests | the same worktree, the check run again |
 | `agent` | the agent's turn | the agent, in its session ("carry on where you left off") |
 | `check` | committed, then the candidate check | the check run again on that commit |
-| `apply` | the merge queue: on top, judged again, boarded | applied again — a rebase already done does nothing; its place in line kept |
+| `apply` | the merge queue: the train's tree merge, the batch judged, boarded | back in line, its place kept; the next train merges it again, reusing the merges already made |
 | `resolve` | conflicts resolved by an agent, mid-rebase | the agent in the worktree as it stands; a rebase already finished goes straight to applying |
 | `swap` | the go-live | the supervisor runs outside the engine; only one lost before it said how it went is asked for again |
 
@@ -477,15 +477,58 @@ the Mac app, of which there is one, is changed by one at a time — and a
 later item in another area goes ahead of it. The guess only has to be good
 enough: what collides anyway is resolved when it's applied.
 
-**The merge queue.** A change that is to be applied (its autonomy says so,
-or `--apply`) joins the queue when its checks finish; changes are applied
-one at a time, in the order they finished. Each is put on top of your
-checkout with whatever landed before it, its conflicts resolved if it no
-longer goes on top (the next in line waits for that), judged again, then
-swapped in. Waiting in line is never a failure, and takes no room from the
-work still going; one cut off by a restart keeps its place and doesn't hold
-up the rest. `eki self` and the board list it. A change you apply by hand
-isn't in the queue, but never overlaps one being applied.
+**The merge queue, and the tree.** A change that is to be applied (its
+autonomy says so, or `--apply`) joins the queue when its checks finish, and
+waits there for the release train — waiting is never a failure, and takes
+no room from the work still going; one cut off by a restart keeps its place.
+A change you apply yourself (`eki self apply`, the board's Apply) joins it
+too, and makes the train take the queue at once (it still goes live with
+the train, unless `--now`).
+
+Until 2026-09-26 the queue was applied one change at a time: rebase,
+resolve, judge again, land, then the next. Of the 61 changes since
+2026-09-24, 11 needed an agent to resolve conflicts (21 resolver runs), and
+the conflicts were almost all in five files — `eki/cli.py` was touched by 29
+of them, `eki/engine.py` by 24. N overlapping changes cost N resolves in a
+row, since B can't be put on A until A's own conflicts are resolved. Now
+each train merges everything ready at once, in levels
+(`eki/treemerge.py`):
+
+1. Changes whose files overlap no other's go straight into the batch —
+   git's three-way merge handles them, no merge step of their own.
+2. The rest are grouped by the files they share (two changes sharing a
+   file, directly or through a third, are one group), and each group is
+   merged like a binary tree: paired up, every pair of the round merged at
+   the same time — up to `self_merge_workers` (4) — then the results paired
+   again, until one result per group. log2(N) rounds instead of N: four
+   changes to `cli.py` are three merges in two rounds, the first two side
+   by side. A pair git merges cleanly needs no agent; a real conflict gets
+   one resolver run, in the thread of the change being merged in, told what
+   both sides are for. If it can't be resolved, the later side is dropped
+   and goes back to its thread with why; the rest go on.
+3. The batch — your checkout plus every straight change plus every group's
+   result — is judged once: its tests and a candidate engine. If that
+   passes it goes live as one release: one build, every change aboard it,
+   one swap (documentation only goes straight into your checkout).
+4. If the batch fails, it is bisected: split in halves, each judged on top
+   of the part already found good (so a change that only breaks in company
+   is found too), and only the change(s) that break it are dropped — back
+   to their threads, with what failed, and tried again as any unfit change
+   is. The rest go live. Parts of the tree that don't involve a dropped
+   change are reused, not merged again; merges already made are remembered
+   (`tree.json`), so a restart doesn't redo a finished resolve.
+
+A train with one change applies it as it always was: put on top of your
+checkout, judged again, its conflicts resolved by a run of its own.
+Hard-locked changes are in the queue only once you've applied them (that's
+the yes they need). A guarded change eki applies alone still goes live
+alone — the train waits while one is in line, and it is released as a batch
+of one, fully checked, on top of your checkout.
+
+`eki self` and the Self board show the tree of the current train (and the
+last one, for an hour): its groups and the files they share, the pairs
+round by round with the worker merging each and whether it went clean or
+needed resolving, the batch's checks, and anything dropped.
 
 **Your attention is part of the budget.** While `self_review_max` (3) fit
 changes are waiting for you, the loop starts nothing new of its own; what you
@@ -673,7 +716,7 @@ needs you: a change waiting to be applied, or an item left to you. A change
 applied, gone live, or tried again later is a line in the next page; a
 rollback is still said at once. `digest: off` turns it off.
 
-What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the merge queue), `log.jsonl`
+What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the merge queue), `tree.json` (the current train's tree merge), `log.jsonl`
 (every change as it was judged), `changes.json` (where each stands now),
 `steps.json` (every step, and whether it's live), `train.json` (the release
 train), `ticks.json` (the ticks written), `notes/` (the weekly notes), `digests/` (the daily pages),

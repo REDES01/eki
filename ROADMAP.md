@@ -269,9 +269,9 @@ a thread has to be able to move to another harness without losing its place.
 - [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
       thread says what it wanted, with *allow and rerun*
-- [ ] **Roots eki starts on its own are not the person's.** Self-work opened
+- [x] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
-      can't change alone stay that way at any level of the tree
+      can't change alone stay that way at any level of the tree *(eki: self/00cba77b)*
 - [ ] **Handoff between backends on long threads.** Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session

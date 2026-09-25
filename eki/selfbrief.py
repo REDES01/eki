@@ -60,6 +60,42 @@ to use it, what to check) and then one last line:
 another item, or `ITEM: person <why>` if this needs a person's hands.
 """
 
+RESOLVE = """\
+You are resolving a rebase conflict in eki — the program that is running you
+right now. This folder is the worktree of one change to eki, stopped in the
+middle of `git rebase` onto commit {head}: the head that changed since the
+change was built. Never touch anything outside this folder.
+
+What the change is for — the goal: {goal}
+
+The change: **{title}**
+
+{spec}
+
+What its builder said it did:
+
+{summary}
+
+The rebase stopped with a conflict in: {conflicted}.
+
+What the head changed in those files:
+
+{head_changes}
+
+Resolve the conflicts so both intents survive: what the change is for, and
+what the head did. Leave no conflict markers (<<<<<<<, =======, >>>>>>>) in
+any file. Then run `bin/check` and leave it green.
+
+Do not commit, do not run `git rebase --continue`, `--skip` or `--abort`, do
+not `git add` or reset — eki carries the rebase on once you're done. Do not
+touch anything outside this folder; do not ask questions — decide, and say
+what you decided.
+
+End your answer with a `SUMMARY:` paragraph in plain words (how you resolved
+each file, what to check) and then one last line:
+`ITEM: done` — or `ITEM: person <why>` if this needs a person's hands.
+"""
+
 
 def plan(goal: str, base: str) -> str:
     return PLAN.format(goal=goal.strip(), base=base[:12])
@@ -79,6 +115,14 @@ def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, ba
     return BUILD.format(goal=goal.strip(), title=title, spec=spec.strip(), branch=branch,
                         base=base[:12], source=source, others=beside, retry=retry,
                         files=", ".join(files) or "(not declared — say which in your summary)")
+
+
+def resolve(*, goal: str, title: str, spec: str, summary: str, head: str, conflicted: List[str],
+            head_changes: str) -> str:
+    return RESOLVE.format(goal=goal.strip(), title=title, spec=spec.strip() or "(no spec)",
+                          summary=(summary or "").strip() or "(nothing said)", head=head[:12],
+                          conflicted=", ".join(conflicted) or "(none named)",
+                          head_changes=head_changes.strip() or "(nothing found)")
 
 
 # ---- reading answers ----------------------------------------------------------------------

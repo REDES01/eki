@@ -46,7 +46,7 @@ def _ask_here(c, aid: str) -> None:
     a = asks.view(row)
     err(show(a))
     if not sys.stdin.isatty():
-        err(f"  (answer with: eki-next answer {aid} <choice>   or in the eki window)")
+        err(f"  (answer with: eki answer {aid} <choice>   or in the eki window)")
         return
     if a["kind"] == "question":
         reply = input("  your answer (number or words): ").strip()

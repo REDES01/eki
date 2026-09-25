@@ -4,7 +4,7 @@
 import Cocoa
 import WebKit
 
-let root = Bundle.main.object(forInfoDictionaryKey: "EkiRoot") as? String ?? NSString("~/eki-next").expandingTildeInPath
+let root = Bundle.main.object(forInfoDictionaryKey: "EkiRoot") as? String ?? NSString("~/eki").expandingTildeInPath
 let port = ProcessInfo.processInfo.environment["EKI_PORT"] ?? (Bundle.main.object(forInfoDictionaryKey: "EkiPort") as? String ?? "7788")
 let home = URL(string: "http://127.0.0.1:\(port)/")!
 
@@ -69,8 +69,8 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
 
     func debug(_ s: String) {
         guard ProcessInfo.processInfo.environment["EKI_SHELL_DEBUG"] != nil
-                || FileManager.default.fileExists(atPath: NSString("~/.eki-next/shell-debug").expandingTildeInPath) else { return }
-        let url = URL(fileURLWithPath: NSString("~/.eki-next/logs/shell.log").expandingTildeInPath)
+                || FileManager.default.fileExists(atPath: NSString("~/.eki/shell-debug").expandingTildeInPath) else { return }
+        let url = URL(fileURLWithPath: NSString("~/.eki/logs/shell.log").expandingTildeInPath)
         if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write((s + "\n").data(using: .utf8)!); try? h.close() }
         else { try? (s + "\n").write(to: url, atomically: true, encoding: .utf8) }
     }
@@ -164,7 +164,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         if !startedEngine {
             startedEngine = true
             let p = Process()
-            p.executableURL = URL(fileURLWithPath: root + "/bin/eki-next")
+            p.executableURL = URL(fileURLWithPath: root + "/bin/eki")
             p.arguments = ["engine", "start"]
             try? p.run()
         }

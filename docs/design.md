@@ -2,8 +2,8 @@
 
 eki keeps the Mac you own working for you, and rents frontier agents
 (Claude Code, Codex) only for what the local models can't do. This is the
-rebuild from zero. The old eki (`~/eki`) is the reference for hard-won
-details, not a code source.
+rebuild from zero. The eki before the rebuild is kept, dated, in `~/eki-2026-09-26`
+(data in `~/.eki-2026-09-26`): the reference for hard-won details, not a code source.
 
 ## Invariants — every change is checked against these
 
@@ -29,19 +29,19 @@ details, not a code source.
 ## Pieces
 
 ```
-eki-next ask "…"  ──►  runs table (queued)
+eki ask "…"  ──►  runs table (queued)
                           │
 engine (launchd, one)  ───┤  every tick: reap → route → gate → spawn
                           ▼
 worker (detached, one per run) ── runs the provider ── writes events
                           │
                           ▼
-eki-next follow <run>  ◄── events table
+eki follow <run>  ◄── events table
 ```
 
 | Module | Job |
 |---|---|
-| `paths` | where everything lives (`EKI_HOME`, default `~/.eki-next` while the old eki runs) |
+| `paths` | where everything lives (`EKI_HOME`, default `~/.eki`) |
 | `db` | schema, WAL, busy timeout — the one source of truth |
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
@@ -71,11 +71,11 @@ session id per thread, so returning to it resumes its session.
 ## Routing
 
 1. **Prompt check** → a row. Uses the local model when it's up (one short
-   classification call, logged); otherwise the `general` row. `eki-next
+   classification call, logged); otherwise the `general` row. `eki
    route explain "…"` shows the row and why.
 2. **Table** → first target in the row that's available. Moving down the
    row is failover. The table is a JSON file you can read and edit
-   (`~/.eki-next/routing.json`); defaults are written on first run.
+   (`~/.eki/routing.json`); defaults are written on first run.
 
 ## Milestone 2: the window and the machine
 
@@ -89,7 +89,7 @@ session id per thread, so returning to it resumes its session.
   window and a menu bar item around the web UI; it starts the engine if
   it isn't up. It rarely needs to change.
 - **Local models** (`eki/models.py`): a local provider with a `serve`
-  command can be started and stopped by eki (`eki-next models`, or the
+  command can be started and stopped by eki (`eki models`, or the
   sidebar). With `keep_up`, the engine keeps it running while memory is
   normal and *steps it out* when memory comes under pressure and nothing
   is using it, coming back five minutes after pressure eases. A model you

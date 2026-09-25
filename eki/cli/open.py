@@ -11,7 +11,7 @@ from .common import ensure_engine
 NAME = "open"
 HELP = "open eki's window"
 
-APP = Path(__file__).resolve().parents[2] / "Eki Next.app"
+APP = Path(__file__).resolve().parents[2] / "Eki.app"
 
 
 def add(p) -> None:

@@ -1,8 +1,7 @@
 """Where everything lives.
 
-One directory, `EKI_HOME`. While the old eki still runs on this Mac the
-default is `~/.eki-next`, so the two never share a file; at the swap it
-becomes `~/.eki`.
+One directory, `EKI_HOME`, by default `~/.eki`. (The eki before the
+rebuild is kept, dated, in `~/.eki-2026-09-26` and `~/eki-2026-09-26`.)
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ from pathlib import Path
 
 
 def home() -> Path:
-    root = Path(os.environ.get("EKI_HOME") or "~/.eki-next").expanduser()
+    root = Path(os.environ.get("EKI_HOME") or "~/.eki").expanduser()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

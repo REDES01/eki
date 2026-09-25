@@ -25,5 +25,5 @@ def run(args) -> int:
         for s in found:
             print(f"{s['name']:<24} {s['description'][:70]}")
         if not found:
-            print("no skills yet — eki-next skills add <folder with SKILL.md>")
+            print("no skills yet — eki skills add <folder with SKILL.md>")
     return 0

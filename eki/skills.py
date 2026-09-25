@@ -79,6 +79,8 @@ def claude_plugin() -> Optional[str]:
     manifest.write_text(json.dumps({"name": "eki", "version": "1.0.0",
                                     "description": "Skills from eki's store"}, indent=2))
     link = root / "skills"
+    if link.is_symlink() and Path(os.readlink(link)) != paths.skills():
+        link.unlink()                         # the store moved (a new EKI_HOME)
     if not link.is_symlink():
         if link.exists():
             shutil.rmtree(link)

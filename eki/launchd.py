@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import paths
 
-LABEL = os.environ.get("EKI_LAUNCHD_LABEL") or "dev.eki.next.engine"
+LABEL = os.environ.get("EKI_LAUNCHD_LABEL") or "local.eki.engine"
 
 
 def plist_path() -> Path:

@@ -3,7 +3,7 @@
 Read `docs/design.md` first. The invariants there are not negotiable:
 
 1. A restart at any moment loses nothing. The engine holds no state; workers
-   are detached and write to SQLite. `eki-next drill` must pass.
+   are detached and write to SQLite. `eki drill` must pass.
 2. eki integrates; it doesn't build tools or harnesses.
 3. Subscriptions only through the official CLIs. Never read a token.
 4. Everything is a run, and every routing decision says why.

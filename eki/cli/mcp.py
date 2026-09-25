@@ -28,5 +28,5 @@ def run(args) -> int:
         for name, spec in servers.items():
             print(f"{name:<16} {spec.get('url') or ' '.join([spec.get('command', '')] + spec.get('args', []))}")
         if not servers:
-            print("no servers yet — eki-next mcp add <name> -- <command …>  or  --url <url>")
+            print("no servers yet — eki mcp add <name> -- <command …>  or  --url <url>")
     return 0

@@ -1,4 +1,4 @@
-"""`eki-next <command>` — one file per command in this package.
+"""`eki <command>` — one file per command in this package.
 
 Each command module has `NAME`, `HELP`, `add(parser)` and `run(args) -> int`.
 """
@@ -14,7 +14,7 @@ COMMANDS = ["ask", "answer", "follow", "runs", "show", "cancel", "threads", "eng
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="eki-next", description="The station on your Mac.")
+    p = argparse.ArgumentParser(prog="eki", description="The station on your Mac.")
     sub = p.add_subparsers(dest="command", metavar="<command>")
     for name in COMMANDS:
         mod = importlib.import_module(f"eki.cli.{name}")

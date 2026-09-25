@@ -36,7 +36,7 @@ def run(args) -> int:
     try:
         code = follow(c, rid, show_tools=not args.quiet)
     except KeyboardInterrupt:
-        err(f"\n(still running — eki-next follow {rid}; stop it with eki-next cancel {rid})")
+        err(f"\n(still running — eki follow {rid}; stop it with eki cancel {rid})")
         return 130
     last = store.thread_runs(c, tid)[-1]["id"]
     err(f"[thread {tid} · run {last}]")

@@ -1,12 +1,12 @@
 #!/bin/sh
-# Build "Eki Next.app": the thin native shell around the engine's web UI.
+# Build "Eki.app": the thin native shell around the engine's web UI.
 # Needs the Xcode command line tools (swiftc). The UI itself is not in here.
 set -e
 here="$(cd "$(dirname "$0")/.." && pwd)"
-app="$here/Eki Next.app"
+app="$here/Eki.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-swiftc -O "$here/mac/main.swift" -o "$app/Contents/MacOS/EkiNext" -framework Cocoa -framework WebKit
+swiftc -O "$here/mac/main.swift" -o "$app/Contents/MacOS/Eki" -framework Cocoa -framework WebKit
 # the icon, from mac/AppIcon-1024.png (rendered from mac/AppIcon.svg), every size macOS asks for
 set_dir="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$set_dir"
@@ -22,9 +22,9 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Eki Next</string>
-  <key>CFBundleIdentifier</key><string>dev.eki.next</string>
-  <key>CFBundleExecutable</key><string>EkiNext</string>
+  <key>CFBundleName</key><string>Eki</string>
+  <key>CFBundleIdentifier</key><string>local.eki.app</string>
+  <key>CFBundleExecutable</key><string>Eki</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>$icon</string>
   <key>CFBundleShortVersionString</key><string>0.3.0</string>

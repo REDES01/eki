@@ -1,7 +1,7 @@
 """What agents ask you while they work: questions, permissions, forms.
 
 An ask is written down the moment the program asks, and waits for you in
-the database — the web UI and `eki-next answer` both answer it here. The
+the database — the web UI and `eki answer` both answer it here. The
 worker that owns the run picks the answer up and hands it to the program.
 If that worker dies, the ask is withdrawn and the resumed program asks
 again, so an answer is never given to a question nobody is waiting on.

@@ -594,10 +594,24 @@ eki submit "port the parser to Rust" -m <key> -r .   # prints a run id at once
 eki wait <run> -o out/                       # blocks: the pictures' paths, the text, or -o's file
 ```
 
+## Memory
+
+One folder of plain notes every agent here shares — the project's
+(`.eki/memory`) and the person's own (`~/.eki/memory`). Read it before
+asking something the person may have said already; keep facts there, not
+how-to (that's a skill):
+
+```
+eki recall                        # every note, the project's first
+eki recall <name>                 # one note, whole
+eki recall -s "words"             # the notes that mention them
+eki remember "the fact" -n <name> # keep one (-g: the person's own, not the project's)
+```
+
 ## As tools
 
 The `eki` MCP server gives the same through `eki_capabilities` (read it
-first), `eki_ask` and `eki_image`.
+first), `eki_ask`, `eki_image`, `eki_recall` and `eki_remember`.
 """
     return render(EKI_SKILL, "Hand work to eki, the model hub on this Mac: route a prompt to "
                   "another model (local LLM, Claude Code, Codex, Gemini CLI, API), generate an image, or "

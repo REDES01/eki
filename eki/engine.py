@@ -2751,9 +2751,10 @@ class Engine(SelfLoop):
         session.backend_key = backend.key                                  # type: ignore[attr-defined]
         return session
 
-    def _bridge_for(self, cid: str) -> Optional[mcpbridge.Bridge]:
+    def _bridge_for(self, cid: str, cwd: str = "") -> Optional[mcpbridge.Bridge]:
         """eki's own tools for a thread's Claude Code, served in-process
-        (Settings → Claude tools)."""
+        (Settings → Claude tools); `cwd` is the folder it works in, whose
+        project's memory the tools read."""
         if not self.settings.get("claude_tools", True):
             return None
         depth, parent = nesting.current()
@@ -2761,7 +2762,7 @@ class Engine(SelfLoop):
         # built-in server needs an approval dialog only its own front
         # ends show, so it is opt-in beside these (claude_builtin_computer_use)
         return mcpbridge.Bridge(self, cid, depth=depth + 1, screen=self._screen_for(cid),
-                                parent=parent)
+                                parent=parent, folder=cwd)
 
     def _claude_extra(self) -> Dict[str, Dict[str, Any]]:
         claude_bin = next((getattr(b, "bin", "") for b in self.backends
@@ -2774,7 +2775,8 @@ class Engine(SelfLoop):
         prompt = "\n\n".join(x for x in (str(self.settings.get("claude_system_prompt", "")).strip(),
                                           learn_mod.agent_note(self.settings)) if x)
         session = live.LiveSession(argv, cwd, nesting.child_env(self._harness_env(cid)), prompt,
-                                   bridge=self._bridge_for(cid), extra_servers=self._claude_extra())
+                                   bridge=self._bridge_for(cid, cwd or ""),
+                                   extra_servers=self._claude_extra())
         session.screen = self._screen_for(cid)                             # type: ignore[attr-defined]
         if cid:
             session.worker_meta["thread"] = cid
@@ -2802,7 +2804,7 @@ class Engine(SelfLoop):
                 continue
             try:
                 if kind == "claude":
-                    session: Any = live.LiveSession.attach(w, bridge=self._bridge_for(cid),
+                    session: Any = live.LiveSession.attach(w, bridge=self._bridge_for(cid, str(spec.get("cwd") or "")),
                                                            extra_servers=self._claude_extra())
                     session.screen = self._screen_for(cid)                 # type: ignore[attr-defined]
                 else:

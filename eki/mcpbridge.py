@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from . import grant as grant_mod
 from . import nesting
+from . import notes
 from . import produce
 
 log = logging.getLogger("eki.mcp")
@@ -83,8 +84,11 @@ class Bridge:
     name = "eki"
 
     def __init__(self, engine: Any = None, conversation: str = "", depth: int = 0,
-                 name: str = "eki", screen: bool = True, parent: str = ""):
+                 name: str = "eki", screen: bool = True, parent: str = "",
+                 folder: str = ""):
         self.engine = engine
+        #: where the agent works, for its project's memory when a call names none
+        self.folder = folder
         self.conversation = conversation
         #: the depth what these tools ask arrives at, and the run they ask from
         self.depth = depth
@@ -183,6 +187,35 @@ class Bridge:
                                       "width": {"type": "integer"}, "height": {"type": "integer"},
                                       "count": {"type": "integer", "minimum": 1, "maximum": 4}},
                        "required": ["prompt"]}, self.image))
+        self.add(Tool("eki_recall",
+                      "Read eki's memory — plain notes every agent on this Mac shares, the "
+                      "project's and the person's own. No arguments lists every note; `name` "
+                      "reads one whole; `query` finds the notes that mention those words. Look "
+                      "here before asking the person something they may have said before.",
+                      {"type": "object",
+                       "properties": {"name": {"type": "string", "description": "a note to read whole"},
+                                      "query": {"type": "string", "description": "words to look for"},
+                                      "scope": {"type": "string", "enum": ["", "project", "global"],
+                                                "description": "empty reads both, the project's first"},
+                                      "folder": {"type": "string",
+                                                 "description": "the folder you work in, for its project's notes"}}},
+                      self.recall, read_only=True))
+        self.add(Tool("eki_remember",
+                      "Keep a fact in eki's memory, where every agent on this Mac reads it: "
+                      "something the person told you, a decision, where a thing lives. One "
+                      "fact per note, in plain words. It goes to the project's notes when the "
+                      "folder is in one, the person's own otherwise; the same name replaces a "
+                      "note (or adds to it with `append`). How-to belongs in a skill, not here.",
+                      {"type": "object",
+                       "properties": {"text": {"type": "string"},
+                                      "name": {"type": "string",
+                                               "description": "short, for its file name (default: its first line)"},
+                                      "description": {"type": "string", "description": "one line on what it is"},
+                                      "scope": {"type": "string", "enum": ["", "project", "global"]},
+                                      "folder": {"type": "string",
+                                                 "description": "the folder you work in, for its project's notes"},
+                                      "append": {"type": "boolean"}},
+                       "required": ["text"]}, self.remember))
         if sys.platform == "darwin" and self.screen:
             self.add(Tool("eki_screenshot",
                           "A screenshot of the Mac's main display, scaled to logical points so "
@@ -244,6 +277,36 @@ class Bridge:
                                   wants={"read_only": bool(read_only),
                                          "commands": [str(c) for c in commands or []]})
         return [text(content)]
+
+    async def recall(self, name: str = "", query: str = "", scope: str = "",
+                     folder: str = "") -> List[Dict[str, Any]]:
+        where = os.path.expanduser(folder or self.folder)
+        if name:
+            note = notes.read(name, where, scope)
+            if note:
+                return [text(f"{note['name']} ({note['scope']}, {note['path']}):\n\n{note['text']}")]
+            if not query:
+                query = name
+        rows = notes.search(query, where, scope) if query else notes.listing(where, scope)
+        if not rows:
+            return [text(f"no note mentions {query!r}" if query else "memory is empty")]
+        lines = []
+        for n in rows:
+            lines.append(f"- {n['name']} [{n['scope']}]: {n['description']}")
+            lines += [f"    {ln[:160]}" for ln in n.get("lines") or ()]
+        return [text(("Notes that mention it" if query else "Notes (name [scope]: what it is)")
+                     + " — read one whole with eki_recall(name=…):\n" + "\n".join(lines))]
+
+    async def remember(self, text: str, name: str = "", description: str = "", scope: str = "",
+                       folder: str = "", append: bool = False) -> List[Dict[str, Any]]:
+        if grant_mod.from_env().level == "read":
+            raise RuntimeError("a read-only run can't write to memory")
+        where = os.path.expanduser(folder or self.folder)
+        note = notes.write(text, name=name, where=where, scope=scope, description=description,
+                           source=f"thread {self.conversation}" if self.conversation else "an agent",
+                           append=append)
+        said = f"{'remembered' if note['made'] else 'updated'} {note['name']} ({note['scope']}) at {note['path']}"
+        return [{"type": "text", "text": said}]            # `text` is the note here
 
     async def image(self, prompt: str, width: int = 0, height: int = 0, count: int = 1
                     ) -> List[Dict[str, Any]]:
@@ -348,7 +411,7 @@ class Bridge:
 
 INSTRUCTIONS = ("eki is the model hub on this Mac. Use eki_capabilities to see the other "
                 "backends, eki_ask to delegate a step to one of them, eki_image for pictures, "
-                "and the eki_screenshot / eki_click / eki_type / eki_key tools to drive the "
+                "eki_recall / eki_remember for the notes every agent here shares, and the eki_screenshot / eki_click / eki_type / eki_key tools to drive the "
                 "screen when a task needs a GUI. Paths returned are real files on this Mac.")
 
 

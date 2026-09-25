@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS providers (
 );
 """
 
+#: which side of eki's MCP registry each agent CLI reads its servers from
+_SIDES = {"claude_code": "claude", "codex": "codex", "gemini_cli": "gemini"}
+
 CAPABILITY_FIELDS = ("context_tokens", "text", "vision", "tools", "repo",
                      "images_out", "web", "streaming", "produces", "needs")
 
@@ -68,6 +71,13 @@ class Provider:
             side = "claude" if self.kind == "claude_code" else "codex"
             hosted = self.kind == "claude_code" or bool(settings_mod.load().get("codex_web_search", True))
             caps["web"] = hosted or mcpregistry.provides(side, "web")
+        # a mesh server (Blender) is how an agent CLI makes 3D: the side that
+        # has one makes meshes as well as words, and routing can say so
+        side = _SIDES.get(self.kind)
+        if side and "produces" not in self.capabilities:
+            from . import mcpregistry
+            if mcpregistry.provides(side, "mesh"):
+                caps["produces"] = ("code", "prose", "mesh")
         return BackendInfo(key=self.key, kind=self.kind, label=self.label,
                            capabilities=Capabilities(**caps),
                            cost=Cost(tier=self.tier, note=self.note),

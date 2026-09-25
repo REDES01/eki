@@ -119,6 +119,17 @@ image model draw it — a run of its own under this one, the same one
 place (`eki/illustrate.py`). Offered only when an image model is set up
 (and, inside a goal, allowed). Setting `pictures_in_answers` (on).
 
+A local model on a server that takes `tools` (mlx_lm.server) can also call
+eki itself, in a loop of its own (`eki/toolloop.py`): beside `hand_off` it
+is offered `eki_ask`, `eki_image` and `eki_capabilities` — the tools Claude
+Code and Codex get from eki. It calls one, eki runs it, the result goes back
+to the model, and it answers; a picture it asked for lands in its answer.
+Asked for a village's lore and a portrait of its elder, it writes the lore
+and draws the portrait without giving up the thread. Never the screen,
+files or commands — that is still a handover. At most four rounds of calls;
+what it asks runs one level down, under this run's budget, and the calls
+are kept in the turn's meta (`eki_tools`). Setting `local_tools` (on).
+
 ### Long threads (`eki/carry.py`)
 
 What a model is given of the thread follows one rule:

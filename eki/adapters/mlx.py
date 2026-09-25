@@ -42,7 +42,7 @@ class MLXBackend(Backend):
 
     async def stream(self, messages: List[Message], **kw) -> AsyncIterator[str]:
         body: Dict[str, Any] = {
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [_wire(m) for m in messages],
             "stream": True,
             # ask for the final usage frame; servers that don't know this
             # option ignore it rather than failing
@@ -86,7 +86,8 @@ class MLXBackend(Backend):
                         if text:
                             yield text
                         for tc in delta.get("tool_calls") or []:
-                            at = calls.setdefault(int(tc.get("index") or 0), {"name": "", "args": ""})
+                            at = calls.setdefault(int(tc.get("index") or 0), {"name": "", "args": "", "id": ""})
+                            at["id"] = at["id"] or str(tc.get("id") or "")
                             fn = tc.get("function") or {}
                             at["name"] += fn.get("name") or ""
                             at["args"] += fn.get("arguments") or ""
@@ -97,9 +98,19 @@ class MLXBackend(Backend):
                 continue
             try:
                 args = json.loads(c["args"]) if c["args"].strip() else {}
-                yield ToolCall(c["name"], args if isinstance(args, dict) else {}, "")
+                yield ToolCall(c["name"], args if isinstance(args, dict) else {}, "", c["id"])
             except json.JSONDecodeError:
-                yield ToolCall(c["name"], {}, c["args"])
+                yield ToolCall(c["name"], {}, c["args"], c["id"])
+
+
+def _wire(m: Message) -> Dict[str, Any]:
+    """A message as the server takes it: with its calls, or the call it answers."""
+    out: Dict[str, Any] = {"role": m.role, "content": m.content}
+    if m.tool_calls:
+        out["tool_calls"] = m.tool_calls
+    if m.tool_call_id:
+        out["tool_call_id"] = m.tool_call_id
+    return out
 
 
 @register("llamacpp")

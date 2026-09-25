@@ -336,7 +336,7 @@ So that the agent doing the work can ask eki for what it can't do itself.
 A project is a folder, a roster of backends, and a shared memory. Chats become
 views into a project rather than the top of the tree.
 
-- [ ] `.eki/` marker in a folder; calls made inside it belong to the project
+- [x] `.eki/` marker in a folder; calls made inside it belong to the project *(eki: self/b6057c8d)*
 - [ ] Project in the app: its chats, its artifacts, its files made by agents
       (16f0c12, self/29ac7283: files Claude Code or Codex write into a repo
       now reach the gallery; the project itself waits for the `.eki/` marker)

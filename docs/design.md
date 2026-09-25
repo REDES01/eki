@@ -55,6 +55,13 @@ eki follow <run>  ◄── events table
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
+| `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |
+| `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
+| `rebase` | the git steps of the queue: rebase a branch onto its predicted head, carry on after a resolve, a fresh worktree for gate 2 |
+| `resolve` | the queue's side path: a run resolves a conflicted rebase, eki checks it, runs gate 1 again and puts the item at the back |
+| `candidate` | gate 2's own checks: the checkout's engine boots, it opens and migrates a copy of the db, and the running build opens the copy |
+| `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
+| `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `cli/*` | one file per command |
 
 ## Runs

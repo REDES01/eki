@@ -362,3 +362,24 @@ def test_the_catalog_adds_a_server_and_the_registry_says_what_it_provides(tmp_pa
     (tmp_path / "config.toml").write_text("")
     mcpregistry.render_codex()
     assert "web_search" not in (tmp_path / "config.toml").read_text()
+
+
+def test_blender_from_the_catalog_lets_that_side_make_meshes(tmp_path, monkeypatch):
+    from eki import adapters, providers
+    monkeypatch.setattr(mcpregistry, "PATH", tmp_path / "mcp.json")
+    entry = mcpregistry.catalog_entry("blender")
+    assert entry["provides"] == ["mesh"] and entry["key_env"] == ""
+    claude = providers.Provider(key="claude", kind="claude_code", label="Claude Code")
+    codex = providers.Provider(key="codex", kind="codex", label="Codex")
+    assert "mesh" not in adapters.produces(adapters.build(claude.info(), {}))
+    mcpregistry.put("blender", {"command": entry["command"], "provides": entry["provides"],
+                                "backends": ["claude"]})
+    made = adapters.produces(adapters.build(claude.info(), {}))
+    assert made == {"code", "prose", "mesh"}                   # still answers in words
+    assert "mesh" not in adapters.produces(adapters.build(codex.info(), {}))
+    # a row that says what it makes keeps its own say
+    fixed = providers.Provider(key="c2", kind="claude_code", label="C",
+                               capabilities={"produces": ["code"]})
+    assert fixed.info().capabilities.produces == ("code",)
+    mcpregistry.set_enabled("blender", False)
+    assert "mesh" not in adapters.produces(adapters.build(claude.info(), {}))

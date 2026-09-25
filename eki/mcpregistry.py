@@ -69,6 +69,11 @@ CATALOG: List[Dict[str, Any]] = [
     {"id": "filesystem", "title": "Filesystem", "provides": ["files"],
      "command": "npx -y @modelcontextprotocol/server-filesystem ~", "key_env": "",
      "blurb": "Read and write files under a folder."},
+    # 3D work goes through Blender's own server; eki builds no mesh backend
+    {"id": "blender", "title": "Blender", "provides": ["mesh"],
+     "command": "uvx blender-mcp", "key_env": "",
+     "blurb": "Build and edit scenes in a running Blender (install its add-on "
+              "from github.com/ahujasid/blender-mcp and press Connect)."},
 ]
 
 

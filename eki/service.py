@@ -955,7 +955,7 @@ def self_change(cid: str) -> Any:
     from . import selfwork
     c = _self_call(selfwork.change, cid)
     fields = {k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__}
-    return {**c, "lines": selfwork.Proposal(**fields).lines()}
+    return {**c, "lines": selfwork.Proposal(**fields).lines(), **engine().self_stage(c["id"])}
 
 
 @app.get("/api/self/changes/{cid}/diff")

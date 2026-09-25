@@ -37,6 +37,7 @@ Every ask is a run in the engine, not in this terminal: Ctrl-C stops
                                          a diff and a verdict — never a merge
     eki self -r "…" -r "…"               several changes, queued; side by side as room allows
     eki self                             what it has proposed so far
+    eki self --watch                     each change going in, at its stage, as it moves
     eki serve                            run the engine in the foreground
 """
 from __future__ import annotations
@@ -657,12 +658,11 @@ def _self_status(service: str, limit: int) -> int:
               + ("   (eki self off)" if g["state"] == "active" else "   (eki self on)"))
         if g.get("note") and not g.get("working"):
             print(f"now: {g['note']}")
-    going = _going_live(v.get("going_live") or {})
-    if going:
-        print(going)
-    train = _next_go_live(v.get("train") or {})
-    if train:
-        print(train)
+    flow = _pipeline_lines(v)
+    if flow is None:                        # an engine from before eki/pipeline.py
+        for line in (_going_live(v.get("going_live") or {}), _next_go_live(v.get("train") or {})):
+            if line:
+                print(line)
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
           + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
@@ -681,7 +681,9 @@ def _self_status(service: str, limit: int) -> int:
                      "  (carries on when there's room)"))
             if i.get("why"):
                 print(f"          picked: {i['why'][:100]}")
-    if v.get("merging"):
+    if flow:
+        print("\n" + "\n".join(flow).lstrip("\n"))
+    elif flow is None and v.get("merging"):
         print("\nmerge queue (applied one at a time, in the order they finished):")
         for n, r in enumerate(v["merging"], 1):
             state = "applying now" if r.get("applying") else "waiting its turn" if r.get("live") \
@@ -711,7 +713,8 @@ def _self_status(service: str, limit: int) -> int:
     if rows:
         print("\nrecent:")
         for c in rows:
-            print(f"  {_ago(c.get('state_at'))}  {c['state']:<11} self/{c['id']}  {c['title'][:56]}")
+            said = (c.get("stage") or {}).get("label", "").lower() or c["state"]
+            print(f"  {_ago(c.get('state_at'))}  {said:<11} self/{c['id']}  {c['title'][:56]}")
     page = v.get("digest")
     if page and not page.get("quiet"):
         print(f"\ntoday's digest ({page['id']}): `eki self digest`")
@@ -737,6 +740,43 @@ def _tiers(tiers: Dict[str, Any]) -> List[str]:
 def _after(row: Dict[str, Any]) -> str:
     """A roadmap item waiting for the one above it in its stage says so."""
     return f"  (after: {row['after'][:60]})" if row.get("after") else ""
+
+
+def _pipeline_lines(v: Dict[str, Any]) -> Optional[List[str]]:
+    """Each change on its way in at its real stage, and the go-live as one
+    group (eki/pipeline.py); None when the engine doesn't say (an older one)."""
+    if "pipeline" not in v:
+        return None
+    from . import pipeline
+    return pipeline.lines({"changes": v.get("pipeline") or [], "golive": v.get("golive") or {}})
+
+
+def _self_watch(service: str, every: float = 3.0) -> int:
+    """`eki self --watch`: the pipeline, drawn again every few seconds."""
+    try:
+        while True:
+            v = call("GET", "/api/self", service)
+            lines = _pipeline_lines(v)
+            out = [f"eki self — {time.strftime('%H:%M:%S')}   (Ctrl-C stops watching)", ""]
+            out += (lines if lines else ["nothing on its way in"]) if lines is not None else \
+                ["this engine doesn't say its stages yet — it's older than `eki self --watch`"]
+            if sys.stdout.isatty():
+                sys.stdout.write("\033[H\033[2J")
+            print("\n".join(out), flush=True)
+            time.sleep(every)
+    except KeyboardInterrupt:
+        return 0
+
+
+def _timeline_lines(c: Dict[str, Any]) -> List[str]:
+    """`eki self show`: where it stands, and each point it passed, with times."""
+    st, tl = c.get("stage") or {}, c.get("timeline") or []
+    out = [f"now: {st['text']}"] if st.get("text") else []
+    if tl:
+        out.append("timeline:")
+    for r in tl:
+        out.append(f"  {_ago(r['at'])}  {r['step']}" + (f" — {r['note']}" if r.get("note") else ""))
+    return out
 
 
 def _self_verb(args, verb: str, rest: List[str]) -> int:
@@ -819,7 +859,9 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
         print(call("GET", f"/api/self/changes/{arg}/diff", s)["diff"])
         return 0
     if verb == "show":
-        print("\n".join(call("GET", f"/api/self/changes/{arg}", s)["lines"]))
+        c = call("GET", f"/api/self/changes/{arg}", s)
+        tl = _timeline_lines(c)
+        print("\n".join(c["lines"] + ([""] + tl if tl else [])))
         return 0
     body: Dict[str, Any] = {}
     if verb == "apply":
@@ -1011,6 +1053,8 @@ def cmd_self(args) -> int:
     request = " ".join(words).strip()
     if not request:
         ensure_engine(args.service)
+        if getattr(args, "watch", False):
+            return _self_watch(args.service)
         return _self_status(args.service, args.limit)
     ensure_engine(args.service)
     body = {"request": request, "when": "later" if args.later else "now", "apply": args.apply,
@@ -1513,7 +1557,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     "eki self parallel [N]         the most self-work at once (default 2)\n"
                                     "eki self release [N]          go live now with what's applied; N: at most one go-live every N min (15)\n"
                                     "eki self on|off               let eki work on itself whenever the machine has room\n"
-                                    "eki self diff|show|apply|discard|undo <id>\n"
+                                    "eki self --watch               each change going in, at its stage — every few seconds\n"
+                                    "eki self diff|show|apply|discard|undo <id>   (show: with its timeline)\n"
                                     "eki self offer <id>           offer a change upstream as a pull request (asks first)\n"
                                     "eki self next                 what it would take next\n"
                                     "eki self retry|drop|mine <item>\n"
@@ -1542,6 +1587,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "eki self offer: don't ask before pushing and opening the pull request")
     sw.add_argument("--now", action="store_true",
                     help="eki self apply: go live at once, not with the next release train")
+    sw.add_argument("--watch", action="store_true",
+                    help="eki self: the changes going in and the next go-live, drawn again every few seconds")
 
     ro = sub.add_parser("routing", help="the routing table; explain a request; replay recent ones")
     ro.add_argument("action", nargs="?", default="show", choices=["show", "explain", "replay", "undo", "forget"])

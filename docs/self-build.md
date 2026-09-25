@@ -173,6 +173,21 @@ counted to the same deadline once it has. `eki self`, `eki builds` and the
 Self board say *new version going live in N min* while one is on its way
 (`builds.going_live`).
 
+**Watching it go in** (`eki/pipeline.py`, `eki self --watch`). "Applying"
+was several stages that all said the same word. Now each change on its way in
+says its real stage and what it waits on — *in line behind self/a* ·
+*rebasing* · *fixing conflicts in x.py (run r, 4 min)* · *checking again* ·
+*building* · *landed, goes live at 21:45 with 2 others* · *going live* ·
+*watching (90 s left)* · *live* · *rolled back (why)*. A stage spins only
+while its worker or step is live in this engine; one a restart cut off says
+*waiting to be resumed*. The go-live is shown as one group: what the next one
+carries and when it leaves, and what the last one carried and how it came
+out. Each point a change passes is written to `~/.eki/self/pipeline.jsonl`,
+from which its timeline is read — *queued → rebased → conflicts fixed →
+rechecked → landed → live*, with times. `eki self` and the Self board
+(*Go-live*, *Going in*) show it; `eki self show <id>` prints the timeline;
+`eki self --watch` draws the pipeline again every few seconds.
+
 ## The supervisor  (built: `eki/supervisor.sh`)
 
 Small on purpose — a hundred lines of shell, no imports from eki, so that

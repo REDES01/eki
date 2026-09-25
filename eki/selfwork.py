@@ -50,7 +50,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import candidate, roadmap, workers
+from . import candidate, pipeline, roadmap, workers
 
 HOME = Path("~/.eki/self").expanduser()
 #: screenshots an agent takes of the app it changed, by change id
@@ -1252,13 +1252,16 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     moved = not is_in(root, head, commit)
     if moved:
         say("your checkout has moved on since — putting the change on top of it…")
+        pipeline.mark(cid, "rebasing", home, onto=head[:10])
         got, _ = _rebase(where, "-q", head)
         if got.returncode != 0:
             subprocess.run(["git", "-C", str(where), "rebase", "--abort"], capture_output=True)
             why = (got.stderr.strip() or got.stdout.strip()).splitlines()
             set_state(cid, "conflicts", home, why="it doesn't go on top of your checkout as it is now: "
                       + (why[-1] if why else "a conflict")[:200])
+            pipeline.mark(cid, "conflicts", home, why=(why[-1] if why else "a conflict")[:200])
             return {"state": "conflicts", "id": cid}
+        pipeline.mark(cid, "rebased", home, onto=head[:10])
         p.commit, p.base = git(where, "rev-parse", "HEAD"), head
         p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
         p.protected, p.locked = touches_protected(p.files), touches_locked(p.files)
@@ -1267,6 +1270,7 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
             record(p, home)
             set_state(cid, "proposed", home, why="it touches what eki may not change alone ("
                       + ", ".join(p.locked or p.protected) + ")")
+            pipeline.mark(cid, "stopped", home, why=p.verdict)
             return {"state": "proposed", "id": cid, "why": p.verdict}
         alone = bool(p.protected) and not by_person
         busy = alone_blocked(cid, home) if alone else ""
@@ -1276,8 +1280,10 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     if moved or alone:
         if not docs_only(p.files):
             say("judging it again, on top of your checkout…")
+            pipeline.mark(cid, "checking", home)
             report = check(where, python=python, say=say)
             p.report, p.fit = report.to_json(), report.fit
+            pipeline.mark(cid, "rechecked", home, fit=bool(report.fit))
             if not report.fit:
                 p.verdict = "not fit to run on top of your checkout — the branch is kept"
                 record(p, home)
@@ -1302,8 +1308,11 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         if merged.startswith("merged"):
             close_worktree(root, where, cid, keep_branch=True)
             set_state(cid, "applied", home, merged=merged, how="into your checkout (documentation only)")
+            pipeline.mark(cid, "landed", home)
+            pipeline.mark(cid, "live", home, how="documentation: straight into your checkout")
             return {"state": "applied", "id": cid, "merged": merged}
         set_state(cid, "proposed", home, why=merged)
+        pipeline.mark(cid, "stopped", home, why=merged)
         return {"state": "proposed", "id": cid, "why": merged}
     from . import builds
     build = builds.make(root, p.commit, note=f"self/{cid}")
@@ -1319,6 +1328,7 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     else:
         builds.board(build, self_id=cid, now=now)
     set_state(cid, "applying", home, build=str(build), alone=False)
+    pipeline.mark(cid, "landed", home, build=build.name)
     return {"state": "applying", "id": cid, "build": str(build)}
 
 
@@ -1331,11 +1341,13 @@ def settled(cid: str, outcome: str, merged: str = "", why: str = "",
         return {}
     if outcome == "healthy":
         entry = set_state(c["id"], "applied", home, merged=merged or None, how="swapped in, healthy")
+        pipeline.mark(c["id"], "live", home)
         if merged.startswith("merged") and c.get("worktree"):
             close_worktree(Path(c["root"]), Path(c["worktree"]), c["id"], keep_branch=True)
         if c.get("reverts"):
             set_state(c["reverts"], "undone", home, by=c["id"])
         return entry
+    pipeline.mark(c["id"], "rolled back", home, why=why or outcome)
     return set_state(c["id"], "rolled back", home, why=why or outcome)
 
 
@@ -1349,6 +1361,7 @@ def carried(root: Path, commit: str, home: Optional[Path] = None) -> List[str]:
             continue
         if is_in(root, c["commit"], commit):
             set_state(c["id"], "applied", home, how="swapped in with a later change, healthy")
+            pipeline.mark(c["id"], "live", home, how="with a later change")
             done.append(c["id"])
     return done
 

@@ -1509,3 +1509,34 @@ def test_the_command_line_says_which_thread_asks(monkeypatch):
     assert cli.parent_headers() == {}
     monkeypatch.setenv("EKI_PARENT", "abc")
     assert cli.parent_headers() == {"X-Eki-Parent": "abc"}
+
+
+@pytest.mark.asyncio
+async def test_applying_shows_each_real_stage_the_go_live_and_a_timeline(eng, monkeypatch):
+    from eki import pipeline
+    Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
+    started = await eng.self_ask("make VALUE two")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfwork.changes()[0]["id"]
+    (eng.root / "README.md").write_text("eki, moved on\n")
+    git(eng.root, "commit", "-qam", "yours, meanwhile")
+    assert (await eng.self_apply(cid))["state"] == "applying"
+    # the train left at once (the first after a quiet window): the supervisor has it
+    build = builds.train()["departed"]["build"]
+    (builds.SELF_HOME / "swap.json").write_text(json.dumps(
+        {"state": "waiting", "target": build, "self": cid, "at": int(time.time()),
+         "deadline": int(time.time()) + 30}))
+    monkeypatch.setattr(builds, "_swap_pid", lambda: 4242)
+    v = eng.self_view()
+    row = next(r for r in v["pipeline"] if r["id"] == cid)
+    assert row["text"] == "going live" and row["live"]
+    assert v["golive"]["last"]["carrying"][0]["id"] == cid and v["golive"]["last"]["stage"] == "going live"
+    assert next(c for c in v["changes"] if c["id"] == cid)["stage"]["label"] == "Going live"
+    assert [e["event"] for e in pipeline.events(cid)] == ["queued", "rebasing", "rebased", "checking",
+                                                          "rechecked", "landed", "leaving"]
+    eng.self_settled({"state": "healthy", "target": build, "cars": [cid]})
+    got = eng.self_stage(cid)
+    assert got["stage"]["text"] == "live"
+    assert [r["step"] for r in got["timeline"]] == ["queued", "rebased", "rechecked", "landed",
+                                                    "left to go live", "live"]
+    await eng.runner.stop()

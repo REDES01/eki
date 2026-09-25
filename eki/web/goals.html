@@ -150,6 +150,19 @@
   .rowline:last-child { border-bottom: 0; }
   .rowline .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rowline .when { color: var(--ink-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .flow { padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: 13px; min-width: 0; }
+  .flow:last-child { border-bottom: 0; }
+  .flow .head { display: flex; gap: 10px; align-items: center; min-width: 0; }
+  .flow .head a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; }
+  .flow .stage { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+  .flow .stage.live { color: var(--ok); } .flow .stage.stalled { color: var(--wait); }
+  .tl { display: flex; flex-wrap: wrap; gap: 2px 6px; margin-top: 3px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .tl .arrow { color: var(--line-2); }
+  .tl b { font-weight: 500; color: var(--ink-2); }
+  .golive { padding: 10px 14px; }
+  .golive .line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; padding: 3px 0; }
+  .golive .line + .line { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 5px; }
+  .golive .what { color: var(--ink-3); font-size: 12.5px; }
   pre.diff { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto;
              font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
   pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--danger); } pre.diff .hunk { color: var(--info); }
@@ -439,8 +452,16 @@ const byWhom = c => c.backend && c.backend !== "eki" ? "by " + esc(c.backend) : 
 // live, or cut off by a restart and carried on by itself (no spinner then)
 const fixing = c => c.state === "conflicts" && !!c.resolving;
 const fixingLive = c => fixing(c) && c.resolving_live !== false;
-const stateOf = c => fixingLive(c) ? "Fixing conflicts" : fixing(c) ? "Carrying on" : CSTATE[c.state] || c.state;
-const badgeOf = c => fixing(c) ? (fixingLive(c) ? "working" : "queued") : CBADGE[c.state] || "";
+// on its way in, a change says its real stage (eki/pipeline.py) — never a bare "Applying"
+const STAGE_BADGE = { live: "done", "rolled back": "stuck", landed: "waiting", "in line": "waiting" };
+const stageBadge = st => st.stalled ? "queued" : st.live ? "working" : STAGE_BADGE[st.stage] || "waiting";
+const stateOf = c => c.stage ? c.stage.label : fixingLive(c) ? "Fixing conflicts" : fixing(c) ? "Carrying on" : CSTATE[c.state] || c.state;
+const badgeOf = c => c.stage ? stageBadge(c.stage) : fixing(c) ? (fixingLive(c) ? "working" : "queued") : CBADGE[c.state] || "";
+const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// queued 21:02 → rebased 21:05 → landed 21:10
+const timelineOf = tl => (tl || []).length ? `<div class="tl">${tl.map((r, n) =>
+  `${n ? `<span class="arrow">→</span>` : ""}<span title="${esc(r.note || "")}"><b>${esc(r.step)}</b> ${esc(hm(r.at))}</span>`).join("")}</div>` : "";
+const stageOf = st => `<span class="stage ${st.live ? "live" : st.stalled ? "stalled" : ""}" title="${esc(st.text)}">${esc(st.text)}</span>`;
 const when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function changeActs(c, withDiff) {
@@ -505,25 +526,22 @@ function changeCard(c) {
     <div class="acts">${changeActs(c, true)}</div></div>`;
 }
 
-// a new version on its way in: work isn't paused for it, and runs still
-// going when it swaps carry on in the new engine
-function goingLive(g) {
-  if (!g || !g.state) return "";
-  const what = g.self ? ` (self/${esc(g.self)})` : "";
-  const when = g.state === "swapping" || !g.in ? "now" : `in ${Math.max(1, Math.ceil(g.in / 60))} min`;
-  return `<div class="line"><span class="spinner"></span><span>New version${what} going live ${when}</span>
-    <span class="muted" style="font-size:12.5px">— runs still going then carry on in it</span></div>`;
-}
-
-// the release train: applied changes go live together, at most once every
-// few minutes — work keeps going meanwhile
-function nextGoLive(t) {
-  if (!t || !(t.carrying || []).length) return "";
-  const when = !t.in ? "now" : `in ${Math.max(1, Math.ceil(t.in / 60))} min`;
-  const what = t.carrying.map(c => `<span title="self/${esc(c.id)}">${esc(c.title)}</span>`).join(", ");
-  return `<div class="line"><span>Next go-live ${when}, carrying: ${what}</span>
+// the go-live as one group: what the next one carries and when it leaves;
+// the last one, what it carried and where it stands or how it came out.
+// Work isn't paused for either — runs still going then carry on in the new engine.
+function goLive(g, every) {
+  const nxt = g?.next, last = g?.last;
+  if (!nxt && !last) return "";
+  const ids = cs => cs.map(c => `<a href="#/self/${enc(c.id)}" title="self/${esc(c.id)}" style="color:inherit">${esc(c.title || "self/" + c.id)}</a>`).join(", ");
+  let h = `<div class="section"><div class="label">Go-live</div><div class="card golive">`;
+  if (nxt) h += `<div class="line"><span>Next leaves ${nxt.in ? "at " + esc(hm(nxt.leaves_at)) : "now"}, carrying ${ids(nxt.carrying)}</span>
     <button class="btn small" data-release-now title="Don't wait for the train: swap it in now">Go live now</button>
-    <span class="muted" style="font-size:12.5px">— at most one every ${esc(t.every)} min</span></div>`;
+    <span class="what">— at most one every ${esc(every)} min</span></div>`;
+  if (last) h += `<div class="line">${last.live ? `<span class="spinner"></span>` : ""}
+    <span class="badge ${stageBadge(last)}">${esc(last.label)}</span>
+    <span>Left ${esc(hm(last.left_at))}, carrying ${ids(last.carrying)}</span>
+    <span class="what">— ${esc(last.text)}${last.settled_at ? " · " + esc(hm(last.settled_at)) : ""}</span></div>`;
+  return h + `</div></div>`;
 }
 
 function selfPage() {
@@ -531,7 +549,7 @@ function selfPage() {
   if (!v) return `<div class="empty">Loading…</div>`;
   if (!v.can) return `<div class="empty">${esc(v.why_not)}</div>`;
   const g = v.goal, on = !!g && g.state === "active", now = v.working[0];
-  const going = v.working.filter(i => i.phase !== "merging"), merging = v.merging || [];
+  const going = v.working.filter(i => i.phase !== "merging");
   const status = !g ? "Off — eki changes itself only when you ask."
     : g.state === "paused" ? "Paused — nothing new starts."
     : g.state === "stuck" ? "Stopped: " + (g.note || "its turns kept failing")
@@ -543,8 +561,6 @@ function selfPage() {
       <span class="badge ${on ? (now ? "working" : "queued") : "paused"}">${on ? "On" : g ? "Paused" : "Off"}</span>
       <span class="muted" style="flex:1 1 220px;min-width:0">${esc(status)}</span>
       <button class="btn ${on ? "" : "primary"}" data-self-on="${on ? 0 : 1}">${on ? "Pause" : g ? "Resume" : "Start"}</button></div>
-    ${goingLive(v.going_live)}
-    ${nextGoLive(v.train)}
     <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the open item in ROADMAP.md worth most for the next release — each change in its own worktree, tested and started on a spare port before you see it.</div>
     <div class="line"><span class="muted">How far it goes alone</span>
       <div class="seg" role="group" aria-label="Autonomy"><button data-self-auto="propose" aria-pressed="${v.autonomy === "propose"}" title="A branch, a diff and its checks: you apply it">Propose</button><button data-self-auto="apply" aria-pressed="${v.autonomy === "apply"}" title="A change that passes is swapped in, watched, and rolled back if it isn't healthy">Apply here</button></div>
@@ -572,11 +588,13 @@ function selfPage() {
       ${(i.areas || []).map(a => `<span class="chipk" title="The area it works in: nothing else starts there until it's done">${esc(a)}</span>`).join("")}</div>`;
     h += `</div></div></div>`;
   }
-  if (merging.length) {
-    h += `<div class="section"><div class="label">Merge queue · ${merging.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    merging.forEach((r, n) => h += `<div class="rowline"><span class="when">${n + 1}</span>${r.applying ? `<span class="spinner"></span>` : ""}<span class="grow" title="${esc(r.title)}">${esc(r.title)}</span>
-      <span class="muted" style="font-size:12.5px">${r.applying ? "being applied" : r.live ? "waiting its turn" : "cut off — back in line when it carries on"}</span></div>`);
-    h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes are applied one at a time, in the order they finished — each put on top of what landed before it and judged again.</div></div>`;
+  h += goLive(v.golive, v.train?.every || 15);
+  const flow = v.pipeline || [];
+  if (flow.length) {
+    h += `<div class="section"><div class="label">Going in · ${flow.length}</div><div class="card" style="padding:2px 14px">`;
+    for (const r of flow) h += `<div class="flow"><div class="head">${r.live ? `<span class="spinner"></span>` : ""}
+      <a href="#/self/${enc(r.id)}" title="self/${esc(r.id)} · ${esc(r.title)}">${esc(r.title)}</a>${stageOf(r)}</div>${timelineOf(r.timeline)}</div>`;
+    h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes are applied one at a time, in the order they finished — each put on top of what landed before it and judged again — then go live together. A spinner means its worker is running now.</div></div>`;
   }
   const ahead = v.queue, nexts = v.roadmap?.next || [];
   if (ahead.length || nexts.length) {
@@ -646,6 +664,11 @@ function changePage() {
     ${c.verdict ? `<div class="note" style="background:var(--sunk)">${esc(c.verdict)}${c.why && !c.verdict.includes(c.why) ? " — " + esc(c.why) : ""}${c.merged ? " · " + esc(c.merged) : ""}</div>` : ""}
     ${checksOf(c) ? `<div class="meta" style="margin-top:10px">${checksOf(c)}</div>` : ""}
     <div class="acts">${changeActs(c, false)}</div>${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;
+  if (c.stage || (c.timeline || []).length) {
+    h += `<div class="label" style="margin-top:18px">Going in</div><div class="card" style="padding:2px 14px"><div class="flow">`
+       + (c.stage ? `<div class="head">${c.stage.live ? `<span class="spinner"></span>` : ""}${stageOf(c.stage)}</div>` : "")
+       + timelineOf(c.timeline) + `</div></div>`;
+  }
   for (const k of (c.report?.checks || []).filter(k => !k.ok && !k.skipped))
     h += `<div class="label">${esc(k.name)} failed</div><pre class="diff" style="margin-bottom:14px">${esc(k.detail)}</pre>`;
   h += `<div class="label" style="margin-top:18px">The change</div>`;

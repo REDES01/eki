@@ -41,6 +41,7 @@ from . import digest as digest_mod
 from . import drill
 from . import goals as goals_mod
 from . import observe as observe_mod
+from . import pipeline
 from . import roadmap
 from . import selfloop
 from . import selfwork
@@ -353,6 +354,9 @@ class SelfLoop:
                 # finished changes are applied one at a time, in the order they
                 # finished: in line, it takes no room from the work still going
                 ahead = selfloop.merge_join(prop.id, item=it.id, title=it.title, run=run["id"], area=it.area)
+                was = pipeline.events(prop.id)
+                if not was or was[-1]["event"] in ("stopped", "rolled back"):   # not in line already
+                    pipeline.mark(prop.id, "queued", ahead=ahead)
                 it = selfloop.update(it.id, phase="merging")
                 if ahead:
                     yield (f"\n\n*eki: fit — {ahead} change{'s' if ahead != 1 else ''} finished before it; "
@@ -375,6 +379,7 @@ class SelfLoop:
             while not selfloop.merge_turn(cid, self.runner.running):   # type: ignore[attr-defined]
                 await asyncio.sleep(MERGE_POLL)
             selfloop.merge_mark(cid, applying=True)
+            pipeline.mark(cid, "turn")
             c = selfwork.change(cid)
             if c["state"] in ("applying", "applied"):   # it went in before a restart cut this off
                 return {"state": c["state"], "id": cid}
@@ -444,6 +449,9 @@ class SelfLoop:
         if gone:
             steps.start("swap", Path(gone["build"]).name, change=(gone["cars"] or [""])[-1],
                         cars=gone["cars"], target=gone["build"])
+            for cid in gone["cars"]:
+                pipeline.mark(cid, "leaving", build=Path(gone["build"]).name,
+                              **{"with": [x for x in gone["cars"] if x != cid]})
         return gone
 
     def _self_release_minutes(self) -> float:
@@ -482,6 +490,7 @@ class SelfLoop:
                                               check=self.self_check, by_person=by_person, now=now,
                                               guarded=guarded)
             except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
+                pipeline.mark(cid, "stopped", why=str(e)[:200])
                 if raising:
                     raise
                 return {"state": "proposed", "id": cid, "why": str(e)[:300]}
@@ -998,6 +1007,8 @@ class SelfLoop:
             raise selfwork.SelfWorkError(
                 "it touches what eki may not change alone: " + ", ".join(c["protected"])
                 + " — confirm to apply it (`eki self apply " + c["id"] + "`, or Apply on the board)")
+        if not any(r.get("change") == c["id"] for r in selfloop.merge_queue()):
+            pipeline.mark(c["id"], "queued", by="you")
         got = await self._self_apply_now(cid, raising=True, by_person=True, now=now)
         if got.get("state") == "conflicts":
             # it no longer goes on top of your checkout: not handed back to
@@ -1095,6 +1106,7 @@ class SelfLoop:
                 return
             selfwork.set_state(c["id"], "conflicts", rebase=info)
         if info["files"]:
+            pipeline.mark(c["id"], "conflicts", files=list(info["files"]), run=run["id"])
             if not carried:
                 yield (f"*eki: it conflicts in {', '.join(info['files'])} — having them resolved in its "
                        "worktree…*\n\n")
@@ -1149,6 +1161,7 @@ class SelfLoop:
                 said(text)
                 yield "\n\n" + text
                 return
+            pipeline.mark(c["id"], "fixed", files=list(info.get("resolved") or info["files"]), run=run["id"])
             yield "\n\n*eki: resolved — judging it again on top of your checkout, then applying it…*\n"
         selfwork.set_state(c["id"], "conflicts", resolving="", why="", rebase={})
         try:
@@ -1372,6 +1385,28 @@ class SelfLoop:
 
     # ---- the view ------------------------------------------------------------------------
 
+    def _self_pipeline(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Each change on its way in, at its real stage, and the go-live as
+        one group (eki/pipeline.py) — in progress only where its worker or
+        step is live in this engine."""
+        left = builds_mod.departs_in(self._self_release_minutes())
+        sw = builds_mod.last_swap()
+        return pipeline.view(rows, queue=selfloop.merge_queue(),
+                             running=self.runner.running,               # type: ignore[attr-defined]
+                             train=builds_mod.train(), leaves_at=None if left is None else time.time() + left,
+                             swap=sw, swap_alive=bool(builds_mod.going_live()),
+                             running_build=str(builds_mod.running().get("id") or ""), boot=steps.BOOT)
+
+    def self_stage(self, cid: str) -> Dict[str, Any]:
+        """One change's stage and timeline, for `eki self show` and its page."""
+        c = selfwork.change(cid)
+        got = self._self_pipeline([c])
+        row = next(iter(got["changes"]), None)
+        if row is None:
+            row = {"timeline": pipeline.timeline(c["id"])}
+        return {"stage": {k: v for k, v in row.items() if k not in ("id", "title", "timeline")} or None,
+                "timeline": row["timeline"]}
+
     def self_view(self) -> Dict[str, Any]:
         why_not = self._self_why_not()
         root = self._self_root()
@@ -1410,6 +1445,12 @@ class SelfLoop:
                                "live": steps.live(step, live)}
             return row
 
+        flow = self._self_pipeline(rows)
+        stage_of = {r["id"]: r for r in flow["changes"]}
+        for c in rows:
+            if c["id"] in stage_of:
+                c["stage"] = {k: v for k, v in stage_of[c["id"]].items() if k not in ("id", "title", "timeline")}
+
         # a spinner only for what is being worked on now: a resolve whose run
         # a restart took with it is "carrying on", not "fixing"
         for c in rows:
@@ -1437,6 +1478,8 @@ class SelfLoop:
                          "areas": [selfloop.lane_name(a) for a in r.get("area") or []]}
                         for r in selfloop.merge_queue()],
             "train": self._self_train(),                               # the next go-live, and what it carries
+            "pipeline": flow["changes"],                               # each change on its way in, at its stage
+            "golive": flow["golive"],                                  # the next go-live, and the last one
             "working": [item_row(i) for i in items if i.state == "working"],
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],

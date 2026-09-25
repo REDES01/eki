@@ -70,6 +70,8 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(digest, "HOME", root / "eki" / "self")
     from eki import steps
     monkeypatch.setattr(steps, "HOME", root / "eki" / "self")
+    from eki import pipeline
+    monkeypatch.setattr(pipeline, "HOME", root / "eki" / "self")
     # the programs eki starts as workers, and what they print
     from eki import workers
     monkeypatch.setattr(workers, "HOME", root / "eki" / "work")

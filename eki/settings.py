@@ -84,6 +84,9 @@ DEFAULTS: Dict[str, Any] = {
     #: a model with no tools of its own may ask for a picture mid-answer,
     #: drawn by the image model where it asked (eki/illustrate.py)
     "pictures_in_answers": True,
+    #: a local model on a server that takes `tools` may call eki's own —
+    #: ask another model, make a picture — in a loop of its own (eki/toolloop.py)
+    "local_tools": True,
     #: a subscription that runs out mid-run: the next choice in the row, on
     #: another subscription, carries on from where it stopped (eki/failover.py)
     "failover": True,

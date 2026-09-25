@@ -22,8 +22,12 @@ PRODUCTS = ("code", "prose", "image", "mesh", "audio")
 
 @dataclass
 class Message:
-    role: str                    # "user" | "assistant" | "system"
+    role: str                    # "user" | "assistant" | "system" | "tool"
     content: str
+    #: an assistant turn's calls, in OpenAI's shape, and the call a "tool"
+    #: message answers — only in a local model's tool loop (eki/toolloop.py)
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: str = ""
 
 
 @dataclass
@@ -34,6 +38,7 @@ class ToolCall:
     name: str
     arguments: Dict[str, Any] = field(default_factory=dict)
     raw: str = ""                # the arguments as sent, when they weren't JSON
+    id: str = ""                 # the server's id for it, answered by a "tool" message
 
 
 @dataclass

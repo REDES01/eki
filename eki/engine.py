@@ -46,6 +46,7 @@ from . import learn as learn_mod
 from . import carry as carry_mod
 from . import handoff as handoff_mod
 from . import illustrate
+from . import toolloop as toolloop_mod
 from . import failover as failover_mod
 from . import files as files_mod
 from . import goals as goals_mod
@@ -1223,13 +1224,18 @@ class Engine(SelfLoop):
             # a picture mid-answer, asked for in words (eki/illustrate.py)
             at = 1 if may_hand_off else 0
             history = history[:at] + [Message("system", illustrate.instructions())] + history[at:]
+        # a local model that takes `tools` gets eki's own too, in a loop (eki/toolloop.py)
+        speaker: Any = backend
+        bridge = self._local_bridge(backend, cid, run)
+        if bridge is not None:
+            speaker = toolloop_mod.Loop(backend, bridge, meta)
         started = time.time()                   # what an in-place run wrote is what changed since
         if self._lives(backend) and not grant.narrowed:
             stream = self._live_turn(work_run, cid, backend, choice.model)
         elif self._needs_skill_loader(backend):
-            stream = self._skilled(backend, history, kw, meta)
+            stream = self._skilled(speaker, history, kw, meta)
         else:
-            stream = backend.stream(history, **kw)
+            stream = speaker.stream(history, **kw)
         if may_hand_off:
             stream = handoff_mod.watch(stream)
         if may_draw:
@@ -1488,6 +1494,19 @@ class Engine(SelfLoop):
             alt = words.replace("[", "(").replace("]", ")")[:120]
             return f"![{alt}]({found.group(1)})"
         return draw
+
+    def _local_bridge(self, backend: Backend, cid: str,
+                      run: Dict[str, Any]) -> Optional[mcpbridge.Bridge]:
+        """eki's tools for a local model's own loop: one without tools of its
+        own, on a server that takes `tools`, while what it asks may still go
+        a level deeper (Settings: `local_tools`)."""
+        if not (self._bare(backend.key) and getattr(backend, "accepts_tools", False)
+                and self.settings.get("local_tools", True)):
+            return None
+        depth, _ = nesting.current()
+        if depth + 1 >= nesting.MAX_DEPTH:
+            return None
+        return mcpbridge.Bridge(self, cid, depth=depth + 1, screen=False, parent=run["id"])
 
     def _handoff_targets(self, allowed: Optional[List[str]] = None) -> List[Tuple[str, str]]:
         """Who a model without tools may hand a thread to: the subscriptions'

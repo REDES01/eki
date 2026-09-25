@@ -43,6 +43,9 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
 
     if run["pinned"] and run["provider"]:
         ok, why = can(run["provider"])
+        cfg = providers.config().get(run["provider"], {})
+        if not ok and cfg.get("kind") == "local" and cfg.get("serve") and run["provider"] not in skip:
+            return Decision(run["provider"], "picked", f"you picked {run['provider']} (starting it)")
         return Decision(run["provider"] if ok else None, "picked",
                         f"you picked {run['provider']}" + ("" if ok else f" — waiting: {why}"))
 

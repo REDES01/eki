@@ -16,7 +16,10 @@ bin/eki-next ask --bg --background "…"                # runs when the Mac has 
 bin/eki-next runs | follow | show <run> | cancel <run>
 bin/eki-next route "fix the failing test"             # where it would go, and why
 bin/eki-next providers | skills | mcp
+bin/eki-next models [start|stop] local               # local models; kept up while there's room
+bin/eki-next open                                     # the window (http://127.0.0.1:7788)
 bin/eki-next engine install                           # login agent: always on
+bin/build-mac                                         # build "Eki Next.app", the thin native shell
 bin/eki-next drill                                    # prove a restart loses nothing
 ```
 

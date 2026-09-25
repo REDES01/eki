@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eki</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="side-head">
+      <span class="mark" aria-hidden="true"></span><span class="brand">eki</span>
+      <button id="new" class="ghost" title="New thread (⌘K)">＋ New</button>
+    </div>
+    <nav id="threads"></nav>
+    <section id="machine">
+      <div class="sect">Providers</div>
+      <div id="providers"></div>
+      <div id="engine" class="dim"></div>
+    </section>
+  </aside>
+  <main id="main">
+    <header id="head">
+      <div id="title">New thread</div>
+      <div id="meta" class="dim"></div>
+    </header>
+    <div id="scroll"><div id="log"></div><div id="empty" class="dim">Ask anything. eki picks who answers and says why.</div></div>
+    <form id="composer" autocomplete="off">
+      <textarea id="prompt" rows="1" placeholder="Ask eki…"></textarea>
+      <div class="bar">
+        <select id="to" title="Who answers"><option value="">Auto</option></select>
+        <input id="cwd" placeholder="folder (optional)" title="Work in this folder" spellcheck="false">
+        <label class="check" title="Run when the Mac has room"><input type="checkbox" id="bg"> background</label>
+        <span class="grow"></span>
+        <button id="send" type="submit">Send</button>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="/ui/md.js"></script>
+<script src="/ui/app.js"></script>
+</body>
+</html>

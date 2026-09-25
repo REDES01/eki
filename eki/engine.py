@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import db, machine, paths, store
+from . import db, machine, models, paths, store
 
 log = logging.getLogger("eki.engine")
 
@@ -150,9 +150,18 @@ def spawn(conn, rid: str) -> None:
     conn.execute("UPDATE runs SET pid=? WHERE id=? AND pid IS NULL", (proc.pid, rid))
 
 
+#: how often the engine does its rounds of the local models
+DUTY_EVERY = 15.0
+_last_duty = [0.0]
+
+
 def tick(conn) -> None:
     reap(conn)
     spawn_ready(conn)
+    if time.time() - _last_duty[0] > DUTY_EVERY:
+        _last_duty[0] = time.time()
+        for line in models.duty(conn):
+            log.info(line)
 
 
 def lock() -> Optional[IO[str]]:
@@ -192,6 +201,8 @@ def serve() -> int:
     signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
     signal.signal(signal.SIGINT, lambda *_: stopping.append(1))
     conn = db.connect()
+    from . import server
+    server.start_in_background()
     log.info("engine %s up, home %s", os.getpid(), paths.home())
     while not stopping:
         try:

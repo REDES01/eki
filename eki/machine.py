@@ -26,6 +26,9 @@ def on_power() -> bool:
 
 def memory_pressure() -> int:
     """1 normal, 2 warning, 4 critical (the kernel's own level)."""
+    forced = os.environ.get("EKI_MEMORY_PRESSURE")
+    if forced:
+        return int(forced)
     out = _run("sysctl", "-n", "kern.memorystatus_vm_pressure_level").strip()
     return int(out) if out.isdigit() else 1
 

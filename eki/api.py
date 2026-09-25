@@ -1,0 +1,108 @@
+"""What the web UI can ask for. Plain functions from a request to JSON-able data;
+`server.py` does the HTTP. Everything here is also reachable from the CLI."""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import time
+from typing import Any, Dict, List, Optional
+
+from . import asking, capacity, engine, machine, models, paths, providers, routing, store
+
+TERMINAL = ("done", "failed", "cancelled", "handed_off")
+
+
+def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) -> Dict[str, Any]:
+    view: Dict[str, Any] = {k: r[k] for k in ("id", "seq", "prompt", "state", "provider", "row", "why",
+                                              "priority", "attempt", "error", "parent", "created_at",
+                                              "ended_at")}
+    if full:
+        view["answer"] = store.answer(conn, r["id"])
+        view["steps"] = [{"kind": e["kind"], **json.loads(e["data"])}
+                         for e in store.events_after(conn, r["id"])
+                         if e["kind"] in ("tool", "note", "interrupted", "handoff")]
+        view["last_event"] = max((e["id"] for e in store.events_after(conn, r["id"])), default=0)
+    return view
+
+
+def threads(conn: sqlite3.Connection, limit: int = 60) -> List[Dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT t.*, MAX(r.created_at) AS updated, "
+        " SUM(CASE WHEN r.state IN ('queued','starting','running') THEN 1 ELSE 0 END) AS active "
+        "FROM threads t LEFT JOIN runs r ON r.thread_id = t.id "
+        "GROUP BY t.id ORDER BY active > 0 DESC, updated DESC LIMIT ?", (limit,)).fetchall()
+    return [{"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
+             "updated": t["updated"] or t["created_at"], "working": bool(t["active"])} for t in rows]
+
+
+def thread(conn: sqlite3.Connection, tid: str) -> Dict[str, Any]:
+    t = store.thread(conn, tid)
+    if t is None:
+        raise KeyError(f"no thread {tid}")
+    return {"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
+            "runs": [_run_view(conn, r) for r in store.thread_runs(conn, t["id"])]}
+
+
+def events(conn: sqlite3.Connection, tid: str, after: int, wait: float = 20) -> Dict[str, Any]:
+    """New events in a thread, waiting up to `wait` seconds for the first one."""
+    end = time.time() + wait
+    while True:
+        rows = conn.execute(
+            "SELECT e.* FROM events e JOIN runs r ON r.id = e.run_id "
+            "WHERE r.thread_id = ? AND e.id > ? ORDER BY e.id LIMIT 500", (tid, after)).fetchall()
+        active = conn.execute("SELECT COUNT(*) FROM runs WHERE thread_id=? AND state IN "
+                              "('queued','starting','running')", (tid,)).fetchone()[0]
+        if rows or time.time() >= end:
+            return {"events": [{**json.loads(e["data"]), "id": e["id"], "run": e["run_id"],
+                                "kind": e["kind"]} for e in rows],
+                    "active": active}
+        time.sleep(0.15)
+
+
+def ask(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
+    tid, rid = asking.submit(conn, str(body.get("prompt") or ""), thread=body.get("thread") or None,
+                             to=body.get("to") or None, cwd=body.get("cwd") or None,
+                             background=bool(body.get("background")))
+    return {"thread": tid, "run": rid}
+
+
+def cancel(conn: sqlite3.Connection, rid: str) -> Dict[str, Any]:
+    return {"result": store.cancel(conn, rid)}
+
+
+def provider_list(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    avail = capacity.status(conn)
+    out = []
+    for name, cfg in providers.config().items():
+        ok, why = avail.get(name, (False, "?"))
+        item = {"name": name, "kind": cfg.get("kind"), "label": cfg.get("label") or name,
+                "ok": ok, "why": why}
+        if cfg.get("kind") == "local":
+            item["model"] = models.status(name)
+        out.append(item)
+    return out
+
+
+def model_action(name: str, action: str) -> Dict[str, Any]:
+    if action == "start":
+        return models.start(name)
+    if action == "stop":
+        return models.stop(name)
+    raise ValueError(f"unknown action {action}")
+
+
+def status(conn: sqlite3.Connection) -> Dict[str, Any]:
+    active = store.runs_in(conn, store.ACTIVE)
+    room, why = machine.room()
+    return {"engine": engine.running_pid(), "pid": os.getpid(), "home": str(paths.home()),
+            "running": sum(r["state"] in ("starting", "running") for r in active),
+            "queued": sum(r["state"] == "queued" for r in active),
+            "room": room, "room_why": why, "memory_pressure": machine.memory_pressure()}
+
+
+def route(conn: sqlite3.Connection, prompt: Optional[str]) -> Dict[str, Any]:
+    if not prompt:
+        from .routing.table import rows
+        return {"checker": routing.checker_name(), "rows": rows()}
+    return routing.explain(conn, prompt)

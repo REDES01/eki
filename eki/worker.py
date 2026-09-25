@@ -19,7 +19,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import capacity, db, mcp, paths, providers, routing, skills, store
+from . import capacity, db, mcp, models, paths, providers, routing, skills, store
 from .providers.base import Outcome, Turn
 
 log = logging.getLogger("eki.worker")
@@ -81,10 +81,10 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
     rid, now = r["id"], db.now()
     with db.tx(conn):
         cur = store.run(conn, rid)
-        if cur["cancel"] or out.state == "cancelled":
-            store.update_run(conn, rid, state="cancelled", ended_at=now)
-        elif out.state == "done":
+        if out.state == "done":               # finished before the stop landed: keep the answer
             store.update_run(conn, rid, state="done", ended_at=now, error=None)
+        elif cur["cancel"] or out.state == "cancelled":
+            store.update_run(conn, rid, state="cancelled", ended_at=now)
         elif out.state == "handed_off":
             store.update_run(conn, rid, state="handed_off", ended_at=now, error=None)
             nxt = store.create_run(conn, r["thread_id"], r["prompt"], priority=r["priority"], parent=rid,
@@ -141,10 +141,13 @@ def main(rid: str) -> int:
 
         turn.extra["on_child"] = lambda pid: conn.execute(
             "UPDATE runs SET child_pid=? WHERE id=?", (pid, rid))
-        if providers.config().get(provider, {}).get("kind") == "codex":
+        kind = providers.config().get(provider, {}).get("kind")
+        if kind == "local" and not models.ensure(provider):
+            emit("note", {"text": f"{provider} didn't come up"})
+        if kind == "codex":
             skills.sync_codex()
         out = providers.get(provider).take(turn, emit)
-        if stop.is_set() and out.state not in ("done",):
+        if stop.is_set() and out.state != "done":
             out.state = "cancelled"
         finish(conn, r, provider, out)
     except Exception:                                   # noqa: BLE001 — a bug must not loop forever

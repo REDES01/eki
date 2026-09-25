@@ -77,8 +77,26 @@ session id per thread, so returning to it resumes its session.
    row is failover. The table is a JSON file you can read and edit
    (`~/.eki-next/routing.json`); defaults are written on first run.
 
-## Not in milestone 1
+## Milestone 2: the window and the machine
 
-Web UI (the engine will serve it; a thin native shell comes after), goals
-/ idle shift, self-build loop, image generation, learned preferences, model
-lifecycle. Each is built on the pieces above, not beside them.
+- **Web UI served by the engine** (`eki/server.py`, `eki/api.py`,
+  `eki/web/`) on `127.0.0.1:7788`. The files are read from disk on every
+  request: a UI change is live on refresh. No build step, no framework. A
+  POST needs the `X-Eki: 1` header, so only eki's own page can act.
+  Nothing lives in the page that the engine doesn't have: refresh, or
+  restart the engine mid-run, and the page picks up where it was.
+- **A thin Mac shell** (`mac/main.swift`, built by `bin/build-mac`): a
+  window and a menu bar item around the web UI; it starts the engine if
+  it isn't up. It rarely needs to change.
+- **Local models** (`eki/models.py`): a local provider with a `serve`
+  command can be started and stopped by eki (`eki-next models`, or the
+  sidebar). With `keep_up`, the engine keeps it running while memory is
+  normal and *steps it out* when memory comes under pressure and nothing
+  is using it, coming back five minutes after pressure eases. A model you
+  stop stays stopped until you start it. eki never stops a server it
+  didn't start. A run sent to a stopped model starts it and waits.
+
+## Not built yet
+
+Goals / idle shift, self-build loop, image generation, learned preferences.
+Each is built on the pieces above, not beside them.

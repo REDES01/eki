@@ -10,7 +10,7 @@ import sys
 from typing import List, Optional
 
 COMMANDS = ["ask", "follow", "runs", "show", "cancel", "threads", "engine", "route",
-            "providers", "skills", "mcp", "drill"]
+            "providers", "models", "skills", "mcp", "open", "drill"]
 
 
 def parser() -> argparse.ArgumentParser:

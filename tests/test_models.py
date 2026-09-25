@@ -1,0 +1,87 @@
+import json
+import socket
+import sys
+import time
+
+import pytest
+
+from eki import models
+
+SERVE = """
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        b = json.dumps({"data": [{"id": "m"}]}).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+"""
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+@pytest.fixture
+def model(home):
+    port = free_port()
+    cfg = {"kind": "local", "base_url": f"http://127.0.0.1:{port}", "keep_up": True,
+           "serve": {"command": [sys.executable, "-c", SERVE, str(port)]}}
+    (home / "providers.json").write_text(json.dumps({"local": cfg}))
+    yield "local"
+    models.stop("local", by="test")
+
+
+def wait_up(name, up=True, t=10):
+    end = time.time() + t
+    while time.time() < end:
+        if models.status(name)["up"] == up:
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def test_start_and_stop(model):
+    assert not models.status(model)["up"]
+    models.start(model)
+    assert wait_up(model)
+    st = models.stop(model)
+    assert wait_up(model, up=False) and st["held"]
+
+
+def test_ensure_starts_it_for_a_run(model):
+    assert models.ensure(model, timeout=10)
+    assert models.status(model)["managed"]
+
+
+def test_kept_up_and_stepped_out(model, conn, monkeypatch):
+    assert models.duty(conn) == ["started local: kept up"]
+    assert wait_up(model)
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "2")
+    assert models.duty(conn) == ["stepped local out: memory under pressure"]
+    assert wait_up(model, up=False)
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
+    assert models.duty(conn) == []          # waits a while before coming back
+
+
+def test_held_by_you_stays_down(model, conn):
+    models.stop(model)
+    assert models.duty(conn) == []
+
+
+def test_a_server_eki_didnt_start_is_left_alone(model, conn, monkeypatch):
+    import subprocess
+    cfg = json.loads((models.paths.config("providers")).read_text())["local"]
+    proc = subprocess.Popen(cfg["serve"]["command"])
+    try:
+        assert wait_up(model)
+        monkeypatch.setenv("EKI_MEMORY_PRESSURE", "4")
+        assert models.duty(conn) == []
+        assert models.status(model)["up"] and not models.status(model)["managed"]
+    finally:
+        proc.terminate()

@@ -13,6 +13,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("EKI_HOME", str(h))
     monkeypatch.setenv("EKI_AGENTS_SKILLS", str(tmp_path / "agents-skills"))
     monkeypatch.setenv("EKI_MACHINE", "ok")
+    monkeypatch.setenv("EKI_PORT", "0")
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
     real = Path("~").expanduser()
     assert not str(h).startswith(str(real / ".eki")), "tests must never use the real eki home"
     (h / "providers.json").write_text(json.dumps({

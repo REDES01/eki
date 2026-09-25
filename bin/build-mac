@@ -1,0 +1,32 @@
+#!/bin/sh
+# Build "Eki Next.app": the thin native shell around the engine's web UI.
+# Needs the Xcode command line tools (swiftc). The UI itself is not in here.
+set -e
+here="$(cd "$(dirname "$0")/.." && pwd)"
+app="$here/Eki Next.app"
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+swiftc -O "$here/mac/main.swift" -o "$app/Contents/MacOS/EkiNext" -framework Cocoa -framework WebKit
+icon=""
+for f in "$here/mac/AppIcon.icns" "$HOME/eki/mac/assets/AppIcon.icns"; do
+  [ -f "$f" ] && cp "$f" "$app/Contents/Resources/AppIcon.icns" && icon="AppIcon" && break
+done
+cat > "$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>Eki Next</string>
+  <key>CFBundleIdentifier</key><string>dev.eki.next</string>
+  <key>CFBundleExecutable</key><string>EkiNext</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>$icon</string>
+  <key>CFBundleShortVersionString</key><string>0.3.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <key>EkiRoot</key><string>$here</string>
+  <key>EkiPort</key><string>${EKI_PORT:-7788}</string>
+</dict></plist>
+PLIST
+codesign --force -s - "$app" >/dev/null 2>&1 || true
+echo "built $app"

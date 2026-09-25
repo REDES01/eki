@@ -444,7 +444,13 @@ still going carry over into the new version rather than holding it back
       `supervisor.sh`, `agent.py`, secrets and quota are protected — eki never
       applies them itself; the supervisor is only installed by `eki agent
       install`. 5006fdd: the person can apply such a change — `eki self
-      apply`, or *Apply* on the board)
+      apply`, or *Apply* on the board). Since 2026-09-25 that is the
+      *hard-locked* tier (`selfwork.HARD_LOCKED`): the supervisor and rollback
+      path (`supervisor.sh`, `builds.py`), what launchd runs (`agent.py`, the
+      launcher), the judge (`candidate.py`, `drill.py`), the credentials rule
+      (`secrets.py`, `quota/`), `mac/sign.sh`, `mac/hub.entitlements`,
+      `LICENSE`, `NOTICE`. The rest of the self-work code is *guarded*: eki
+      applies it alone under autonomy apply, fully checked and live on its own
 - [x] **This Mac and the public repo are different.** What eki changes here is
       a local branch on top of the last release, rebased when a release
       lands. Offering a change upstream is a pull request; merging to `main`

@@ -514,16 +514,40 @@ judged is closed with that change, not started over. An item a change was applie
 for is never taken again on its own, ticked or not.
 
 **How far it goes alone.** `self_autonomy` is *propose* (a branch, a diff and
-its checks; you apply it) or *apply* (a fit change that touches nothing
-protected is applied at once). `self_autonomy_areas` overrides it per path —
-`{"ROADMAP.md": "apply", "docs/": "apply"}` — the longest match winning; a
-change is applied only if every file it touches may be. Protected paths — now
-including `selfloop.py` and `selfengine.py`, which decide what eki takes on
-and how far it goes — are never applied by eki at any setting: not by
-autonomy, not by `eki self --apply`, not by the merge queue. That keeps eki
-from applying them alone; it doesn't keep you out.
+its checks; you apply it) or *apply* (a fit change is applied at once — one
+touching a guarded path only as below). `self_autonomy_areas` overrides it
+per path — `{"ROADMAP.md": "apply", "docs/": "apply"}` — the longest match
+winning; a change is applied only if every file it touches may be.
 
-**Applying a protected change yourself.** `eki self apply <id>` lists the
+What eki is built from comes in two tiers (`selfwork.HARD_LOCKED` and
+`selfwork.GUARDED`; `eki self` and the Self board list both):
+
+- **Hard-locked** — never applied by eki, at any setting: not by autonomy,
+  not by `eki self --apply`, not by the merge queue. The supervisor and the
+  way back (`supervisor.sh`, `builds.py`), what launchd runs (`agent.py`,
+  the launcher), the judge (`candidate.py`, `drill.py` — so eki can't weaken
+  its own checks), the credentials rule (`secrets.py`, `quota/`),
+  `mac/sign.sh`, `mac/hub.entitlements`, `LICENSE` and `NOTICE`. That keeps
+  eki from applying them alone; it doesn't keep you out.
+- **Guarded** — the rest of how eki builds itself: `selfwork.py`,
+  `selfloop.py`, `selfengine.py`, `workers.py`, `steps.py`, `observe.py`,
+  `roadmap.py`. Until 2026-09-25 these waited for you like the hard-locked
+  ones, so most improvements to the self-work sat waiting. Now eki applies
+  such a change alone when autonomy is *apply* (or the item was asked with
+  `--apply`), but only alone: it waits its turn until nothing else is on the
+  release train or on its way live; it is put on top of your checkout and
+  judged again right then, whether or not your checkout moved, and every
+  check must pass with the tests and the restart check actually run (not
+  skipped); then it is swapped in by itself instead of boarding the train,
+  and nothing else goes live — the train waits, the merge queue waits —
+  until it has settled (at most an hour), so a rollback undoes only it. Its
+  thread says it was applied alone as a guarded change, and so does the
+  journal the weekly note is written from. Under *propose* it waits for you
+  like any other change.
+
+A change touching both tiers is hard-locked: it waits for you.
+
+**Applying a protected change yourself.** Either tier. `eki self apply <id>` lists the
 protected files the change touches and asks *apply it anyway? [y/N]*
 (`--yes` skips the question; with no terminal to ask, it needs `--yes`). On
 the Self board the button reads *Apply…* and opens a confirm step naming the

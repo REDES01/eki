@@ -28,10 +28,13 @@ change to documentation only goes straight into your checkout), `discard`,
 or — once applied — `undo`, which is a change of its own: the revert, judged
 like any other. Where each change stands is kept in ~/.eki/self/changes.json.
 
-Some paths eki may change but never on its own say-so — the checker that
-judges it, this file, the login agent, anything that holds or reads a
-credential. A proposal that touches them says so, loudly, and is never
-applied by eki.
+Some paths eki may change but never on its own say-so (HARD_LOCKED) — the
+supervisor and the way back, what launchd runs, the checker that judges it,
+anything that holds or reads a credential. A proposal that touches them
+says so, loudly, and is never applied by eki. The rest of its own machinery
+— this file among it — is GUARDED: eki may apply such a change alone when
+autonomy is apply, but only fully checked, judged again on top of your
+checkout right before, and live on its own so a rollback undoes only it.
 """
 from __future__ import annotations
 
@@ -53,16 +56,32 @@ HOME = Path("~/.eki/self").expanduser()
 #: screenshots an agent takes of the app it changed, by change id
 SHOTS = Path("~/.eki/shots").expanduser()
 
-#: a diff touching these is for a person to read, whatever the checks say
-PROTECTED = (
-    "eki/candidate.py", "eki/selfwork.py",       # who judges, and who asks
-    "eki/selfloop.py", "eki/selfengine.py",      # what it takes on, and how far it goes alone
-    "eki/agent.py",                              # what launchd runs
+#: a diff touching these is for a person to read, whatever the checks say:
+#: eki never applies it alone, at any autonomy
+HARD_LOCKED = (
     "eki/builds.py", "eki/supervisor.sh",        # the swap and the way back
+    "eki/agent.py", "eki/launcher.py",           # what launchd runs
+    "eki/launcher.swift",
+    "eki/candidate.py", "eki/drill.py",          # the judge: eki can't weaken its own checks
     "eki/secrets.py", "eki/quota/",              # the credentials rule
     "mac/sign.sh", "mac/hub.entitlements",
     "LICENSE", "NOTICE",
 )
+#: how eki builds itself: applied alone only when autonomy is apply, every
+#: check passing (the restart check among them), judged again on top of
+#: your checkout right before, and live on its own (the person decided,
+#: 2026-09-25 — most improvements to the self-work sat waiting)
+GUARDED = (
+    "eki/selfwork.py", "eki/selfloop.py",        # who asks, and what it takes on
+    "eki/selfengine.py",                         # how far it goes alone
+    "eki/workers.py", "eki/steps.py",            # work a restart doesn't lose
+    "eki/observe.py", "eki/roadmap.py",          # what it notices, what it works from
+)
+PROTECTED = HARD_LOCKED + GUARDED
+#: checks a guarded change must have run and passed — never skipped
+GUARDED_CHECKS = ("tests", "restart")
+#: a guarded change on its way live holds the others back at most this long
+ALONE_HOLD = 3600
 #: a base that passed its tests is trusted for this long
 BASE_OK_SECONDS = 24 * 3600
 #: states a change can be in (changes.json)
@@ -90,6 +109,7 @@ class Proposal:
     backend: str = ""
     files: List[str] = field(default_factory=list)
     protected: List[str] = field(default_factory=list)
+    locked: List[str] = field(default_factory=list)   # the part of `protected` that's HARD_LOCKED
     commit: str = ""
     report: Optional[Dict[str, Any]] = None
     verdict: str = ""
@@ -136,8 +156,12 @@ class Proposal:
             for c in self.report["checks"]:
                 mark = "skip" if c["skipped"] else ("ok  " if c["ok"] else "FAIL")
                 out.append(f"  {mark}  {c['name']:9} {c['detail']}".rstrip())
-        if self.protected:
-            out.append("  !! touches what eki may not change alone: " + ", ".join(self.protected))
+        if self.locked:
+            out.append("  !! touches what eki may never change alone: " + ", ".join(self.locked))
+        guarded = [f for f in self.protected if f not in self.locked]
+        if guarded:
+            out.append("  !  guarded — eki applies it alone only when autonomy is apply, "
+                       "fully checked and on its own: " + ", ".join(guarded))
         if self.applied_by:
             out.append(f"  applied because {self.applied_by} asked for it")
         out.append(f"  → {self.verdict}")
@@ -193,9 +217,65 @@ def changed(where: Path) -> List[str]:
     return [n for n in names.splitlines() if n.strip()]
 
 
-def touches_protected(files: List[str]) -> List[str]:
+def _under(files: List[str], paths: Tuple[str, ...]) -> List[str]:
     return [f for f in files
-            if any(f == p or (p.endswith("/") and f.startswith(p)) for p in PROTECTED)]
+            if any(f == p or (p.endswith("/") and f.startswith(p)) for p in paths)]
+
+
+def touches_protected(files: List[str]) -> List[str]:
+    """Files in either tier: what a person is told about."""
+    return _under(files, PROTECTED)
+
+
+def touches_locked(files: List[str]) -> List[str]:
+    """Files eki never applies alone, at any autonomy."""
+    return _under(files, HARD_LOCKED)
+
+
+def locked_of(c: Dict[str, Any]) -> List[str]:
+    """A change's hard-locked files — worked out again for a record written
+    before the tiers, when everything protected waited for a person."""
+    return list(c.get("locked") or touches_locked(c.get("protected") or []))
+
+
+def fully_checked(report: Dict[str, Any]) -> str:
+    """"" when every check passed and none of GUARDED_CHECKS was skipped —
+    what a guarded change needs to go in alone; else why not."""
+    checks = {k.get("name"): k for k in report.get("checks") or []}
+    for name in GUARDED_CHECKS:
+        k = checks.get(name)
+        if k is None or k.get("skipped"):
+            return f"the {name} check didn't run"
+    bad = [n for n, k in checks.items() if not k.get("ok")]
+    return f"{', '.join(bad)} failed" if bad else ""
+
+
+def alone_blocked(cid: str = "", home: Optional[Path] = None) -> str:
+    """Why a guarded change can't go live alone right now: others aboard
+    the release train, a swap on its way in, or another guarded change not
+    yet settled. "" when it can."""
+    from . import builds
+    if any(car.get("self") != cid for car in builds.train().get("cars") or []):
+        return "waiting for the release train to leave — a guarded change goes live on its own"
+    if builds.going_live():
+        return "waiting for the new version going live to settle — a guarded change goes live on its own"
+    other = guarded_applying(home)
+    if other and other != cid:
+        return f"waiting for self/{other}, a guarded change going live alone, to settle"
+    return ""
+
+
+def guarded_applying(home: Optional[Path] = None, now: Optional[float] = None) -> str:
+    """The guarded change on its way live alone, if there is one: nothing
+    else goes live until it's settled, so a rollback undoes only it. It
+    holds them at most ALONE_HOLD — a swap that never came can't hold
+    everything forever."""
+    now = now or time.time()
+    for c in changes(home):
+        if c.get("state") == "applying" and c.get("alone") \
+                and now - float(c.get("alone_at") or 0) < ALONE_HOLD:
+            return c["id"]
+    return ""
 
 
 def docs_only(files: List[str]) -> bool:
@@ -348,6 +428,7 @@ def changes(home: Optional[Path] = None, limit: int = 0) -> List[Dict[str, Any]]
         row["state"] = st.get("state") or first_state(e)
         row["state_at"] = st.get("at") or e.get("at") or 0
         row["title"] = e.get("title") or (e.get("request") or "").strip().split("\n")[0][:100]
+        row["locked"] = locked_of(row)
         # records from before the loop don't say who wanted them; a fault's brief does
         row.setdefault("source", "fault" if (e.get("request") or "").startswith("Fix a fault eki observed")
                        else "asked")
@@ -586,7 +667,7 @@ def conclude(p: Proposal, got: Dict[str, str], *, python: Optional[str] = None,
         if p.base and head != p.base else pending
     if not p.files:
         return finish("the agent changed nothing", keep=False)
-    p.protected = touches_protected(p.files)
+    p.protected, p.locked = touches_protected(p.files), touches_locked(p.files)
     p.commit = head
 
     if docs_only(p.files):
@@ -598,9 +679,12 @@ def conclude(p: Proposal, got: Dict[str, str], *, python: Optional[str] = None,
     p.report, p.fit = report.to_json(), report.fit
     if not report.fit:
         return finish("not fit to run — the branch is kept so the failure can be read")
+    if p.locked:
+        return finish("passes, but touches protected paths eki may never change alone: "
+                      "for a person to read line by line before merging")
     if p.protected:
-        return finish("passes, but touches protected paths: for a person to read "
-                      "line by line before merging")
+        return finish("fit to run — a guarded change: eki applies it alone only when autonomy "
+                      "is apply, judged again first and live on its own")
     return finish("fit to run — proposed, not merged")
 
 
@@ -1109,7 +1193,7 @@ def finish_rebase(cid: str, info: Dict[str, Any], by: str = "", how: str = "",
 def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None,
           check: Callable[..., candidate.Report] = candidate.check, say: Say = None,
           swap: Optional[Callable[..., Any]] = None, by_person: bool = False,
-          now: bool = False) -> Dict[str, Any]:
+          now: bool = False, guarded: bool = False) -> Dict[str, Any]:
     """Put a proposed change to work. If your checkout has moved on since it
     was made, it's put on top of it first and judged again. Documentation
     goes straight into your checkout; code becomes a build that boards the
@@ -1121,9 +1205,16 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     rebase with nothing to do, and a check cut off (steps.Interrupted) is
     simply run again.
 
-    A change touching PROTECTED goes in only when a person asked for it
+    A change touching HARD_LOCKED goes in only when a person asked for it
     (`by_person`): the protection keeps eki from applying those alone, not
-    you. It takes the same path as any other, and its record says who asked."""
+    you. It takes the same path as any other, and its record says who asked.
+
+    One touching only GUARDED paths eki may apply alone (`guarded`: autonomy
+    is apply) — but only alone: with nothing else on the release train or
+    on its way live, judged again on top of your checkout whether or not it
+    moved, every check passing and the tests and restart check actually run,
+    and then swapped in by itself rather than boarding the train, so a
+    rollback undoes only it."""
     say = say or (lambda _line: None)
     python = python or sys.executable
     c = change(cid, home)
@@ -1132,11 +1223,19 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         raise SelfWorkError(f"self/{cid} is {c['state']} — only a proposed change can be applied")
     if c.get("resolving") and time.time() - float(c.get("resolving_at") or 0) < 3600:
         raise SelfWorkError("eki is having its conflicts resolved right now — it applies it when that's done")
-    if c.get("protected") and not by_person:
-        raise SelfWorkError("it touches what eki may not change alone ("
-                            + ", ".join(c["protected"]) + f") — a person applies it: `eki self apply {cid}`")
+    if locked_of(c) and not by_person:
+        raise SelfWorkError("it touches what eki may never change alone ("
+                            + ", ".join(locked_of(c)) + f") — a person applies it: `eki self apply {cid}`")
+    if c.get("protected") and not by_person and not guarded:
+        raise SelfWorkError("it's a guarded change (" + ", ".join(c["protected"]) + ") — eki applies "
+                            f"those alone only when autonomy is apply; a person applies it: `eki self apply {cid}`")
     if not c.get("fit"):
         raise SelfWorkError(f"self/{cid} didn't pass its checks")
+    alone = bool(c.get("protected")) and not by_person
+    if alone:
+        busy = alone_blocked(cid, home)
+        if busy:
+            return {"state": c["state"], "id": cid, "why": busy}
     if by_person:
         set_state(cid, c["state"], home, applied_by="you", asked_at=int(time.time()))
     root = Path(c["root"])
@@ -1150,7 +1249,8 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
     if c.get("base") and not asks_to_tick(c.get("request") or "", c.get("source") or "") and _untick_commit(where, c["base"]):
         commit = p.commit = git(where, "rev-parse", "HEAD")
         p.files = [f for f in git(where, "diff", "--name-only", c["base"], commit).splitlines() if f]
-    if not is_in(root, head, commit):
+    moved = not is_in(root, head, commit)
+    if moved:
         say("your checkout has moved on since — putting the change on top of it…")
         got, _ = _rebase(where, "-q", head)
         if got.returncode != 0:
@@ -1161,13 +1261,19 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
             return {"state": "conflicts", "id": cid}
         p.commit, p.base = git(where, "rev-parse", "HEAD"), head
         p.files = [f for f in git(where, "diff", "--name-only", head, p.commit).splitlines() if f]
-        p.protected = touches_protected(p.files)
-        if p.protected and not by_person:
+        p.protected, p.locked = touches_protected(p.files), touches_locked(p.files)
+        if (p.locked or (p.protected and not guarded)) and not by_person:
             p.verdict = "on top of your checkout it touches protected paths — for a person"
             record(p, home)
             set_state(cid, "proposed", home, why="it touches what eki may not change alone ("
-                      + ", ".join(p.protected) + ")")
+                      + ", ".join(p.locked or p.protected) + ")")
             return {"state": "proposed", "id": cid, "why": p.verdict}
+        alone = bool(p.protected) and not by_person
+        busy = alone_blocked(cid, home) if alone else ""
+        if busy:
+            record(p, home)
+            return {"state": c["state"], "id": cid, "why": busy}
+    if moved or alone:
         if not docs_only(p.files):
             say("judging it again, on top of your checkout…")
             report = check(where, python=python, say=say)
@@ -1177,6 +1283,12 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
                 record(p, home)
                 set_state(cid, "unfit", home, why="failed its checks once put on top of your checkout")
                 return {"state": "unfit", "id": cid}
+            short = fully_checked(p.report) if alone else ""
+            if short:
+                p.verdict = f"a guarded change goes in alone only fully checked: {short}"
+                record(p, home)
+                set_state(cid, "proposed", home, why=p.verdict)
+                return {"state": "proposed", "id": cid, "why": p.verdict}
         p.verdict = "fit to run on top of your checkout"
         record(p, home)
     if roadmap.NAME in p.files and c.get("source") != "undo" \
@@ -1195,11 +1307,18 @@ def apply(cid: str, *, python: Optional[str] = None, home: Optional[Path] = None
         return {"state": "proposed", "id": cid, "why": merged}
     from . import builds
     build = builds.make(root, p.commit, note=f"self/{cid}")
+    if alone:
+        # live by itself, not on the train: a rollback undoes only it
+        (swap or builds.swap)(build, self_id=cid)
+        set_state(cid, "applying", home, build=str(build), alone=True, alone_at=int(time.time()),
+                  how="applied alone as a guarded change — every check passed, the full tests "
+                      "again on top of your checkout just before")
+        return {"state": "applying", "id": cid, "build": str(build), "alone": True}
     if swap is not None:
         swap(build, self_id=cid)
     else:
         builds.board(build, self_id=cid, now=now)
-    set_state(cid, "applying", home, build=str(build))
+    set_state(cid, "applying", home, build=str(build), alone=False)
     return {"state": "applying", "id": cid, "build": str(build)}
 
 

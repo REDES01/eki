@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import builds, candidate, goals, roadmap, selfloop, selfwork, shift, watch
+from eki import builds, candidate, goals, observe, roadmap, selfloop, selfwork, shift, watch
 from eki.adapters.base import Backend, BackendInfo, Capabilities, Cost, Health
 from eki.quota.base import Reading, Window
 from tests.test_runs import echo_config, settle
@@ -675,6 +675,63 @@ async def test_a_protected_change_waits_for_you_even_with_apply_and_goes_in_when
     eng.self_settled({"self": cid, "state": "healthy", "merged": "merged into your checkout"})
     c = selfwork.change(cid)
     assert c["state"] == "applied" and c["applied_by"] == "you"
+    await eng.runner.stop()
+
+
+def _fully_checked(where, **kw):
+    """The candidate check with the restart check run — a guarded change needs it."""
+    return candidate.Report(str(where), [candidate.Check("tests", True, "stand-in"),
+                                         candidate.Check("restart", True, "stand-in")])
+
+
+@pytest.mark.asyncio
+async def test_a_guarded_change_is_applied_alone_under_autonomy_apply(eng):
+    eng.settings = {**eng.settings, "self_autonomy": "apply"}
+    eng.self_check = _fully_checked
+    Agent.edits = {"eki/steps.py": "# how steps survive a restart, better\n"}
+    started = await eng.self_ask("make steps sturdier")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    c = selfwork.change(cid)
+    assert c["state"] == "applying" and c["alone"] and c["protected"] == ["eki/steps.py"]
+    # live by itself, not on the release train
+    assert eng.swaps[-1][1] == {"self_id": cid} and not builds.train().get("cars")
+    said = eng.store.turns(started["conversation"])[-1]["content"]
+    assert "applied alone, as a guarded change" in said and "rollback undoes only it" in said
+    assert any("applied alone as a guarded change" in (e.get("what") or "")
+               for e in observe.entries(0, "history"))
+    # the train waits while it settles; then it's applied, and the train may go
+    builds.board(eng.root / "another-build", self_id="other")
+    assert await eng.self_release() == {}
+    eng.self_settled({"self": cid, "state": "healthy", "merged": "merged into your checkout"})
+    assert selfwork.change(cid)["state"] == "applied" and not selfwork.guarded_applying()
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_hard_locked_file_in_a_guarded_change_makes_it_wait_even_under_apply(eng):
+    eng.settings = {**eng.settings, "self_autonomy": "apply"}
+    eng.self_check = _fully_checked
+    Agent.edits = {"eki/steps.py": "# steps\n", "eki/candidate.py": "# a gentler judge\n"}
+    started = await eng.self_ask("make steps sturdier, and the judge gentler")
+    await settle(eng.runs, started["run"], timeout=20)
+    c = selfwork.change(selfloop.get(started["item"]).change)
+    assert c["state"] == "proposed" and c["locked"] == ["eki/candidate.py"] and not eng.swaps
+    said = eng.store.turns(started["conversation"])[-1]["content"]
+    assert "never change alone" in said
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_guarded_change_waits_for_you_when_autonomy_is_propose(eng):
+    eng.self_check = _fully_checked
+    Agent.edits = {"eki/workers.py": "# workers\n"}
+    started = await eng.self_ask("make workers sturdier")
+    await settle(eng.runs, started["run"], timeout=20)
+    cid = selfloop.get(started["item"]).change
+    assert selfwork.change(cid)["state"] == "proposed" and not eng.swaps
+    said = eng.store.turns(started["conversation"])[-1]["content"]
+    assert "a guarded change, waiting for you" in said and "only when autonomy is apply" in said
     await eng.runner.stop()
 
 

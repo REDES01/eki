@@ -459,7 +459,7 @@ function changeActs(c, withDiff) {
   if (["proposed", "conflicts", "rolled back"].includes(c.state) && c.fit)
     out.push(!guarded ? `<button class="btn small primary" data-cact="apply" data-id="${esc(c.id)}">Apply</button>`
       : S.confirm === "ap:" + c.id
-      ? `<span class="confirm">It touches what eki may not change alone: ${esc(c.protected.join(", "))}. Apply it anyway? It's checked, built and swapped in, watched. <button class="btn small primary" data-cact="apply" data-confirm="1" data-id="${esc(c.id)}">Apply</button><button class="btn small" data-cancel>Cancel</button></span>`
+      ? `<span class="confirm">It touches ${(c.locked || []).length ? "what eki may never change alone" : "eki's own machinery (guarded)"}: ${esc(c.protected.join(", "))}. Apply it anyway? It's checked, built and swapped in, watched. <button class="btn small primary" data-cact="apply" data-confirm="1" data-id="${esc(c.id)}">Apply</button><button class="btn small" data-cancel>Cancel</button></span>`
       : `<button class="btn small primary" data-ask="ap:${esc(c.id)}">Apply…</button>`);
   if (["proposed", "conflicts", "unfit", "stopped", "rolled back"].includes(c.state))
     out.push(S.confirm === "dc:" + c.id
@@ -472,9 +472,29 @@ function changeActs(c, withDiff) {
   return out.join("");
 }
 
+// what eki may change alone: never (hard-locked), and only fully checked (guarded)
+function tiersOf(t) {
+  if (!t) return "";
+  const names = ps => ps.map(p => p.startsWith("eki/") ? p.slice(4) : p).join(", ");
+  return `<div class="muted" style="font-size:12.5px"><b>Never alone</b> — you apply these: ${esc(names(t.locked || []))}</div>
+    <div class="muted" style="font-size:12.5px"><b>Alone only under Apply here</b> — every check passing, the restart check among them, the full tests again just before, and live on its own so a rollback undoes only it: ${esc(names(t.guarded || []))}</div>`;
+}
+
+const guardedOf = c => (c.protected || []).filter(f => !(c.locked || []).includes(f));
+
+// why a change touching eki's own machinery is where it is
+function tierWhy(c) {
+  if ((c.locked || []).length)
+    return "Touches what eki may never change alone (" + c.locked.join(", ") + ") — eki won't apply it; read it, and Apply it yourself if you want it";
+  if (c.alone) return "Applied alone as a guarded change (" + guardedOf(c).join(", ") + ") — fully checked, live on its own";
+  if (guardedOf(c).length)
+    return "A guarded change (" + guardedOf(c).join(", ") + ") — eki applies it alone only under Apply here, fully checked; or Apply it yourself";
+  return "";
+}
+
 function changeCard(c) {
-  const why = (c.protected || []).length && !["applying", "applied"].includes(c.state)
-            ? "Touches what eki may not change alone (" + c.protected.join(", ") + ") — eki won't apply it; read it, and Apply it yourself if you want it"
+  const why = (c.protected || []).length && (!["applying", "applied"].includes(c.state) || c.alone)
+            ? tierWhy(c)
             : fixing(c) ? "" : c.why || "";
   return `<div class="card change">
     <div class="top"><div style="min-width:0"><div class="title">${esc(c.title)}</div>
@@ -532,6 +552,7 @@ function selfPage() {
         <input class="input" id="area-path" placeholder="e.g. ROADMAP.md or docs/" style="width:170px">
         <select class="input" id="area-mode"><option value="apply">apply</option><option value="propose">propose</option></select>
         <button class="btn small" data-area-add>Add</button></span></div>
+    ${tiersOf(v.tiers)}
     <div class="line">
       <label class="check" title="Under pace for the week, and never the last 30% of a window"><input type="checkbox" id="self-spare" ${!g || g.spare ? "checked" : ""} ${g ? "" : "disabled"}> Your subscriptions' spare room</label>
       <label class="check" title="Qwen with Codex's hands may take eki's own code too"><input type="checkbox" id="self-local" ${v.local ? "checked" : ""}> Local models too</label>
@@ -621,7 +642,7 @@ function changePage() {
     <div class="meta"><span class="badge ${badgeOf(c)}">${esc(stateOf(c))}</span>${srcChip(c.source || "asked")}
       <span>self/${esc(c.id)}</span><span>${c.backend && c.backend !== "eki" ? "written by " + esc(c.backend) : "made by eki"}</span>
       ${c.base ? `<span>on ${esc(c.base.slice(0, 10))}</span>` : ""}<span>${esc(when(c.at))}</span>${c.applied_by ? `<span>applied because ${esc(c.applied_by)} asked</span>` : ""}</div>
-    ${(c.protected || []).length ? `<div class="meta" style="color:var(--wait)">Touches what eki may not change alone: ${esc(c.protected.join(", "))}</div>` : ""}
+    ${(c.protected || []).length ? `<div class="meta" style="color:var(--wait)">${esc(tierWhy(c))}</div>` : ""}
     ${c.verdict ? `<div class="note" style="background:var(--sunk)">${esc(c.verdict)}${c.why && !c.verdict.includes(c.why) ? " — " + esc(c.why) : ""}${c.merged ? " · " + esc(c.merged) : ""}</div>` : ""}
     ${checksOf(c) ? `<div class="meta" style="margin-top:10px">${checksOf(c)}</div>` : ""}
     <div class="acts">${changeActs(c, false)}</div>${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}</div>`;

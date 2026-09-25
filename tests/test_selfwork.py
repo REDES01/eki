@@ -151,6 +151,72 @@ def test_a_change_that_comes_to_touch_protected_paths_on_top_of_your_checkout_wa
     assert selfwork.change(p.id, home)["protected"] == ["eki/agent.py"]
 
 
+def full(fit: bool = True, restart: str = "ran"):
+    """A report with the tests and the restart check — what a guarded change needs."""
+    def check(where, **kw):
+        return candidate.Report(str(where), [candidate.Check("tests", fit, "as told"),
+                                             candidate.Check("restart", True, restart,
+                                                             skipped=restart == "skipped")])
+    return check
+
+
+def test_the_tiers_split_what_was_protected():
+    assert selfwork.PROTECTED == selfwork.HARD_LOCKED + selfwork.GUARDED
+    assert not set(selfwork.HARD_LOCKED) & set(selfwork.GUARDED)
+    for judge in ("eki/candidate.py", "eki/drill.py", "eki/builds.py", "eki/supervisor.sh", "eki/agent.py"):
+        assert selfwork.touches_locked([judge]) == [judge]
+    for own in ("eki/selfwork.py", "eki/selfloop.py", "eki/selfengine.py", "eki/workers.py", "eki/steps.py"):
+        assert selfwork.touches_protected([own]) == [own] and not selfwork.touches_locked([own])
+    # a record from before the tiers: its hard-locked part is worked out again
+    assert selfwork.locked_of({"protected": ["eki/selfwork.py", "eki/agent.py"]}) == ["eki/agent.py"]
+
+
+def test_a_guarded_change_is_applied_alone_when_autonomy_lets_it(tmp_path):
+    from eki import builds
+    root = repo(tmp_path)
+    p = propose(tmp_path, root, agent({"eki/steps.py": "# how steps survive a restart\n"}))
+    home, swaps, checked = tmp_path / "self", [], []
+    assert p.protected == ["eki/steps.py"] and not p.locked and "guarded" in p.verdict
+    # not without autonomy saying so
+    with pytest.raises(selfwork.SelfWorkError, match="guarded"):
+        selfwork.apply(p.id, home=home, check=full(), swap=lambda b, **kw: swaps.append(kw))
+
+    def check(where, **kw):
+        checked.append(where)
+        return full()(where)
+    got = selfwork.apply(p.id, home=home, check=check, guarded=True, swap=lambda b, **kw: swaps.append(kw))
+    # judged again right before, though your checkout hadn't moved; swapped in by itself
+    assert got["state"] == "applying" and got["alone"] and len(checked) == 1
+    assert swaps == [{"self_id": p.id}] and not builds.train().get("cars")
+    c = selfwork.change(p.id, home)
+    assert c["alone"] and "applied alone as a guarded change" in c["how"]
+    assert selfwork.guarded_applying(home) == p.id                 # nothing else goes live meanwhile
+
+
+def test_a_guarded_change_goes_in_alone_only_fully_checked_and_with_nothing_else_going_live(tmp_path):
+    from eki import builds
+    root = repo(tmp_path)
+    p = propose(tmp_path, root, agent({"eki/workers.py": "# workers\n"}))
+    home, swaps = tmp_path / "self", []
+    got = selfwork.apply(p.id, home=home, check=full(restart="skipped"), guarded=True,
+                         swap=lambda b, **kw: swaps.append(kw))
+    assert got["state"] == "proposed" and "restart check didn't run" in got["why"] and not swaps
+    builds.board(tmp_path / "some-build", self_id="other")         # another change aboard the train
+    got = selfwork.apply(p.id, home=home, check=full(), guarded=True, swap=lambda b, **kw: swaps.append(kw))
+    assert "release train" in got["why"] and not swaps
+    assert selfwork.change(p.id, home)["state"] == "proposed"
+
+
+def test_a_guarded_change_touching_a_hard_locked_file_waits_for_a_person(tmp_path):
+    root = repo(tmp_path)
+    p = propose(tmp_path, root, agent({"eki/steps.py": "# steps\n", "eki/drill.py": "# a weaker drill\n"}))
+    home, swaps = tmp_path / "self", []
+    assert p.locked == ["eki/drill.py"] and "never change alone" in p.verdict
+    with pytest.raises(selfwork.SelfWorkError, match="a person applies it"):
+        selfwork.apply(p.id, home=home, check=full(), guarded=True, swap=lambda b, **kw: swaps.append(kw))
+    assert not swaps and selfwork.change(p.id, home)["state"] == "proposed"
+
+
 def test_every_proposal_is_written_down(tmp_path):
     root = repo(tmp_path)
     propose(tmp_path, root, agent({"eki/thing.py": "VALUE = 2\n"}))
@@ -324,3 +390,11 @@ def test_begin_says_which_base_passed(tmp_path):
     broken, heard = repo(tmp_path / "b", passing=False), []
     q = selfwork.begin("make VALUE two", root=broken, home=tmp_path / "self", passed=heard.append)
     assert q.verdict and heard == []
+
+
+def test_eki_self_names_both_tiers():
+    from eki import cli
+    got = cli._tiers({"locked": list(selfwork.HARD_LOCKED), "guarded": list(selfwork.GUARDED)})
+    assert got[0].startswith("  never alone") and "candidate.py" in got[0] and "selfwork.py" not in got[0]
+    assert "alone only under apply" in got[1] and "selfwork.py" in got[1]
+    assert cli._tiers({}) == []

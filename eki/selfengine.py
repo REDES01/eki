@@ -344,7 +344,7 @@ class SelfLoop:
                 if not (prop.commit and prop.fit):
                     out.update(outcome="failed", note=prop.verdict)
         applied: Dict[str, Any] = {}
-        if prop.commit and prop.fit and not prop.protected:
+        if prop.commit and prop.fit and not selfwork.locked_of(prop.to_json()):
             mode = "apply" if (it.apply and selfloop.owner(it) == "person") or merging else \
                 selfloop.autonomy_for(prop.files, self.settings)       # type: ignore[attr-defined]
             if mode == "apply":
@@ -380,7 +380,12 @@ class SelfLoop:
                 # its conflicts were being resolved when a restart cut both off:
                 # the resolve is carried on (self_carry_on), and applies it
                 return await self._self_resolved(cid)
-            applied = await self._self_apply_now(cid)
+            guarded = bool(c.get("protected"))
+            # a guarded change goes live alone: it waits for the train and any
+            # swap to clear, and nothing else goes live until it has settled
+            while selfwork.alone_blocked(cid) if guarded else selfwork.guarded_applying():
+                await asyncio.sleep(MERGE_POLL)
+            applied = await self._self_apply_now(cid, guarded=guarded)
             if applied.get("state") == "conflicts":
                 started = await self._self_resolve_start(cid)
                 applied = await self._self_resolved(cid) if started else applied
@@ -421,6 +426,8 @@ class SelfLoop:
             t = builds_mod.train()
             if t.get("cars"):
                 builds_mod._save_train({**t, "now": True})
+        elif selfwork.guarded_applying():
+            return {}           # a guarded change is going live alone: the train waits for it
         try:
             gone = await asyncio.to_thread(builds_mod.depart, self._self_release_minutes())
         except (RuntimeError, OSError, ValueError) as e:
@@ -456,24 +463,32 @@ class SelfLoop:
                 continue
         return {"in": left, "every": self._self_release_minutes(), "carrying": rows}
 
-    async def _self_apply_now(self, cid: str, raising: bool = False,
-                              by_person: bool = False, now: bool = False) -> Dict[str, Any]:
+    async def _self_apply_now(self, cid: str, raising: bool = False, by_person: bool = False,
+                              now: bool = False, guarded: bool = False) -> Dict[str, Any]:
         """selfwork.apply, one at a time in this engine: two applies at once
         would each build on a checkout without the other. `by_person` only
-        where a person asked — it's what lets a protected change in. A
-        change applied boards the release train, which leaves if it's time
-        (`now`: a person wants it live at once). A check cut off
-        (steps.Interrupted) isn't a verdict: it goes up to the step."""
+        where a person asked — it's what lets a protected change in;
+        `guarded` only where autonomy let a guarded one go alone. A change
+        applied boards the release train, which leaves if it's time (`now`:
+        a person wants it live at once); a guarded one goes live by itself.
+        A check cut off (steps.Interrupted) isn't a verdict: it goes up to
+        the step."""
         lock = vars(self).setdefault("_self_applying", asyncio.Lock())
         async with lock:
             try:
                 got = await asyncio.to_thread(selfwork.apply, cid, python=sys.executable,
-                                              check=self.self_check, by_person=by_person, now=now)
+                                              check=self.self_check, by_person=by_person, now=now,
+                                              guarded=guarded)
             except (selfwork.SelfWorkError, ValueError, RuntimeError) as e:
                 if raising:
                     raise
                 return {"state": "proposed", "id": cid, "why": str(e)[:300]}
-        if got.get("state") == "applying":
+        if got.get("alone"):
+            steps.start("swap", Path(got["build"]).name, change=cid, cars=[cid], target=got["build"])
+            c = selfwork.change(cid)
+            observe_mod.note("history", what=f"self/{cid} applied alone as a guarded change "
+                             f"({', '.join(c.get('protected') or [])}): {c.get('title') or ''}"[:300])
+        elif got.get("state") == "applying":
             gone = await self.self_release()
             if gone.get("state") == "proposed":
                 return {**got, **gone}
@@ -528,8 +543,14 @@ class SelfLoop:
             "no change": "nothing changed",
             "not started": "not started",
         }.get(state, state)
-        if c.get("protected") and state == "proposed":
-            head = "passes, but touches what eki may not change alone — for you to read line by line"
+        locked = selfwork.locked_of(c)
+        guarded = [f for f in c.get("protected") or [] if f not in locked]
+        if locked and state == "proposed":
+            head = "passes, but touches what eki may never change alone — for you to read line by line"
+        elif guarded and state == "proposed":
+            head = "fit to run — a guarded change, waiting for you"
+        elif c.get("alone") and state == "applying":
+            head = "fit to run — applied alone, as a guarded change"
         lines.append(f"**eki · change to itself: {head}.**")
         if c.get("summary"):
             lines.append("**What's new**\n\n" + str(c["summary"]).strip())
@@ -559,12 +580,24 @@ class SelfLoop:
                 lines.append(f"What failed: {str(failed.get('detail') or '')[:400]}")
         if c.get("ticks") and c.get("commit") and c.get("said") in ("done", "already"):
             lines.append(f"eki ticks the ROADMAP item “{it.title}” once it lands.")
-        if state == "applying":
+        if state == "applying" and c.get("alone"):
+            lines.append(f"It touches eki's own machinery ({', '.join(f'`{f}`' for f in guarded)}), so it went "
+                         "in as a guarded change: every check passed, the restart check among them, and the "
+                         "full tests ran again on top of your checkout just before. It goes live on its own, "
+                         "not with the release train, so if it isn't healthy the rollback undoes only it.")
+        elif state == "applying":
             lines.append("It goes live with the next release train (`eki self` says when) — runs still going "
                          "carry on in the new engine; the supervisor watches it and goes "
                          "back to what ran before if it isn't healthy.")
         elif state == "applied":
             lines.append(str(c.get("how") or c.get("merged") or "In your checkout."))
+        elif state in ("proposed", "conflicts") and guarded and not locked:
+            if applied.get("why") or c.get("why"):
+                lines.append(f"Not applied: {applied.get('why') or c.get('why')}")
+            lines.append(f"It touches eki's own machinery ({', '.join(f'`{f}`' for f in guarded)}): eki applies "
+                         "such a change alone only when autonomy is apply, fully checked and live on its own. "
+                         f"Read it with `eki self diff {cid}`; to take it, `eki self apply {cid}` or Apply on "
+                         f"the board ([Self]({self._self_board(cid)})) — it asks you to confirm first.")
         elif state in ("proposed", "conflicts") and c.get("protected"):
             lines.append(f"eki won't apply it on its own. Read it with `eki self diff {cid}`; "
                          f"to take it, `eki self apply {cid}` or Apply on the board "
@@ -1382,6 +1415,8 @@ class SelfLoop:
             "goal": goal,
             "autonomy": self.settings.get("self_autonomy", "propose"),   # type: ignore[attr-defined]
             "areas": self.settings.get("self_autonomy_areas") or {},     # type: ignore[attr-defined]
+            # what eki never applies alone, and what it applies alone only fully checked
+            "tiers": {"locked": list(selfwork.HARD_LOCKED), "guarded": list(selfwork.GUARDED)},
             "review_max": int(self.settings.get("self_review_max", selfloop.REVIEW_MAX)),  # type: ignore[attr-defined]
             "local": bool(self.settings.get("self_local", False)),       # type: ignore[attr-defined]
             "parallel": self._self_parallel(),

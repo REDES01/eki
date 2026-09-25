@@ -666,6 +666,8 @@ def _self_status(service: str, limit: int) -> int:
     areas = ", ".join(f"{k}: {m}" for k, m in (v.get("areas") or {}).items())
     print(f"autonomy: {v['autonomy']}" + (f" ({areas})" if areas else "")
           + f" · at most {v['review_max']} waiting for you · {v.get('parallel', 1)} at once")
+    for line in _tiers(v.get("tiers") or {}):
+        print(line)
     working = [i for i in v["working"] if i.get("phase") != "merging"]
     if working:
         print("\nworking on:")
@@ -715,6 +717,18 @@ def _self_status(service: str, limit: int) -> int:
         print(f"\nweekly note ({note['id']}): {len(note.get('suggestions') or [])} suggestions — "
               "on the board (Goals → Self)")
     return 0
+
+
+def _tiers(tiers: Dict[str, Any]) -> List[str]:
+    """What eki may change alone, in two lines: never, and only fully checked."""
+    def names(paths: List[str]) -> str:
+        return ", ".join(p.split("/", 1)[-1] if p.startswith("eki/") else p for p in paths)
+    out = []
+    if tiers.get("locked"):
+        out.append("  never alone (you apply them): " + names(tiers["locked"]))
+    if tiers.get("guarded"):
+        out.append("  alone only under apply, every check passing, live on its own: " + names(tiers["guarded"]))
+    return out
 
 
 def _after(row: Dict[str, Any]) -> str:

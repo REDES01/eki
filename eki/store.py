@@ -30,6 +30,11 @@ def thread(conn: sqlite3.Connection, tid: str) -> Optional[sqlite3.Row]:
                         (tid, tid + "%")).fetchone()
 
 
+def cwd_of(conn: sqlite3.Connection, tid: str) -> Optional[str]:
+    row = conn.execute("SELECT cwd FROM threads WHERE id=?", (tid,)).fetchone()
+    return row["cwd"] if row and row["cwd"] else None
+
+
 def session(conn: sqlite3.Connection, tid: str, provider: str) -> Optional[sqlite3.Row]:
     return conn.execute("SELECT * FROM sessions WHERE thread_id=? AND provider=?",
                         (tid, provider)).fetchone()

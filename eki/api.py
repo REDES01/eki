@@ -89,6 +89,8 @@ def provider_list(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     avail = capacity.status(conn)
     out = []
     for name, cfg in providers.config().items():
+        if name in providers.BUILTIN:
+            continue
         ok, why = avail.get(name, (False, "?"))
         item = {"name": name, "kind": cfg.get("kind"), "label": cfg.get("label") or name,
                 "ok": ok, "why": why}

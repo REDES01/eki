@@ -40,6 +40,13 @@ def config(name: str) -> Path:
     return home() / f"{name}.json"
 
 
+def work() -> Path:
+    """Worktrees for runs that must not collide (eki/workspace.py)."""
+    p = home() / "work"
+    p.mkdir(exist_ok=True)
+    return p
+
+
 def scratch() -> Path:
     """Where a run with no folder works."""
     p = home() / "scratch"

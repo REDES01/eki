@@ -5,7 +5,7 @@ from eki import db, drill, engine, store
 
 def test_restart_drill(home):
     checks = drill.run(say=lambda s: None, home=str(home / "drill"))
-    assert len(checks) == 6
+    assert len(checks) == 7
 
 
 def test_runs_of_one_thread_go_one_at_a_time(conn, monkeypatch):

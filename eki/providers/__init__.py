@@ -15,10 +15,11 @@ from .. import paths
 from .base import Outcome, Provider, Turn
 from .claude_code import ClaudeCode
 from .codex import Codex
+from .command import Command
 from .fake import Fake
 from .local import Local
 
-KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, Local, Fake)}
+KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, Local, Fake, Command)}
 
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     "claude": {"kind": "claude_code", "label": "Claude Code"},
@@ -26,12 +27,18 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     "local": {"kind": "local", "label": "Local model (MLX)", "base_url": "http://127.0.0.1:8080"},
 }
 
+#: always there, never in the routing table: reached only when picked by name
+BUILTIN: Dict[str, Dict[str, Any]] = {
+    "command": {"kind": "command", "label": "a command in a folder"},
+}
+
 
 def config() -> Dict[str, Dict[str, Any]]:
     path = paths.config("providers")
     if not path.exists():
         path.write_text(json.dumps(DEFAULTS, indent=2) + "\n")
-    return json.loads(path.read_text())
+    got = json.loads(path.read_text())
+    return {**BUILTIN, **got}
 
 
 def build(name: str, cfg: Dict[str, Any]) -> Provider:

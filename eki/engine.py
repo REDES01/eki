@@ -112,6 +112,8 @@ def spawn_ready(conn) -> int:
     now = db.now()
     active = store.runs_in(conn, ("starting", "running"))
     busy_threads = {r["thread_id"] for r in active}
+    # two runs in one folder would overwrite each other: they take turns
+    busy_folders = {store.cwd_of(conn, r["thread_id"]) for r in active} - {None}
     slots = MAX_PARALLEL - len(active)
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
@@ -120,7 +122,9 @@ def spawn_ready(conn) -> int:
     for r in queued:
         if slots <= 0:
             break
-        if r["thread_id"] in busy_threads or (r["retry_at"] and r["retry_at"] > now):
+        folder = store.cwd_of(conn, r["thread_id"])
+        if r["thread_id"] in busy_threads or (r["retry_at"] and r["retry_at"] > now) \
+                or folder in busy_folders:
             busy_threads.add(r["thread_id"])        # later runs of this thread wait their turn
             continue
         if r["priority"] == "background":
@@ -128,6 +132,8 @@ def spawn_ready(conn) -> int:
             if not room[0]:
                 continue
         busy_threads.add(r["thread_id"])
+        if folder:
+            busy_folders.add(folder)
         spawn(conn, r["id"])
         slots -= 1
         started += 1

@@ -46,7 +46,8 @@ eki follow <run>  ◄── events table
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers |
-| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `fake` (tests) |
+| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
+| `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |

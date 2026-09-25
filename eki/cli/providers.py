@@ -16,6 +16,8 @@ def run(args) -> int:
     avail = capacity.status(conn())
     print(f"({paths.config('providers')})")
     for name, cfg in providers.config().items():
+        if name in providers.BUILTIN:
+            continue
         ok, why = avail.get(name, (False, "?"))
         print(f"{'✓' if ok else '✗'} {name:<8} {cfg.get('kind', ''):<12} {cfg.get('label', '')}"
               + ("" if ok else f"  — {why}"))

@@ -7,7 +7,9 @@ In a throwaway EKI_HOME, with the fake provider:
 3. a third run is asked for while no engine is up;
 4. a new engine starts, and the worker is killed hard mid-turn — the run
    must be resumed in the same session, not started over or failed;
-5. everything must end `done`, nothing failed, nothing doubled.
+5. a command run (a check, say) is killed mid-way — it must be run again
+   and finish exactly once;
+6. everything must end `done`, nothing failed, nothing doubled.
 """
 from __future__ import annotations
 
@@ -78,6 +80,9 @@ def run(say: Callable[[str], None] = print, home: str | None = None) -> List[str
 
         with db.tx(c):
             third = store.create_run(c, store.create_thread(c, "while down", None), "steps=2 third")
+            cmd = store.create_run(c, store.create_thread(c, "a command", home),
+                                   '["sh", "-c", "for i in 1 2 3 4 5 6 7 8; do echo tick $i; '
+                                   'sleep 0.3; done; echo cmd done"]', provider="command")
         ok("a request was taken while no engine was up")
 
         engine.start_detached()
@@ -86,12 +91,17 @@ def run(say: Callable[[str], None] = print, home: str | None = None) -> List[str
         os.kill(worker_pid, signal.SIGKILL)
         ok("new engine up; the worker killed mid-turn")
 
+        _wait("the command to get going", lambda: "tick 2" in store.answer(c, cmd))
+        os.kill(store.run(c, cmd)["pid"], signal.SIGKILL)
+        ok("a command run killed mid-way")
+
         _wait("everything to finish", lambda: all(
-            store.run(c, r)["state"] in ("done", "failed", "cancelled") for r in (long_run, second, third)),
-            timeout=60)
-        for r in (long_run, second, third):
+            store.run(c, r)["state"] in ("done", "failed", "cancelled")
+            for r in (long_run, second, third, cmd)), timeout=60)
+        for r in (long_run, second, third, cmd):
             row = store.run(c, r)
             assert row["state"] == "done", f"run {r} ended {row['state']}: {row['error']}"
+        assert store.answer(c, cmd).count("cmd done") == 1, "the command didn't finish exactly once"
         lr = store.run(c, long_run)
         assert lr["attempt"] == 2, f"the long run took {lr['attempt']} attempts"
         said = store.answer(c, long_run)

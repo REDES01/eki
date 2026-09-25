@@ -7,9 +7,9 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 
 ## eki builds eki — `docs/self-build.md`
 
-- [ ] **Groundwork.** A worktree per folder run (`eki/workspace.py`) so
-      parallel runs on one repo never collide; the command provider
-      (`eki/providers/command.py`) — an argv in a folder as a run.
+- [x] **Groundwork.** Worktrees on demand (`eki/workspace.py`); runs in one
+      folder take turns; the command provider (`eki/providers/command.py`)
+      — an argv in a folder as a run, resumed by running again.
 - [ ] **Go-live.** Immutable builds under `~/.eki/builds/<sha>` with
       `current`/`previous`; the launcher launchd runs (loop, swap code,
       watch window, roll back); `eki swap`, `eki builds`; a drill case that

@@ -82,6 +82,11 @@ def thread_runs(conn: sqlite3.Connection, tid: str) -> List[sqlite3.Row]:
 def update_run(conn: sqlite3.Connection, rid: str, **fields: Any) -> None:
     cols = ", ".join(f"{k}=?" for k in fields)
     conn.execute(f"UPDATE runs SET {cols} WHERE id=?", (*fields.values(), rid))
+    if "state" in fields:
+        # every change of state is an event too, so anything following the run
+        # (the web page's long poll, `eki follow`) hears about it at once
+        attempt = conn.execute("SELECT attempt FROM runs WHERE id=?", (rid,)).fetchone()
+        add_event(conn, rid, attempt[0] if attempt else 0, "state", {"state": fields["state"]})
 
 
 def excluded(row: sqlite3.Row) -> List[str]:

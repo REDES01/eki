@@ -110,3 +110,13 @@ def test_answering_an_ask_over_http(web, conn):
     code, got = post(f"{web}/api/asks/{aid}/answer", {"allow": False})
     assert code == 200 and got["result"] == "answered"
     assert json.loads(get(web + "/api/asks")[1]) == []
+
+
+def test_a_run_ending_wakes_the_page_at_once(web, conn):
+    """The page waits on events; the end of a run must be one, or the page shows 'working' until its poll times out."""
+    _, got = post(web + "/api/ask", {"prompt": "steps=1 x"})
+    after = json.loads(get(f"{web}/api/threads/{got['thread']}/events?after=0&wait=0")[1])["events"]
+    last = max([e["id"] for e in after], default=0)
+    run_inline(conn, got["run"])
+    ev = json.loads(get(f"{web}/api/threads/{got['thread']}/events?after={last}&wait=0")[1])
+    assert ev["events"][-1]["kind"] == "state" and ev["events"][-1]["state"] == "done" and ev["active"] == 0

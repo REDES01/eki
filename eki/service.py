@@ -909,8 +909,10 @@ async def _self_await(fn, *args, **kw) -> Any:
 @app.get("/api/self")
 def self_view() -> Any:
     """What eki is doing to itself, what waits for you, what's next."""
+    from . import appbuild
     out = engine().self_view()
     out["page"] = _board_version()
+    out["app"] = appbuild.versions_line()          # "app: running …, installed …"
     return out
 
 

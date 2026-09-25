@@ -607,6 +607,8 @@ function selfPage() {
     h += `</div></div></div>`;
   }
   h += goLive(v.golive, v.train?.every || 15);
+  // which build of the Mac app is open, and whether a newer one waits (eki/appbuild.py)
+  if (v.app) h += `<div class="muted" style="font-size:12.5px;margin-top:10px">${esc(v.app)}</div>`;
   const flow = v.pipeline || [];
   if (flow.length) {
     h += `<div class="section"><div class="label">Going in · ${flow.length}</div><div class="card" style="padding:2px 14px">`;

@@ -131,9 +131,15 @@ built from `mac/` (every `mac/*.swift` is part of it). When a change touches
 `mac/`, the candidate check typechecks the app (*app*), so Swift that doesn't
 compile is never fit. After a healthy swap whose `mac/` differs from what the
 installed `Eki.app` was built from, eki rebuilds it from the running build
-and puts it in place, quitting and reopening it — only while it isn't the app
-in front; otherwise it waits and tries again every five minutes. A build that
-fails leaves the app as it was. `~/.eki/app.json` says what it was built from.
+and puts it in place. An app in the background is quit and reopened at once;
+one you're using is left open and shows a small *New version ready — Restart*
+banner (and *Restart to Update* in the app menu): it restarts at a click, or
+by itself once it's been in the background, or you've been away, for five
+minutes — not while an answer is coming in. A build that fails leaves the
+app as it was. `~/.eki/app.json` says what it was built from; each bundle
+carries its build (the hash's first seven characters and when it was built),
+shown in About and Settings, and `eki self`, `eki builds` and the board say
+`app: running <build>, installed <build>`.
 
 **Nothing running is dropped.** A healthy build goes into your checkout only
 when it can (edits you haven't committed stop it), so the engine can run

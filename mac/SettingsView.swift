@@ -60,6 +60,8 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("This app") { AppBuildRow() }
         }
         .formStyle(.grouped)
     }

@@ -16,6 +16,11 @@ RES="$APP/Contents/Resources"
 HELPERS="$APP/Contents/Helpers"
 AGENTS="$APP/Contents/Library/LaunchAgents"
 VERSION="$(cat ../VERSION 2>/dev/null || echo 0.1.0)"
+# Which build this is: the hash of mac/ eki built it from (eki/appbuild.py
+# passes it; "dev" by hand) and when. The open app compares its own with the
+# one on disk to know a newer one is in place (mac/Update.swift).
+BUILD="${EKI_APP_BUILD:-dev}"
+BUILT_AT="$(date +%s)"
 
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
@@ -34,6 +39,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>EkiBuild</key><string>$BUILD</string>
+  <key>EkiBuiltAt</key><string>$BUILT_AT</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <!-- the engine, the model servers and the CLIs all live on loopback -->
   <key>NSAppTransportSecurity</key>

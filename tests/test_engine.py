@@ -54,3 +54,18 @@ def test_only_one_engine(home):
     assert engine.lock() is None
     assert engine.running_pid() == os.getpid()
     held.close()
+
+
+def test_the_engine_sees_exit_codes(home):
+    """With SIGCHLD ignored, subprocess.run would report 0 for everything (the
+    2026-09-26 bug: every git question the engine asked was answered yes)."""
+    import subprocess
+    import sys
+    code = ("from eki import engine, db\n"
+            "import subprocess\n"
+            "import signal; signal.signal(signal.SIGCHLD, signal.SIG_IGN); engine.handle_signals([])\n"
+            "engine.tick(db.connect())\n"
+            "print(subprocess.run(['/bin/sh', '-c', 'exit 3']).returncode)\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env={**os.environ, "EKI_PORT": "0"})
+    assert out.stdout.strip() == "3", out.stderr

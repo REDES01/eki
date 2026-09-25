@@ -156,7 +156,16 @@ def spawn(conn, rid: str) -> None:
                             env=env, stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
                             start_new_session=True, close_fds=True)
     logf.close()
+    _children.append(proc)
     conn.execute("UPDATE runs SET pid=? WHERE id=? AND pid IS NULL", (proc.pid, rid))
+
+
+#: workers this engine started, collected as they end so they don't linger as zombies
+_children: list = []
+
+
+def reap_children() -> None:
+    _children[:] = [p for p in _children if p.poll() is None]
 
 
 #: how often the engine does its rounds of the local models
@@ -197,6 +206,7 @@ _last_self = [0.0]
 
 def tick(conn) -> bool:
     """One round. False when this engine should step aside for a newer build."""
+    reap_children()
     reap(conn)
     spawn_ready(conn)
     refresh_quota()
@@ -253,15 +263,23 @@ def running_pid() -> Optional[int]:
         return None
 
 
+def handle_signals(stopping: list) -> None:
+    """TERM and INT end the loop. SIGCHLD is left alone on purpose: with it
+    ignored, every subprocess the engine runs (git, pmset, the quota probes)
+    reports exit 0 whatever happened, since waitpid can't see the status.
+    Workers are collected by `reap_children` instead."""
+    signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
+    signal.signal(signal.SIGINT, lambda *_: stopping.append(1))
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+
+
 def serve() -> int:
     held = lock()
     if held is None:
         log.info("another engine is running")
         return 1
-    signal.signal(signal.SIGCHLD, signal.SIG_IGN)      # workers are reaped by the system
-    stopping = []
-    signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
-    signal.signal(signal.SIGINT, lambda *_: stopping.append(1))
+    stopping: list = []
+    handle_signals(stopping)
     conn = db.connect()
     from . import server
     server.start_in_background()

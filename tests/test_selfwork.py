@@ -279,7 +279,7 @@ def test_an_app_change_is_looked_at_and_its_pictures_go_where_eki_shows_them(tmp
 
 
 def test_the_cli_asks_before_applying_a_protected_change(monkeypatch, capsys):
-    from eki import cli
+    from eki.cli import self_ as cli
     c = {"id": "abc", "protected": ["eki/agent.py"]}
     assert cli._confirm_protected(c, yes=True)                            # --yes
     assert "eki/agent.py" in capsys.readouterr().err                      # shown either way
@@ -294,7 +294,7 @@ def test_the_cli_asks_before_applying_a_protected_change(monkeypatch, capsys):
 
 
 def test_an_apply_being_resolved_says_eki_is_fixing_it_not_retry():
-    from eki import cli
+    from eki.cli import self_ as cli
     said = cli._conflicts_said({"state": "conflicts", "resolving": "r123"})
     assert "fixing the conflicts itself" in said and "eki watch r123" in said
     assert "retry" not in said
@@ -311,16 +311,18 @@ def test_an_apply_being_resolved_says_eki_is_fixing_it_not_retry():
 ])
 def test_self_flags_work_anywhere(monkeypatch, argv, words, yes):
     from eki import cli
+    from eki.cli import self_
     seen = {}
-    monkeypatch.setattr(cli, "cmd_self", lambda a: seen.update(vars(a)) or 0)
+    monkeypatch.setattr(self_, "cmd_self", lambda a: seen.update(vars(a)) or 0)
     assert cli.main(argv) == 0
     assert seen["request"] == words and seen["yes"] == yes
 
 
 def test_an_unknown_flag_or_stray_word_is_still_an_error(monkeypatch):
     from eki import cli
-    monkeypatch.setattr(cli, "cmd_self", lambda a: 0)
-    monkeypatch.setattr(cli, "cmd_runs", lambda a: 0)
+    from eki.cli import runs, self_
+    monkeypatch.setattr(self_, "cmd_self", lambda a: 0)
+    monkeypatch.setattr(runs, "cmd_runs", lambda a: 0)
     for argv in (["self", "apply", "abc", "--bogus"], ["runs", "stray"]):
         with pytest.raises(SystemExit):
             cli.main(argv)
@@ -393,7 +395,7 @@ def test_begin_says_which_base_passed(tmp_path):
 
 
 def test_eki_self_names_both_tiers():
-    from eki import cli
+    from eki.cli import self_ as cli
     got = cli._tiers({"locked": list(selfwork.HARD_LOCKED), "guarded": list(selfwork.GUARDED)})
     assert got[0].startswith("  never alone") and "candidate.py" in got[0] and "selfwork.py" not in got[0]
     assert "alone only under apply" in got[1] and "selfwork.py" in got[1]

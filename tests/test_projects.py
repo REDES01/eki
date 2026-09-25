@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 from eki import cli, produce, projects
+from eki.cli import ask as cli_ask, project as cli_project
 from eki.engine import Engine
 from eki.runs import RunStore
 
@@ -116,7 +117,7 @@ async def test_a_call_made_inside_a_project_belongs_to_it_and_its_agents_calls_t
 def test_the_command_line_says_where_it_was_called_from(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     sent = {}
-    monkeypatch.setattr(cli, "call", lambda method, path, service, **kw: sent.update(kw.get("json") or {})
+    monkeypatch.setattr(cli_ask, "call", lambda method, path, service, **kw: sent.update(kw.get("json") or {})
                         or {"run": "r1", "conversation": "c1"})
     for k in ("EKI_PARENT", "EKI_INSIDE"):
         monkeypatch.delenv(k, raising=False)
@@ -130,7 +131,7 @@ def test_eki_project_init_and_show(tmp_path, monkeypatch, capsys):
     game = tmp_path / "game"
     game.mkdir()
     asked = {}
-    monkeypatch.setattr(cli, "call", lambda method, path, service, **kw: asked.update(kw.get("params") or {})
+    monkeypatch.setattr(cli_project, "call", lambda method, path, service, **kw: asked.update(kw.get("params") or {})
                         or [{"id": "r1", "state": "done", "backend": "echo", "prompt": "draw a map"}])
     assert cli.main(["project", "show", str(game)]) == 1           # not one yet
     assert cli.main(["project", "init", str(game), "--name", "Harbor"]) == 0

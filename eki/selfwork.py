@@ -298,6 +298,8 @@ def brief(request: str, python: str, where: str = "") -> str:
         "How to work here:\n"
         "- Read README.md and the modules you touch first; match their style — "
         "plain docstrings that say why, small functions, no new dependencies.\n"
+        "- A new `eki` command is a new file in eki/cli/ with its own register(); don't grow a "
+        "shared file (eki/cli/common.py holds only what several commands need).\n"
         "- Add or adjust tests under tests/ for what you change.\n"
         f"- Run the tests with `{python} -m pytest -q` and leave them passing.\n"
         "- If you change the Mac app (mac/), make sure it compiles: "
@@ -1114,6 +1116,17 @@ def landed_since(cid: str, onto: str, files: List[str], home: Optional[Path] = N
     return got.stdout.strip()[:1500]
 
 
+#: told to a resolver whose change edited eki/cli.py from before it became a package
+CLI_SPLIT = (
+    "eki/cli.py was split since: the command line is now the package eki/cli/, one module "
+    "per command (eki/cli/self_.py for `eki self`, eki/cli/goals.py for `eki goals` …), each "
+    "with a register(sub) for its subparser and flags; what several share (call(), watch(), "
+    "ensure_engine()) is in eki/cli/common.py. The checkout's eki/cli.py is only a marker "
+    "now — keep it exactly as the checkout has it, and make the change's edits to the old "
+    "file in the module for that command instead (a new command: a new module with its "
+    "own register() and ORDER, not an edit to eki/cli/__init__.py).\n\n")
+
+
 def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str, where: str,
                   step: str = "") -> str:
     """What the agent is told when a change stops on conflicts. `step`: the
@@ -1128,6 +1141,7 @@ def resolve_brief(c: Dict[str, Any], files: List[str], landed: str, python: str,
         f"eki's change self/{c['id']} was made on an older checkout. " + now
         + f"What the change does:\n{what}\n\n"
         + (f"What the checkout gained in those files since:\n{landed}\n\n" if landed else "")
+        + (CLI_SPLIT if "eki/cli.py" in files else "")
         + "How to work here:\n"
         "- Resolve every <<<<<<< / ======= / >>>>>>> block in those files so both sides' intent "
         "survives: the checkout's side is what's current; the change's side is what it adds.\n"

@@ -119,9 +119,9 @@ def test_old_builds_go_but_never_current_or_previous(src):
 
 
 def test_cmd_builds_says_so_before_any_swap_has_happened(src, capsys):
-    from eki import cli
+    from eki.cli import builds as cli_builds
     builds.ensure_layout(src)
-    assert cli.cmd_builds(None) == 0
+    assert cli_builds.cmd_builds(None) == 0
     assert "no swap yet" in capsys.readouterr().out.strip().splitlines()[-1]
 
 
@@ -500,7 +500,7 @@ def test_the_same_change_under_another_id_is_not_lost(src):
 
 
 def test_eki_self_says_when_a_new_version_goes_live():
-    from eki.cli import _going_live
+    from eki.cli.common import _going_live
     assert _going_live({}) == ""
     assert _going_live({"state": "waiting", "self": "ab12", "in": 95}).startswith(
         "new version (self/ab12) going live in 2 min")

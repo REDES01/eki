@@ -170,7 +170,7 @@ def test_useful_local_work_is_measured_by_the_day(eng):
 
 
 def test_the_command_line_says_the_measure():
-    from eki.cli import _local_work_line
+    from eki.cli.goals import _local_work_line
     line = _local_work_line({"days": 7, "hours_a_day": 3.4, "share": 0.1417, "baseline_share": 0.01})
     assert line == ("local models, last 7 days: 3.4 h of useful work a day "
                     "(14.2% of the time; 1% before the idle shift)")
@@ -465,7 +465,7 @@ async def test_a_memory_spike_passes_a_lasting_warning_doesnt(eng, monkeypatch):
 
 
 def test_eki_ask_from_inside_an_agent_says_so(monkeypatch):
-    from eki import cli
+    from eki.cli import ask as cli
     sent = {}
     monkeypatch.setattr(cli, "call", lambda m, p, s, **kw: sent.update(kw["json"]) or {"run": "r", "conversation": "c"})
     monkeypatch.setenv("EKI_INSIDE", "1")

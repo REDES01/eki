@@ -163,7 +163,7 @@ async def test_a_pair_that_cant_be_resolved_drops_the_later_side_only(repo, tmp_
 
 
 def test_eki_self_shows_the_tree_of_the_train():
-    from eki import cli
+    from eki.cli import self_ as cli
     t = {"state": "merging", "workers": 4, "straight": [{"id": "x1", "title": "x"}],
          "groups": [{"files": ["eki/cli.py"], "changes": [{"id": n, "title": n} for n in ("a1", "b2", "c3", "d4")]}],
          "rounds": [[{"a": ["a1"], "b": ["b2"], "state": "resolving", "worker": 1},
@@ -210,7 +210,7 @@ async def test_a_train_that_breaks_off_is_kept_as_failed(repo, tmp_path):
 
 
 def test_eki_self_says_no_merge_is_running_and_how_the_last_train_went():
-    from eki import cli
+    from eki.cli import self_ as cli
     last = {"train": "t", "at": 100, "ended": 200, "rounds": 2, "outcome": "merged",
             "changes": [{"id": "a1", "title": "one"}, {"id": "b2", "title": "two"}, {"id": "c3", "title": "three"}],
             "landed": ["a1", "b2"], "dropped": {"c3": "the batch failed its checks with it"}}
@@ -224,7 +224,7 @@ def test_eki_self_says_no_merge_is_running_and_how_the_last_train_went():
 
 
 def test_eki_self_always_shows_going_in_and_the_tree_merge(monkeypatch, capsys):
-    from eki import cli
+    from eki.cli import self_ as cli
     v = {"can": True, "goal": None, "autonomy": "propose", "review_max": 3, "working": [], "waiting": [],
          "queue": [], "left": [], "changes": [], "roadmap": {"next": []}, "pipeline": [], "golive": {}, "tree": {}}
     monkeypatch.setattr(cli, "call", lambda *a, **k: v)

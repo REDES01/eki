@@ -260,7 +260,7 @@ async def test_your_own_apply_can_go_live_now(eng):
 
 
 def test_the_command_line_says_when_the_next_go_live_is():
-    from eki import cli
+    from eki.cli import common as cli
     line = cli._next_go_live({"in": 400, "every": 15, "carrying": [{"id": "ab12", "title": "make it so"}]})
     assert line.startswith("next go-live in 7 min, carrying: self/ab12 (make it so)")
     assert cli._next_go_live({}) == ""
@@ -271,7 +271,7 @@ def test_the_command_line_says_when_the_next_go_live_is():
 
 
 def test_eki_self_all_shows_what_is_cut_off(monkeypatch, capsys):
-    from eki import cli
+    from eki.cli import self_ as cli
     long = "a title long enough that a terminal line would cut it off somewhere " * 2
     view = {"can": True, "goal": None, "autonomy": "propose", "review_max": 3, "areas": {}, "tiers": {},
             "working": [], "merging": [], "waiting": [], "queue": [], "left": [],

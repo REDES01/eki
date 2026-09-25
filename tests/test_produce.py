@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from eki import cli, grant, migrate, produce
+from eki.cli import produce as produce_cli
 
 REAL_CLIENT = httpx.Client
 
@@ -30,7 +31,7 @@ def engine(monkeypatch, *, state="done", answer="", error="", backend="comfyui",
     monkeypatch.setattr(produce.httpx, "Client",
                         lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(migrate, "run", lambda root: None)
-    monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
+    monkeypatch.setattr(produce_cli, "ensure_engine", lambda s: None)
     monkeypatch.setattr(produce.time, "sleep", lambda s: None)
     # the suite may itself be run by an agent eki started
     for var in ("EKI_INSIDE", "EKI_PARENT", produce.nesting.VAR, produce.nesting.RUN):
@@ -108,7 +109,7 @@ def test_no_engine_exits_3(monkeypatch, capsys):
 
     def down(service):
         raise SystemExit(1)
-    monkeypatch.setattr(cli, "ensure_engine", down)
+    monkeypatch.setattr(produce_cli, "ensure_engine", down)
     assert cli.main(["image", "a fox", "--json"]) == produce.UNREACHABLE
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
@@ -154,7 +155,7 @@ def test_submit_without_an_engine_exits_3(monkeypatch, capsys):
 
     def down(service):
         raise SystemExit(1)
-    monkeypatch.setattr(cli, "ensure_engine", down)
+    monkeypatch.setattr(produce_cli, "ensure_engine", down)
     assert cli.main(["submit", "hi", "--json"]) == produce.UNREACHABLE
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
@@ -222,7 +223,7 @@ def backends_engine(monkeypatch, status=200):
     monkeypatch.setattr(produce.httpx, "Client",
                         lambda **kw: real(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(migrate, "run", lambda root: None)
-    monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
+    monkeypatch.setattr(produce_cli, "ensure_engine", lambda s: None)
 
 
 def test_capabilities_says_what_is_up_and_the_command_for_each(monkeypatch, capsys):
@@ -262,6 +263,6 @@ def test_capabilities_without_an_engine_exits_3(monkeypatch, capsys):
 
     def down(service):
         raise SystemExit(1)
-    monkeypatch.setattr(cli, "ensure_engine", down)
+    monkeypatch.setattr(produce_cli, "ensure_engine", down)
     assert cli.main(["capabilities"]) == produce.UNREACHABLE
     assert "isn't running" in capsys.readouterr().err

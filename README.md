@@ -443,6 +443,7 @@ Tests: `.venv/bin/python -m pytest -q`.
 
 ```
 eki/            the engine: runs, router, providers, quota, adapters
+eki/cli/        the eki command: one file per command — a new one is a new file
 eki/adapters/   one file per kind of backend
 eki/quota/      reading what's left of a subscription, the sanctioned way
 eki/evals/      the labelling seed set and its harness

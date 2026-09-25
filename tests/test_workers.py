@@ -399,3 +399,47 @@ def test_a_stalled_program_is_cut_off_for_the_session_too():
         session.proc = P()
         with pytest.raises(steps.Interrupted):
             session._write({"type": "user"})
+
+
+def test_a_program_just_ended_is_not_cut_off_while_its_keeper_writes_how():
+    """Between the program ending and its keeper writing the exit down, the
+    worker is ending, not lost: a check made in that gap once answered -9
+    for good (2026-09-25: a failed resume said "exited with code -9", and
+    the reason it gave on stderr was lost under load)."""
+    import subprocess
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()                                        # reaped: its pid is gone
+    keeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    d = workers.HOME / "ending"
+    d.mkdir(parents=True)
+    (d / "spec.json").write_text(json.dumps({"argv": ["claude"], "keeper": keeper.pid, "at": time.time()}))
+    state = {"keeper": keeper.pid, "pid": ended.pid, "started": ""}
+    (d / "state.json").write_text(json.dumps(state))
+    w = workers.Worker(d)
+    proc = workers.Proc(w)
+    try:
+        assert not w.alive(strict=False)
+        assert not w.ended() and not w.lost() and proc.returncode is None
+        # the keeper's word arrives: that is how it ended
+        (d / "state.json").write_text(json.dumps({**state, "exit": 1}))
+        assert w.ended() and proc.returncode == 1 and not w.lost()
+    finally:
+        keeper.kill()
+        keeper.wait()
+
+
+def test_a_worker_whose_keeper_died_without_a_word_is_cut_off():
+    import subprocess
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    keeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    d = workers.HOME / "killed"
+    d.mkdir(parents=True)
+    (d / "spec.json").write_text(json.dumps({"argv": ["claude"], "keeper": keeper.pid, "at": time.time()}))
+    (d / "state.json").write_text(json.dumps({"keeper": keeper.pid, "pid": ended.pid, "started": ""}))
+    w = workers.Worker(d)
+    os.kill(keeper.pid, signal.SIGKILL)                 # left a zombie of this process: not "there"
+    deadline = time.time() + 10
+    while not w.ended() and time.time() < deadline:
+        time.sleep(0.05)
+    assert w.ended() and w.lost() and workers.Proc(w).returncode == -9

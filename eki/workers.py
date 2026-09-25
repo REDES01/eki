@@ -178,8 +178,39 @@ class Worker:
         return True
 
     def lost(self) -> bool:
-        """Dead with no result: cut off, not finished."""
-        return self.exit is None and not self.alive()
+        """Dead with no result: cut off, not finished — not a program whose
+        keeper is still writing down how it ended."""
+        if self.exit is not None or self.alive():
+            return False
+        return not self._keeper_there() and self.exit is None
+
+    def ended(self) -> bool:
+        """Over, with all that will ever be said about how: its exit written
+        down, or its keeper gone too without a word (cut off). The program
+        ends a moment before its keeper writes that down; a look in between
+        is no verdict — under load it once read as -9 for good."""
+        if self.exit is not None:
+            return True
+        if self.alive(strict=False):
+            return False
+        return not self._keeper_there()
+
+    def _keeper_there(self) -> bool:
+        """The keeper still runs (and so will write the exit down). One this
+        engine started is its child: asked with waitpid, which also reaps
+        it, so a keeper that died never lingers here as a zombie."""
+        keeper = self.group
+        if keeper <= 0:
+            return False
+        try:
+            done, _ = os.waitpid(keeper, os.WNOHANG)
+            return not done
+        except ChildProcessError:
+            pass                            # a keeper an engine before this one started
+        if not _pid_there(keeper):
+            return False
+        was = self.state.get("keeper_started")
+        return not was or started_at(keeper) == was
 
     def ended_at(self) -> float:
         return float(self.state.get("ended") or 0)
@@ -357,7 +388,7 @@ def run(argv: List[str], *, key: str, cwd: Optional[str] = None,
     if w is None:
         w = start(argv, cwd=cwd, env=env, merge=merge, home=home, key=key, **meta)
     since = time.time()
-    while w.exit is None and w.alive(strict=False):
+    while not w.ended():
         if timeout and time.time() - since > timeout:
             w.kill(why="timed out")
             w.collect()
@@ -621,13 +652,10 @@ class Proc:
 
     @property
     def returncode(self) -> Optional[int]:
-        if self._code is None:
+        if self._code is None and self.worker.ended():
             code = self.worker.exit
-            if code is None and not self.worker.alive(strict=False):
-                code = self.worker.exit          # it may have just been written
-                if code is None:
-                    code = -int(signal.SIGKILL)  # gone without a word: cut off
-            self._code = code
+            # gone without a word: cut off
+            self._code = -int(signal.SIGKILL) if code is None else code
         return self._code
 
     async def wait(self) -> int:

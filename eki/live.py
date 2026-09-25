@@ -162,9 +162,12 @@ class LiveSession:
             except (RuntimeError, asyncio.TimeoutError) as e:
                 log.warning("extra MCP servers: %s", e)
 
-    async def _last_words(self, wait: float = 5.0) -> None:
+    async def _last_words(self, wait: float = INIT_TIMEOUT) -> None:
         """Let the reader finish with a program that has exited, so
-        `exit_error` holds what it wrote to stderr."""
+        `exit_error` holds what it wrote to stderr. The reader ends once the
+        program is gone, so this waits on that, not on a guess of how long
+        it takes: a few seconds was too few under load. `wait` only bounds a
+        reader that is stuck."""
         if self._reader and not self._reader.done():
             try:
                 await asyncio.wait_for(asyncio.shield(self._reader), timeout=wait)

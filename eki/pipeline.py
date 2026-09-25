@@ -13,7 +13,8 @@ said by name, with what it waits on:
     rebasing · checking again · building
     fixing conflicts in x.py (run r, 4 min)
     landed, goes live at 21:45 with 2 others
-    going live · watching (90 s left) · live · rolled back (why)
+    waiting for running work (1:12 left, then it goes anyway)
+    swapping · watching the new version (2:31 left) · live · rolled back — why
 
 A stage is in progress only while its worker or step is live in this engine;
 one a restart cut off says so — "waiting to be resumed" — rather than spin.
@@ -63,7 +64,7 @@ DOING = {"turn": "starting its turn", "queued": "starting its turn", "rebasing":
 LABEL = {"in line": "In line", "rebasing": "Rebasing", "starting its turn": "Starting",
          "checking again": "Checking again", "building": "Building", "fixing": "Fixing conflicts",
          "conflicts": "Conflicts", "landed": "Landed", "going live": "Going live",
-         "watching": "Watching", "live": "Live", "rolled back": "Rolled back"}
+         "swapping": "Swapping", "watching": "Watching", "live": "Live", "rolled back": "Rolled back"}
 
 _lock = threading.Lock()
 
@@ -198,7 +199,7 @@ def stage(c: Dict[str, Any], *, evs: List[Dict[str, Any]], queue: List[Dict[str,
     gone_swap = gone_with and swap.get("target") == departed.get("build")
     if state == "rolled back" or (state == "applying" and gone_swap and swap.get("state") in ("rolled back", "failed")):
         why = c.get("why") if state == "rolled back" else swap.get("why")
-        return _stage("rolled back", f"rolled back ({why or 'it wasn’t healthy'})")
+        return _stage("rolled back", f"rolled back — {why or 'it wasn’t healthy'}")
     if state == "applied" or (state == "applying" and gone_swap and swap.get("state") == "healthy"):
         return _stage("live", "live")
 
@@ -229,9 +230,11 @@ def stage(c: Dict[str, Any], *, evs: List[Dict[str, Any]], queue: List[Dict[str,
     # a person's own apply: no queue, just the journal (and only this engine's)
     if state in ("proposed", "conflicts", "rolled back") and last.get("event") in DOING \
             and now - float(last.get("at") or 0) < STALE:
-        doing = DOING[last["event"]]
-        live = last.get("boot") == boot and bool(boot)
-        return _stage(_key(doing), doing, live=live, stalled=not live)
+        if last.get("boot") == boot and bool(boot):
+            doing = DOING[last["event"]]
+            return _stage(_key(doing), doing, live=True)
+        # cut off by a restart: nothing carries a person's apply on, so
+        # it is theirs again — not "waiting to be resumed"
 
     if state != "applying":
         return {}
@@ -253,29 +256,82 @@ def _key(doing: str) -> str:
         doing, "starting its turn")
 
 
+def clock(seconds: float) -> str:
+    """1:12 — minutes and seconds left, for a countdown."""
+    n = max(0, int(seconds))
+    return f"{n // 60}:{n % 60:02d}"
+
+
+def _counting(key: str, say: str, until: float, now: float, **more: Any) -> Dict[str, Any]:
+    """A stage with a live countdown: `say` holds "{left}", which the text
+    fills in now and the board keeps filling in every second from `until`."""
+    return _stage(key, say.replace("{left}", clock(until - now)), live=True, say=say, until=int(until),
+                  left=max(0, int(until - now)), **more)
+
+
 def go_live_stage(swap: Dict[str, Any], swap_alive: bool, running_build: str,
                   now: Optional[float] = None) -> Dict[str, Any]:
-    """Where a go-live stands: the supervisor waiting for a quiet moment,
-    swapping, watching the new engine — or how it came out."""
+    """Where a go-live stands, said the way the supervisor is living it
+    (eki/supervisor.sh): its wait for running work — cut short by a quiet
+    moment, never longer than its deadline — then the swap, then its watch
+    of the new version; and how it came out.
+
+    On 2026-09-26 all five minutes of that read "going live" under a
+    spinner, and looked stuck."""
     now = now or time.time()
     st = swap.get("state") or ""
     if st == "healthy":
         return _stage("live", "live")
     if st in ("rolled back", "failed"):
-        return _stage("rolled back", f"rolled back ({swap.get('why') or 'it wasn’t healthy'})")
-    if st not in ("waiting", "swapping"):
-        return _stage("going live", "going live", stalled=True)
-    if not swap_alive:
+        return _stage("rolled back", f"rolled back — {swap.get('why') or 'it wasn’t healthy'}")
+    if st not in ("waiting", "swapping") or not swap_alive:
         return _stage("going live", "going live", stalled=True)
     if st == "waiting":
-        left = int(swap.get("deadline") or 0) - now
-        return _stage("going live", "going live" + (f" by {_hm(float(swap['deadline']))} (at once if nothing runs)"
-                                                    if left > 60 else ""), live=True)
+        deadline = float(swap.get("deadline") or 0)
+        if deadline > now:
+            return _counting("going live", "waiting for running work ({left} left, then it goes anyway)",
+                             deadline, now)
+        if swap.get("behind"):
+            # past its own deadline, it still waits out the go-live before it
+            return _stage("going live", "waiting for the go-live before it to settle", live=True)
+        return _stage("swapping", "swapping", live=True)
     target = Path(str(swap.get("target") or "")).name
     if target and target == running_build:
-        left = int(max(float(swap.get("at") or 0), STARTED) + WATCH - now)
-        return _stage("watching", f"watching ({max(0, left)} s left)", live=True, left=max(0, left))
-    return _stage("going live", "going live — restarting on the new build", live=True)
+        # the watch starts once the new engine answers as the new build —
+        # this engine, which started moments after the swap
+        until = max(float(swap.get("at") or 0), STARTED) + WATCH
+        if until <= now:
+            return _stage("watching", "watching the new version — its verdict any moment", live=True)
+        return _counting("watching", "watching the new version ({left} left)", until, now)
+    return _stage("swapping", "swapping — restarting on the new version", live=True)
+
+
+def supervisor_said(since: float, home: Optional[Path] = None, limit: int = 6) -> List[Dict[str, Any]]:
+    """[{"at", "text"}] — what the supervisor wrote in swap.log since a
+    go-live left ("runs still going after 120s; swapping anyway", "swap: …",
+    "healthy on …"), the last `limit` lines."""
+    try:
+        text = ((home or HOME) / "swap.log").read_text()
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines()[-200:]:
+        try:
+            at = time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            continue
+        if at >= since - 1:
+            out.append({"at": int(at), "text": line[20:].strip()[:240]})
+    return out[-limit:]
+
+
+def needs_you(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fit changes that truly wait for the person. One eki is taking in by
+    itself — in the merge queue, being checked again, its conflicts being
+    fixed — has a stage and is shown under "going in"; offering it an
+    Apply button beside "Checking again" (2026-09-26) said the opposite."""
+    return [c for c in rows if c.get("state") in ("proposed", "conflicts") and c.get("fit")
+            and not c.get("stage") and not c.get("resolving")]
 
 
 # ---- the view -----------------------------------------------------------------------------
@@ -308,18 +364,20 @@ def view(rows: List[Dict[str, Any]], *, queue: List[Dict[str, Any]], running: It
                     "timeline": timeline(c["id"], evs=evs, queued_at=queued_at.get(c["id"], 0),
                                          landed_at=landed_at.get(c["id"], 0))})
     order = {r["change"]: n for n, r in enumerate(queue)}
-    rank = {"live": 0, "rolled back": 0, "watching": 1, "going live": 1, "landed": 2}
+    rank = {"live": 0, "rolled back": 0, "watching": 1, "swapping": 1, "going live": 1, "landed": 2}
     out.sort(key=lambda r: (rank.get(r["stage"], 3), order.get(r["id"], -1)))
     return {"changes": out, "golive": golive(by_id, train=train, leaves_at=leaves_at, swap=swap,
-                                            swap_alive=swap_alive, running_build=running_build, now=now)}
+                                            swap_alive=swap_alive, running_build=running_build, now=now,
+                                            home=home)}
 
 
 def golive(by_id: Dict[str, Dict[str, Any]], *, train: Dict[str, Any], leaves_at: Optional[float],
            swap: Dict[str, Any], swap_alive: bool, running_build: str,
-           now: Optional[float] = None) -> Dict[str, Any]:
+           now: Optional[float] = None, home: Optional[Path] = None) -> Dict[str, Any]:
     """The release train as one group. "next": what the next go-live
     carries and when it leaves; "last": the one that left last — what it
-    carried, when, and where it stands or how it came out."""
+    carried, when, and where it stands or how it came out — with what the
+    supervisor wrote about it since ("said")."""
     now = now or time.time()
 
     def carried(ids: Iterable[str]) -> List[Dict[str, str]]:
@@ -338,7 +396,8 @@ def golive(by_id: Dict[str, Dict[str, Any]], *, train: Dict[str, Any], leaves_at
             st = _stage("live", "went live with a later one") if swap.get("state") == "healthy" else st
         out["last"] = {"carrying": carried(gone.get("cars") or []), "left_at": int(gone.get("at") or 0),
                        "build": Path(gone["build"]).name, **st,
-                       "settled_at": int(swap.get("at") or 0) if mine and st["stage"] in ("live", "rolled back") else None}
+                       "settled_at": int(swap.get("at") or 0) if mine and st["stage"] in ("live", "rolled back") else None,
+                       "said": supervisor_said(float(gone.get("at") or 0), home) if mine else []}
     return out
 
 

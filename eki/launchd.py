@@ -6,6 +6,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import paths
@@ -51,12 +52,20 @@ def install() -> str:
     p = plist_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["launchctl", "bootout", f"{_domain()}/{LABEL}"], capture_output=True)
+    for _ in range(50):                    # bootout returns before the job is gone
+        gone = subprocess.run(["launchctl", "print", f"{_domain()}/{LABEL}"], capture_output=True)
+        if gone.returncode != 0:
+            break
+        time.sleep(0.1)
     with open(p, "wb") as f:
         plistlib.dump(spec, f)
-    out = subprocess.run(["launchctl", "bootstrap", _domain(), str(p)], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr.strip() or "launchctl bootstrap failed")
-    return str(p)
+    out = None
+    for _ in range(5):
+        out = subprocess.run(["launchctl", "bootstrap", _domain(), str(p)], capture_output=True, text=True)
+        if out.returncode == 0:
+            return str(p)
+        time.sleep(1)
+    raise RuntimeError((out.stderr.strip() if out else "") or "launchctl bootstrap failed")
 
 
 def uninstall() -> bool:

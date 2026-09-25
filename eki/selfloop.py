@@ -17,7 +17,8 @@ fault had happened twice. This is the loop around it:
          or with `eki self apply`) or apply (swapped in, watched, rolled back
          if unhealthy)
   plan   a roadmap item is ticked once its change has landed, as a commit
-         of its own (selfwork.write_ticks) — never in the change itself
+         of its own (selfwork.write_ticks) — never in the change itself —
+         and every item that change finished is closed (close_landed)
 
 Several at once (`self_parallel`, default 2), when there's room: each
 subscription carries only what its spare room allows, the models on this
@@ -56,7 +57,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import roadmap
-from .selfwork import SUMMARY_LINE
+from .selfwork import SUMMARY_LINE, names
 
 HOME = Path("~/.eki/self").expanduser()
 #: an item whose change failed its checks this many times is left for a person
@@ -687,6 +688,49 @@ def after_change(it: Item, change: Dict[str, Any], home: Optional[Path] = None) 
             fields.update(state="done" if it.source in ("asked", "undo", "fault") else "gave up",
                           note="the agent changed nothing")
     return update(it.id, home, **fields)
+
+
+#: an item waiting to be taken, or given up on: closed once its work is in
+_OPEN = ("queued", "gave up")
+
+
+def close_landed(landed: Iterable[Tuple[Dict[str, Any], str]], roadmap_text: str,
+                 home: Optional[Path] = None) -> List[str]:
+    """Items whose work is in already, closed — so the loop never does them
+    again, however the change got in (the loop, the release train, your
+    apply, a redo you asked for, a state put right by hand). `landed`:
+    (change, key) for every change that landed, `key` the roadmap item it
+    finishes ("" for none; selfwork.tick_of). Closed, if waiting or given up:
+    the change's own item (it follows its change: `after_change`) — a roadmap
+    item's only if the change finished it, not a first slice — the
+    roadmap item with that key, and an item you asked for that names that
+    roadmap item (selfwork.names) — asked before the change landed, so a
+    redo asked for since is left alone. And any roadmap item waiting whose
+    line ROADMAP.md shows ticked. What it closed, a few words each."""
+    closed: List[str] = []
+    all_ = {i.id: i for i in _load(home)}
+    for c, key in landed:
+        for it in list(all_.values()):
+            if it.state not in _OPEN:
+                continue
+            if it.id == c.get("item"):
+                if it.source == "roadmap" and not key:   # a slice: more to do, maybe put back on purpose
+                    continue
+                it = after_change(it, c, home)
+            elif key and ((it.source == "roadmap" and it.key == key) or
+                          (it.source == "asked" and it.created_at <= int(c.get("state_at") or 0)
+                           and names(it.request, it.source, roadmap_text) == key)):
+                it = update(it.id, home, state="done", note=f"landed as self/{c['id']}", run="", phase="", open={})
+            else:
+                continue
+            all_[it.id] = it
+            closed.append(f"“{it.title[:60]}” {it.state} — self/{c['id']} landed")
+    ticked = {i.key for i in roadmap.parse(roadmap_text) if i.done}
+    for it in all_.values():
+        if it.source == "roadmap" and it.state == "queued" and it.key in ticked:
+            update(it.id, home, state="done", note="ticked in ROADMAP.md", run="", phase="", open={})
+            closed.append(f"“{it.title[:60]}” done — ticked in ROADMAP.md")
+    return closed
 
 
 # ---- a chat message that asks eki to change itself --------------------------------

@@ -822,11 +822,31 @@ def _put_back(where: Path, commit: str) -> None:
 # back first (`keep_ticks`), and the writer ticks any landed item it finds
 # open again (`write_ticks`).
 
-def tick_of(c: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """(key, mark) of the roadmap item the change finishes, or None."""
+def tick_of(c: Dict[str, Any], text: str = "") -> Optional[Tuple[str, str]]:
+    """(key, mark) of the roadmap item the change finishes, or None: the item
+    it was made for, if its agent said it's done — or, given ROADMAP.md
+    (`text`), the one a person's request names (`names`): a redo asked for
+    by hand ("Bring 'Handoff …' up to date and land it") finishes the item
+    as surely as the loop's own change would."""
     if c.get("ticks") and c.get("said") in ("done", "already"):
         return c["ticks"], roadmap.mark(c["id"])
-    return None
+    if roadmap.NAME in (c.get("files") or []):       # an edit of the file: its items are its own
+        return None
+    key = names(c.get("request") or "", c.get("source") or "", text)
+    return (key, roadmap.mark(c["id"])) if key else None
+
+
+def names(request: str, source: str, text: str) -> str:
+    """The roadmap item a person's request is about: its whole title, quoted,
+    on the request's first line (roadmap.named) — "" for any other request,
+    for one that opens an item again (`asks_to_untick`), and for one about
+    the file ("add 'X' to ROADMAP.md"), which names an item to write, not
+    one it does."""
+    first = (request or "").strip().split("\n")[0]
+    if source != "asked" or not text or roadmap.NAME.lower() in first.lower() \
+            or asks_to_untick(request, source):
+        return ""
+    return roadmap.named(text, first)
 
 
 #: a request that is itself about ticking the roadmap ("tick the item …"):
@@ -916,10 +936,16 @@ def landed(c: Dict[str, Any]) -> bool:
                                        and c.get("said") in ("done", "already"))
 
 
-def landed_keys(rows: List[Dict[str, Any]]) -> List[str]:
+def landed_keys(rows: List[Dict[str, Any]], text: str = "") -> List[str]:
     """Keys of the roadmap items a change landed for — never taken again on
-    their own, whatever ROADMAP.md says about them."""
-    return [c["ticks"] for c in rows if c.get("ticks") and c["state"] == "applied"]
+    their own, whatever ROADMAP.md says about them. Given the file (`text`),
+    an item a person's applied request named counts too (`tick_of`)."""
+    keys = [c["ticks"] for c in rows if c.get("ticks") and c["state"] == "applied"]
+    for c in rows:
+        found = tick_of(c, text) if text and c["state"] == "applied" and not c.get("ticks") else None
+        if found:
+            keys.append(found[0])
+    return keys
 
 
 def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
@@ -937,14 +963,16 @@ def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
     back; nothing else may."""
     path = (home or HOME) / "ticks.json"
     everything = list(reversed(changes(home)))                         # oldest first
-    rows = [c for c in everything if tick_of(c)]
+    text = roadmap.read(Path(root))
+    rows = [(c, tick_of(c, text)) for c in everything]
+    rows = [(c, found[0]) for c, found in rows if found]
     try:
         done: Dict[str, str] = json.loads(path.read_text())
     except (OSError, ValueError):
         done = {}
     wrote: List[str] = []
     ready = True
-    for c in rows:
+    for c, key in rows:
         was = done.get(c["id"], "")
         if landed(c) and not was:
             act = "tick"
@@ -952,7 +980,7 @@ def write_ticks(root: Path, home: Optional[Path] = None) -> List[str]:
             act = "untick"
         else:
             continue
-        got = _roadmap_commit(Path(root), c, act)
+        got = _roadmap_commit(Path(root), c, act, key=key)
         if got is None:
             ready = False
             break                                   # your checkout isn't ready: later
@@ -971,13 +999,14 @@ def _reassert_ticks(root: Path, rows: List[Dict[str, Any]], done: Dict[str, str]
     wrote: List[str] = []
     text = roadmap.read(root)
     for c in rows:
-        key = c.get("ticks") or ""
+        found = tick_of(c, text)
+        key = found[0] if found else (c.get("ticks") or "")
         if not key or not landed(c):
             continue
         item = roadmap.find(text, key)
         if item is None or item.done:
             continue
-        if tick_of(c):
+        if found:
             if done.get(c["id"]) != "ticked":
                 continue
         elif c["state"] != "applied" or not ticked_since(root, key, c.get("commit") or ""):

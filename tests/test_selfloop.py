@@ -1550,3 +1550,135 @@ async def test_applying_shows_each_real_stage_the_go_live_and_a_timeline(eng, mo
     assert [r["step"] for r in got["timeline"]] == ["queued", "rebased", "rechecked", "landed",
                                                     "left to go live", "live"]
     await eng.runner.stop()
+
+
+# ---- what landed is closed, whichever way it landed -------------------------------------------
+
+def test_a_request_names_a_roadmap_item_by_its_whole_title_in_quotes():
+    key = roadmap.parse(PLAN)[3].key                                   # One standing context
+    assert roadmap.named(PLAN, "Bring 'One standing context' up to date and land it") == key
+    assert roadmap.named(PLAN, "Finish “One standing context.” today") == key
+    assert roadmap.named(PLAN, "make one standing context faster") == ""        # not quoted: in passing
+    assert roadmap.named(PLAN, "Redo 'One standing' please") == ""               # half a title
+    assert roadmap.named(PLAN, "Do 'One standing context' and 'Commit the working tree'") == ""   # two
+    asked = {"id": "c9", "source": "asked", "request": "Bring 'One standing context' up to date and land it. "
+             "Then tick the ROADMAP item."}
+    assert selfwork.tick_of(asked, PLAN) == (key, "*(eki: self/c9)*")
+    assert selfwork.tick_of(asked) is None                              # without the file, nothing to name
+    assert selfwork.tick_of({**asked, "files": ["ROADMAP.md"]}, PLAN) is None
+    assert selfwork.tick_of({**asked, "request": "Add 'One standing context' to ROADMAP.md"}, PLAN) is None
+    assert selfwork.tick_of({**asked, "request": "Untick 'One standing context'"}, PLAN) is None
+    assert selfwork.tick_of({**asked, "source": "fault"}, PLAN) is None
+    assert selfwork.landed_keys([{**asked, "state": "applied"}], PLAN) == [key]
+    assert selfwork.landed_keys([{**asked, "state": "proposed"}], PLAN) == []
+
+
+def test_everything_a_landed_change_satisfies_is_closed_and_nothing_else():
+    first, *_ = roadmap.parse(PLAN)
+    item = selfloop.add("roadmap", first.title, key=first.key)
+    selfloop.update(item.id, attempts=1, note="its run failed")        # put back by a run that failed after
+    redo = selfloop.add("asked", "redo", request="Bring 'Commit the working tree' up to date and land it")
+    gave_up = selfloop.add("roadmap", "One standing context", key=roadmap.parse(PLAN)[3].key, state="gave up")
+    landed = {"id": "c1", "item": item.id, "state": "applied", "said": "done", "ticks": first.key,
+              "state_at": int(time.time()) + 5}
+    closed = selfloop.close_landed([(landed, first.key)], PLAN)
+    assert len(closed) == 2 and all("self/c1 landed" in c for c in closed)
+    assert selfloop.get(item.id).state == "done" and selfloop.get(redo.id).state == "done"
+    assert selfloop.get(redo.id).note == "landed as self/c1"
+    assert selfloop.get(gave_up.id).state == "gave up"                  # another item: untouched
+    # a redo asked for after it landed is yours: left alone
+    again = selfloop.add("asked", "again", request="Bring 'Commit the working tree' up to date and land it")
+    assert selfloop.close_landed([({**landed, "state_at": again.created_at - 1}, first.key)], PLAN) == []
+    assert selfloop.get(again.id).state == "queued"
+
+
+def test_a_slice_put_back_is_left_but_a_ticked_line_closes_its_item():
+    _, _, _, standing = roadmap.parse(PLAN)
+    item = selfloop.add("roadmap", standing.title, key=standing.key, note="a first slice landed")
+    part = {"id": "c2", "item": item.id, "state": "applied", "said": "partial", "ticks": standing.key}
+    assert selfloop.close_landed([(part, "")], PLAN) == []
+    assert selfloop.get(item.id).state == "queued"                      # more to do: taken again
+    ticked = roadmap.tick(PLAN, standing.key, "")
+    assert selfloop.close_landed([(part, "")], ticked) == ["“One standing context” done — ticked in ROADMAP.md"]
+    assert selfloop.get(item.id).state == "done"
+
+
+def _stale(eng, title="Commit the working tree"):
+    """A roadmap item left waiting — its second attempt, say — and a redo
+    you asked for later, both for the same item."""
+    entry = next(e for e in roadmap.parse(PLAN) if e.title == title)
+    it = selfloop.by_key(entry.key, "roadmap") or selfloop.add("roadmap", entry.title, key=entry.key)
+    it = selfloop.update(it.id, state="queued", attempts=1, note="an earlier attempt failed")
+    redo = selfloop.add("asked", "redo", request=f"Bring '{title}' up to date and land it", state="gave up")
+    return entry, it, redo
+
+
+def _ticks(eng):
+    return [s for s in git(eng.root, "log", "--format=%s").splitlines() if s.startswith("roadmap: tick")]
+
+
+@pytest.mark.asyncio
+async def test_the_loop_landing_an_item_closes_every_item_for_it(eng):
+    eng.self_on(True)
+    eng.settings = {**eng.settings, "self_autonomy_areas": {"ROADMAP.md": "apply", "README.md": "apply"}}
+    entry, it, redo = _stale(eng)
+    Agent.edits, Agent.answers = {"README.md": "eki, committed\n"}, ["Committed.\nITEM: done"]
+    await turn(eng)
+    c = selfwork.change(selfloop.get(it.id).change)
+    assert c["state"] == "applied"
+    assert selfloop.get(it.id).state == "done" and selfloop.get(redo.id).state == "done"
+    assert roadmap.find((eng.root / "ROADMAP.md").read_text(), entry.key).done and len(_ticks(eng)) == 1
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_merge_train_landing_a_redo_ticks_and_closes_the_roadmap_item(eng):
+    eng.settings = {**eng.settings, "self_autonomy": "apply"}
+    entry, it, _ = _stale(eng, "One standing context")
+    Agent.edits = {"README.md": "eki, standing context\n"}
+    got = await eng.self_ask("Bring 'One standing context' up to date and land it", apply=True)
+    assert (await settle(eng.runs, got["run"], timeout=30))["state"] == "done"
+    cid = selfloop.get(got["item"]).change
+    assert selfwork.change(cid)["state"] == "applied"                     # documentation: the train merged it
+    text = (eng.root / "ROADMAP.md").read_text()
+    assert roadmap.find(text, entry.key).done and roadmap.mark(cid) in text and len(_ticks(eng)) == 1
+    assert selfloop.get(it.id).state == "done" and selfloop.get(it.id).note == f"landed as self/{cid}"
+    assert entry.title not in [e["title"] for e in eng.self_view()["roadmap"]["next"]]
+    assert eng._self_ticks() == []                                        # once
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_your_apply_closes_every_item_for_it(eng):
+    eng.self_on(True)
+    Agent.edits, Agent.answers = {"README.md": "eki, committed\n"}, ["Committed.\nITEM: done"]
+    await turn(eng)
+    first = next(i for i in selfloop.items() if i.source == "roadmap")
+    cid = first.change
+    entry, it, redo = _stale(eng)                                         # the item put back while it waited
+    assert it.id == first.id
+    assert (await eng.self_apply(cid))["state"] == "applied"
+    assert selfloop.get(it.id).state == "done" and selfloop.get(redo.id).state == "done"
+    assert len(_ticks(eng)) == 1
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_state_put_right_by_hand_is_swept_when_the_engine_starts(eng):
+    root = eng.root
+    entry, it, redo = _stale(eng)
+    selfwork.record(selfwork.Proposal(id="c7", request="x", root=str(root), commit=git(root, "rev-parse", "HEAD"),
+                                      fit=True, source="roadmap", said="done", ticks=entry.key, item=it.id))
+    selfwork.set_state("c7", "applied", how="merged by hand")            # put right by hand, no engine watching
+    standing = roadmap.parse(PLAN)[3]
+    other = selfloop.add("roadmap", standing.title, key=standing.key)
+    (root / "ROADMAP.md").write_text(roadmap.tick(PLAN, standing.key, ""))  # and one you ticked yourself
+    git(root, "commit", "-qam", "yours: tick it")
+    assert eng.self_settle() == ["tick self/c7"]
+    assert {selfloop.get(x.id).state for x in (it, redo, other)} == {"done"}
+    assert roadmap.find((root / "ROADMAP.md").read_text(), entry.key).done
+    # and the board never shows a ticked item waiting, even before the loop looks again
+    left = selfloop.add("roadmap", "Commit the working tree", key=entry.key)
+    view = eng.self_view()
+    assert view["queue"] == [] and view["roadmap"]["next"] == [] and selfloop.get(left.id).state == "done"
+    await eng.runner.stop()

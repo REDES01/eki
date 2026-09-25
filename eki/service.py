@@ -231,6 +231,11 @@ async def lifespan(app: FastAPI):
         resumed = await eng.resume_interrupted()
         if resumed:
             log.info("carried on with %d interrupted run(s)", resumed)
+        try:
+            # what landed while no engine watched: ticked, and its items closed
+            await asyncio.to_thread(eng.self_settle)
+        except Exception:                           # noqa: BLE001
+            log.exception("self-work settle")
         # every step of self-work the last engine was in the middle of —
         # a check, a conflict resolution — taken up again (eki/steps.py)
         carried = await eng.self_carry_on()

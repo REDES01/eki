@@ -1009,7 +1009,7 @@ class SelfLoop:
         changes = self._self_week_changes(now)
         plan = roadmap.read(self._self_root())
         items = roadmap.parse(plan)
-        landed = set(selfwork.landed_keys(selfwork.changes()))
+        landed = set(selfwork.landed_keys(selfwork.changes(), plan))
         try:
             from . import mcpregistry
             servers = sorted(mcpregistry.load().keys())
@@ -1133,8 +1133,9 @@ class SelfLoop:
         queued = {r["change"] for r in selfloop.merge_queue()}
         waiting = [c for c in selfwork.waiting() if c["id"] not in queued]
         await asyncio.to_thread(self._self_ticks)      # a tick taken back is put back first
-        landed = selfwork.landed_keys(selfwork.changes())
-        it, why = selfloop.pick(roadmap.read(root), waiting=len(waiting), review_max=review_max,
+        plan = roadmap.read(root)
+        landed = selfwork.landed_keys(selfwork.changes(), plan)
+        it, why = selfloop.pick(plan, waiting=len(waiting), review_max=review_max,
                                 landed=landed,
                                 live=self.runner.running,               # type: ignore[attr-defined]
                                 parallel=self._self_parallel(),
@@ -1276,14 +1277,40 @@ class SelfLoop:
 
     def _self_ticks(self) -> List[str]:
         """ROADMAP.md ticks, written by one writer once a change has landed
-        (selfwork.write_ticks) — never a change's own commit."""
+        (selfwork.write_ticks) — never a change's own commit. Every path a
+        change lands by comes through here, so this is also where the items
+        it finished are closed (`_self_close_landed`)."""
         try:
             wrote = selfwork.write_ticks(self._self_root())
         except (selfwork.SelfWorkError, OSError, ValueError):
-            return []
+            wrote = []
         for what in wrote:
             observe_mod.note("history", what=f"roadmap: {what}")
+        self._self_close_landed()
         return wrote
+
+    def _self_close_landed(self) -> List[str]:
+        """Items still waiting whose work has landed — or whose line is
+        ticked — closed, so the loop never does them again
+        (selfloop.close_landed)."""
+        try:
+            text = roadmap.read(self._self_root())
+            rows = [(c, (selfwork.tick_of(c, text) or ("",))[0])
+                    for c in reversed(selfwork.changes()) if selfwork.landed(c)]
+            closed = selfloop.close_landed(rows, text)
+        except (selfwork.SelfWorkError, OSError, ValueError):
+            return []
+        for what in closed:
+            observe_mod.note("history", what=f"self-work: {what}")
+        return closed
+
+    def self_settle(self) -> List[str]:
+        """At start: what landed while no engine was watching — a merge by
+        hand, a state put right by hand — ticked, and its items closed."""
+        if self._self_why_not():
+            return []
+        self._self_reconcile()
+        return self._self_ticks()
 
     async def self_apply(self, cid: str, confirmed: bool = False, now: bool = False) -> Dict[str, Any]:
         """You apply a change (`eki self apply`, the board's Apply). One that
@@ -1718,13 +1745,14 @@ class SelfLoop:
         root = self._self_root()
         if not why_not:
             self._self_reconcile()
+            self._self_close_landed()
         g = self._self_goal()
         rows = selfwork.changes()
         items = selfloop.items()
         text = roadmap.read(root) if not why_not else ""
         plan = roadmap.parse(text)
         known = {i.key: i for i in items if i.source == "roadmap"}
-        landed = set(selfwork.landed_keys(rows))
+        landed = set(selfwork.landed_keys(rows, text))
         # all of them: the board shows the first few and opens the rest in place
         upcoming = [(e, worth) for e, worth in roadmap.ranked(text, plan) if e.key not in landed
                     and (e.key not in known or known[e.key].state not in selfloop.SETTLED)]

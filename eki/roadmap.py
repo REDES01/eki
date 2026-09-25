@@ -241,6 +241,31 @@ def find(text: str, key: str) -> Optional[Item]:
     return next((i for i in parse(text) if i.key == key), None)
 
 
+#: what may stand around a title a request names: "Bring 'Handoff …' up to date"
+QUOTES = "'\"“”‘’`*"
+
+
+def named(text: str, line: str) -> str:
+    """The key of the one item `line` names by its whole title, in quotes
+    ("Bring 'Handoff between backends on long threads' up to date") — ""
+    if it names none, or more than one. Only a whole, quoted title counts:
+    a word in passing, or half a title, is not a claim to have done it."""
+    low = (line or "").lower()
+    keys = set()
+    for item in parse(text):
+        title = item.title.lower()
+        if len(title) < 8:
+            continue
+        at = low.find(title)
+        while at >= 0:
+            after = low[at + len(title):].lstrip(".")
+            if at and low[at - 1] in QUOTES and after[:1] in QUOTES:
+                keys.add(item.key)
+                break
+            at = low.find(title, at + 1)
+    return next(iter(keys)) if len(keys) == 1 else ""
+
+
 def intro(text: str, section: str) -> str:
     """What a section says before its first item — the stage's why."""
     out: List[str] = []

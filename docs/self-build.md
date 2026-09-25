@@ -584,6 +584,19 @@ whatever the file says. An item cut off by a restart after its change was
 judged is closed with that change, not started over. An item a change was applied
 for is never taken again on its own, ticked or not.
 
+**What landed is closed, however it landed.** Whenever a change lands — the
+loop's own, the release train, your apply, a state put right by hand — every
+item it satisfies that still waits is closed: its own item, the roadmap item
+with its key, and an item you asked for earlier that names that roadmap item.
+A change you asked for counts as finishing a roadmap item when its request
+names the item's whole title in quotes on its first line ("Bring 'Handoff
+between backends on long threads' up to date and land it"): the item is
+ticked for it, once. A request about ROADMAP.md itself ("add 'X' to
+ROADMAP.md"), or one that opens an item again, claims nothing. When the
+engine starts, and whenever the board is shown, a roadmap item still waiting
+whose line is ticked is closed too, so *Up next* and the queue never show
+one.
+
 **How far it goes alone.** `self_autonomy` is *propose* (a branch, a diff and
 its checks; you apply it) or *apply* (a fit change is applied at once — one
 touching a guarded path only as below). `self_autonomy_areas` overrides it

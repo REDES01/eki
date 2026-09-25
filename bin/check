@@ -1,6 +1,13 @@
 #!/bin/sh
 # The gate for main: every test, including the restart drill.
+# The interpreter is the first of $EKI_PYTHON, this folder's .venv, python3
+# that has pytest (the engine's own EKI_PYTHON may be a bare runtime), and
+# the tests see it as EKI_PYTHON.
 set -e
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
-"${EKI_PYTHON:-$here/.venv/bin/python}" -m pytest -q "$@"
+for py in "$EKI_PYTHON" "$here/.venv/bin/python" python3; do
+    [ -n "$py" ] && "$py" -c "import pytest" >/dev/null 2>&1 && EKI_PYTHON="$py" exec "$py" -m pytest -q "$@"
+done
+echo "bin/check: no interpreter with pytest (tried \$EKI_PYTHON, .venv/bin/python, python3)" >&2
+exit 1

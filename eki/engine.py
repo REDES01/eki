@@ -15,11 +15,12 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import db, machine, models, paths, store
+from . import db, machine, models, paths, quota, store
 
 log = logging.getLogger("eki.engine")
 
@@ -155,9 +156,36 @@ DUTY_EVERY = 15.0
 _last_duty = [0.0]
 
 
+_quota_job: list = [None, 0.0]
+
+
+def refresh_quota() -> None:
+    """Ask the subscription programs how much is left — on a thread of its own,
+    since asking takes seconds and the engine's rounds must not wait."""
+    job = _quota_job[0]
+    if (job is not None and job.is_alive()) or time.time() - _quota_job[1] < 60:
+        return
+    _quota_job[1] = time.time()
+
+    def work() -> None:
+        c = db.connect()
+        try:
+            read = quota.refresh(c)
+            if read:
+                log.info("quota read: %s", ", ".join(read))
+        except Exception:                                # noqa: BLE001
+            log.exception("quota refresh failed")
+        finally:
+            c.close()
+
+    _quota_job[0] = threading.Thread(target=work, daemon=True, name="quota")
+    _quota_job[0].start()
+
+
 def tick(conn) -> None:
     reap(conn)
     spawn_ready(conn)
+    refresh_quota()
     if time.time() - _last_duty[0] > DUTY_EVERY:
         _last_duty[0] = time.time()
         for line in models.duty(conn):

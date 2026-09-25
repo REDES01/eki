@@ -50,12 +50,9 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         } else {
             status.button?.title = "eki"
         }
-        let m = NSMenu()
-        m.addItem(withTitle: "Open eki", action: #selector(show), keyEquivalent: "")
-        m.addItem(withTitle: "New thread", action: #selector(newThread), keyEquivalent: "")
-        m.addItem(.separator())
-        m.addItem(withTitle: "Quit eki window", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-        status.menu = m
+        rebuildMenu(lines: [], waiting: 0)
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refreshStatus() }
+        refreshStatus()
         load()
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
             guard let self = self else { return e }
@@ -104,6 +101,52 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         dragRects = rects("drag")
         noDragRects = rects("nodrag")
         debug("drag areas: \(dragRects) minus \(noDragRects)")
+    }
+
+    // The menu bar item: what's waiting for you, and how much of each plan is left.
+    func rebuildMenu(lines: [String], waiting: Int) {
+        let m = NSMenu()
+        if waiting > 0 {
+            m.addItem(withTitle: waiting == 1 ? "1 question waiting for you" : "\(waiting) questions waiting for you",
+                      action: #selector(show), keyEquivalent: "")
+            m.addItem(.separator())
+        }
+        for line in lines {
+            let item = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            m.addItem(item)
+        }
+        if !lines.isEmpty { m.addItem(.separator()) }
+        m.addItem(withTitle: "Open eki", action: #selector(show), keyEquivalent: "")
+        m.addItem(withTitle: "New thread", action: #selector(newThread), keyEquivalent: "")
+        m.addItem(.separator())
+        m.addItem(withTitle: "Quit eki window", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        status.menu = m
+        status.button?.title = waiting > 0 ? " \(waiting)" : ""
+        status.button?.imagePosition = .imageLeading
+    }
+
+    func refreshStatus() {
+        let group = DispatchGroup()
+        var provs: [[String: Any]] = [], asks: [[String: Any]] = []
+        for (path, assign) in [("api/providers", { (v: [[String: Any]]) in provs = v }),
+                               ("api/asks", { (v: [[String: Any]]) in asks = v })] {
+            group.enter()
+            URLSession.shared.dataTask(with: home.appendingPathComponent(path)) { data, _, _ in
+                if let d = data, let v = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] { assign(v) }
+                group.leave()
+            }.resume()
+        }
+        group.notify(queue: .main) { [weak self] in
+            let names = ["five_hour": "5h", "seven_day": "week", "thirty_day": "30 days"]
+            let lines: [String] = provs.compactMap { p in
+                guard let q = p["quota"] as? [String: Any], let w = q["windows"] as? [String: [String: Any]] else { return nil }
+                let parts = w.sorted { $0.key < $1.key }.map { k, v in
+                    "\(names[k] ?? k) \(Int(((v["used"] as? Double) ?? 0) * 100))%" }
+                return "\(p["name"] as? String ?? "?")  ·  " + parts.joined(separator: "  ·  ")
+            }
+            self?.rebuildMenu(lines: lines, waiting: asks.count)
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

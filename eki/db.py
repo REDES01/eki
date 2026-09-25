@@ -65,6 +65,24 @@ CREATE TABLE IF NOT EXISTS events (
     data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, id);
+CREATE TABLE IF NOT EXISTS asks (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    kind TEXT NOT NULL,          -- question | permission | form
+    payload TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open',   -- open | answered | delivered | withdrawn
+    answer TEXT,
+    created_at REAL NOT NULL,
+    answered_at REAL
+);
+CREATE INDEX IF NOT EXISTS asks_run ON asks(run_id, state);
+CREATE TABLE IF NOT EXISTS quota (
+    provider TEXT PRIMARY KEY,
+    windows TEXT NOT NULL,       -- {"five_hour": {"used": 0..1, "resets_at": epoch}, …}
+    plan TEXT,
+    observed_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS cooldowns (
     provider TEXT PRIMARY KEY,
     until REAL NOT NULL,

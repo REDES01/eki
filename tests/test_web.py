@@ -84,3 +84,29 @@ def test_event_ids_are_eki_ids_not_session_ids(web, conn):
     ev = json.loads(get(f"{web}/api/threads/{got['thread']}/events?after=0&wait=0")[1])["events"]
     assert all(isinstance(e["id"], int) for e in ev)
     assert get(f"{web}/api/threads/{got['thread']}/events?after=NaN&wait=0")[0] == 200
+
+
+def test_only_files_a_run_pointed_at_are_served(web, conn, home):
+    import urllib.parse
+    _, got = post(web + "/api/ask", {"prompt": "steps=1 write"})
+    run_inline(conn, got["run"])
+    t = json.loads(get(f"{web}/api/threads/{got['thread']}")[1])
+    made = t["runs"][0]["files"]
+    assert made and made[0].endswith("made.html")
+    code, body = get(web + "/api/file?path=" + urllib.parse.quote(made[0]))
+    assert code == 200 and "made by fake" in body
+    secret = home / "providers.json"
+    with pytest.raises(urllib.error.HTTPError):
+        get(web + "/api/file?path=" + urllib.parse.quote(str(secret)))
+
+
+def test_answering_an_ask_over_http(web, conn):
+    from eki import asks, db, store
+    with db.tx(conn):
+        tid = store.create_thread(conn, "t", None)
+        rid = store.create_run(conn, tid, "x")
+    aid = asks.create(conn, rid, tid, "permission", {"tool": "Bash", "detail": "ls"})
+    assert json.loads(get(web + "/api/asks")[1])[0]["id"] == aid
+    code, got = post(f"{web}/api/asks/{aid}/answer", {"allow": False})
+    assert code == 200 and got["result"] == "answered"
+    assert json.loads(get(web + "/api/asks")[1]) == []

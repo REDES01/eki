@@ -17,19 +17,12 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import shutil
-import signal
-import subprocess
 import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 Emit = Callable[[str, Dict[str, Any]], None]
-
-#: a program that prints nothing for this long is taken as hung
-IDLE_LIMIT = float(os.environ.get("EKI_IDLE_LIMIT") or 30 * 60)
 
 
 @dataclass
@@ -50,6 +43,7 @@ class Outcome:
     error: str = ""
     reset_at: Optional[float] = None      # when a limit lifts
     reason: str = ""                      # why it handed off
+    finished: bool = False                # the program said its turn is over
 
 
 class Provider:
@@ -84,101 +78,7 @@ def find_binary(name: str) -> Optional[str]:
     return None
 
 
-class ProgramProvider(Provider):
-    """A provider that is a program printing one JSON object per line."""
-
-    harness = True
-
-    def argv(self, turn: Turn) -> List[str]:
-        raise NotImplementedError
-
-    def read(self, event: Dict[str, Any], emit: Emit, out: Outcome) -> None:
-        """Turn one line of the program's output into events; note the outcome."""
-        raise NotImplementedError
-
-    def env(self, turn: Turn) -> Dict[str, str]:
-        env = dict(os.environ)
-        env["EKI_RUN"] = turn.run_id
-        env["EKI_THREAD"] = turn.thread_id
-        return env
-
-    def take(self, turn: Turn, emit: Emit) -> Outcome:
-        out = Outcome()
-        argv = self.argv(turn)
-        proc = subprocess.Popen(
-            argv, cwd=turn.cwd, env=self.env(turn),
-            # DEVNULL: with a pipe on stdin the CLIs wait for more input
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            process_group=0)
-        if turn.extra.get("on_child"):
-            turn.extra["on_child"](proc.pid)
-        lines: "queue.Queue[Optional[bytes]]" = queue.Queue()
-        err_tail: List[bytes] = []
-
-        def pump() -> None:
-            for line in proc.stdout:          # type: ignore[union-attr]
-                lines.put(line)
-            lines.put(None)
-
-        def pump_err() -> None:
-            for line in proc.stderr:          # type: ignore[union-attr]
-                err_tail.append(line)
-                del err_tail[:-20]
-
-        threading.Thread(target=pump, daemon=True).start()
-        threading.Thread(target=pump_err, daemon=True).start()
-        last = time.time()
-        try:
-            while True:
-                if turn.stop.is_set():
-                    out.state, out.error = "cancelled", "stopped"
-                    break
-                try:
-                    line = lines.get(timeout=0.5)
-                except queue.Empty:
-                    if time.time() - last > IDLE_LIMIT:
-                        out.state, out.error = "failed", f"no output for {int(IDLE_LIMIT)}s"
-                        break
-                    continue
-                if line is None:
-                    break
-                last = time.time()
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue                  # banners, log noise
-                if isinstance(event, dict):
-                    self.read(event, emit, out)
-        finally:
-            _stop(proc)
-        code = proc.returncode
-        if out.state == "done" and code not in (0, None) and not out.error:
-            tail = b"".join(err_tail).decode("utf-8", "replace").strip()
-            out.state, out.error = "failed", (tail[-400:] or f"{self.name} exited {code}")
-        if out.state == "done" and out.error:
-            out.state = "failed"
-        if out.state == "failed" and _looks_like_limit(out.error):
-            out.state = "limited"
-        return out
-
-
-def _stop(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-        proc.wait(timeout=5)
-    except (ProcessLookupError, PermissionError):
-        pass
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.wait()
-
-
-def _looks_like_limit(text: str) -> bool:
+def looks_like_limit(text: str) -> bool:
     t = (text or "").lower()
     return any(k in t for k in ("usage limit", "rate limit", "rate_limit", "limit reached",
                                 "hit your limit", "quota", "too many requests", "429"))

@@ -33,7 +33,7 @@ def checker_name() -> str:
 
 
 def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
-    avail = capacity.status(conn)
+    avail = capacity.status(conn, background=run["priority"] == "background")
     skip = set(store.excluded(run))
 
     def can(name: str) -> Tuple[bool, str]:
@@ -66,7 +66,13 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
                             checker=checker_name())
     entry = table_row(key)
     refused: List[str] = []
-    for target in entry["targets"]:
+    # a subscription near the end of its plan goes last in its row
+    saved = {t: capacity.saving(conn, t) for t in entry["targets"]}
+    order = [t for t in entry["targets"] if not saved[t]] + [t for t in entry["targets"] if saved[t]]
+    for t in entry["targets"]:
+        if saved[t] and len(entry["targets"]) > 1:
+            refused.append(f"{t} last ({saved[t]})")
+    for target in order:
         ok, why = can(target)
         if ok:
             tail = f"; skipped {', '.join(refused)}" if refused else ""

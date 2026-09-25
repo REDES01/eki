@@ -59,6 +59,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _served_file(self, path: str) -> None:
+        from . import files
+        conn = db.connect()
+        try:
+            got = files.read(conn, path)
+        finally:
+            conn.close()
+        if got is None:
+            return self._json({"error": "not a file a run made"}, 404)
+        body, ctype = got
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        # whatever an agent wrote runs with no rights of eki's own
+        self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-popups")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _call(self, fn: Callable[..., Any], *args: Any) -> None:
         conn = db.connect()
         try:
@@ -101,6 +120,10 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             return self._call(api.events, m.group(1), _num(q.get("after"), 0, int),
                               min(_num(q.get("wait"), 20, float), 25))
+        if p == "/api/file":
+            return self._served_file(q.get("path") or "")
+        if p == "/api/asks":
+            return self._call(api.open_asks)
         if p == "/api/providers":
             return self._call(api.provider_list)
         if p == "/api/route":
@@ -114,6 +137,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if p == "/api/ask":
             return self._call(api.ask, body)
+        m = re.fullmatch(r"/api/asks/(\w+)/answer", p)
+        if m:
+            return self._call(api.answer, m.group(1), body)
         m = re.fullmatch(r"/api/runs/(\w+)/cancel", p)
         if m:
             return self._call(api.cancel, m.group(1))

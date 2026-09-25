@@ -30,7 +30,7 @@
     const list = await call("/api/threads");
     $("threads").innerHTML = list.map((t) => `
       <a href="#${t.id}" class="thread ${t.id === state.thread ? "on" : ""}" data-id="${t.id}">
-        ${t.working ? '<span class="dot" title="working"></span>' : ""}
+        ${t.needs_you ? '<span class="dot you" title="needs you"></span>' : t.working ? '<span class="dot" title="working"></span>' : ""}
         <span class="t">${md.esc(t.title || "(untitled)")}</span>
         <span class="when dim">${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
       </a>`).join("") || '<div class="dim pad">No threads yet.</div>';
@@ -50,7 +50,8 @@
     const who = r.provider ? `<span class="who">${md.esc(r.provider)}</span>` : "";
     const why = r.why ? `<span class="why" title="${md.esc(r.why)}">${md.esc(r.why)}</span>` : "";
     let tail = "";
-    if (live) tail = `<div class="live"><span class="spin"></span>${r.state === "queued" ? "waiting" : "working"}
+    const waiting = (r.asks || []).some((a) => a.state === "open");
+    if (live) tail = `<div class="live"><span class="spin ${waiting ? "paused" : ""}"></span>${waiting ? "waiting for you" : r.state === "queued" ? "waiting" : "working"}
                         <button class="ghost small" data-cancel="${r.id}">Stop</button></div>`;
     if (r.state === "failed") tail = `<div class="err">Failed: ${md.esc(r.error || "")}</div>`;
     if (r.state === "cancelled") tail = `<div class="dim">Stopped.</div>`;
@@ -58,7 +59,13 @@
     return `<div class="turn" id="run-${r.id}">
         ${r.parent ? "" : `<div class="user">${md.render(r.prompt)}</div>`}
         <div class="bot"><div class="route">${who}${why}</div>${steps}
-          <div class="answer">${answer}</div>${tail}</div></div>`;
+          <div class="answer">${answer}</div>${(r.asks || []).map(cards.render).join("")}${files(r)}${tail}</div></div>`;
+  }
+
+  function files(r) {
+    if (!r.files || !r.files.length) return "";
+    return `<div class="files">${r.files.map((p) => `<button type="button" class="file" data-file="${md.esc(p)}">
+      ${md.esc(p.split("/").pop())}</button>`).join("")}</div>`;
   }
 
   async function loadThread(scroll) {
@@ -68,6 +75,7 @@
     $("meta").textContent = [t.provider && "with " + t.provider, t.cwd].filter(Boolean).join(" · ");
     if (t.cwd && !$("cwd").value) $("cwd").value = t.cwd;
     const log = $("log");
+    if (log.contains(document.activeElement) && document.activeElement.matches(".ask input")) return;  // don't wipe a half-typed answer
     const nearBottom = log.parentElement.scrollHeight - log.parentElement.scrollTop - log.parentElement.clientHeight < 80;
     log.innerHTML = t.runs.map(runHtml).join("");
     $("empty").style.display = t.runs.length ? "none" : "";
@@ -113,6 +121,17 @@
 
   // ---- providers and the machine ---------------------------------------------------------
 
+  const WINDOW = { five_hour: "5h", seven_day: "week", thirty_day: "30 days" };
+  function meters(q) {
+    if (!q || !q.windows) return "";
+    return `<div class="meters">${Object.entries(q.windows).map(([k, w]) => {
+      const pct = Math.round((w.used || 0) * 100);
+      const resets = w.resets_at ? new Date(w.resets_at * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "";
+      return `<div class="meter" title="${WINDOW[k] || k}: ${pct}% used${resets ? " · resets " + resets : ""}">
+        <span class="mlabel">${WINDOW[k] || k}</span><span class="mbar"><i style="width:${Math.min(pct, 100)}%" class="${pct >= 100 ? "full" : ""}"></i></span><span class="mpct">${pct}%</span></div>`;
+    }).join("")}</div>`;
+  }
+
   async function loadProviders() {
     let ps, st;
     try {
@@ -136,7 +155,7 @@
         : `<button class="ghost small" data-model="${p.name}" data-act="start">Start</button>`;
       const label = m && m.starting ? "starting…" : (p.ok ? "ready" : p.why);
       return `<div class="prov"><span class="led ${p.ok ? "ok" : m && m.starting ? "wait" : ""}"></span>
-        <span class="pname">${md.esc(p.name)}</span><span class="dim pwhy" title="${md.esc(label)}">${md.esc(label)}</span>${action}</div>`;
+        <span class="pname">${md.esc(p.name)}</span><span class="dim pwhy" title="${md.esc(label)}">${p.quota ? (p.quota.plan || "") : md.esc(label)}</span>${action}</div>${meters(p.quota)}`;
     }).join("");
     $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}`;
   }
@@ -187,6 +206,7 @@
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); location.hash = ""; open(null); }
   });
   window.addEventListener("hashchange", () => open(location.hash.slice(1) || null));
+  window.addEventListener("eki:refresh", () => { loadThread(false); loadThreads(); });
 
   // The Mac window moves when dragged by its title areas; tell it where they are.
   function reportDrag() {

@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, capacity, engine, machine, models, paths, providers, routing, store
+from . import asking, asks, capacity, engine, machine, models, paths, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -23,17 +23,21 @@ def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) ->
                          for e in store.events_after(conn, r["id"])
                          if e["kind"] in ("tool", "note", "interrupted", "handoff")]
         view["last_event"] = max((e["id"] for e in store.events_after(conn, r["id"])), default=0)
+        view["asks"] = [asks.view(a) for a in asks.for_run(conn, r["id"]) if a["state"] != "withdrawn"]
+        view["files"] = sorted({e["path"] for e in view["steps"] if e.get("path")})
     return view
 
 
 def threads(conn: sqlite3.Connection, limit: int = 60) -> List[Dict[str, Any]]:
     rows = conn.execute(
         "SELECT t.*, MAX(r.created_at) AS updated, "
-        " SUM(CASE WHEN r.state IN ('queued','starting','running') THEN 1 ELSE 0 END) AS active "
+        " SUM(CASE WHEN r.state IN ('queued','starting','running') THEN 1 ELSE 0 END) AS active, "
+        " (SELECT COUNT(*) FROM asks a WHERE a.thread_id = t.id AND a.state = 'open') AS waiting "
         "FROM threads t LEFT JOIN runs r ON r.thread_id = t.id "
-        "GROUP BY t.id ORDER BY active > 0 DESC, updated DESC LIMIT ?", (limit,)).fetchall()
+        "GROUP BY t.id ORDER BY waiting > 0 DESC, active > 0 DESC, updated DESC LIMIT ?", (limit,)).fetchall()
     return [{"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
-             "updated": t["updated"] or t["created_at"], "working": bool(t["active"])} for t in rows]
+             "updated": t["updated"] or t["created_at"], "working": bool(t["active"]),
+             "needs_you": bool(t["waiting"])} for t in rows]
 
 
 def thread(conn: sqlite3.Connection, tid: str) -> Dict[str, Any]:
@@ -53,10 +57,12 @@ def events(conn: sqlite3.Connection, tid: str, after: int, wait: float = 20) -> 
             "WHERE r.thread_id = ? AND e.id > ? ORDER BY e.id LIMIT 500", (tid, after)).fetchall()
         active = conn.execute("SELECT COUNT(*) FROM runs WHERE thread_id=? AND state IN "
                               "('queued','starting','running')", (tid,)).fetchone()[0]
+        waiting = conn.execute("SELECT COUNT(*) FROM asks WHERE thread_id=? AND state='open'",
+                               (tid,)).fetchone()[0]
         if rows or time.time() >= end:
             return {"events": [{**json.loads(e["data"]), "id": e["id"], "run": e["run_id"],
                                 "kind": e["kind"]} for e in rows],
-                    "active": active}
+                    "active": active, "waiting": waiting}
         time.sleep(0.15)
 
 
@@ -65,6 +71,14 @@ def ask(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
                              to=body.get("to") or None, cwd=body.get("cwd") or None,
                              background=bool(body.get("background")))
     return {"thread": tid, "run": rid}
+
+
+def answer(conn: sqlite3.Connection, aid: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    return {"result": asks.answer(conn, aid, body)}
+
+
+def open_asks(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    return [asks.view(a) for a in asks.open_asks(conn)]
 
 
 def cancel(conn: sqlite3.Connection, rid: str) -> Dict[str, Any]:
@@ -80,6 +94,9 @@ def provider_list(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
                 "ok": ok, "why": why}
         if cfg.get("kind") == "local":
             item["model"] = models.status(name)
+        q = quota.reading(conn, name)
+        if q:
+            item["quota"] = q
         out.append(item)
     return out
 

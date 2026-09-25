@@ -16,11 +16,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .base import Emit, Outcome, ProgramProvider, Turn, with_history
+from .base import Emit, Outcome, Turn, with_history
+from .program import Channel, ProgramProvider
 
 
 class Fake(ProgramProvider):
     kind = "fake"
+    interactive = True
 
     def __init__(self, name: str, cfg: Dict[str, Any]):
         super().__init__(name, cfg)
@@ -38,18 +40,33 @@ class Fake(ProgramProvider):
         env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         return env
 
-    def read(self, event: Dict[str, Any], emit: Emit, out: Outcome) -> None:
+    def read(self, event: Dict[str, Any], emit: Emit, out: Outcome, ch: Channel) -> None:
         kind = event.get("type")
+        if kind == "ask":
+            ch.ask("question", {"questions": [{"question": event["question"], "header": "Pick",
+                                               "multiSelect": False,
+                                               "options": [{"label": o} for o in event["options"]]}]},
+                   event["id"])
+            return
+        if kind == "done":
+            out.finished = True
+            return
         if kind == "session":
             emit("session", {"id": event["id"]})
         elif kind == "text":
             emit("text", {"text": event["text"]})
+        elif kind == "tool":
+            emit("tool", {k: v for k, v in event.items() if k != "type"})
         elif kind == "limit":
             out.error, out.reset_at = "usage limit reached", time.time() + float(event.get("in", 60))
         elif kind == "handoff":
             out.state, out.reason = "handed_off", event.get("reason", "")
         elif kind == "error":
             out.error = event.get("message", "error")
+
+    def answer(self, ch: Channel, key: Any, response: Dict[str, Any]) -> None:
+        answers = response.get("answers") or {}
+        ch.write({"id": key, "answer": next(iter(answers.values()), "") if response.get("allow", True) else None})
 
 
 # ---- the program itself -------------------------------------------------------------------
@@ -78,6 +95,7 @@ def main(argv: List[str]) -> int:
     else:
         sid = uuid.uuid4().hex
         state = _fresh(prompt)
+    (state_dir / sid).write_text(json.dumps(state))
     _say({"type": "session", "id": sid})
     ask = state["prompt"]
     if "fail" in ask.split():
@@ -89,6 +107,14 @@ def main(argv: List[str]) -> int:
     if "handoff" in ask.split():
         _say({"type": "handoff", "reason": "needs tools"})
         return 0
+    if "ask" in ask.split():
+        _say({"type": "ask", "id": "q1", "question": "Which colour?", "options": ["red", "blue"]})
+        reply = json.loads(sys.stdin.readline() or "{}")
+        _say({"type": "text", "text": f"picked {reply.get('answer')}\n"})
+    if "write" in ask.split():
+        path = Path(os.environ.get("EKI_HOME", ".")) / "made.html"
+        path.write_text("<h1>made by fake</h1>")
+        _say({"type": "tool", "name": "Write", "detail": str(path), "path": str(path)})
     delay = float(_num(ask, "delay", 0.05))
     while state["done"] < state["steps"]:
         time.sleep(delay)
@@ -96,6 +122,7 @@ def main(argv: List[str]) -> int:
         (state_dir / sid).write_text(json.dumps(state))
         _say({"type": "text", "text": f"step {state['done']}/{state['steps']}\n"})
     _say({"type": "text", "text": f"{name} done: {ask.splitlines()[-1][:80]}"})
+    _say({"type": "done"})
     return 0
 
 

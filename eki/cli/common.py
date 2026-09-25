@@ -36,6 +36,26 @@ def ago(t: Optional[float]) -> str:
     return f"{s}s ago"
 
 
+def _ask_here(c, aid: str) -> None:
+    """A question mid-run: answered right here in a terminal, else say how."""
+    from .. import asks
+    from .answer import response_for, show
+    row = asks.get(c, aid)
+    if row is None or row["state"] != "open":
+        return
+    a = asks.view(row)
+    err(show(a))
+    if not sys.stdin.isatty():
+        err(f"  (answer with: eki-next answer {aid} <choice>   or in the eki window)")
+        return
+    if a["kind"] == "question":
+        reply = input("  your answer (number or words): ").strip()
+        asks.answer(c, aid, response_for(a, reply))
+    else:
+        reply = input("  allow? [y/N/a=always] ").strip().lower()
+        asks.answer(c, aid, response_for(a, "", allow=reply in ("y", "yes", "a"), always=reply == "a"))
+
+
 def follow(c, rid: str, *, show_tools: bool = True, poll: float = 0.2) -> int:
     """Print a run as it happens, into the run it hands off to. Exit code: 0 done."""
     last = 0
@@ -53,6 +73,8 @@ def follow(c, rid: str, *, show_tools: bool = True, poll: float = 0.2) -> int:
                 err(f"→ {data['provider']}  ({data['why']})")
             elif kind == "tool" and show_tools:
                 err(f"  · {data.get('name')} {data.get('detail', '')}")
+            elif kind == "ask":
+                _ask_here(c, data["ask"])
             elif kind in ("note", "interrupted"):
                 err(f"  ! {data.get('text') or kind}")
             elif kind == "handoff":

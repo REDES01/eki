@@ -9,6 +9,7 @@ queues the run again; the next worker resumes the program's session.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -19,7 +20,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import capacity, db, mcp, models, paths, providers, routing, skills, store
+from . import asks, capacity, files, db, mcp, models, paths, providers, quota, routing, skills, store
 from .providers.base import Outcome, Turn
 
 log = logging.getLogger("eki.worker")
@@ -125,6 +126,7 @@ def main(rid: str) -> int:
         hconn.close()
 
     threading.Thread(target=beat, daemon=True).start()
+    asks.withdraw_run(conn, rid)          # what an earlier attempt asked, the program will ask again
     attempt = r["attempt"]
     try:
         provider = r["provider"] if (r["provider"] and not r["pinned"]) else route(conn, r)
@@ -135,9 +137,20 @@ def main(rid: str) -> int:
         turn.stop = stop
 
         def emit(kind: str, data: Dict[str, Any]) -> None:
+            if kind == "quota":                  # what the program says of its plan: kept, not shown
+                quota.record(conn, data.get("provider") or provider, data.get("windows") or {})
+                return
             store.add_event(conn, rid, attempt, kind, data)
             if kind == "session" and data.get("id"):
                 store.save_session(conn, r["thread_id"], provider, str(data["id"]), rid)
+
+        def ask(kind: str, payload: Dict[str, Any]) -> str:
+            aid = asks.create(conn, rid, r["thread_id"], kind, payload)
+            emit("ask", {"ask": aid, "kind": kind})
+            return aid
+
+        turn.extra.update(ask=ask, answers=lambda ids: asks.take_answers(conn, ids),
+                          retract=lambda aid: asks.withdraw(conn, aid))
 
         turn.extra["on_child"] = lambda pid: conn.execute(
             "UPDATE runs SET child_pid=? WHERE id=?", (pid, rid))
@@ -147,6 +160,11 @@ def main(rid: str) -> int:
         if kind == "codex":
             skills.sync_codex()
         out = providers.get(provider).take(turn, emit)
+        made = {json.loads(e["data"]).get("path") for e in store.events_after(conn, rid)
+                if e["kind"] == "tool"}
+        for path in files.named_in(store.answer(conn, rid)):
+            if path not in made:              # a file the answer names: shown like one it wrote
+                emit("tool", {"name": "file", "detail": path, "path": path})
         if stop.is_set() and out.state != "done":
             out.state = "cancelled"
         finish(conn, r, provider, out)

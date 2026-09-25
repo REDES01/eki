@@ -379,7 +379,7 @@ Only what Stages 1–7 prove is missing. A driving agent (Claude Code, Codex) wi
 eki's commands is the first orchestrator; build a planner when it falls short.
 
 - [ ] A task graph over runs: inputs and outputs as files, fan-out, resume
-- [ ] A local model with its own tool loop, so it can call eki too
+- [x] A local model with its own tool loop, so it can call eki too *(eki: self/8817b975)*
 - [ ] An MCP wrapper over the same engine API, if a client without a shell needs it
 
 ## Alongside every stage — eki builds eki

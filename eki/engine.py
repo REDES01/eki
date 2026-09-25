@@ -383,7 +383,11 @@ class Engine(SelfLoop):
                                                    tools=True, repo=True,
                                                    # the web only through a search server
                                                    # eki's registry gives Codex
-                                                   web=mcpregistry.provides("codex", "web")),
+                                                   web=mcpregistry.provides("codex", "web"),
+                                                   # and 3D through a mesh server (Blender)
+                                                   produces=(("code", "prose", "mesh")
+                                                             if mcpregistry.provides("codex", "mesh")
+                                                             else ())),
                 cost=adapters.Cost(tier=0, note="local, through Codex"))
             options = {**self.options.get(codex.key, {}), "model": p.key, "local_model": p.key,
                        "gateway": f"http://127.0.0.1:{self.port}/v1", "context_tokens": context}

@@ -98,7 +98,7 @@ Legend: ✅ works · 🟡 works with a caveat · ⬜ not done · ➖ terminal-on
 |---|---|---|
 | ✅ | `web` is a capability a provider has: Claude Code (hosted), Codex (hosted, once `web_search = "live"` is in its config — eki sets it), a Codex-driven local model only through a search server from the registry | live: `/api/backends` shows web on codex and claude_code, not codex-qwen |
 | ✅ | Research needs `web` | live: "latest news about dsh this month" under Auto → Codex, which searched and cited; codex-qwen passed over |
-| ✅ | Catalog in `/mcp`: Brave, Exa, Tavily, Perplexity, Fetch, Playwright, GitHub, Filesystem — add with a key, choose backends; a search server gives that side `web` | engine unit-tested; panel built |
+| ✅ | Catalog in `/mcp`: Brave, Exa, Tavily, Perplexity, Fetch, Playwright, GitHub, Filesystem, Blender — add with a key, choose backends; a search server gives that side `web`, Blender gives it `mesh` | engine unit-tested; panel built |
 | ✅ | Perplexity and DeepSeek as providers (templates) | added; Perplexity carries `web` |
 
 ## Not covered

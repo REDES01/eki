@@ -385,6 +385,10 @@ rendered into every CLI — Claude Code per session (nothing written into
 entries in `~/.gemini/settings.json` that eki keeps a note of and replaces
 (a server of the same name you put there yourself is left alone). A server
 Claude Code already has can be shared with the others from the same panel.
+The panel's catalog adds common servers in one step — search, a browser,
+GitHub, files, and Blender: with Blender's MCP add-on running, the sides you
+give it can build and edit 3D scenes, and count as able to make meshes.
+eki has no 3D engine of its own; Blender's server is the tool.
 
 ## Claude and Codex usage
 

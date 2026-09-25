@@ -364,8 +364,8 @@ One memory store every harness shares, as simple as Claude's own client
 memory: a folder of plain markdown notes, global (`~/.eki/memory`) and per
 project (the project's `.eki/memory`). No graph, no decay.
 
-- [ ] `eki remember` / `eki recall` and the same in eki's MCP tools: list,
-      read, search and write notes, global or scoped to the project
+- [x] `eki remember` / `eki recall` and the same in eki's MCP tools: list,
+      read, search and write notes, global or scoped to the project *(eki: self/bd97f108)*
 - [ ] Claude Code's auto-memory notes and anything an agent is asked to
       remember land there, instead of being absorbed into skills; skills
       keep how-to, memory keeps facts

@@ -34,6 +34,12 @@ it live). Use it when the change is to eki itself — its code, docs or skills �
 not to the person's project. Don't start it in a loop, or from inside a
 self-build item.
 
+Fit items join a queue (under autonomy `apply` by themselves, under `propose`
+by `eki self apply`): each is rebased on the ones ahead, checked again, landed
+in eki's integration repo and put live by the train. An item that touches a
+hard-locked file (the launcher, `bin/check`, the drill, quotas, …) waits for a
+person's `eki self apply <item> --yes`.
+
 ```
 eki self "…"            # plan a goal into items and build them side by side
 eki self --one "…"      # no planning: the goal is one item
@@ -42,6 +48,9 @@ eki self show <item>    # one item in full
 eki self diff <item>    # what it changed
 eki self follow <item>  # its build run, live
 eki self drop <item> | eki self retry <item>
+eki self apply <item> [--yes]   # queue a proposed item (--yes: one that touches locked files)
+eki self release        # put integration main live now (the train, by hand)
+eki self autonomy apply|propose # queue and release by itself, or wait for you
 ```
 
 ## Other commands

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import builds, db, machine, models, paths, quota, selfwork, store
+from . import builds, db, machine, models, paths, queue, quota, selfwork, store, train
 
 log = logging.getLogger("eki.engine")
 
@@ -207,6 +207,12 @@ def tick(conn) -> bool:
                 log.info("self: %s", line)
         except Exception:                                # noqa: BLE001 — self-work must not stop the rest
             log.exception("self-work tick failed")
+        for name, step in (("queue", queue.tick), ("train", train.tick)):
+            try:
+                for line in step(conn):
+                    log.info("self: %s", line)
+            except Exception:                            # noqa: BLE001 — one failing never stops the other
+                log.exception("%s tick failed", name)
     if time.time() - _last_duty[0] > DUTY_EVERY:
         _last_duty[0] = time.time()
         for line in models.duty(conn):

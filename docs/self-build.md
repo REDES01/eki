@@ -212,8 +212,10 @@ eki` and can't raise the setting, turn the loop on, or touch a locked file.
    scheduler by write-sets, the build run with its brief, gate 1, `eki
    self`. eki proposes changes to itself, in parallel, as branches
    `self/<id>` of the source repo: merge one, or `eki swap self/<id>`.
-4. **The queue** — the integration repo, speculative rebase, gate 2, the
-   side path with `rerere`, landing and pushing, the train, `apply`.
+4. ~~**The queue**~~ — the integration repo, speculative rebase, gate 2, the
+   side path with `rerere`, landing and pushing, the train, `apply`. eki
+   lands into its own clone at `~/.eki/self/repo`, and the engine drives
+   `eki/queue.py`, `eki/resolve.py`, `eki/candidate.py` and `eki/train.py`.
 5. **The loop closes** — faults become items, the daily digest, the score.
 
 ## What the first eki taught

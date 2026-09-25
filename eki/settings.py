@@ -115,6 +115,11 @@ DEFAULTS: Dict[str, Any] = {
     "self_fix_daily": 3,
     #: a macOS notification when eki learns or improves a skill
     "notify_learned": True,
+    #: the daily digest (eki/digest.py): "on" — one page a day, and one
+    #: notification, of what eki changed and what waits for you; "off"
+    "digest": "on",
+    #: when it's written, local time
+    "digest_at": "09:00",
     #: appended to Claude Code's own system prompt
     "claude_system_prompt": "",
     #: serve eki's own tools to Claude Code in-process (eki/mcpbridge.py):

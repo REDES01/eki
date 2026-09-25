@@ -37,6 +37,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from . import builds as builds_mod
 from . import candidate
 from . import capacity as capacity_mod
+from . import digest as digest_mod
 from . import drill
 from . import goals as goals_mod
 from . import observe as observe_mod
@@ -503,7 +504,9 @@ class SelfLoop:
                                 meta={"run": run["id"], "self": c["id"], "self_item": it.id})
         yield "\n\n" + text
         watched = it.source == "asked" and it.when == "now"
-        if not watched and self.settings.get("notify_learned", True):   # type: ignore[attr-defined]
+        # the rest — applied, tried again later — is a line in the day's digest
+        if not watched and digest_mod.needs_you(c, it.state) and \
+                self.settings.get("notify_learned", True):              # type: ignore[attr-defined]
             head = {"applying": "Applying", "applied": "Applied", "proposed": "Proposed",
                     "conflicts": "Proposed"}.get(c["state"], "Tried")
             first = next((x.strip("-• ") for x in str(c.get("summary") or "").splitlines() if x.strip()), "")
@@ -621,6 +624,29 @@ class SelfLoop:
                                f"{len(suggestions)} suggestion{'s' if len(suggestions) != 1 else ''} "
                                "— Goals → Self")
         yield f"\n\n*eki: kept as the note of {note['id']} — its suggestions are on the board ([Self]({self._self_board()})).*"
+
+    # ---- the daily digest (eki/digest.py) ------------------------------------------------
+
+    async def self_digest(self, force: bool = False) -> Optional[Dict[str, Any]]:
+        """Once a day, at `digest_at`: the page of what happened since the
+        last one, kept, and said in one notification — none on a quiet day.
+        `force` writes it now, whatever the time. None when it isn't due."""
+        if not force and (self.settings.get("digest", "on") == "off"                      # type: ignore[attr-defined]
+                          or not digest_mod.due(at=str(self.settings.get("digest_at") or digest_mod.AT))):  # type: ignore[attr-defined]
+            return None
+        now = time.time()
+        start = digest_mod.since(now)
+        local = {b.key for b in self.backends if b.info.cost.tier == 0}      # type: ignore[attr-defined]
+        hours = sum(s for k, _, s in self.runs.done_spans(start) if k in local) / 3600   # type: ignore[attr-defined]
+        work = {"local_hours": round(hours, 2),
+                "week_hours_a_day": self.local_work().get("hours_a_day"),        # type: ignore[attr-defined]
+                "goal_turns": self.goals_report(hours=(now - start) / 3600).get("turns")}  # type: ignore[attr-defined]
+        page = digest_mod.save(digest_mod.build(selfwork.changes(), [i.to_json() for i in selfloop.items()],
+                                                since=start, now=now, work=work))
+        said = digest_mod.notification(page)
+        if said and self.settings.get("notify_learned", True):          # type: ignore[attr-defined]
+            await self._notify(said["title"], said["body"])             # type: ignore[attr-defined]
+        return page
 
     def _self_evidence(self) -> Dict[str, Any]:
         """The week, in numbers, for the note: nothing a model made up."""
@@ -1093,8 +1119,8 @@ class SelfLoop:
         text = self._self_says(now, it, applied)                        # type: ignore[arg-type]
         said(text)
         yield "\n\n" + text
-        if self.settings.get("notify_learned", True):                   # type: ignore[attr-defined]
-            head = {"applying": "Applying", "applied": "Applied"}.get(now["state"], "Still waiting")
+        if digest_mod.needs_you(now) and self.settings.get("notify_learned", True):   # type: ignore[attr-defined]
+            head = "Still waiting"                                      # applied: it's in the digest
             await self._notify(f"eki · {head}: {now.get('title') or 'self/' + now['id']}"[:120],  # type: ignore[attr-defined]
                                "its conflicts with your checkout were resolved"[:200])
 
@@ -1370,5 +1396,6 @@ class SelfLoop:
             "changes": rows[:40],
             "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key)} for e in upcoming]},
             "note": selfloop.latest_note(),
+            "digest": digest_mod.latest(),
             "shift": self._shift_state,                                 # type: ignore[attr-defined]
         }

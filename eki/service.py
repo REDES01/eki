@@ -149,6 +149,12 @@ async def lifespan(app: FastAPI):
             except Exception:                       # noqa: BLE001
                 log.exception("restart drill")
             try:
+                # the daily digest, once it's due (eki/digest.py)
+                if await eng.self_digest():
+                    log.info("wrote the daily digest")
+            except Exception:                       # noqa: BLE001
+                log.exception("daily digest")
+            try:
                 # finished work dirs after a week; a worker nobody took up, killed
                 await asyncio.to_thread(eng.sweep_workers)
             except Exception:                       # noqa: BLE001
@@ -997,6 +1003,12 @@ def self_roadmap_action(key: str, action: str) -> Any:
 async def self_note() -> Any:
     """Write this week's note now, rather than when it's due."""
     return await _self_await(engine().self_note_now)
+
+
+@app.post("/api/self/digest")
+async def self_digest() -> Any:
+    """Write today's digest now, rather than at `digest_at` — and say it."""
+    return await _self_await(engine().self_digest, True)
 
 
 @app.post("/api/self/notes/{nid}/{index}/{action}")

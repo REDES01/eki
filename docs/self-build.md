@@ -389,8 +389,8 @@ through four steps (`SelfLoop._self_work`):
    candidate check. No ROADMAP tick goes in the change (see *The roadmap*). A change to
    documentation only (`*.md` outside `eki/`) needs no candidate engine.
 4. **then** — applied or proposed, by the autonomy setting; the thread gets a
-   line from eki saying what came of it, and a notification if nobody asked
-   for it in a chat.
+   line from eki saying what came of it, and — if nobody asked for it in a
+   chat — a notification only when it needs you (*The daily digest*, below).
 
 Who starts one:
 
@@ -605,10 +605,22 @@ drill*, above). It suggests; you pick: *Ask eki to do it* (a queued request), *A
 ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 
+**The daily digest** (`eki/digest.py`). One short page a day, at `digest_at`
+(09:00): what changed in eki since the last page and why (you asked, a fault,
+the next ROADMAP item), what was tried and didn't land, what helped (the hours
+this Mac's own models worked, against the week's average; goal turns
+finished), and what waits for you (proposals, and items left to you since the
+last page). It is built from what eki wrote down, not by a model. It is on the
+board (Goals → Self → *Today's digest*), in `eki self digest`, and said in one
+notification — none on a quiet day. Per-change notifications are only for what
+needs you: a change waiting to be applied, or an item left to you. A change
+applied, gone live, or tried again later is a line in the next page; a
+rollback is still said at once. `digest: off` turns it off.
+
 What it keeps, all in `~/.eki/self/`: `work.json` (the items), `merge.json` (the merge queue), `log.jsonl`
 (every change as it was judged), `changes.json` (where each stands now),
 `steps.json` (every step, and whether it's live), `train.json` (the release
-train), `ticks.json` (the ticks written), `notes/` (the weekly notes),
+train), `ticks.json` (the ticks written), `notes/` (the weekly notes), `digests/` (the daily pages),
 `base-ok.json` / `base-bad.json` (bases that passed, or failed), `drill.json`
 (the last full restart drill).
 
@@ -626,6 +638,7 @@ eki self next
 eki self retry|drop|mine <item>
 eki self autonomy apply ROADMAP.md=apply docs/=apply
 eki self note [now]
+eki self digest [now]            the day's page; now: write it again
 eki self drill [quick]           restart a sandboxed engine mid-work: is anything lost?
 ```
 

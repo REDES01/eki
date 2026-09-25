@@ -855,7 +855,9 @@ class Engine(SelfLoop):
                              why=done.get("why"), self=done.get("self"))
             title = f"{what} was rolled back"
             body = done.get("why") or done["state"]
-        if self.settings.get("notify_learned", True):
+        # a self change that went live is a line in the day's digest; a rollback is said now
+        quiet = done["state"] == "healthy" and bool(done.get("self") or done.get("cars"))
+        if not quiet and self.settings.get("notify_learned", True):
             await self._notify(title, body)
         return done
 

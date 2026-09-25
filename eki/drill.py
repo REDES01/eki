@@ -401,7 +401,8 @@ echo "{name} 9.9.9 (the drill's fake)"
 
 #: the settings of a sandboxed engine: nothing learned, measured, watched or said
 QUIET = {"skills_learn": "off", "auto_measure": "off", "notify_learned": False, "notify_goals": False,
-         "claude_tools": False, "claude_screen": False, "self_fix": "off", "claude_probe": False}
+         "claude_tools": False, "claude_screen": False, "self_fix": "off", "claude_probe": False,
+         "digest": "off"}
 
 
 def _git(where: Path, *args: str) -> str:

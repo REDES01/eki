@@ -577,7 +577,7 @@ def cmd_agent(args) -> int:
 
 
 SELF_VERBS = ("apply", "discard", "undo", "diff", "show", "on", "off", "next", "note",
-              "autonomy", "retry", "drop", "mine", "parallel", "release", "drill")
+              "digest", "autonomy", "retry", "drop", "mine", "parallel", "release", "drill")
 
 
 def _ago(t: float) -> str:
@@ -650,6 +650,9 @@ def _self_status(service: str, limit: int) -> int:
         print("\nrecent:")
         for c in rows:
             print(f"  {_ago(c.get('state_at'))}  {c['state']:<11} self/{c['id']}  {c['title'][:56]}")
+    page = v.get("digest")
+    if page and not page.get("quiet"):
+        print(f"\ntoday's digest ({page['id']}): `eki self digest`")
     note = v.get("note")
     if note:
         print(f"\nweekly note ({note['id']}): {len(note.get('suggestions') or [])} suggestions — "
@@ -713,6 +716,11 @@ def _self_verb(args, verb: str, rest: List[str]) -> int:
             print(f"{i['source']:<8} {i['title']}{_after(i)}")
         for n in v["roadmap"]["next"]:
             print(f"roadmap  {n['section']}: {n['title']}{_after(n)}")
+        return 0
+    if verb == "digest":
+        v = call("GET", "/api/self", s)
+        page = call("POST", "/api/self/digest", s) if arg == "now" or not v.get("digest") else v["digest"]
+        print(f"eki's day, {page['id']}\n\n{page['text']}")
         return 0
     if verb == "note":
         v = call("GET", "/api/self", s)
@@ -1419,6 +1427,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     "eki self next                 what it would take next\n"
                                     "eki self retry|drop|mine <item>\n"
                                     "eki self autonomy propose|apply [path=apply …]\n"
+                                    "eki self digest [now]         the day's page: what changed, what helped, what waits for you\n"
                                     "eki self note [now]           the weekly note: what it noticed, what it suggests\n"
                                     "eki self drill [quick]        restart a sandboxed engine mid-work: does it lose anything?",
                         formatter_class=argparse.RawDescriptionHelpFormatter)

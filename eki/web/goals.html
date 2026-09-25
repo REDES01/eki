@@ -573,6 +573,11 @@ function selfPage() {
       <button class="btn small" data-iact="retry" data-id="${esc(i.id)}">Let eki try</button></div>`;
     h += `</div></div></div>`;
   }
+  const day = v.digest;
+  h += `<div class="section"><div class="label">Today's digest</div><div class="card" style="padding:12px 16px">`;
+  if (!day) h += `<div class="muted" style="font-size:13px">Once a day eki writes one short page — what it changed, what helped, what waits for you — and sends it as one notification. <button class="btn small" data-digest-now>Write one now</button></div>`;
+  else h += `<div class="muted" style="font-size:12px;margin-bottom:6px">${esc(day.id)} · since ${esc(when(day.since))} · <a href="#" data-digest-now style="color:var(--accent);text-decoration:none">write it again</a></div><div class="body">${md(day.text)}</div>`;
+  h += `</div></div>`;
   const note = v.note;
   h += `<div class="section"><div class="label">Weekly note</div><div class="card" style="padding:12px 16px">`;
   if (!note) h += `<div class="muted" style="font-size:13px">A week after eki starts working on itself it writes down what it noticed, with two or three suggestions. <button class="btn small" data-note-now>Write one now</button></div>`;
@@ -750,6 +755,7 @@ document.addEventListener("click", async e => {
   if (iact) return act(() => api(`/api/self/items/${enc(iact.dataset.id)}/${iact.dataset.iact}`, "POST"));
   const ract = t.closest("[data-ract]");
   if (ract) return act(() => api(`/api/self/roadmap/${enc(ract.dataset.key)}/${ract.dataset.ract}`, "POST"));
+  if (t.closest("[data-digest-now]")) { e.preventDefault(); return act(() => api("/api/self/digest", "POST")); }
   if (t.closest("[data-note-now]")) { e.preventDefault(); return act(() => api("/api/self/note", "POST")); }
   const sugg = t.closest("[data-sugg]");
   if (sugg) return act(() => api(`/api/self/notes/${enc(sugg.dataset.nid)}/${sugg.dataset.i}/${sugg.dataset.sugg}`, "POST"));

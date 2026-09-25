@@ -183,3 +183,44 @@ def test_eki_self_watch_draws_the_pipeline_until_stopped(monkeypatch, capsys):
     assert out.count("self/c1  one — in line behind self/a") == 2 and "queued" in out
     # an engine from before the pipeline: said, not a crash
     assert cli._pipeline_lines({"working": []}) is None
+
+
+def test_what_went_in_is_kept_apart_from_what_is_still_going_in(tmp_path):
+    """The board said "Going in · 7" when five of the seven were live
+    (2026-09-26): what went in is its own group, after what's on its way."""
+    rows = [{"id": "done", "state": "applied", "title": "went in", "state_at": NOW - 600, "asked_at": NOW - 900},
+            {"id": "next", "state": "proposed", "title": "on its way", "state_at": NOW - 60}]
+    queue = [{"change": "next", "run": "r1", "at": NOW - 60}]
+    v = pipeline.view(rows, queue=queue, running={"r1"}, train={}, leaves_at=None, swap={},
+                      swap_alive=False, running_build="b0", now=NOW, home=tmp_path)
+    assert [(r["id"], r["settled"]) for r in v["changes"]] == [("next", False), ("done", True)]
+    out = "\n".join(pipeline.lines(v, now=NOW))
+    assert "going in · 1:" in out and "went in, last hour · 1:" in out
+    assert out.index("self/next") < out.index("went in, last hour")
+
+
+def test_a_change_applied_before_the_journal_gets_its_timeline_from_its_record(tmp_path):
+    """self/ab0ce2c8 went live with no timeline at all, self/2589b520 with
+    only "live": what its record knows fills in, and a gap is said."""
+    c = {"id": "old", "state": "applied", "title": "t", "state_at": NOW - 100, "asked_at": NOW - 700}
+    v = pipeline.view([c], queue=[], running=(), train={}, leaves_at=None, swap={}, swap_alive=False,
+                      running_build="b0", now=NOW, home=tmp_path)
+    row = v["changes"][0]
+    assert [r["step"] for r in row["timeline"]] == ["queued", "live"] and row["partial"]
+    c.update(alone_at=NOW - 400)
+    v = pipeline.view([c], queue=[], running=(), train={}, leaves_at=None, swap={}, swap_alive=False,
+                      running_build="b0", now=NOW, home=tmp_path)
+    row = v["changes"][0]
+    assert [r["step"] for r in row["timeline"]] == ["queued", "landed", "live"] and not row.get("partial")
+
+
+def test_a_title_for_a_list_is_never_cut_mid_word():
+    long = ("Two fixes to what the person sees. (1) The daily digest must list every change of the day — "
+            "applied, rolled back, unfit, and each with why")
+    assert pipeline.short_title(long) == "Two fixes to what the person sees"
+    assert pipeline.short_title("Bug: roadmap items stay queued after their work landed, so the loop would "
+                                "redo them. Seen at 00:55") == \
+        "Bug: roadmap items stay queued after their work landed, so the loop would redo them"
+    words = pipeline.short_title("word " * 40)
+    assert words.endswith("…") and len(words) <= pipeline.TITLE_MAX and "wor…" not in words
+    assert pipeline.short_title("short one") == "short one"

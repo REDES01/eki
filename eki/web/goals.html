@@ -155,6 +155,8 @@
   .flow .head { display: flex; gap: 10px; align-items: center; min-width: 0; }
   .flow .head a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; }
   .flow .stage { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+  .flow .full { font-size: 12.5px; margin: 4px 0 2px; white-space: normal; overflow-wrap: anywhere; }
+  .flow .head .more { flex: none; }
   .flow .stage.live { color: var(--ok); } .flow .stage.stalled { color: var(--wait); }
   .tl { display: flex; flex-wrap: wrap; gap: 2px 6px; margin-top: 3px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .tl .arrow { color: var(--line-2); }
@@ -465,6 +467,10 @@ const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", min
 const timelineOf = tl => (tl || []).length ? `<div class="tl">${tl.map((r, n) =>
   `${n ? `<span class="arrow">→</span>` : ""}<span title="${esc(r.note || "")}"><b>${esc(r.step)}</b> ${esc(hm(r.at))}</span>`).join("")}</div>` : "";
 const stageOf = st => `<span class="stage ${st.live ? "live" : st.stalled ? "stalled" : ""}" title="${esc(st.text)}">${esc(st.text)}</span>`;
+// a title for a list: short, never cut mid-word; the whole of it opens in place
+const titleOf = (r, key) => `<a href="#/self/${enc(r.id)}" title="self/${esc(r.id)} · ${esc(r.title_full || r.title)}">${esc(r.title)}</a>`
+  + (r.title_full ? `<button class="more" data-more="${esc(key)}" aria-expanded="${!!S.open[key]}" title="${S.open[key] ? "Show less" : "Show all of it"}">${S.open[key] ? "less" : "more"}</button>` : "");
+const fullOf = (r, key) => r.title_full && S.open[key] ? `<div class="full muted">${esc(r.title_full)}</div>` : "";
 const when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function changeActs(c, withDiff) {
@@ -636,25 +642,32 @@ function selfPage() {
     h += `<div class="section"><div class="label">Waiting for you · ${v.waiting.length}</div><div class="goals">${v.waiting.map(changeCard).join("")}</div></div>`;
   if (going.length) {
     h += `<div class="section"><div class="label">Working on · ${going.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.why ? `${i.title}\nPicked because: ${i.why}` : i.title)}">${esc(i.title)}${i.live ? "" : i.step?.state === "interrupted" ? ` <span class="muted">— cut off by a restart; carries on by itself</span>` : ` <span class="muted">— carries on when there's room</span>`}</span>
+    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.why ? `${i.title_full || i.title}\nPicked because: ${i.why}` : i.title_full || i.title)}">${esc(i.title)}${i.live ? "" : i.step?.state === "interrupted" ? ` <span class="muted">— cut off by a restart; carries on by itself</span>` : ` <span class="muted">— carries on when there's room</span>`}</span>
       ${(i.areas || []).map(a => `<span class="chipk" title="The area it works in: nothing else starts there until it's done">${esc(a)}</span>`).join("")}</div>`;
     h += `</div></div></div>`;
   }
   h += goLive(v.golive, v.train?.every || 15);
   const flow = v.pipeline || [];
-  if (!flow.length)
-    h += `<div class="section"><div class="label">Going in</div><div class="card" style="padding:2px 14px"><div class="rows"><div class="rowline"><span class="grow muted">Nothing on its way right now</span></div></div></div></div>`;
-  else {
-    h += `<div class="section"><div class="label">Going in · ${flow.length}</div><div class="card" style="padding:2px 14px">`;
-    for (const r of flow) h += `<div class="flow"><div class="head">${r.live ? `<span class="spinner"></span>` : ""}
-      <a href="#/self/${enc(r.id)}" title="self/${esc(r.id)} · ${esc(r.title)}">${esc(r.title)}</a>${stageOf(r)}</div>${timelineOf(r.timeline)}</div>`;
-    h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
+  const settled = r => r.settled ?? ["live", "rolled back"].includes(r.stage);
+  const onWay = flow.filter(r => !settled(r)), went = flow.filter(settled);
+  const flowRow = r => `<div class="flow"><div class="head">${r.live ? `<span class="spinner"></span>` : ""}
+      ${titleOf(r, "t:" + r.id)}${stageOf(r)}</div>${fullOf(r, "t:" + r.id)}${timelineOf(r.timeline)}${r.partial
+      ? `<div class="muted" style="font-size:12px;margin-top:2px">Earlier steps weren't recorded — it went in before eki wrote each one down.</div>` : ""}</div>`;
+  h += `<div class="section"><div class="label">Going in${onWay.length ? " · " + onWay.length : ""}</div><div class="card" style="padding:2px 14px">`;
+  h += onWay.length ? onWay.map(flowRow).join("") : `<div class="rows"><div class="rowline"><span class="grow muted">Nothing on its way right now</span></div></div>`;
+  h += `</div><div class="muted" style="font-size:12px;margin-top:6px">Finished changes wait for the release train, which takes them all at once: changes that share no file go straight in, the rest are merged two at a time in rounds, and the batch is judged once before it goes live. A spinner means its worker is running now.</div></div>`;
+  if (went.length) {
+    const open = !!S.open.went;
+    h += `<div class="section"><div class="label">Went in · last hour · ${went.length}</div><div class="card" style="padding:2px 14px">`
+       + (open ? went.map(flowRow).join("") : "")
+       + `<div class="rows"><div class="rowline"><button class="more" data-more="went" aria-expanded="${open}">${open ? "Hide" : `Show ${went.length === 1 ? "it" : `all ${went.length}`}`}</button>
+          <span class="grow muted" style="font-size:12.5px">${open ? "" : esc(went.map(r => r.title).slice(0, 3).join(" · ") + (went.length > 3 ? " …" : ""))}</span></div></div></div></div>`;
   }
   h += treeOf(v.tree, v.tree_last, v.golive?.last);
   const ahead = v.queue, nexts = capped("next", v.roadmap?.next || []);
   if (ahead.length || nexts.rows.length) {
     h += `<div class="section"><div class="label">Up next</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${afterNote(i)}</span>
+    for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title_full || i.title)}">${esc(i.title)}${afterNote(i)}</span>
       ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
       ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
     for (const n of nexts.rows) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
@@ -712,7 +725,7 @@ function changePage() {
   const c = S.change;
   if (!c) return `<a class="back" href="#/self">← Self</a><div class="empty">Loading…</div>`;
   let h = `<a class="back" href="#/self">← Self</a><div class="goal-head">
-    <div class="text">${esc(c.title)}</div>
+    <div class="text">${esc(c.title)}</div>${c.title_full ? `<div class="muted" style="margin-top:4px;font-size:13px">${esc(c.title_full)}</div>` : ""}
     <div class="meta"><span class="badge ${badgeOf(c)}">${esc(stateOf(c))}</span>${srcChip(c.source || "asked")}
       <span>self/${esc(c.id)}</span><span>${c.backend && c.backend !== "eki" ? "written by " + esc(c.backend) : "made by eki"}</span>
       ${c.base ? `<span>on ${esc(c.base.slice(0, 10))}</span>` : ""}<span>${esc(when(c.at))}</span>${c.applied_by ? `<span>applied because ${esc(c.applied_by)} asked</span>` : ""}</div>

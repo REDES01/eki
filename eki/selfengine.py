@@ -1742,6 +1742,10 @@ class SelfLoop:
             row.pop("open", None)
             row["live"] = i.run in live
             row["areas"] = [selfloop.lane_name(a) for a in i.area]
+            whole = pipeline.full_title(i.title if len(i.title) < 100 else (i.request or i.title))
+            row["title"] = pipeline.short_title(i.title or whole)
+            if whole and whole != row["title"]:
+                row["title_full"] = whole
             if i.source == "roadmap" and i.state == "queued":
                 row["after"] = waits(i.key)
             if i.change and i.change in by_id:

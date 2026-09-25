@@ -138,7 +138,7 @@ class Proposal:
     @property
     def headline(self) -> str:
         first = self.request.strip().splitlines()[0] if self.request.strip() else ""
-        return (self.title or first)[:100]
+        return pipeline.short_title(self.title or first)
 
     def lines(self) -> List[str]:
         out = [f"self/{self.id}: {self.headline}"]
@@ -427,7 +427,12 @@ def changes(home: Optional[Path] = None, limit: int = 0) -> List[Dict[str, Any]]
         row = {**e, **{k: v for k, v in st.items() if k not in ("state", "at")}}
         row["state"] = st.get("state") or first_state(e)
         row["state_at"] = st.get("at") or e.get("at") or 0
-        row["title"] = e.get("title") or (e.get("request") or "").strip().split("\n")[0][:100]
+        # a short title for lists, never cut mid-word; the whole of it opens in place
+        whole = pipeline.full_title(e.get("title") or "") if e.get("title") and len(e["title"]) < 100 \
+            else pipeline.full_title(e.get("request") or e.get("title") or "")
+        row["title"] = pipeline.short_title(e.get("title") or whole)
+        if whole and whole != row["title"]:
+            row["title_full"] = whole
         row["locked"] = locked_of(row)
         # records from before the loop don't say who wanted them; a fault's brief does
         row.setdefault("source", "fault" if (e.get("request") or "").startswith("Fix a fault eki observed")

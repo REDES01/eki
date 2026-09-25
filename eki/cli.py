@@ -678,16 +678,16 @@ def _self_status(service: str, limit: int, everything: bool = False) -> int:
         for i in working:
             where = ", ".join(i.get("areas") or []) or "?"
             step = i.get("step") or {}
-            cut = step.get("state") == "interrupted" or (step and not step.get("live") and not i.get("live"))
+            stalled = step.get("state") == "interrupted" or (step and not step.get("live") and not i.get("live"))
             print(f"  {i['source']:<7} {cut(i['title'], 60)}  [{where}]"
                   + ("" if i.get("live") else
-                     f"  (cut off at {step.get('kind')} — carries on by itself)" if cut else
+                     f"  (cut off at {step.get('kind')} — carries on by itself)" if stalled else
                      "  (carries on when there's room)"))
             if i.get("why"):
                 print(f"          picked: {i['why'][:100]}")
     if flow:
         print("\n" + "\n".join(flow).lstrip("\n"))
-    if flow is not None and not v.get("pipeline"):
+    if flow is not None and not any(r.get("stage") not in ("live", "rolled back") for r in v.get("pipeline") or []):
         print("\ngoing in: nothing on its way right now")
     elif flow is None and v.get("merging"):
         print("\nmerge queue (the next release train merges them together):")

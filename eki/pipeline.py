@@ -31,6 +31,7 @@ queued → rebased → conflicts fixed → rechecked → landed → live.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -43,8 +44,11 @@ HOME = Path("~/.eki/self").expanduser()
 WATCH = 180
 #: when this engine started: a swap's watch is counted from here
 STARTED = time.time()
-#: a change that went live or was rolled back stays in view this long
+#: a change that went live or was rolled back stays in view this long —
+#: apart from what is still on its way in, under "Went in"
 SETTLED_SHOWN = 3600
+#: the stages a change has finished at: it's no longer "going in"
+SETTLED = ("live", "rolled back")
 #: a person's apply (no merge queue) seen mid-stage this recently still counts
 STALE = 3600
 #: the journal is trimmed to this many lines, oldest first
@@ -66,6 +70,34 @@ LABEL = {"in line": "In line", "rebasing": "Rebasing", "starting its turn": "Sta
          "watching": "Watching", "live": "Live", "rolled back": "Rolled back"}
 
 _lock = threading.Lock()
+
+
+# ---- a title for a list -------------------------------------------------------------------
+
+#: a title in a list is at most this long; the whole of it opens in place
+TITLE_MAX = 90
+
+
+def short_title(text: str, n: int = TITLE_MAX) -> str:
+    """One line for a list, never cut mid-word: the whole text when it fits,
+    else its first sentence (or the part before a "Topic: …" colon) when
+    that fits and says something, else as many whole words as fit and "…"."""
+    t = " ".join(str(text or "").split())
+    if len(t) <= n:
+        return t
+    m = re.match(r"(.{20,%d}?)[.!?:;](?=\s)" % (n - 1), t)
+    if m:
+        return m.group(1).rstrip(" ,—-")
+    head = t[:n - 1]
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip(" ,;:—-(") + "…"
+
+
+def full_title(text: str) -> str:
+    """The first paragraph of a request, whole: what a short title opens to."""
+    t = str(text or "").strip().split("\n\n")[0]
+    return " ".join(t.split())
 
 
 # ---- the journal ------------------------------------------------------------------------
@@ -131,10 +163,12 @@ def events(cid: str, home: Optional[Path] = None, all_: Optional[List[Dict[str, 
 
 
 def timeline(cid: str, *, evs: Optional[List[Dict[str, Any]]] = None, queued_at: int = 0,
-             landed_at: int = 0, home: Optional[Path] = None) -> List[Dict[str, Any]]:
+             landed_at: int = 0, live_at: int = 0, home: Optional[Path] = None) -> List[Dict[str, Any]]:
     """[{"step", "at", "note"}] — each point the change passed, in order.
-    `queued_at` / `landed_at` fill in what the merge queue and the train
-    knew about a change from before the journal."""
+    `queued_at` / `landed_at` / `live_at` fill in what the merge queue, the
+    train and the change's own record knew about it from before the journal
+    (or from a path that didn't write to it): asked to apply, landed alone,
+    applied."""
     evs = events(cid, home) if evs is None else evs
     out: List[Dict[str, Any]] = []
     for e in evs:
@@ -155,7 +189,17 @@ def timeline(cid: str, *, evs: Optional[List[Dict[str, Any]]] = None, queued_at:
         out.insert(0, {"step": "queued", "at": int(queued_at), "note": ""})
     if landed_at and not any(r["step"] == "landed" for r in out):
         out.append({"step": "landed", "at": int(landed_at), "note": ""})
+    if live_at and not any(r["step"] in ("live", "rolled back") for r in out):
+        out.append({"step": "live", "at": int(live_at), "note": ""})
+    out.sort(key=lambda r: r["at"])                     # stable: same-second points keep their order
     return out
+
+
+def partial(tl: List[Dict[str, Any]]) -> bool:
+    """A change that went live but whose way in wasn't written down whole —
+    applied before the journal, or by a path that didn't mark its steps."""
+    steps_ = {r["step"] for r in tl}
+    return "live" in steps_ and not ({"queued", "landed"} <= steps_)
 
 
 # ---- the stage ----------------------------------------------------------------------------
@@ -304,12 +348,22 @@ def view(rows: List[Dict[str, Any]], *, queue: List[Dict[str, Any]], running: It
         if st["stage"] in ("live", "rolled back") and now - float(c.get("state_at") or 0) > SETTLED_SHOWN \
                 and c.get("state") != "applying":
             continue
-        out.append({"id": c["id"], "title": c.get("title") or "", **st,
-                    "timeline": timeline(c["id"], evs=evs, queued_at=queued_at.get(c["id"], 0),
-                                         landed_at=landed_at.get(c["id"], 0))})
+        tl = timeline(c["id"], evs=evs,
+                      queued_at=queued_at.get(c["id"]) or int(c.get("asked_at") or 0),
+                      landed_at=landed_at.get(c["id"]) or int(c.get("alone_at") or 0),
+                      live_at=int(c.get("state_at") or c.get("at") or 0) if c.get("state") == "applied" else 0)
+        row = {"id": c["id"], "title": c.get("title") or "", **st, "timeline": tl,
+               "settled": st["stage"] in SETTLED}
+        if c.get("title_full"):
+            row["title_full"] = c["title_full"]
+        if partial(tl):
+            row["partial"] = True
+        out.append(row)
     order = {r["change"]: n for n, r in enumerate(queue)}
-    rank = {"live": 0, "rolled back": 0, "watching": 1, "going live": 1, "landed": 2}
-    out.sort(key=lambda r: (rank.get(r["stage"], 3), order.get(r["id"], -1)))
+    # still on its way first (nearest to live first), then what went in, newest first
+    rank = {"watching": 1, "going live": 1, "landed": 2}
+    out.sort(key=lambda r: (1, -int((r["timeline"] or [{}])[-1].get("at") or 0)) if r["settled"]
+             else (0, rank.get(r["stage"], 3), order.get(r["id"], -1)))
     return {"changes": out, "golive": golive(by_id, train=train, leaves_at=leaves_at, swap=swap,
                                             swap_alive=swap_alive, running_build=running_build, now=now)}
 
@@ -356,15 +410,24 @@ def lines(v: Dict[str, Any], now: Optional[float] = None) -> List[str]:
         out.append(f"last go-live left {_hm(last['left_at'])}, carrying "
                    + ", ".join(f"self/{c['id']}" for c in last["carrying"]) + f" — {last['text']}")
     rows = v.get("changes") or []
-    if rows:
+    going = [r for r in rows if not _settled(r)]
+    went = [r for r in rows if _settled(r)]
+    for head, group in (("going in", going), ("went in, last hour", went)):
+        if not group:
+            continue
         out.append("")
-        out.append("going in:")
-    for r in rows:
-        mark_ = "▸ " if r.get("live") else "  "
-        out.append(f"{mark_}self/{r['id']}  {r['title'][:52]} — {r['text']}")
-        if r.get("timeline"):
-            out.append("      " + short(r["timeline"]))
+        out.append(f"{head} · {len(group)}:")
+        for r in group:
+            mark_ = "▸ " if r.get("live") else "  "
+            out.append(f"{mark_}self/{r['id']}  {r['title'][:60]} — {r['text']}")
+            if r.get("timeline"):
+                out.append("      " + short(r["timeline"])
+                           + ("   (earlier steps weren't recorded)" if r.get("partial") else ""))
     return out
+
+
+def _settled(r: Dict[str, Any]) -> bool:
+    return bool(r.get("settled")) if "settled" in r else r.get("stage") in SETTLED
 
 
 def short(tl: List[Dict[str, Any]]) -> str:

@@ -62,11 +62,19 @@ def _stopped(worktree: str | Path, out: subprocess.CompletedProcess, what: str) 
     return files if files else proceed(worktree)
 
 
-def onto(worktree: str | Path, head: str) -> List[str]:
+def onto(worktree: str | Path, head: str, since: str | None = None) -> List[str]:
     """Rebase the worktree's branch onto `head`. [] when it finished cleanly;
-    otherwise the conflicted files, the worktree left mid-rebase."""
+    otherwise the conflicted files, the worktree left mid-rebase. `since`: the
+    head it was last rebased onto — only the commits after it move, so what an
+    old head carried (an item that failed since) is left behind."""
     abort(worktree)
     sha = git(worktree, "rev-parse", "--verify", f"{head}^{{commit}}")
+    old = git(worktree, "rev-parse", "--verify", "-q", f"{since}^{{commit}}", check=False) if since else ""
+    if old and old != sha and _run(worktree, "merge-base", "--is-ancestor", old, "HEAD").returncode == 0:
+        out = _run(worktree, "rebase", "--onto", sha, old)
+        if out.returncode == 0 and not in_progress(worktree):
+            return []
+        return _stopped(worktree, out, "rebase --onto")
     if _run(worktree, "merge-base", "--is-ancestor", sha, "HEAD").returncode == 0:
         return []                               # already on head
     out = _run(worktree, "rebase", sha)

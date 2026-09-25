@@ -126,6 +126,26 @@ def test_a_session_that_cannot_resume_says_so():
     run(go())
 
 
+def test_a_session_gone_before_the_handshake_still_says_why(monkeypatch):
+    """The program may exit before eki writes a word to it; the reason is
+    still what it said, not a closed pipe."""
+    real = live.workers.start_proc
+
+    async def exited_first(*a, **k):
+        proc = await real(*a, **k)
+        await proc.wait()
+        return proc
+
+    monkeypatch.setattr(live.workers, "start_proc", exited_first)
+
+    async def go():
+        s = live.LiveSession(FAKE + ["--resume", "gone"], None, None)
+        with pytest.raises(RuntimeError) as e:
+            await s.start()
+        assert "No conversation found" in str(e.value)
+    run(go())
+
+
 def test_activity_lines_read_like_the_terminal():
     f = live.summarize_activity
     assert f("Bash", {"command": "pytest -q"}) == "Running pytest -q"

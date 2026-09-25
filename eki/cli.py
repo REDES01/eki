@@ -867,6 +867,50 @@ def _self_drill(rest: List[str], as_json: bool) -> int:
     return 0 if results and all(r.ok for r in results) else 1
 
 
+def _self_offer(rest: List[str], yes: bool, as_json: bool) -> int:
+    """A change offered upstream as a pull request (eki/upstream.py). Runs
+    here, as you, with your git and `gh` — publishing is yours to ask for,
+    so it asks first."""
+    from . import selfwork, settings, upstream
+    if not rest:
+        print("eki self offer <id>", file=sys.stderr)
+        return 2
+    prefs = settings.load()
+    onto, fork = prefs.get("self_upstream") or "origin/main", prefs.get("self_offer_remote") or ""
+    try:
+        c = selfwork.change(rest[0])
+    except selfwork.SelfWorkError as e:
+        print(f"! {e}", file=sys.stderr)
+        return 1
+    print(f"self/{c['id']}: {c['title'][:70]}\n  its commits go on top of {onto} as eki/{c['id']}, "
+          f"pushed to {fork or onto.partition('/')[0]}, and a pull request is opened — "
+          "anyone who can see the repo can read it", file=sys.stderr)
+    if not yes:
+        if not sys.stdin.isatty():
+            print("! not asked from a terminal — add --yes to offer it", file=sys.stderr)
+            return 1
+        try:
+            if input("offer it? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("not offered", file=sys.stderr)
+                return 1
+        except EOFError:
+            return 1
+    try:
+        got = upstream.offer(c["id"], upstream=onto, push_to=fork)
+    except selfwork.SelfWorkError as e:
+        print(f"! {e}", file=sys.stderr)
+        return 1
+    if as_json:
+        print(json.dumps(got, indent=2))
+    elif got.get("url"):
+        print(f"{'opened' if got['opened'] else 'already open'}: {got['url']} — merging it stays with "
+              "whoever looks after the repo")
+    else:
+        print(f"pushed {got['branch']} to {got['remote']}; the pull request wasn't opened "
+              f"({got.get('why', '')})" + (f" — open it at {got['compare']}" if got.get("compare") else ""))
+    return 0
+
+
 def cmd_self(args) -> int:
     """eki, working on eki (eki/selfwork.py, eki/selfloop.py, docs/self-build.md)."""
     words = list(args.request or [])
@@ -877,6 +921,8 @@ def cmd_self(args) -> int:
     verb = words[0].lower() if words else ""
     if verb == "drill" and len(words) <= 2:
         return _self_drill(words[1:], args.json)
+    if verb == "offer" and len(words) <= 2:
+        return _self_offer(words[1:], getattr(args, "yes", False), args.json)
     if verb in SELF_VERBS and (len(words) <= 2 or verb == "autonomy"):
         ensure_engine(args.service)
         return _self_verb(args, verb, words[1:])
@@ -1369,6 +1415,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                                     "eki self release [N]          go live now with what's applied; N: at most one go-live every N min (15)\n"
                                     "eki self on|off               let eki work on itself whenever the machine has room\n"
                                     "eki self diff|show|apply|discard|undo <id>\n"
+                                    "eki self offer <id>           offer a change upstream as a pull request (asks first)\n"
                                     "eki self next                 what it would take next\n"
                                     "eki self retry|drop|mine <item>\n"
                                     "eki self autonomy propose|apply [path=apply …]\n"
@@ -1391,7 +1438,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="if it's fit and touches nothing protected, swap it in (watched, rolled back if unhealthy)")
     sw.add_argument("--json", action="store_true")
     sw.add_argument("-y", "--yes", action="store_true",
-                    help="eki self apply: don't ask before applying a change that touches protected paths")
+                    help="eki self apply: don't ask before applying a change that touches protected paths; "
+                         "eki self offer: don't ask before pushing and opening the pull request")
     sw.add_argument("--now", action="store_true",
                     help="eki self apply: go live at once, not with the next release train")
 

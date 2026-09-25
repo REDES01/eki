@@ -135,6 +135,12 @@ class LiveSession:
             await self.close()
             raise RuntimeError("Claude Code didn't answer the handshake"
                                + (f": {self.exit_error}" if self.exit_error else ""))
+        except RuntimeError as e:
+            # gone before it read the handshake (a session that can't be
+            # resumed): what it said on the way out is the reason, not the pipe
+            await self._last_words()
+            await self.close()
+            raise RuntimeError(self.exit_error or str(e)) from None
         reply = reply if isinstance(reply, dict) else {}
         self.commands = [c for c in reply.get("commands") or []
                          if isinstance(c, dict) and c.get("name")]
@@ -155,6 +161,15 @@ class LiveSession:
                 await self.mcp_set_servers({})
             except (RuntimeError, asyncio.TimeoutError) as e:
                 log.warning("extra MCP servers: %s", e)
+
+    async def _last_words(self, wait: float = 5.0) -> None:
+        """Let the reader finish with a program that has exited, so
+        `exit_error` holds what it wrote to stderr."""
+        if self._reader and not self._reader.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self._reader), timeout=wait)
+            except (asyncio.TimeoutError, Exception):       # noqa: BLE001
+                pass
 
     @classmethod
     def attach(cls, worker: workers.Worker, bridge: Any = None,
@@ -226,8 +241,8 @@ class LiveSession:
         rid = uuid.uuid4().hex[:12]
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._waiting[rid] = fut
-        self._write({"type": "control_request", "request_id": rid, "request": request})
         try:
+            self._write({"type": "control_request", "request_id": rid, "request": request})
             return await fut
         finally:
             self._waiting.pop(rid, None)

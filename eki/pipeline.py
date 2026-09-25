@@ -419,7 +419,7 @@ def lines(v: Dict[str, Any], now: Optional[float] = None) -> List[str]:
         out.append(f"{head} · {len(group)}:")
         for r in group:
             mark_ = "▸ " if r.get("live") else "  "
-            out.append(f"{mark_}self/{r['id']}  {r['title'][:60]} — {r['text']}")
+            out.append(f"{mark_}self/{r['id']}  {short_title(r['title'], 60)} — {r['text']}")
             if r.get("timeline"):
                 out.append("      " + short(r["timeline"])
                            + ("   (earlier steps weren't recorded)" if r.get("partial") else ""))

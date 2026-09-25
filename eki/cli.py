@@ -738,9 +738,10 @@ def _self_status(service: str, limit: int, everything: bool = False) -> int:
 
 
 def _cut(text: str, n: int) -> str:
-    """A title cut to fit a line, saying it was ("…")."""
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+    """A title cut to fit a line, at a sentence or a whole word, never
+    mid-word (eki/pipeline.py short_title)."""
+    from . import pipeline
+    return pipeline.short_title(text, n)
 
 
 def _more(n: int, what: str) -> None:

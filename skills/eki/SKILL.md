@@ -24,3 +24,37 @@ Rules of thumb:
   come back with `eki follow <run>`.
 - If a run asks a question, it waits for the person — `eki answer` lists
   what's waiting. Don't answer on their behalf.
+
+## eki self — eki changes itself
+
+A goal in words is planned into small items; each item is built by an agent
+in a git worktree of its own and judged by `bin/check`; a change that passes
+is proposed as a branch `self/<id>` (merge it, or `eki swap self/<id>` to put
+it live). Use it when the change is to eki itself — its code, docs or skills —
+not to the person's project. Don't start it in a loop, or from inside a
+self-build item.
+
+```
+eki self "…"            # plan a goal into items and build them side by side
+eki self --one "…"      # no planning: the goal is one item
+eki self                # the board: goals, their items, and where each one stands
+eki self show <item>    # one item in full
+eki self diff <item>    # what it changed
+eki self follow <item>  # its build run, live
+eki self drop <item> | eki self retry <item>
+```
+
+## Other commands
+
+```
+eki threads [<thread>]          # list threads, or print one as a conversation
+eki engine status|start|stop    # start, stop or check the engine; install it as a login agent
+eki providers                   # list providers and whether each can take work now
+eki models [start|stop <name>]  # list local models; start or stop one
+eki skills [add|remove|sync]    # list, add or remove skills (shared by every program)
+eki mcp [add|remove <name>]     # list, add or remove MCP servers (shared by every program)
+eki open                        # open eki's window
+eki drill                       # prove a restart loses nothing (runs in a throwaway home)
+eki swap <commit> | --back      # make a build of a commit, check it, and put it live
+eki builds                      # list eki's builds: current, previous, and how the last swap went
+```

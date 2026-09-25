@@ -6,7 +6,8 @@ fault had happened twice. This is the loop around it:
 
   what   an item: something you asked for (in a chat, on the board, with
          `eki self`), a fault eki noticed in its own code, the weekly note,
-         or the next unchecked item in ROADMAP.md — in that order
+         or the open item in ROADMAP.md worth most for the next release
+         (roadmap.ranked) — in that order, and each says why it was picked
   when   as a goal's turns: the goal "eki works on itself" gets turns like
          any goal, whenever the machine has room, inside its budget (by
          default only your subscriptions' spare room)
@@ -103,6 +104,7 @@ class Item:
     #: "eki": asked for from inside work eki started on its own (see `owner`)
     by: str = ""
     backend: str = ""               # asked for a backend by name
+    why: str = ""                   # why the loop picked it, when it did (pick)
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
 
@@ -224,7 +226,9 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     in ROADMAP.md reads differently. `landed`: keys of roadmap items a change
     was applied for — never taken again on their own, ticked or not, unless
     left for you and reworded since. Inside a stage an item waits for the
-    open ones above it (roadmap.after)."""
+    open ones above it (roadmap.after). Roadmap items are taken by what
+    they're worth for the next release, not where they sit (roadmap.ranked);
+    the item picked keeps why (`Item.why`)."""
     live, landed = set(live), set(landed)
     all_ = _load(home)
     files = files or {}
@@ -235,7 +239,8 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     # something already begun, cut off (you came back, the engine restarted): carry on
     for it in all_:
         if it.state == "working" and not (it.run and it.run in live):
-            return _with_area(it, roadmap_text, guess, home), "carrying on where it stopped"
+            it = _with_area(it, roadmap_text, guess, home)
+            return it, "carrying on where it stopped" + (f" — {it.why}" if it.why else "")
     busy = [i for i in all_ if i.state == "working" and i.phase != "merging"]
     if len(busy) >= max(1, parallel):
         if len(busy) == 1:
@@ -254,7 +259,7 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
     for it in (i for i in queued if i.source in ("asked", "undo")):
         area = it.area or guess(text_of(it, roadmap_text))
         if free(it.title, area):
-            return update(it.id, home, area=area), "you asked for it"
+            return update(it.id, home, area=area, why="you asked for it"), "you asked for it"
     if waiting >= review_max:
         return None, (f"{waiting} change{'s' if waiting != 1 else ''} waiting for you to look at "
                       "(Self, or `eki self`) — nothing new until then")
@@ -262,11 +267,11 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
         for it in (i for i in queued if i.source == source):
             area = it.area or guess(text_of(it, roadmap_text))
             if free(it.title, area):
-                return update(it.id, home, area=area), why
+                return update(it.id, home, area=area, why=why), why
     known = {i.key: i for i in all_ if i.source == "roadmap"}
     plan = roadmap.parse(roadmap_text)
     ordered: List[Tuple[roadmap.Item, roadmap.Item]] = []     # what waits for the item above it
-    for entry in roadmap.workable(plan):
+    for entry, worth in roadmap.ranked(roadmap_text, plan):
         it = known.get(entry.key)
         seen = entry_print(entry.text)
         again = it is not None and it.state == "person" and bool(it.seen) and it.seen != seen
@@ -283,12 +288,12 @@ def pick(roadmap_text: str, *, waiting: int = 0, review_max: int = REVIEW_MAX,
             continue
         if it is None:
             it = add("roadmap", entry.title, key=entry.key, home=home)
-        fields: Dict[str, Any] = {"area": area, "seen": seen}
+        why = (f"its entry in ROADMAP.md changed since it was left for you ({entry.section.split(' — ')[0]})"
+               if again else f"worth most for the next release of what's open: {worth}")
+        fields: Dict[str, Any] = {"area": area, "seen": seen, "why": why}
         if again:
             fields.update(state="queued", attempts=0, note="", open={}, phase="", run="")
-        return update(it.id, home, **fields), \
-            (f"its entry in ROADMAP.md changed since it was left for you ({entry.section.split(' — ')[0]})"
-             if again else f"the next open item in ROADMAP.md ({entry.section.split(' — ')[0]})")
+        return update(it.id, home, **fields), why
     if held:
         title, area, other = held[0]
         return None, (f"“{title[:60]}” waits: it touches {', '.join(lane_name(a) for a in area)}, "
@@ -781,13 +786,50 @@ def note_prompt(evidence: Dict[str, Any]) -> str:
         "2. Two or three suggestions. Each: what to do, the evidence for it (with counts), and "
         "what it would take. Prefer adding a provider or an MCP server, or changing a setting, "
         "over building something into eki. Don't repeat the ROADMAP's next items unless the "
-        "evidence says one matters more than its place says.\n\n"
+        "evidence says one matters more than its place says. If `self_build_share` shows most "
+        "of eki's changes went into its own self-build machinery, say so plainly.\n\n"
         "Then, at the very end, the same suggestions as JSON in a ```json block — a list of "
         '{"title": "…", "why": "…", "kind": "provider" | "server" | "setting" | "roadmap" | '
         '"change", "do": "the request eki would be given, or the ROADMAP item\'s text", '
         '"stage": "for kind roadmap: the ROADMAP section it belongs under"}.\n'
         "Nothing is done without the person picking it; don't write as if it were."
     )
+
+
+#: the week's self-work was mostly the builder when more than this share of it was
+BUILDER_MOST = 0.5
+
+
+def on_the_builder(files: Iterable[str]) -> Optional[bool]:
+    """Whether a change went into the self-build machinery (the "self" lane)
+    — most of its code, docs and tests aside — or None if it touched no code."""
+    code = [lane_of(f) for f in files if lane_of(f) not in ("docs", "tests")]
+    if not code:
+        return None
+    return sum(1 for lane in code if lane == "self") * 2 > len(code)
+
+
+def builder_share(changes: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """How much of the self-work in `changes` went into the builder itself:
+    {"changes", "on_the_builder", "share", "titles"} — changes that touched
+    no code aren't counted."""
+    counted = [(c, on_the_builder(c.get("files") or [])) for c in changes]
+    counted = [(c, b) for c, b in counted if b is not None]
+    mine = [c for c, b in counted if b]
+    return {"changes": len(counted), "on_the_builder": len(mine),
+            "share": round(len(mine) / len(counted), 2) if counted else 0.0,
+            "titles": [str(c.get("title") or "")[:80] for c in mine][:6]}
+
+
+def builder_line(share: Dict[str, Any]) -> str:
+    """The note's line when most of the week's self-work built the builder —
+    "" otherwise. Written by eki, not a model: it's a count."""
+    n, k = int(share.get("changes") or 0), int(share.get("on_the_builder") or 0)
+    if n < 2 or k / n <= BUILDER_MOST:
+        return ""
+    return (f"**Most of eki's work on itself this week went into the self-build machinery** — "
+            f"{k} of {n} changes. Building the builder is only worth it if the rest moves; "
+            "next week the loop should spend more on the release.")
 
 
 _JSON_BLOCK = re.compile(r"```json\s*(.*?)```", re.S | re.I)

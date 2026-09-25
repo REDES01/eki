@@ -413,8 +413,21 @@ next piece of self-work, taken in this order:
 2. what you asked for, queued;
 3. faults in eki's own code;
 4. the weekly note, when a week has passed;
-5. the next open item in `ROADMAP.md`, in the file's order — inside a stage,
-   only once the open items above it have landed (see *The roadmap*).
+5. the open item in `ROADMAP.md` worth most for the next release — inside a
+   stage, only once the open items above it have landed (see *The roadmap*).
+
+Each item keeps why it was picked: its thread opens with *Picked because: …*,
+`eki self` prints it under what's working, and the board shows it on hover.
+
+*What an item is worth* (`roadmap.ranked`), most first: what the file's
+*Left for the first release* list names, in its order; then what moves the
+score — an item about the local models' share of the work, redos or
+overrides; then the rest of the release — the stages the vision names ("the
+first public release is Stages 1–3") and *Where it stands*; then the other
+sections (*What eki keeps current*, an *Inbox*); then the self-build
+machinery itself (*Alongside every stage*), since building the builder is
+only worth it if the rest moves; then the stages after the release. Inside
+each, the file's order. Faults come before all of it (3, above).
 
 **Budget.** By default eki's own code is worked on by your subscriptions'
 spare room only — under pace for the week, never the last 30% of a window —
@@ -476,7 +489,7 @@ one above — two agents starting Stage 7's second and third items before its
 first would each invent their own memory store, and clash when applied. An
 item marked `(independent)` neither waits nor holds anything up, and can go
 beside the others. Later stages don't wait on earlier ones — the file's
-order is already the loop's — and items in any other section (*Alongside
+release's stages come first anyway — and items in any other section (*Alongside
 every stage*, *What eki keeps current*, an *Inbox*) are independent anyway.
 `eki self next`, `eki self` and the board show what a waiting item waits for:
 `after: <the item above>` (`roadmap.after`).
@@ -625,7 +638,11 @@ could take), the hours each backend worked (the local models' share of the
 week against the 1% baseline), its own changes and the roadmap — and two or
 three suggestions with their evidence, leaning to adding a provider or an MCP
 server. The week's restart drill goes in too, as its table (*The restart
-drill*, above). It suggests; you pick: *Ask eki to do it* (a queued request), *Add to
+drill*, above). So does its own share: when most of the week's changes
+(more than half, of two or more that touched code) went into the self-build
+machinery — `eki/self*`, the candidate check, the builds, the roadmap
+reader — the note says so in a line of its own, counted by eki, not written
+by the model (`selfloop.builder_share`). It suggests; you pick: *Ask eki to do it* (a queued request), *Add to
 ROADMAP* (a commit to your checkout, under the stage it names or an *Inbox*),
 or *Dismiss*.
 

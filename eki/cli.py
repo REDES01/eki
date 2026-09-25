@@ -679,6 +679,8 @@ def _self_status(service: str, limit: int) -> int:
                   + ("" if i.get("live") else
                      f"  (cut off at {step.get('kind')} — carries on by itself)" if cut else
                      "  (carries on when there's room)"))
+            if i.get("why"):
+                print(f"          picked: {i['why'][:100]}")
     if v.get("merging"):
         print("\nmerge queue (applied one at a time, in the order they finished):")
         for n, r in enumerate(v["merging"], 1):
@@ -692,6 +694,7 @@ def _self_status(service: str, limit: int) -> int:
                   f"\n              eki self diff {c['id']} · eki self apply {c['id']} · eki self discard {c['id']}")
     ahead = v["queue"]
     nexts = [f"  roadmap {n['section'].split(' — ')[0]}: {n['title'][:60]}{_after(n)}"
+             + (f"\n          {n['worth'][:100]}" if n.get("worth") else "")
              for n in v["roadmap"]["next"][:3]]
     if ahead or nexts:
         print("\nup next:")

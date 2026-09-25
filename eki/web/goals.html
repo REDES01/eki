@@ -545,7 +545,7 @@ function selfPage() {
       <button class="btn ${on ? "" : "primary"}" data-self-on="${on ? 0 : 1}">${on ? "Pause" : g ? "Resume" : "Start"}</button></div>
     ${goingLive(v.going_live)}
     ${nextGoLive(v.train)}
-    <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the next open item in ROADMAP.md — each change in its own worktree, tested and started on a spare port before you see it.</div>
+    <div class="muted" style="font-size:12.5px">When the machine has room it fixes what breaks in its own code, then takes the open item in ROADMAP.md worth most for the next release — each change in its own worktree, tested and started on a spare port before you see it.</div>
     <div class="line"><span class="muted">How far it goes alone</span>
       <div class="seg" role="group" aria-label="Autonomy"><button data-self-auto="propose" aria-pressed="${v.autonomy === "propose"}" title="A branch, a diff and its checks: you apply it">Propose</button><button data-self-auto="apply" aria-pressed="${v.autonomy === "apply"}" title="A change that passes is swapped in, watched, and rolled back if it isn't healthy">Apply here</button></div>
       <span class="areas">${Object.entries(v.areas || {}).map(([p, m]) => `<span class="area" title="Changes only to ${esc(p)}: ${esc(m)}">${esc(p)} → ${esc(m)}<button data-area-rm="${esc(p)}" title="Remove">×</button></span>`).join("")}
@@ -568,7 +568,7 @@ function selfPage() {
     h += `<div class="section"><div class="label">Waiting for you · ${v.waiting.length}</div><div class="goals">${v.waiting.map(changeCard).join("")}</div></div>`;
   if (going.length) {
     h += `<div class="section"><div class="label">Working on · ${going.length}</div><div class="card" style="padding:2px 14px"><div class="rows">`;
-    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${i.live ? "" : i.step?.state === "interrupted" ? ` <span class="muted">— cut off by a restart; carries on by itself</span>` : ` <span class="muted">— carries on when there's room</span>`}</span>
+    for (const i of going) h += `<div class="rowline">${i.live ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.why ? `${i.title}\nPicked because: ${i.why}` : i.title)}">${esc(i.title)}${i.live ? "" : i.step?.state === "interrupted" ? ` <span class="muted">— cut off by a restart; carries on by itself</span>` : ` <span class="muted">— carries on when there's room</span>`}</span>
       ${(i.areas || []).map(a => `<span class="chipk" title="The area it works in: nothing else starts there until it's done">${esc(a)}</span>`).join("")}</div>`;
     h += `</div></div></div>`;
   }
@@ -584,7 +584,7 @@ function selfPage() {
     for (const i of ahead) h += `<div class="rowline">${i.state === "working" ? `<span class="spinner"></span>` : ""}${srcChip(i.source)}<span class="grow" title="${esc(i.title)}">${esc(i.title)}${afterNote(i)}</span>
       ${i.attempts ? `<span class="when">attempt ${i.attempts + 1} of 2</span>` : ""}
       ${i.state === "queued" ? `<button class="btn small" data-iact="drop" data-id="${esc(i.id)}">Drop</button>` : ""}</div>`;
-    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
+    for (const n of nexts) h += `<div class="rowline">${srcChip("roadmap")}<span class="grow" title="${esc(n.text)}">${esc(n.title)} <span class="muted" title="${esc(n.worth || "")}">· ${esc(n.section.split(" — ")[0])}</span>${afterNote(n)}</span>
       <button class="btn small" data-ract="person" data-key="${esc(n.key)}" title="eki won't take this one">Leave for me</button></div>`;
     h += `</div></div><div class="muted" style="font-size:12px;margin-top:6px">ROADMAP.md: ${v.roadmap.done} done, ${v.roadmap.open} open.</div></div>`;
   }

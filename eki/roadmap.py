@@ -7,8 +7,8 @@ Work while you're away`) and, under them, items —
     - [ ] **Goals are sentences.** What you'd type in a chat, left running…
           indented lines carry the item on
 
-eki reads it to find the next thing to work on in itself, in the order the
-file gives, and ticks an item once the change that finished it has landed,
+eki reads it to find the next thing to work on in itself, by what an item
+is worth for the next release rather than where it sits (`ranked`), and ticks an item once the change that finished it has landed,
 naming that change — one small commit of its own, written by the merge queue
 alone (eki/selfengine.py, `_self_ticks`), and taken back if the change is
 undone. A change never carries a tick in its own commit (a tick an agent
@@ -26,8 +26,18 @@ waits until every open item above it has landed, because the one below
 usually builds on it — two agents each inventing the memory store the first
 item was to make clash when they're applied. An item marked `(independent)`
 neither waits nor holds anything up. Later stages don't wait on earlier ones
-(the file's order is already the loop's), and items in any other section —
-*Alongside every stage*, *What eki keeps current* — are independent anyway.
+(`ranked` puts the release's stages first), and items in any other
+section — *Alongside every stage*, *What eki keeps current* — are
+independent anyway.
+
+What an item is worth (`worth`), most first: named in the file's list of
+what's *Left for the first release*, in that list's order; then what moves
+the score — the local models' share of the work, redos, overrides; then the
+rest of the release — its stages, as the vision names them ("the first
+public release is Stages 1–3"), and *Where it stands*; then the other
+sections; then the self-build machinery (*Alongside every stage — eki
+builds eki*), which is only worth it if the rest moves; then the stages
+after the release. Inside each, the file's order.
 """
 from __future__ import annotations
 
@@ -35,7 +45,7 @@ import hashlib
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 NAME = "ROADMAP.md"
 BOX = re.compile(r"^- \[( |x|X)\] (.*)$")
@@ -45,6 +55,15 @@ WAITING = re.compile(r"\(waiting on\b[^)]*\)", re.I)
 INDEPENDENT = re.compile(r"\(independent\)", re.I)
 #: sections whose bullets are never work
 SKIP = ("not planned", "keeping this file")
+#: "The first public release** is Stages 1–3" — which stages the release is
+RELEASE = re.compile(r"release\**\s+is\s+stages?\s+(\d+)(?:\s*[–—-]\s*(\d+))?", re.I)
+#: the list of what's left for the release, and an entry of it: "2. *Handoff…* (Stage 2)"
+LEFT = re.compile(r"^\**left for the (?:first |next )?(?:public )?release", re.I)
+NAMED = re.compile(r"^\s*\d+\.\s+\*([^*]+)\*")
+#: what moves the score (docs/observe.md, the weekly note): the local share, redos, overrides
+SCORE = re.compile(r"\b(local share|share of (?:the )?work|useful local work|redos?|overrides?)\b", re.I)
+#: the self-build machinery's own section
+BUILDER = "alongside every stage"
 
 
 @dataclass
@@ -140,6 +159,82 @@ def after(items: Iterable[Item], item: Item, landed: Iterable[str] = ()) -> Opti
     above = [i for i in items if i.section == item.section and i.order < item.order
              and not i.done and i.key not in landed and not INDEPENDENT.search(i.text)]
     return above[-1] if above else None
+
+
+def stage_of(section: str) -> Optional[int]:
+    m = re.match(r"stage\s+(\d+)", section.strip(), re.I)
+    return int(m.group(1)) if m else None
+
+
+def release_stages(text: str) -> Optional[range]:
+    """The stages the next release is, as the file says — or None if it doesn't."""
+    m = RELEASE.search(text)
+    if not m:
+        return None
+    lo = int(m.group(1))
+    return range(lo, int(m.group(2) or lo) + 1)
+
+
+def left_for_release(text: str) -> List[str]:
+    """The titles in the file's "Left for the first release" list, in its order."""
+    out: List[str] = []
+    inside = False
+    for line in text.splitlines():
+        if LEFT.match(line.strip()):
+            inside = True
+            continue
+        if not inside:
+            continue
+        m = NAMED.match(line)
+        if m:
+            out.append(m.group(1).strip())
+        elif out and line.strip() and not line.startswith(" "):
+            break                               # the list is over; before it, the lead-in carries on
+        elif SECTION.match(line):
+            break
+    return out
+
+
+def _same(a: str, b: str) -> bool:
+    """Two titles naming the same item: one starts the other, give or take case and punctuation."""
+    a, b = (re.sub(r"[^a-z0-9]+", " ", x.lower()).strip() for x in (a, b))
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
+def worth(item: Item, text: str, named: Optional[List[str]] = None,
+          release: Optional[range] = None) -> Tuple[Tuple[int, int, int], str]:
+    """How much `item` is worth for the next release — a sort key, smallest
+    first — and why, in a few words (see the module's docstring)."""
+    named = left_for_release(text) if named is None else named
+    section = item.section.split(" — ")[0]
+    stage = stage_of(item.section)
+    at = next((n for n, t in enumerate(named) if _same(t, item.title)), None)
+    if at is not None:
+        return (0, at, item.order), f"named #{at + 1} in what's left for the release"
+    lower = item.section.lower()
+    builder = lower.startswith(BUILDER)
+    score = SCORE.search(item.text)
+    if score and not builder:
+        return (1, 0, item.order), f"it moves the score ({score.group(1).lower()}) — {section}"
+    if stage is not None:
+        if release is None or stage in release:
+            span = f"Stages {release[0]}–{release[-1]}" if release is not None and len(release) > 1 else section
+            return (2, 0, item.order), (f"{section} is part of the next release ({span})"
+                                        if release is not None else f"{section}, in the file's order")
+        return (5, 0, item.order), f"{section}, after the release — nothing worth more is left"
+    if lower.startswith("where it stands"):
+        return (2, 0, item.order), "open now, for the release (Where it stands)"
+    if builder:
+        return (4, 0, item.order), "the self-build machinery — worth it only once the rest moves"
+    return (3, 0, item.order), f"not tied to a stage ({section}) — after the release's own items"
+
+
+def ranked(text: str, items: Optional[List[Item]] = None) -> List[Tuple[Item, str]]:
+    """The items eki may take (`workable`), most worth first, each with why."""
+    items = parse(text) if items is None else items
+    named, release = left_for_release(text), release_stages(text)
+    got = [(i, *worth(i, text, named, release)) for i in workable(items)]
+    return [(i, why) for i, _, why in sorted(got, key=lambda g: g[1])]
 
 
 def find(text: str, key: str) -> Optional[Item]:

@@ -190,6 +190,8 @@ class SelfLoop:
         if goal is not None:
             meta["goal"] = goal.id
             payload.update(goal=goal.id, allowed=list(allowed or []), planned=planned)
+        if it.why and it.state != "working":
+            shown += f"\n\n*Picked because: {it.why}.*"       # the loop says why it took this one
         turn = self.store.add_turn(cid, "user", shown, meta=meta)       # type: ignore[attr-defined]
         rid = self.runs.create(shown, conversation=cid, user_turn=turn,  # type: ignore[attr-defined]
                                requested=it.backend, payload=json.dumps(payload))
@@ -648,6 +650,10 @@ class SelfLoop:
         told = drill.for_note()
         if told:
             text = f"{text}\n\n{told}".strip()
+        # and whether the week went into building the builder — a count, not a model's words
+        mostly = selfloop.builder_line(selfloop.builder_share(self._self_week_changes()))
+        if mostly:
+            text = f"{text}\n\n{mostly}".strip()
         fresh = self.runs.get(run["id"]) or run                         # type: ignore[attr-defined]
         note = selfloop.save_note(text, suggestions, run=run["id"], conversation=run["conversation_id"],
                                   backend=fresh.get("backend") or "")
@@ -681,6 +687,12 @@ class SelfLoop:
             await self._notify(said["title"], said["body"])             # type: ignore[attr-defined]
         return page
 
+    @staticmethod
+    def _self_week_changes(now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """The changes eki made to itself in the last seven days."""
+        since = (now or time.time()) - 7 * 86400
+        return [c for c in selfwork.changes() if float(c.get("at") or 0) >= since]
+
     def _self_evidence(self) -> Dict[str, Any]:
         """The week, in numbers, for the note: nothing a model made up."""
         now, week = time.time(), 7 * 86400
@@ -697,7 +709,7 @@ class SelfLoop:
         local = [b.key for b in self.backends if b.info.cost.tier == 0]   # type: ignore[attr-defined]
         busy = self.runs.busy_seconds(now - week)                       # type: ignore[attr-defined]
         local_s = sum(v for k, v in busy.items() if k in local)
-        changes = [c for c in selfwork.changes() if float(c.get("at") or 0) >= now - week]
+        changes = self._self_week_changes(now)
         plan = roadmap.read(self._self_root())
         items = roadmap.parse(plan)
         landed = set(selfwork.landed_keys(selfwork.changes()))
@@ -722,8 +734,9 @@ class SelfLoop:
             "goals": self.goals_report(hours=168),                      # type: ignore[attr-defined]
             "self_changes": Counter(c["state"] for c in changes),
             "self_change_titles": [f"{c['state']}: {c.get('title')}" for c in changes[:12]],
+            "self_build_share": selfloop.builder_share(changes),
             "roadmap": {**roadmap.counts(items),
-                        "next": [f"{i.section.split(' — ')[0]}: {i.title}" for i in roadmap.workable(items)
+                        "next": [f"{i.title} — {why}" for i, why in roadmap.ranked(plan, items)
                                  if i.key not in landed][:5]},
             "providers": [{"key": b.key, "what": b.info.label, "tier": b.info.cost.tier}  # type: ignore[attr-defined]
                           for b in self.backends],                      # type: ignore[attr-defined]
@@ -1371,7 +1384,7 @@ class SelfLoop:
         plan = roadmap.parse(text)
         known = {i.key: i for i in items if i.source == "roadmap"}
         landed = set(selfwork.landed_keys(selfwork.changes()))
-        upcoming = [e for e in roadmap.workable(plan) if e.key not in landed
+        upcoming = [(e, worth) for e, worth in roadmap.ranked(text, plan) if e.key not in landed
                     and (e.key not in known or known[e.key].state not in selfloop.SETTLED)][:5]
         by_key = {e.key: e for e in plan}
 
@@ -1429,7 +1442,8 @@ class SelfLoop:
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],
             "waiting": [c for c in rows if c["state"] in ("proposed", "conflicts") and c.get("fit")],
             "changes": rows[:40],
-            "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key)} for e in upcoming]},
+            "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key), "worth": worth}
+                                                    for e, worth in upcoming]},
             "note": selfloop.latest_note(),
             "digest": digest_mod.latest(),
             "shift": self._shift_state,                                 # type: ignore[attr-defined]

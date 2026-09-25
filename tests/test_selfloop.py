@@ -232,6 +232,88 @@ def test_landing_the_first_item_frees_the_second():
     assert selfloop.pick(roadmap.tick(STAGED, first.key, "*(eki: self/ab12)*"))[0].id == second.id
 
 
+RANKED = """# Roadmap
+
+**The first public release** is Stages 1–2: an engine and a command line.
+
+## Where it stands
+
+**Left for the first release, in order** (the loop takes them
+first):
+
+1. *Handoff between backends* (Stage 2)
+2. *Commands shared under Auto* (Stage 1) *(for a person)*
+
+## Stage 1 — Skills
+
+- [ ] **A skill reader.** Reads skills.
+
+## Stage 2 — Runs
+
+- [ ] **Handoff between backends** *(independent)*: on long threads.
+
+## Stage 4 — Later
+
+- [ ] **A late thing.** After the release.
+
+## Alongside every stage — eki builds eki
+
+- [ ] **A daily digest.** One page a day.
+- [ ] **Score every change.** The local share before and after.
+
+## What eki keeps current about itself
+
+- [ ] **Outcomes from real use.** Redos and overrides adjust the scores.
+- [ ] **Engine manifests refreshed.**
+"""
+
+
+def test_items_are_ranked_by_what_theyre_worth_for_the_release_not_file_order():
+    assert roadmap.release_stages(RANKED) == range(1, 3)
+    assert roadmap.left_for_release(RANKED) == ["Handoff between backends", "Commands shared under Auto"]
+    got = roadmap.ranked(RANKED)
+    assert [i.title for i, _ in got] == [
+        "Handoff between backends",          # named first in what's left
+        "Outcomes from real use",            # moves the score
+        "A skill reader",                    # a release stage
+        "Engine manifests refreshed",        # another section
+        "A daily digest", "Score every change",   # the builder: the score words don't lift it
+        "A late thing"]                      # after the release
+    why = dict((i.title, w) for i, w in got)
+    assert "named #1" in why["Handoff between backends"]
+    assert "moves the score" in why["Outcomes from real use"]
+    assert "part of the next release (Stages 1–2)" in why["A skill reader"]
+    assert "self-build machinery" in why["A daily digest"]
+    assert "after the release" in why["A late thing"]
+
+
+def test_the_loop_takes_the_item_worth_most_and_says_why():
+    it, why = selfloop.pick(RANKED)
+    assert it.title == "Handoff between backends" and "named #1 in what's left for the release" in why
+    assert selfloop.get(it.id).why == why                                 # kept, for its thread and the board
+    selfloop.update(it.id, state="done")
+    it, why = selfloop.pick(RANKED)
+    assert it.title == "Outcomes from real use" and "moves the score" in why
+    fault = selfloop.add("fault", "Fix KeyError", "the traceback", key="KeyError in eki/x.py:f")
+    it, why = selfloop.pick(RANKED)
+    assert it.id == fault.id and selfloop.get(fault.id).why == "a fault in eki's own code"
+
+
+def test_the_note_says_so_when_the_week_went_into_the_builder():
+    week = [{"title": "merge queue retries", "files": ["eki/selfengine.py", "tests/test_selfloop.py"]},
+            {"title": "ticks", "files": ["eki/roadmap.py", "docs/self-build.md"]},
+            {"title": "handoff", "files": ["eki/handoff.py", "eki/engine.py"]},
+            {"title": "a docs fix", "files": ["README.md"]}]                # no code: not counted
+    share = selfloop.builder_share(week)
+    assert (share["changes"], share["on_the_builder"], share["share"]) == (3, 2, 0.67)
+    assert share["titles"] == ["merge queue retries", "ticks"]
+    line = selfloop.builder_line(share)
+    assert "2 of 3 changes" in line and "only worth it if the rest moves" in line
+    assert selfloop.builder_line(selfloop.builder_share(week[1:])) == ""   # half isn't most
+    assert selfloop.builder_line(selfloop.builder_share(week[:1])) == ""   # one change says little
+    assert selfloop.on_the_builder(["eki/selfloop.py", "eki/engine.py"]) is False   # a tie isn't most
+
+
 def test_a_chat_message_that_asks_eki_to_change_itself():
     yes = ["eki, make the chat list show the project name", "improve yourself so the board loads faster",
            "change eki's code so runs show how long they took", "eki: hide the dock icon"]
@@ -380,6 +462,8 @@ async def test_the_loop_works_through_the_roadmap_and_ticks_what_landed(eng):
     Agent.answers = ["The image edits were committed in 3f2a9c1.\nITEM: already"]
     state = await turn(eng)
     assert state["state"] == "working" and "Commit the working tree" in state["why"]
+    first = next(i for i in selfloop.items() if i.source == "roadmap")
+    assert "*Picked because: worth most for the next release" in eng.store.turns(first.conversation)[0]["content"]
     told = Agent.seen[-1][1]
     assert "the image edits" in told and "ITEM: done" in told and "Read ROADMAP.md first" in told
     text = (eng.root / "ROADMAP.md").read_text()                            # ticked: in your checkout
@@ -1009,6 +1093,22 @@ async def test_the_weekly_note_carries_the_restart_drill_as_it_ran(eng):
     assert "**Restart drill**" in note["text"] and "1 not ok" in note["text"]
     assert "resolving" in note["text"].split("**Restart drill**")[1]      # the table, not a model's words
     assert '"restart_drill"' in Agent.seen[-1][1]                          # and the writer knew it
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_weekly_note_says_when_the_week_went_into_the_builder(eng, monkeypatch):
+    now = time.time()
+    week = [{"id": f"c{n}", "state": "applied", "at": now - 3600, "title": t, "files": f}
+            for n, (t, f) in enumerate([("merge queue", ["eki/selfengine.py"]),
+                                        ("ticks", ["eki/roadmap.py"]), ("handoff", ["eki/handoff.py"])])]
+    monkeypatch.setattr(selfwork, "changes", lambda *a, **k: week)
+    Agent.answers = ["A busy week.\n\n```json\n[]\n```"]
+    started = await eng.self_note_now()
+    await settle(eng.runs, started["run"], timeout=20)
+    text = selfloop.latest_note()["text"]
+    assert "went into the self-build machinery** — 2 of 3 changes" in text   # counted, not a model's words
+    assert '"self_build_share"' in Agent.seen[-1][1]                       # and the writer knew it
     await eng.runner.stop()
 
 

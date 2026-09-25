@@ -5,7 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from eki import cli, pipeline, selfwork
+from eki import pipeline, selfwork
+from eki.cli import self_ as self_cli
 
 from test_selfwork import agent, propose, repo, verdict
 
@@ -207,11 +208,11 @@ def test_eki_self_show_prints_where_it_stands_and_its_timeline(monkeypatch, caps
     c = {"id": "c1", "lines": ["self/c1  one"], "stage": {"text": "rebasing", "live": True},
          "timeline": [{"step": "queued", "at": NOW, "note": ""},
                       {"step": "conflicts", "at": NOW + 60, "note": "README.md"}]}
-    monkeypatch.setattr(cli, "call", lambda *a, **kw: c)
+    monkeypatch.setattr(self_cli, "call", lambda *a, **kw: c)
 
     class Args:
         service = "http://x"
-    assert cli._self_verb(Args(), "show", ["c1"]) == 0
+    assert self_cli._self_verb(Args(), "show", ["c1"]) == 0
     out = capsys.readouterr().out
     assert "now: rebasing" in out and "timeline:" in out and "queued" in out
     assert "conflicts — README.md" in out
@@ -220,19 +221,19 @@ def test_eki_self_show_prints_where_it_stands_and_its_timeline(monkeypatch, caps
 def test_eki_self_watch_draws_the_pipeline_until_stopped(monkeypatch, capsys):
     v = {"pipeline": [{"id": "c1", "title": "one", "text": "in line behind self/a", "live": False,
                        "timeline": [{"step": "queued", "at": NOW, "note": ""}]}], "golive": {}}
-    monkeypatch.setattr(cli, "call", lambda *a, **kw: v)
+    monkeypatch.setattr(self_cli, "call", lambda *a, **kw: v)
     naps = []
 
     def nap(s):
         naps.append(s)
         if len(naps) == 2:
             raise KeyboardInterrupt
-    monkeypatch.setattr(cli.time, "sleep", nap)
-    assert cli._self_watch("http://x") == 0
+    monkeypatch.setattr(self_cli.time, "sleep", nap)
+    assert self_cli._self_watch("http://x") == 0
     out = capsys.readouterr().out
     assert out.count("self/c1  one — in line behind self/a") == 2 and "queued" in out
     # an engine from before the pipeline: said, not a crash
-    assert cli._pipeline_lines({"working": []}) is None
+    assert self_cli._pipeline_lines({"working": []}) is None
 
 
 def test_what_went_in_is_kept_apart_from_what_is_still_going_in(tmp_path):

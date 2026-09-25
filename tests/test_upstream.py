@@ -134,7 +134,7 @@ def test_body_says_how_it_was_judged():
 
 def test_cli_asks_before_publishing(tmp_path, monkeypatch, capsys):
     """Not from a terminal and no --yes: nothing is pushed."""
-    from eki import cli
+    from eki.cli import self_ as cli
     public, mac, home = setup(tmp_path)
     monkeypatch.setattr(selfwork, "HOME", home)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)

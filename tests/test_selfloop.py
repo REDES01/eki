@@ -1471,10 +1471,11 @@ async def test_finished_changes_wait_for_the_train_which_merges_them_as_a_tree(e
 
 def test_several_changes_asked_for_at_once_from_the_command_line(monkeypatch, tmp_path):
     from eki import cli, migrate
+    from eki.cli import self_
     sent = []
     monkeypatch.setattr(migrate, "run", lambda root: None)
-    monkeypatch.setattr(cli, "ensure_engine", lambda s: None)
-    monkeypatch.setattr(cli, "call", lambda m, p, s, **kw: sent.append(kw["json"]) or {"queued": True, "goal": True})
+    monkeypatch.setattr(self_, "ensure_engine", lambda s: None)
+    monkeypatch.setattr(self_, "call", lambda m, p, s, **kw: sent.append(kw["json"]) or {"queued": True, "goal": True})
     assert cli.main(["self", "-r", "make the sidebar wider", "-r", "prefer room when routing"]) == 0
     assert [b["request"] for b in sent] == ["make the sidebar wider", "prefer room when routing"]
     assert {b["when"] for b in sent} == {"later"}
@@ -1584,7 +1585,7 @@ def test_the_persons_switches_are_refused_to_eki_s_own_work(monkeypatch):
 
 
 def test_the_command_line_says_which_thread_asks(monkeypatch):
-    from eki import cli
+    from eki.cli import common as cli
     monkeypatch.delenv("EKI_PARENT", raising=False)
     assert cli.parent_headers() == {}
     monkeypatch.setenv("EKI_PARENT", "abc")

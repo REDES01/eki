@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from eki import cli, mcpbridge, nesting
+from eki import mcpbridge, nesting
+from eki.cli import ask as cli
 from eki.engine import Engine
 from eki.runs import Runner, RunStore
 

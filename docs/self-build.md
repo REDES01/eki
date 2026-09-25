@@ -776,6 +776,26 @@ eki self --all                   every row of every list, nothing cut off
 eki self drill [quick]           restart a sandboxed engine mid-work: is anything lost?
 ```
 
+## Changes that don't collide: one file per command
+
+Several changes run side by side, and each is put on top of what landed
+before it. Two changes to one big file collide even when they're about
+different things, so eki's command line isn't one file: `eki/cli/` has a
+module per command (`ask.py`, `runs.py`, `self_.py`, `routing.py`,
+`goals.py`, `swap.py`, `remember.py` …). Each registers its own subparser and
+flags — a `register(sub)` and an `ORDER` for its place in `eki --help` —
+and `eki/cli/__init__.py` finds them by looking at the package, so there is
+no shared list to edit. What several commands need (`call()`, `watch()`,
+finding the engine) is in `eki/cli/common.py`.
+
+So a new command is a new file in `eki/cli/`; a change to one command
+touches that command's file. Don't grow a shared file to add one.
+
+`eki/cli.py` is still there, empty: Python takes the package first, and
+older builds and apps know a checkout by that file. A change made before the
+split that edited it conflicts with it; the agent resolving that is told to
+make those edits in the command's own module instead.
+
 ## Order of building
 
 1. ~~candidate check~~ — done

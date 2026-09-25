@@ -329,7 +329,8 @@ def entry_print(text: str) -> str:
 
 #: path prefix → lane; the longest match wins, the rest of eki/ is the engine
 LANES = {
-    "mac/": "mac", "eki/web/": "board", "eki/cli.py": "cli", "docs/": "docs", "tests/": "tests",
+    "mac/": "mac", "eki/web/": "board", "eki/cli.py": "cli", "eki/cli/": "cli", "docs/": "docs",
+    "tests/": "tests",
     "README.md": "docs", "ROADMAP.md": "docs", "AGENTS.md": "docs",
     "eki/router.py": "routing", "eki/table.py": "routing", "eki/capacity.py": "routing",
     "eki/priors.py": "routing", "eki/handoff.py": "routing", "eki/classify.py": "routing",

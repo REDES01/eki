@@ -12,7 +12,7 @@ from a local model), what this Mac can do right now, and the screen itself.
 The tools are the same ones the `eki` command line gives an agent with a
 shell (ROADMAP, Stage 3); here they need no shell and no second process.
 Codex gets the same tools through `eki mcp` (a stdio server over the same
-handlers) — see eki/cli.py.
+handlers) — see eki/cli/serve.py.
 """
 from __future__ import annotations
 

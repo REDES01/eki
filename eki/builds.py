@@ -114,7 +114,8 @@ def make(repo: str | Path, ref: Optional[str] = "HEAD") -> Path:
         subprocess.run(["tar", "-x", "-C", str(tmp)], input=archive, check=True)
     else:
         shutil.copytree(repo, tmp, dirs_exist_ok=True, symlinks=True,
-                        ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__", ".pytest_cache"))
+                        ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__", ".pytest_cache",
+                                                      ".healthy", ".eki-build.json"))
     (tmp / ".eki-build.json").write_text(json.dumps(
         {"id": bid, "commit": sha, "source": str(repo), "made_at": time.time()}, indent=2))
     os.replace(tmp, dest)
@@ -154,14 +155,21 @@ def step_aside() -> bool:
 
 
 def mark_healthy() -> Optional[str]:
-    """Called by the engine once it has been up for WATCH: this build is fit."""
+    """Called by the engine once it has been up for WATCH: this build is fit.
+    Returns the build id the first time, None after (the swap record is
+    brought up to date either way)."""
     marker = running() / ".healthy"
-    if marker.exists():
-        return None
-    try:
-        marker.write_text(f"{time.time()}\n")
-    except OSError:
-        return None
+    fresh = not marker.exists()
+    if fresh:
+        try:
+            marker.write_text(f"{time.time()}\n")
+        except OSError:
+            return None
+    _settle_swap()
+    return running_id() if fresh else None
+
+
+def _settle_swap() -> None:
     rec = root() / "swap.json"
     if rec.exists():
         try:
@@ -171,7 +179,6 @@ def mark_healthy() -> Optional[str]:
                 rec.write_text(json.dumps(data, indent=2))
         except ValueError:
             pass
-    return running_id()
 
 
 def status() -> Dict[str, Any]:

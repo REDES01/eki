@@ -13,7 +13,6 @@ def repo(tmp_path):
     workspace.git(r, "init", "-q", "-b", "main")
     (r / "a.txt").write_text("one\n")
     (r / ".venv").mkdir()
-    (r / ".gitignore").write_text(".venv\n")
     workspace.git(r, "add", "-A")
     workspace.git(r, "commit", "-q", "-m", "first")
     return r
@@ -32,7 +31,7 @@ def test_two_worktrees_never_see_each_other(repo):
     a, b = workspace.add(repo, "a"), workspace.add(repo, "b")
     (a / "a.txt").write_text("from a\n")
     assert (b / "a.txt").read_text() == "one\n"
-    assert workspace.changed(a, "HEAD") == ["a.txt"]
+    assert workspace.changed(a, "HEAD") == ["a.txt"]                # the linked .venv never counts
     sha = workspace.commit_all(a, "a's change")
     assert sha and workspace.head(a) == sha
     assert workspace.commit_all(a, "again") is None

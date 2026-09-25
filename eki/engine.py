@@ -149,6 +149,7 @@ def spawn(conn, rid: str) -> None:
                          build=builds.running_id())
     logf = open(paths.logs() / f"worker-{rid}.log", "ab")
     env = dict(os.environ)
+    env.pop("EKI_PYTHON", None)            # the launcher's interpreter is its business, not a run's
     root = str(builds.running())
     env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     proc = subprocess.Popen([sys.executable, "-m", "eki.worker", rid], cwd=str(paths.home()),

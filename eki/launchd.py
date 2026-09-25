@@ -39,7 +39,7 @@ def install() -> str:
         "Label": LABEL,
         "ProgramArguments": ["/bin/sh", str(launcher)],
         "WorkingDirectory": str(paths.home()),
-        "EnvironmentVariables": {"EKI_HOME": str(paths.home()), "EKI_PYTHON": sys.executable,
+        "EnvironmentVariables": {"EKI_HOME": str(paths.home()), "EKI_PYTHON": _python(root),
                                  "EKI_SOURCE": str(root), "PATH": path_env,
                                  "HOME": os.path.expanduser("~")},
         "RunAtLoad": True,
@@ -66,6 +66,12 @@ def install() -> str:
             return str(p)
         time.sleep(1)
     raise RuntimeError((out.stderr.strip() if out else "") or "launchctl bootstrap failed")
+
+
+def _python(root: Path) -> str:
+    """The checkout's own venv when it has one (it has pytest), else this interpreter."""
+    venv = root / ".venv" / "bin" / "python"
+    return str(venv) if os.access(venv, os.X_OK) else sys.executable
 
 
 def uninstall() -> bool:

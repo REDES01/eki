@@ -69,6 +69,7 @@ def test_a_goal_is_planned_built_judged_and_proposed(conn, src, tmp_path, monkey
     assert a["summary"] == "made a."
     judge = store.run(conn, a["run_id"])
     assert judge["provider"] == "command" and judge["prompt"] == selfwork.CHECK
+    assert ".venv" not in workspace.git(src, "show", "--stat", "--format=", a["commit_sha"])
     run_inline(conn, judge["id"])
     selfwork.tick(conn)
     a = item(conn, a["id"])

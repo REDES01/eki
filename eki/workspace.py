@@ -101,17 +101,26 @@ def head(where: str | Path) -> str:
     return git(where, "rev-parse", "HEAD")
 
 
+#: the linked folders, as pathspecs git leaves alone (a `.venv/` ignore rule
+#: doesn't cover a symlink named .venv)
+NOT_LINKED = [f":!{name}" for name in LINKED]
+
+
 def changed(where: str | Path, since: str) -> List[str]:
     """Files different from `since` — committed or not."""
-    files = set(git(where, "diff", "--name-only", since).splitlines())
-    files |= set(git(where, "ls-files", "--others", "--exclude-standard").splitlines())
+    files = set(git(where, "diff", "--name-only", since, "--", ".", *NOT_LINKED).splitlines())
+    files |= set(git(where, "ls-files", "--others", "--exclude-standard", "--", ".", *NOT_LINKED).splitlines())
     return sorted(f for f in files if f)
 
 
 def commit_all(where: str | Path, message: str) -> Optional[str]:
-    """Commit everything in the worktree; None when nothing changed."""
-    git(where, "add", "-A")
-    if not git(where, "status", "--porcelain"):
+    """Commit everything in the worktree but the linked folders; None when nothing changed."""
+    for name in LINKED:                    # one an agent (or an older eki) added anyway: untrack it
+        if git(where, "ls-files", "--", name):
+            git(where, "rm", "-q", "--cached", "--", name)
+    git(where, "add", "-A", "--", ".", *NOT_LINKED)
+    if not git(where, "status", "--porcelain", "--", ".", *NOT_LINKED) \
+            and not git(where, "diff", "--cached", "--name-only"):
         return None
     git(where, "commit", "-q", "-m", message)
     return head(where)

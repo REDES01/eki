@@ -21,7 +21,8 @@ from . import builds, db, paths, selfbrief, store, workspace
 log = logging.getLogger("eki.self")
 
 DEFAULTS = {"parallel": 3, "autonomy": "propose"}
-CHECK = '["/bin/sh", "bin/check", "-q"]'
+#: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
+CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python exec bin/check -q"]'
 
 
 def settings() -> Dict[str, Any]:

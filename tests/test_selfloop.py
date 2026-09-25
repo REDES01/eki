@@ -668,6 +668,24 @@ async def test_a_run_cut_off_after_its_base_passed_doesnt_check_a_new_one(eng, m
 
 
 @pytest.mark.asyncio
+async def test_carrying_on_after_a_restart_adds_no_second_message(eng, monkeypatch):
+    """Every swap cuts off the changes waiting in line; carrying one on is
+    the same request, not a new "Carrying on" message in the thread each time."""
+    async def held(rid):
+        return None
+    monkeypatch.setattr(eng.runner, "submit", held)
+    it = selfloop.add("asked", "make VALUE two", "make VALUE two")
+    first = await eng._self_start(it)
+    cid = first["conversation"]
+    said = [t for t in eng.store.turns(cid) if t["role"] == "user"]
+    again = await eng._self_start(selfloop.get(it.id))          # state "working": carried on
+    assert again["conversation"] == cid and again["run"] != first["run"]
+    assert [t for t in eng.store.turns(cid) if t["role"] == "user"] == said
+    assert eng.runs.get(again["run"])["user_turn"] == eng.runs.get(first["run"])["user_turn"]
+    await eng.runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_applying_code_asks_the_supervisor_and_its_outcome_settles_it(eng):
     Agent.edits = {"eki/thing.py": "VALUE = 2\n"}
     started = await eng.self_ask("make VALUE two")

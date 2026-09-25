@@ -202,7 +202,14 @@ class SelfLoop:
             payload.update(goal=goal.id, allowed=list(allowed or []), planned=planned)
         if it.why and it.state != "working":
             shown += f"\n\n*Picked because: {it.why}.*"       # the loop says why it took this one
-        turn = self.store.add_turn(cid, "user", shown, meta=meta)       # type: ignore[attr-defined]
+        # carried on after a restart: the same request, so the same message —
+        # no second "Carrying on" bubble per restart (a swap cuts off every
+        # change still waiting in line; it isn't anything the person said)
+        prev = (self.runs.get(it.run) or {}) if it.state == "working" and it.run else {}   # type: ignore[attr-defined]
+        if prev.get("conversation_id") == cid and int(prev.get("user_turn") or 0):
+            turn = int(prev["user_turn"])
+        else:
+            turn = self.store.add_turn(cid, "user", shown, meta=meta)   # type: ignore[attr-defined]
         rid = self.runs.create(shown, conversation=cid, user_turn=turn,  # type: ignore[attr-defined]
                                requested=it.backend, payload=json.dumps(payload))
         selfloop.update(it.id, state="working", run=rid, conversation=cid)
@@ -340,6 +347,8 @@ class SelfLoop:
                 **prop.to_json(), "agent_state": state, "reason": selfloop.reason(answer)})
         merging = it.phase == "merging"
         if merging:                                 # cut off while in the merge queue: back in line
+            yield {"backend": "eki", "reason": "eki · in line to land"}   # not "routing…"
+            yield "*eki: still in line to land — the next release train merges it…*\n"
             c = selfwork.change(prop.id)
             prop = selfwork.Proposal(**{k: v for k, v in c.items() if k in selfwork.Proposal.__dataclass_fields__})
         else:

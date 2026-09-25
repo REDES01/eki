@@ -216,6 +216,9 @@ eki` and can't raise the setting, turn the loop on, or touch a locked file.
    side path with `rerere`, landing and pushing, the train, `apply`. eki
    lands into its own clone at `~/.eki/self/repo`, and the engine drives
    `eki/queue.py`, `eki/resolve.py`, `eki/candidate.py` and `eki/train.py`.
+   Built by eki itself: one goal planned into ten items, three waves of
+   parallel worktrees, the person as the merge queue for those; the queue
+   then took its first change goal → live in 25 minutes.
 5. **The loop closes** — faults become items, the daily digest, the score.
 
 ## What the first eki taught

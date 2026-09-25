@@ -1,0 +1,55 @@
+#!/bin/sh
+# eki's launcher: what launchd runs. Starts the engine from builds/current,
+# starts it again after a swap, and goes back to builds/previous if a new
+# build dies before it has proved itself. Kept small and free of eki's code
+# so no change eki makes to itself can break the way back. eki never applies
+# a change to this file alone (docs/self-build.md).
+#
+#   EKI_HOME    where everything lives (default ~/.eki)
+#   EKI_PYTHON  the interpreter (default python3)
+#   EKI_SOURCE  a checkout to run when there is no current build (dev mode)
+#   EKI_WATCH   seconds a new engine must stay up to count as healthy (180)
+set -u
+HOME_DIR="${EKI_HOME:-$HOME/.eki}"
+PY="${EKI_PYTHON:-python3}"
+WATCH="${EKI_WATCH:-180}"
+SWAP=75
+BUILDS="$HOME_DIR/builds"
+mkdir -p "$BUILDS" "$HOME_DIR/logs"
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$HOME_DIR/logs/launcher.log"; }
+
+target() {                       # where current points, or the source checkout
+  if [ -L "$BUILDS/current" ]; then readlink "$BUILDS/current"; else echo "${EKI_SOURCE:-}"; fi
+}
+
+log "launcher $$ up"
+while :; do
+  cur="$(target)"
+  if [ -z "$cur" ] || [ ! -f "$cur/eki/engine.py" ]; then
+    log "nothing to run at '$cur'; waiting"
+    sleep 5
+    continue
+  fi
+  start=$(date +%s)
+  log "start $cur"
+  # run from inside the build, so `eki` can only mean this build's package
+  ( cd "$cur" && EKI_HOME="$HOME_DIR" EKI_BUILD_DIR="$cur" EKI_LAUNCHED=1 PYTHONPATH="$cur" \
+      exec "$PY" -m eki.engine ) >> "$HOME_DIR/logs/engine.log" 2>&1
+  code=$?
+  took=$(( $(date +%s) - start ))
+  if [ "$code" -eq "$SWAP" ]; then
+    log "engine stepped aside for $(target)"
+    continue
+  fi
+  if [ "$took" -lt "$WATCH" ] && [ ! -f "$cur/.healthy" ] && [ -L "$BUILDS/previous" ]; then
+    prev="$(readlink "$BUILDS/previous")"
+    log "rolled back to $prev: engine from $cur exited $code after ${took}s, never healthy"
+    "$PY" -c 'import os,sys; os.symlink(sys.argv[1], sys.argv[2]); os.replace(sys.argv[2], sys.argv[3])' \
+      "$prev" "$BUILDS/.current.tmp" "$BUILDS/current"       # one atomic step, like eki does it
+    printf '{"state": "rolled back", "from": "%s", "to": "%s", "exit": %s, "after": %s, "at": %s}\n' \
+      "$cur" "$prev" "$code" "$took" "$(date +%s)" > "$BUILDS/rollback.json"
+    continue
+  fi
+  log "engine exited $code after ${took}s; starting again in 5s"
+  sleep 5
+done

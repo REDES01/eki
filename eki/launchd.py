@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,20 +22,30 @@ def _domain() -> str:
 
 
 def install() -> str:
-    root = str(Path(__file__).resolve().parent.parent)
+    """launchd runs the launcher (copied once into EKI_HOME/bin), which runs the
+    engine from builds/current — this checkout, until a build is swapped in."""
+    from . import builds
+    root = builds.source()
+    launcher = paths.home() / "bin" / "eki-launcher"
+    launcher.parent.mkdir(exist_ok=True)
+    shutil.copy2(builds.launcher_source(), launcher)
+    launcher.chmod(0o755)
+    if builds.current() is None:
+        builds.swap_to(root, "installed: dev mode")
     path_env = ":".join([os.path.expanduser("~/.local/bin"), "/opt/homebrew/bin", "/usr/local/bin",
                          "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
     spec = {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, "-m", "eki.engine"],
+        "ProgramArguments": ["/bin/sh", str(launcher)],
         "WorkingDirectory": str(paths.home()),
-        "EnvironmentVariables": {"EKI_HOME": str(paths.home()), "PYTHONPATH": root, "PATH": path_env,
+        "EnvironmentVariables": {"EKI_HOME": str(paths.home()), "EKI_PYTHON": sys.executable,
+                                 "EKI_SOURCE": str(root), "PATH": path_env,
                                  "HOME": os.path.expanduser("~")},
         "RunAtLoad": True,
         "KeepAlive": True,
         "ThrottleInterval": 5,
-        "StandardOutPath": str(paths.logs() / "engine.log"),
-        "StandardErrorPath": str(paths.logs() / "engine.log"),
+        "StandardOutPath": str(paths.logs() / "launcher.log"),
+        "StandardErrorPath": str(paths.logs() / "launcher.log"),
         "ProcessType": "Background",
     }
     p = plist_path()
@@ -62,5 +73,5 @@ def installed() -> bool:
 
 
 def kick() -> None:
-    """Restart the engine under launchd (workers keep running)."""
+    """Restart the launcher and its engine under launchd (workers keep running)."""
     subprocess.run(["launchctl", "kickstart", "-k", f"{_domain()}/{LABEL}"], capture_output=True)

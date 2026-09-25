@@ -14,6 +14,7 @@ In a throwaway EKI_HOME, with the fake provider:
 from __future__ import annotations
 
 import os
+import sys
 import signal
 import tempfile
 import time
@@ -114,6 +115,91 @@ def run(say: Callable[[str], None] = print, home: str | None = None) -> List[str
         if pid:
             os.kill(pid, signal.SIGTERM)
             _reap(pid)
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return checks
+
+
+# ---- the swap drill ------------------------------------------------------------------------
+
+def swaps(say: Callable[[str], None] = print, home: str | None = None) -> List[str]:
+    """The go-live path, for real: the launcher runs an engine from a build; a
+    swap to a new build mid-run changes the engine and not the run; a build
+    that can't start is rolled back by the launcher."""
+    import subprocess
+    from . import builds
+    home = home or tempfile.mkdtemp(prefix="eki-swapdrill-")
+    os.makedirs(home, exist_ok=True)
+    saved = {k: os.environ.get(k) for k in ("EKI_HOME", "EKI_MACHINE", "EKI_PORT", "EKI_WATCH")}
+    os.environ.update({"EKI_HOME": home, "EKI_MACHINE": "ok", "EKI_PORT": "0", "EKI_WATCH": "3"})
+    checks: List[str] = []
+    launcher = None
+
+    def ok(text: str) -> None:
+        checks.append(text)
+        say(f"  ✓ {text}")
+
+    def swap_state() -> tuple:
+        st = builds.status()
+        return (st.get("swap") or {}).get("state"), (st.get("swap") or {}).get("target")
+
+    try:
+        with open(os.path.join(home, "providers.json"), "w") as f:
+            f.write(PROVIDERS)
+        with open(os.path.join(home, "routing.json"), "w") as f:
+            f.write(ROUTING)
+        first = builds.make(builds.source(), None)
+        builds.swap_to(first, "drill: first build")
+        env = {**os.environ, "EKI_PYTHON": sys.executable}
+        launcher = subprocess.Popen(["/bin/sh", str(builds.launcher_source())], env=env,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+        c = db.connect()
+        _wait("the launcher's engine", lambda: engine.running_pid() is not None)
+        pid1 = engine.running_pid()
+        ok("the launcher started an engine from the first build")
+
+        with db.tx(c):
+            rid = store.create_run(c, store.create_thread(c, "swap", None), "steps=30 delay=0.2 across")
+        _wait("the run to get going",
+              lambda: len([e for e in store.events_after(c, rid) if e["kind"] == "text"]) >= 2)
+        worker = store.run(c, rid)["pid"]
+        second = builds.make(builds.source(), None)
+        builds.swap_to(second, "drill: second build")
+        _wait("a new engine", lambda: engine.running_pid() not in (None, pid1))
+        ok("swapped: a new engine from the second build")
+        _wait("the second build to be healthy", lambda: swap_state() == ("healthy", str(second)), 20)
+        ok("healthy after the watch window")
+        _wait("the run to finish", lambda: store.run(c, rid)["state"] == "done", 30)
+        r = store.run(c, rid)
+        assert r["pid"] == worker and r["attempt"] == 1, "the swap disturbed the run"
+        assert store.answer(c, rid).count("fake done:") == 1
+        ok("the run went on in its worker through the swap and finished once")
+
+        bad = builds.root() / "bad"
+        (bad / "eki").mkdir(parents=True)
+        (bad / "eki" / "__init__.py").write_text("")
+        (bad / "eki" / "engine.py").write_text("import sys\nsys.exit(3)\n")
+        (bad / ".eki-build.json").write_text('{"id": "bad", "commit": "none", "source": ""}')
+        pid2 = engine.running_pid()
+        builds.swap_to(bad, "drill: a build that can't start")
+        _wait("the rollback", lambda: (builds.status().get("rollback") or {}).get("to") == str(second), 20)
+        _wait("an engine again", lambda: engine.running_pid() not in (None, pid2))
+        assert builds.current() == second, "current isn't the previous build after the rollback"
+        ok("a build that can't start was rolled back by the launcher")
+    finally:
+        if launcher is not None:
+            try:
+                os.killpg(launcher.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            _reap(launcher.pid)
+        pid = engine.running_pid()
+        if pid:
+            os.kill(pid, signal.SIGTERM)
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)

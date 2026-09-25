@@ -10,10 +10,11 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 - [x] **Groundwork.** Worktrees on demand (`eki/workspace.py`); runs in one
       folder take turns; the command provider (`eki/providers/command.py`)
       — an argv in a folder as a run, resumed by running again.
-- [ ] **Go-live.** Immutable builds under `~/.eki/builds/<sha>` with
-      `current`/`previous`; the launcher launchd runs (loop, swap code,
-      watch window, roll back); `eki swap`, `eki builds`; a drill case that
-      swaps a sandboxed engine mid-run. *(for a person: creates the locked
+- [x] **Go-live.** Immutable builds under `~/.eki/builds/<id>` with
+      `current`/`previous`; the launcher launchd runs (`bin/eki-launcher`:
+      loop, swap code, watch window, roll back); `eki swap`, `eki builds`;
+      the swap drill: a swap mid-run changes the engine and not the run, a
+      build that can't start is rolled back. *(for a person: the locked
       files)*
 - [ ] **`eki self "…"`, propose.** The `items` table; the plan run that
       splits a goal into items with write-sets and dependencies; the

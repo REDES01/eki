@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import db, machine, models, paths, quota, store
+from . import builds, db, machine, models, paths, quota, store
 
 log = logging.getLogger("eki.engine")
 
@@ -145,10 +145,11 @@ def spawn(conn, rid: str) -> None:
         cur = store.run(conn, rid)
         if cur["state"] != "queued":
             return
-        store.update_run(conn, rid, state="starting", spawned_at=db.now(), pid=None)
+        store.update_run(conn, rid, state="starting", spawned_at=db.now(), pid=None,
+                         build=builds.running_id())
     logf = open(paths.logs() / f"worker-{rid}.log", "ab")
     env = dict(os.environ)
-    root = str(Path(__file__).resolve().parent.parent)
+    root = str(builds.running())
     env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     proc = subprocess.Popen([sys.executable, "-m", "eki.worker", rid], cwd=str(paths.home()),
                             env=env, stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
@@ -188,7 +189,11 @@ def refresh_quota() -> None:
     _quota_job[0].start()
 
 
-def tick(conn) -> None:
+_up_since = [0.0]
+
+
+def tick(conn) -> bool:
+    """One round. False when this engine should step aside for a newer build."""
     reap(conn)
     spawn_ready(conn)
     refresh_quota()
@@ -196,6 +201,13 @@ def tick(conn) -> None:
         _last_duty[0] = time.time()
         for line in models.duty(conn):
             log.info(line)
+        in_use = [r["build"] for r in store.runs_in(conn, ("starting", "running")) if r["build"]]
+        for gone in builds.sweep(in_use):
+            log.info("removed old build %s", gone)
+    if _up_since[0] and time.time() - _up_since[0] > builds.WATCH:
+        if builds.mark_healthy():
+            log.info("build %s healthy after %ds", builds.running_id(), int(builds.WATCH))
+    return not builds.step_aside()
 
 
 def lock() -> Optional[IO[str]]:
@@ -237,22 +249,27 @@ def serve() -> int:
     conn = db.connect()
     from . import server
     server.start_in_background()
-    log.info("engine %s up, home %s", os.getpid(), paths.home())
+    _up_since[0] = time.time()
+    log.info("engine %s up, home %s, build %s", os.getpid(), paths.home(), builds.running_id())
+    code = 0
     while not stopping:
         try:
-            tick(conn)
+            if not tick(conn):
+                log.info("a newer build is current: stepping aside")
+                code = builds.SWAP_EXIT
+                break
         except Exception:                                # noqa: BLE001 — keep managing
             log.exception("tick failed")
         time.sleep(TICK)
     log.info("engine %s down; workers left running", os.getpid())
     held.close()
-    return 0
+    return code
 
 
 def start_detached() -> int:
     """Start an engine in the background (when launchd isn't looking after one)."""
     env = dict(os.environ)
-    root = str(Path(__file__).resolve().parent.parent)
+    root = str(builds.running())
     env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     logf = open(paths.logs() / "engine.log", "ab")
     proc = subprocess.Popen([sys.executable, "-m", "eki.engine"], cwd=str(paths.home()), env=env,

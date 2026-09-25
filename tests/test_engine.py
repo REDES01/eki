@@ -8,6 +8,11 @@ def test_restart_drill(home):
     assert len(checks) == 7
 
 
+def test_swap_drill(home):
+    checks = drill.swaps(say=lambda s: None, home=str(home / "swaps"))
+    assert len(checks) == 5
+
+
 def test_runs_of_one_thread_go_one_at_a_time(conn, monkeypatch):
     spawned = []
     monkeypatch.setattr(engine, "spawn", lambda c, rid: spawned.append(rid))

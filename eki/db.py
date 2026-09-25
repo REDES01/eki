@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS cooldowns (
 """
 
 
+#: columns added after the first release — the schema only ever grows, so a
+#: worker from an older build keeps writing to a file a newer engine opened
+ADDED = [
+    ("runs", "build", "TEXT"),          # the build the worker ran from
+]
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(paths.db(), timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -98,6 +105,10 @@ def connect() -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
+    for table, col, decl in ADDED:
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
     return conn
 
 

@@ -18,7 +18,9 @@ bin/eki route "fix the failing test"             # where it would go, and why
 bin/eki providers | skills | mcp
 bin/eki models [start|stop] local               # local models; kept up while there's room
 bin/eki open                                     # the window (http://127.0.0.1:7788)
-bin/eki engine install                           # login agent: always on
+bin/eki engine install                           # login agent: always on (the launcher)
+bin/eki swap HEAD | --back | --dev               # a new version live, checked first; go back
+bin/eki builds                                   # which build runs, which it would go back to
 bin/build-mac                                         # build "Eki.app", the thin native shell
 bin/eki drill                                    # prove a restart loses nothing
 ```

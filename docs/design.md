@@ -52,6 +52,8 @@ eki follow <run>  ◄── events table
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
 | `skills`, `mcp` | one store, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`) |
+| `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
+| `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -96,6 +98,22 @@ session id per thread, so returning to it resumes its session.
   is using it, coming back five minutes after pressure eases. A model you
   stop stays stopped until you start it. eki never stops a server it
   didn't start. A run sent to a stopped model starts it and waits.
+
+## Going live
+
+`eki engine install` puts the launcher (not the engine) under launchd and
+points `builds/current` at this checkout: dev mode, edit and `eki engine
+restart` as before. `eki swap <ref>` exports that commit into
+`~/.eki/builds/<id>`, runs `bin/check` in it, and moves the links; the engine
+sees a different `current` at its next tick and exits with the swap code;
+the launcher starts the new one. Workers are untouched — each runs from the
+folder it started in until its run ends. After `EKI_WATCH` seconds (180) up,
+the engine marks its build healthy; if it dies before that, the launcher
+flips back to `previous` and writes `rollback.json`. `eki swap --back` goes
+back by hand, `eki swap --dev` returns to the checkout. The drill tries all
+of it in a sandbox (`eki drill`, `drill.swaps`). The schema only grows
+(`db.ADDED`), so a worker from an older build keeps writing to a file a
+newer engine opened.
 
 ## Milestone 4: eki builds eki
 

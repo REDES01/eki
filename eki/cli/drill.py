@@ -12,11 +12,12 @@ def add(p) -> None:
 
 
 def run(args) -> int:
-    print("restart drill:")
-    try:
-        drill.run()
-    except AssertionError as e:
-        print(f"  ✗ {e}")
-        return 1
+    for title, case in (("restart drill:", drill.run), ("swap drill:", drill.swaps)):
+        print(title)
+        try:
+            case()
+        except AssertionError as e:
+            print(f"  ✗ {e}")
+            return 1
     print("passed")
     return 0

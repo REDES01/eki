@@ -569,6 +569,22 @@ and is swapped in with the next go-live (runs still going carry on in the new en
 healthy one is fast-forwarded into your checkout. Files you never added to git
 don't stop that; edits to tracked files do.
 
+**Offering a change upstream** (`eki/upstream.py`). What eki changes on
+this Mac is a local branch on top of the last release; the public repo is
+something else, because other people install what's merged there. So eki
+never offers anything on its own: `eki self offer <id>` — a person asking —
+puts that change's own commits, and only those, on top of the public `main`
+(`self_upstream`, default `origin/main`) as a branch `eki/<id>`, in a
+scratch worktree so your checkout isn't touched; pushes it (to
+`self_offer_remote` when you work from a fork); and opens a pull request with
+`gh`, saying what the change does and how it was judged here. It asks before
+it pushes (`--yes` from a script). A change that leans on work only this Mac
+has doesn't go on top, and nothing is pushed — it says which files. Without
+`gh` the branch is still pushed and the page to open the pull request is
+given. Offering again pushes the same branch and finds the pull request
+already open (`~/.eki/self/offers.json`). Merging it and cutting a release
+stay with whoever looks after the repo.
+
 **What's new.** Every change ends with a summary for you, in plain words:
 what's new or different, how to use it, what to check before applying. The
 agent writes it under a `SUMMARY:` line; eki shows it at the top of the
@@ -605,6 +621,7 @@ eki self parallel [N]            the most at once (default 2)
 eki self release [N]             go live now; N: at most one go-live every N min (15)
 eki self apply <id> --now        applied and live at once, not with the next train
 eki self diff|show|apply|discard|undo <id>
+eki self offer <id>              offer it upstream as a pull request (asks first)
 eki self next
 eki self retry|drop|mine <item>
 eki self autonomy apply ROADMAP.md=apply docs/=apply
@@ -622,8 +639,8 @@ eki self drill [quick]           restart a sandboxed engine mid-work: is anythin
 5. ~~faults as requests; roadmap items as requests~~, ~~the loop~~, ~~the Self
    view~~, ~~per-area autonomy~~, ~~undo~~, ~~the weekly note~~ — done (the
    loop, 2026-09-23)
-6. still open: offering a change upstream as a pull request (this Mac's
-   changes and the public repo are different things); the Swift app build as
+6. ~~offering a change upstream as a pull request~~ — done (`eki self
+   offer`); still open: the Swift app build as
    a candidate check; the app updating itself from releases through the same
    swap
 

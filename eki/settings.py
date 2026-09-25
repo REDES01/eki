@@ -75,6 +75,11 @@ DEFAULTS: Dict[str, Any] = {
     #: eki's own code is worked on by your subscriptions' spare room; on,
     #: the local models (Qwen with Codex's hands) may take it too
     "self_local": False,
+    #: where `eki self offer <id>` offers a change as a pull request
+    #: (REMOTE/BRANCH), and the remote its branch is pushed to when you work
+    #: from a fork ("" = the upstream's own remote)
+    "self_upstream": "origin/main",
+    "self_offer_remote": "",
     #: who reads the vendors' model pages and the benchmark charts each day
     #: (eki/watch.py): "" = Claude Code if you have it (it can see a chart)
     "watch_reader": "",

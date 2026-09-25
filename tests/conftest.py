@@ -34,6 +34,9 @@ def private_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(standing, "IMPORTED", root / "eki" / "context" / "imported")
     monkeypatch.setattr(standing, "CLAUDE_HOME", root / "claude")
     monkeypatch.setattr(standing, "CODEX_HOME", root / "codex")
+    # eki's memory: a test never reads or writes your notes
+    from eki import notes
+    monkeypatch.setattr(notes, "HOME", root / "eki" / "memory")
     from eki import workspace
     monkeypatch.setattr(workspace, "EKI_HOME", root / "eki")
     monkeypatch.setattr(workspace, "ROOT", root / "eki" / "worktrees")

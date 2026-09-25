@@ -114,6 +114,8 @@ eki context use .       # a project: eki's section in AGENTS.md, `eki` allowed f
 eki project init        # this folder is a project: calls made in it belong to it
 eki project             # which project you're in, and what was asked there
 eki runs --here         # only this project's runs
+eki remember "the tavern is called the Gilded Eel" -n tavern   # a note in memory
+eki recall              # every note here; `eki recall tavern` reads one, `-s eel` searches
 ```
 
 A project is a folder with `.eki/` in it (`eki project init` makes one, with
@@ -122,6 +124,14 @@ any folder below — `eki ask`, `eki image`, `eki submit`, and whatever an
 agent working there asks in turn — is recorded as the project's
 (`eki/projects.py`). Your home folder's `.eki` is eki's own store, never a
 project.
+
+**Memory** is a folder of plain markdown notes, one fact each, that every
+harness shares: the project's in its `.eki/memory`, your own in
+`~/.eki/memory` (`eki/notes.py`). `eki remember` keeps one — in the
+project when you're in one, `-g` for your own — and `eki recall` lists,
+reads or searches them, the project's first. Agents get the same as the
+`eki_remember` / `eki_recall` tools. Nothing else holds them: edit or
+delete the files to prune.
 
 An agent calling `eki ask` hands the run only what it needs — read-only by
 default, a folder's copy with `--repo`, the commands it may use with

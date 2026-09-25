@@ -266,9 +266,9 @@ a thread has to be able to move to another harness without losing its place.
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
       modes, and the harness the local models borrow *(eki: self/71242570)*
-- [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
+- [x] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
-      thread says what it wanted, with *allow and rerun*
+      thread says what it wanted, with *allow and rerun* *(eki: self/857eadbf)*
 - [x] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
       can't change alone stay that way at any level of the tree *(eki: self/00cba77b)*

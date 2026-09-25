@@ -480,13 +480,13 @@ still going carry over into the new version rather than holding it back
       candidate check also talks to a real Claude Code and Codex once — a
       cheap smoke run within spare room — so a break in how eki drives them
       is caught before a swap, not after. Depends on *Measured*
-- [ ] **Work is picked by impact, not file order.** The loop takes faults
+- [x] **Work is picked by impact, not file order.** The loop takes faults
       and anything that moves the score first, then items in this file by
       what they're worth for the next release, not where they sit here; it
       says why it picked each one. It watches its own share too: when most
       self-work in a week went into the self-build machinery itself, the
       weekly note says so — building the builder is only worth it if the
-      rest moves
+      rest moves *(eki: self/ab0ce2c8)*
 - [x] **A daily digest instead of a stream.** One short page a day — on the
       board and as one notification — what changed, why, what helped, and
       what waits for you, in plain words. Per-change notifications only for

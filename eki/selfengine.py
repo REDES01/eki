@@ -52,6 +52,7 @@ from . import settings as settings_mod
 from . import shift as shift_mod
 from . import steps
 from . import treemerge
+from . import workers as workers_mod
 from .adapters.base import BackendError
 
 
@@ -1536,6 +1537,10 @@ class SelfLoop:
         How many were taken up."""
         if self._self_why_not():
             return 0
+        try:
+            await asyncio.to_thread(self._self_let_go_dropped)   # never carried on: let go
+        except Exception as e:                      # noqa: BLE001 — it never stops the rest
+            observe_mod.note("fault", what="let go of dropped self-work", why=repr(e)[:300])
         started = 0
         for s in steps.unfinished():
             live = self.runner.running                                  # type: ignore[attr-defined]
@@ -1641,6 +1646,7 @@ class SelfLoop:
         it = selfloop.get(iid)
         if action == "drop":
             it = selfloop.update(it.id, state="dropped", note="you took it off the list")
+            self._self_let_go(it)
         elif action == "retry":
             it = selfloop.update(it.id, state="queued", attempts=0, note="", open={}, phase="", run="")
         elif action == "person":
@@ -1649,6 +1655,78 @@ class SelfLoop:
             raise ValueError("drop, retry or person")
         self._self_wake()
         return it.to_json()
+
+    # ---- dropped work stays dropped ---------------------------------------------------
+
+    @staticmethod
+    def _self_dropped_at(cwd: str) -> bool:
+        """Is `cwd` the worktree of self-work you dropped? Nothing working
+        there is carried on: on 2026-09-26 a dropped item's Claude Code,
+        kept alive across restarts (eki/workers.py), was taken up again
+        after every swap and "carried on by itself" — each run failing at
+        once. (By its folder, not its thread: an item asked for in a chat
+        shares that chat's thread.)"""
+        where = Path(cwd) if cwd else None
+        if where is None or where.parent != selfwork.HOME:
+            return False
+        return any(i.state == "dropped" and where.name in (i.change, Path(str(i.open.get("worktree") or "")).name)
+                   for i in selfloop.items())
+
+    def _self_let_go(self, it: selfloop.Item) -> List[str]:
+        """A dropped item's work ends for good: its run cancelled, every
+        program still working in its worktree stopped, and the worktree of
+        a change it never finished removed (its branch too, when nothing
+        was committed on it). What was let go, in words."""
+        done: List[str] = []
+        if it.run and it.run in self.runner.running:                    # type: ignore[attr-defined]
+            self.runner.cancel(it.run)                                  # type: ignore[attr-defined]
+            done.append(f"run {it.run}")
+        where = str(it.open.get("worktree") or (selfwork.HOME / it.change if it.change else ""))
+        if where:
+            for w in workers_mod.scan():
+                if w.spec.get("cwd") == where and not w.spec.get("collected"):
+                    w.kill(why="its self-work was dropped")
+                    w.collect()
+                    done.append(f"worker {w.id}")
+            for table in (self.live, self.warm):                        # type: ignore[attr-defined]
+                for key, session in list(table.items()):
+                    if getattr(session, "cwd", None) == where:
+                        table.pop(key, None)
+                        self._follow_on.pop(key, None)                  # type: ignore[attr-defined]
+        if where and Path(where).is_dir() and Path(where).parent == selfwork.HOME and not self._self_kept(it):
+            root = Path(str(it.open.get("root") or self._self_root()))
+            try:
+                head = selfwork.git(Path(where), "rev-parse", "HEAD")
+            except selfwork.SelfWorkError:
+                head = ""
+            base = str(it.open.get("base") or "")
+            selfwork.close_worktree(root, Path(where), Path(where).name, keep_branch=not (base and head == base))
+            done.append(f"worktree {where}")
+        selfloop.update(it.id, open={}, run="")
+        if done:
+            observe_mod.note("history", what=f"let go of dropped self-work: {it.title}"[:200],
+                             how=", ".join(done)[:300])
+        return done
+
+    @staticmethod
+    def _self_kept(it: selfloop.Item) -> bool:
+        """Its change was finished and still waits on a decision: its worktree
+        is the change's, and stays until you decide (discard removes it)."""
+        try:
+            c = selfwork.change(str(it.open.get("id") or it.change or ""))
+        except selfwork.SelfWorkError:
+            return False
+        return c["state"] in ("proposed", "conflicts", "applying", "applied", "rolled back")
+
+    def _self_let_go_dropped(self) -> int:
+        """Dropped items something is still left of — from before this
+        engine, or dropped while a restart was on its way: let go now. An
+        item let go has no `open` or `run` left, so each is let go once."""
+        n = 0
+        for it in selfloop.items():
+            if it.state == "dropped" and (it.open or it.run):
+                n += bool(self._self_let_go(it))
+        return n
 
     def self_roadmap_action(self, key: str, action: str) -> Dict[str, Any]:
         """A ROADMAP item the loop hasn't taken yet: leave it for me, or skip it."""
@@ -1832,7 +1910,8 @@ class SelfLoop:
             "working": [item_row(i) for i in items if i.state == "working"],
             "queue": [item_row(i) for i in items if i.state == "queued"],
             "left": [item_row(i) for i in items if i.state in ("person", "gave up")],
-            "waiting": [c for c in rows if c["state"] in ("proposed", "conflicts") and c.get("fit")],
+            # only what truly needs you: what eki takes in by itself is under "going in"
+            "waiting": pipeline.needs_you(rows),
             # every change, the older ones only as much as a line in a list needs
             "changes": rows[:CHANGES_FULL] + [{k: c[k] for k in CHANGE_LINE if k in c} for c in rows[CHANGES_FULL:]],
             "roadmap": {**roadmap.counts(plan), "next": [{**e.to_json(), "after": waits(e.key), "worth": worth}

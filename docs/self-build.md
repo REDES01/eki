@@ -131,9 +131,15 @@ built from `mac/` (every `mac/*.swift` is part of it). When a change touches
 `mac/`, the candidate check typechecks the app (*app*), so Swift that doesn't
 compile is never fit. After a healthy swap whose `mac/` differs from what the
 installed `Eki.app` was built from, eki rebuilds it from the running build
-and puts it in place, quitting and reopening it — only while it isn't the app
-in front; otherwise it waits and tries again every five minutes. A build that
-fails leaves the app as it was. `~/.eki/app.json` says what it was built from.
+and puts it in place. An app in the background is quit and reopened at once;
+one you're using is left open and shows a small *New version ready — Restart*
+banner (and *Restart to Update* in the app menu): it restarts at a click, or
+by itself once it's been in the background, or you've been away, for five
+minutes — not while an answer is coming in. A build that fails leaves the
+app as it was. `~/.eki/app.json` says what it was built from; each bundle
+carries its build (the hash's first seven characters and when it was built),
+shown in About and Settings, and `eki self`, `eki builds` and the board say
+`app: running <build>, installed <build>`.
 
 **Nothing running is dropped.** A healthy build goes into your checkout only
 when it can (edits you haven't committed stop it), so the engine can run
@@ -177,12 +183,25 @@ Self board say *new version going live in N min* while one is on its way
 was several stages that all said the same word. Now each change on its way in
 says its real stage and what it waits on — *in line behind self/a* ·
 *rebasing* · *fixing conflicts in x.py (run r, 4 min)* · *checking again* ·
-*building* · *landed, goes live at 21:45 with 2 others* · *going live* ·
-*watching (90 s left)* · *live* · *rolled back (why)*. A stage spins only
+*building* · *landed, goes live at 21:45 with 2 others* · *waiting for
+running work (1:12 left, then it goes anyway)* · *swapping* · *watching the
+new version (2:31 left)* · *live* · *rolled back — why*. A stage spins only
 while its worker or step is live in this engine; one a restart cut off says
-*waiting to be resumed*. The go-live is shown as one group: what the next one
-carries and when it leaves, and what the last one carried and how it came
-out. Each point a change passes is written to `~/.eki/self/pipeline.jsonl`,
+*waiting to be resumed* — except a person's own apply, which nothing carries
+on: it is theirs again. The go-live is shown as one group: what the next one
+carries and when it leaves, and the stage the last one is at, read from
+`swap.json` with a countdown the board ticks every second — opened, what it
+carries and what the supervisor wrote in `swap.log` since it left. A change
+eki is taking in by itself is under *Going in*, never *Waiting for you*,
+which holds only what needs you.
+
+**Dropped work stays dropped.** Dropping an item (or finding one dropped by
+an earlier engine) cancels its run, stops every program still working in its
+worktree, and removes that worktree — its branch too, when nothing was
+committed on it; a change it finished that still waits on you keeps its
+worktree. A program left working there is never reattached or "carried on"
+by a new engine (2026-09-26: a dropped item's Claude Code came back after
+every swap, each time failing at once). Each point a change passes is written to `~/.eki/self/pipeline.jsonl`,
 from which its timeline is read — *queued → rebased → conflicts fixed →
 rechecked → landed → live*, with times. `eki self` and the Self board
 (*Go-live*, *Going in*) show it; `eki self show <id>` prints the timeline;

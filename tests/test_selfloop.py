@@ -5,6 +5,7 @@ a chat message, the goal's turns, apply, undo, the weekly note — against a
 throwaway repo, a stand-in agent and a stand-in checker."""
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -1074,6 +1075,58 @@ async def test_discarding_leaves_nothing_behind_and_the_item_isnt_retaken(eng):
     await eng.runner.stop()
 
 
+def workers_collected(w):
+    from eki import workers
+    return workers.Worker(w.dir).spec.get("collected") is True
+
+
+def _half_done(eng, title="More than one merge worker"):
+    """Self-work cut off mid-agent: its worktree, its program still working there."""
+    from eki import workers
+    base = git(eng.root, "rev-parse", "HEAD")
+    where = selfwork.open_worktree(eng.root, "6fde3f4f", base)
+    it = selfloop.add("asked", title, state="working", change="6fde3f4f", conversation="t-chat", phase="agent",
+                      open={"id": "6fde3f4f", "worktree": str(where), "root": str(eng.root), "base": base})
+    w = workers.start([sys.executable, "-c", "import time; time.sleep(60)"], cwd=str(where), talk=True,
+                      kind="claude", thread="t-chat", key="ghost")
+    return it, where, w
+
+
+def test_a_dropped_item_is_let_go_its_program_stopped_and_its_worktree_gone(eng):
+    it, where, w = _half_done(eng)
+    assert eng._self_dropped_at(str(where)) is False
+    eng.self_item_action(it.id, "drop")
+    assert not w.alive() and workers_collected(w)
+    assert not where.exists() and "self/6fde3f4f" not in git(eng.root, "branch", "--list")
+    after = selfloop.get(it.id)
+    assert after.state == "dropped" and after.open == {} and after.run == ""
+    # whatever is left there is never taken up again, after a restart or by following
+    assert eng._self_dropped_at(str(where)) and not eng._self_dropped_at(str(where.parent / "other"))
+    assert not eng._self_dropped_at("/Users/someone/project")
+
+
+@pytest.mark.asyncio
+async def test_dropped_self_work_from_before_is_let_go_and_never_carried_on(eng):
+    """2026-09-26: a cancelled item's Claude Code, left working across
+    restarts, was taken up by every new engine and "carried on" — each
+    run failing at once. Now the next engine stops it instead."""
+    it, where, w = _half_done(eng)
+    selfloop.update(it.id, state="dropped")               # dropped by an engine from before this change
+    assert eng.reattach_workers() == 0 and not eng.live   # not taken up
+    assert not w.alive() and workers_collected(w)
+    await eng.self_carry_on()                             # and the rest of it let go, once
+    assert not where.exists() and selfloop.get(it.id).open == {}
+    assert await eng.follow_live() == 0
+    await eng.runner.stop()
+
+
+def test_a_dropped_item_whose_change_waits_on_you_keeps_its_worktree(eng, monkeypatch):
+    it, where, w = _half_done(eng)
+    monkeypatch.setattr(eng, "_self_kept", lambda item: True)     # its change is proposed, say
+    eng.self_item_action(it.id, "drop")
+    assert where.exists() and not w.alive()
+
+
 @pytest.mark.asyncio
 async def test_the_weekly_note_and_what_you_do_with_its_suggestions(eng):
     Agent.answers = ["Qwen worked 2 h; Claude was corrected 5 times on writing.\n\n```json\n"
@@ -1556,7 +1609,7 @@ async def test_applying_shows_each_real_stage_the_go_live_and_a_timeline(eng, mo
     monkeypatch.setattr(builds, "_swap_pid", lambda: 4242)
     v = eng.self_view()
     row = next(r for r in v["pipeline"] if r["id"] == cid)
-    assert row["text"] == "going live" and row["live"]
+    assert row["text"].startswith("waiting for running work (0:") and row["live"] and row["until"]
     assert v["golive"]["last"]["carrying"][0]["id"] == cid and v["golive"]["last"]["stage"] == "going live"
     assert next(c for c in v["changes"] if c["id"] == cid)["stage"]["label"] == "Going live"
     # your apply takes its turn on the release train (alone on it: rebased, as ever)

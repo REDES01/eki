@@ -2806,6 +2806,11 @@ class Engine(SelfLoop):
                 continue
             if cid in self.live:
                 continue
+            if self._self_dropped_at(str(spec.get("cwd") or "")):
+                # self-work you dropped: its program goes, it isn't carried on
+                w.kill(why="its self-work was dropped")
+                w.collect()
+                continue
             _, seen = w.reading()
             done = b'"type":"result"' if kind == "claude" else b'"turn/completed"'
             if not w.alive() and not (w.exit is not None and w.said_after(seen, done)):
@@ -3253,6 +3258,8 @@ class Engine(SelfLoop):
         for cid, session in list(self.live.items()):
             if not cid or not session.alive or not session.stirred():
                 continue
+            if self._self_dropped_at(session.cwd or ""):
+                continue                            # dropped self-work: let go, never carried on
             key = getattr(session, "backend_key", "") or ""
             busy_here = any((self.runs.get(r) or {}).get("conversation_id") == cid
                             for r in self.runner.running)

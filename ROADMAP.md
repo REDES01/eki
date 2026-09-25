@@ -445,13 +445,13 @@ still going carry over into the new version rather than holding it back
       applies them itself; the supervisor is only installed by `eki agent
       install`. 5006fdd: the person can apply such a change — `eki self
       apply`, or *Apply* on the board)
-- [ ] **This Mac and the public repo are different.** What eki changes here is
+- [x] **This Mac and the public repo are different.** What eki changes here is
       a local branch on top of the last release, rebased when a release
       lands. Offering a change upstream is a pull request; merging to `main`
       and cutting a release stays with a person, because other people
       install that (745807a: a change made before your checkout moved on is
       put on top of it and judged again before it's applied. Still open:
-      offering one upstream as a pull request)
+      offering one upstream as a pull request) *(eki: self/d8e90b98)*
 - [x] **Several changes at once.** Up to `self_parallel` (2) pieces of
       self-work run at once, held to the subscriptions' spare room (the
       local models: one between them). An item's area is guessed from its

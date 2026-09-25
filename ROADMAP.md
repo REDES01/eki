@@ -22,7 +22,7 @@ ticks them as they land. Items marked *(for a person)* are never taken.
       the build brief; gate 1 (`bin/check` as a command run, one retry with
       the failure); `eki self` shows it; `show`, `diff`, `follow`, `drop`,
       `retry`.
-- [ ] **The queue.** The integration repo; speculative rebase and gate 2;
+- [x] **The queue.** The integration repo; speculative rebase and gate 2;
       the side path for conflicts with `rerere`; landing and pushing the
       train every five minutes; `self_autonomy apply`.
 - [ ] **The loop closes.** Faults from the journal become items; the daily

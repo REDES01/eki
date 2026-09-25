@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
 
 from . import config as config_mod
@@ -44,6 +44,7 @@ from . import discover_models
 from . import imagespec
 from . import learn as learn_mod
 from . import handoff as handoff_mod
+from . import illustrate
 from . import failover as failover_mod
 from . import files as files_mod
 from . import goals as goals_mod
@@ -1213,6 +1214,11 @@ class Engine(SelfLoop):
             if as_tool:
                 kw["tools"] = [handoff_mod.tool(hand_to)]
             history = [Message("system", handoff_mod.instructions(hand_to, as_tool))] + history
+        may_draw = self._may_draw(backend.key, run, cid)
+        if may_draw:
+            # a picture mid-answer, asked for in words (eki/illustrate.py)
+            at = 1 if may_hand_off else 0
+            history = history[:at] + [Message("system", illustrate.instructions())] + history[at:]
         started = time.time()                   # what an in-place run wrote is what changed since
         if self._lives(backend) and not grant.narrowed:
             stream = self._live_turn(work_run, cid, backend, choice.model)
@@ -1222,6 +1228,8 @@ class Engine(SelfLoop):
             stream = backend.stream(history, **kw)
         if may_hand_off:
             stream = handoff_mod.watch(stream)
+        if may_draw:
+            stream = illustrate.watch(stream, self._drawer(cid))
         if run.get("_handoff"):
             stream = self._with_note(stream, run["_handoff"])
         if run.get("_failover"):
@@ -1445,6 +1453,37 @@ class Engine(SelfLoop):
         b = self.get(key)
         return b is not None and b.info.capabilities.text and not b.info.capabilities.tools \
             and b.info.kind not in adapters.AGENT_CLIS
+
+    def _may_draw(self, key: str, run: Dict[str, Any], cid: str) -> bool:
+        """A model without tools, in a thread, with an image model it may use
+        and a level of nesting left for the picture's run."""
+        if not (cid and self._bare(key) and self.settings.get("pictures_in_answers", True)):
+            return False
+        if nesting.current()[0] + 1 >= nesting.MAX_DEPTH:
+            return False
+        allowed = _allowed_of(run)
+        return any(b.info.capabilities.images_out and not b.info.capabilities.text
+                   and (allowed is None or b.key in allowed) for b in self.backends)
+
+    def _drawer(self, cid: str) -> Callable[[str], Awaitable[str]]:
+        """What draws a picture a model asked for mid-answer: the image
+        model, in a run of its own under this one — the run `eki_image`
+        starts for Claude Code — and the picture as markdown, or a line
+        saying why there isn't one."""
+        depth, parent = nesting.current()
+        bridge = mcpbridge.Bridge(self, cid, depth=depth + 1, screen=False, parent=parent)
+
+        async def draw(words: str) -> str:
+            try:
+                answer = await bridge._run(words, images=True)
+            except Exception as e:                  # noqa: BLE001
+                return f"*[no picture: {str(e)[:160]}]*"
+            found = mcpbridge.IMAGE_RE.search(answer or "")
+            if not found:
+                return "*[no picture: the image model made none]*"
+            alt = words.replace("[", "(").replace("]", ")")[:120]
+            return f"![{alt}]({found.group(1)})"
+        return draw
 
     def _handoff_targets(self, allowed: Optional[List[str]] = None) -> List[Tuple[str, str]]:
         """Who a model without tools may hand a thread to: the subscriptions'

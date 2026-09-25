@@ -163,9 +163,9 @@ the loop never takes it.
 
 Open right now:
 
-- [x] **Measured: hours of useful local work a day**, against the 1% baseline
+- [ ] **Measured: hours of useful local work a day**, against the 1% baseline
       (the weekly note carries the local models' share of the week since
-      745807a; not yet shown anywhere else) *(eki: self/d1b53b32)*
+      745807a; not yet shown anywhere else)
 - [x] Commit the working tree: image follow-up edits, ComfyUI workflows as
       models (`eki/workflow.py`), gallery, picture sorting mode, app icon,
       Claude Code panels + eki's in-process tools + the MCP registry *(eki: self/a92130fc)*
@@ -184,8 +184,9 @@ gives every backend a view of it. Nothing is authored inside `~/.claude` or
       dependency pinned as a wheel (packaging/homebrew/). A Homebrew install
       doesn't change its own code. *Still open:* `brew install eki` in homebrew/core once eki has the users for it
       (75 stars, or 225 if we submit it ourselves)
-- [x] **The harnesses people already use.** Claude Code and Codex, each
-      through its official program and reading the same store
+- [ ] **The harnesses people already use.** Claude Code and Codex now;
+      Gemini CLI and other agent CLIs next, each through its official
+      program and reading the same store
 
 - [x] **One skill store.** `~/.eki/skills/`, under git (every change a
       commit), in the Agent Skills format both CLIs read (`eki/skills.py`,
@@ -265,12 +266,12 @@ a thread has to be able to move to another harness without losing its place.
       command list for a delegated coding task. Decided in eki, then rendered
       into Claude Code's permission settings, Codex's sandbox and approval
       modes, and the harness the local models borrow *(eki: self/71242570)*
-- [x] **A narrowed run is refused, not asked.** Nobody is watching a child
+- [ ] **A narrowed run is refused, not asked.** Nobody is watching a child
       run. What it isn't allowed is denied, it carries on or fails, and the
-      thread says what it wanted, with *allow and rerun* *(eki: self/857eadbf)*
-- [x] **Roots eki starts on its own are not the person's.** Self-work opened
+      thread says what it wanted, with *allow and rerun*
+- [ ] **Roots eki starts on its own are not the person's.** Self-work opened
       by a fault follows the self-build track's autonomy setting, and the two things eki
-      can't change alone stay that way at any level of the tree *(eki: self/00cba77b)*
+      can't change alone stay that way at any level of the tree
 - [ ] **Handoff between backends on long threads.** Replaying the store works
       until the thread outgrows the smaller model's context, and it ignores
       the CLIs' own session state. A rule for when to resume a native session
@@ -335,11 +336,11 @@ So that the agent doing the work can ask eki for what it can't do itself.
 A project is a folder, a roster of backends, and a shared memory. Chats become
 views into a project rather than the top of the tree.
 
-- [x] `.eki/` marker in a folder; calls made inside it belong to the project *(eki: self/b6057c8d)*
+- [ ] `.eki/` marker in a folder; calls made inside it belong to the project
 - [ ] Project in the app: its chats, its artifacts, its files made by agents
       (16f0c12, self/29ac7283: files Claude Code or Codex write into a repo
       now reach the gallery; the project itself waits for the `.eki/` marker)
-- [x] Per-project roster and policy: which backend does prose here, which does code *(eki: self/a8af1724)*
+- [ ] Per-project roster and policy: which backend does prose here, which does code
 - *Evolve:* a project keeps notes on what worked — which backend was redone,
   which wasn't — and its policy is adjusted from them, visibly.
 

@@ -81,6 +81,9 @@ DEFAULTS: Dict[str, Any] = {
     #: a model with no tools of its own may hand the thread to Claude Code
     #: or Codex when a request needs more (eki/handoff.py)
     "handoff": True,
+    #: a model with no tools of its own may ask for a picture mid-answer,
+    #: drawn by the image model where it asked (eki/illustrate.py)
+    "pictures_in_answers": True,
     #: a subscription that runs out mid-run: the next choice in the row, on
     #: another subscription, carries on from where it stopped (eki/failover.py)
     "failover": True,

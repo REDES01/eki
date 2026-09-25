@@ -112,6 +112,13 @@ A program that keeps its own session (Claude Code, Codex) joining a thread
 others have spoken in is given the conversation so far first, so "now make
 an RPG around that haiku" knows the haiku. Setting `handoff` (on).
 
+A model with no tools can still put a picture in its answer. Where one
+belongs it writes `[[image: what it shows]]` and carries on; eki has the
+image model draw it — a run of its own under this one, the same one
+`eki_image` starts for Claude Code — and the picture takes the marker's
+place (`eki/illustrate.py`). Offered only when an image model is set up
+(and, inside a goal, allowed). Setting `pictures_in_answers` (on).
+
 Checked live on 2026-09-23: haiku and rewrite on the local model (2 s each),
 the disk question handed to Claude Code · Opus with a brief, the RPG idea
 built on the haiku by Opus, which had been given the thread.

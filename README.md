@@ -351,6 +351,10 @@ done rather than explained. A bare model answers when you pick it by
 name, or when no harness can take the request (none set up, all out of
 quota), and the thread says so.
 
+A bare model can still put a picture in what it writes: it asks for one
+mid-answer, the image model draws it, and the picture appears where it
+asked, with the rest of the answer after it (`docs/routing.md`).
+
 ## Claude Code under eki
 
 A Claude Code thread in eki is the real program, kept open in its streaming

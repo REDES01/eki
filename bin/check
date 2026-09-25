@@ -1,0 +1,6 @@
+#!/bin/sh
+# The gate for main: every test, including the restart drill.
+set -e
+here="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$here"
+"${EKI_PYTHON:-$here/.venv/bin/python}" -m pytest -q "$@"

@@ -57,7 +57,9 @@ def test_green_check_then_swap(conn, src):
     assert builds.current() is None and any("checking build" in s for s in said)
     run = check_run(conn, build)
     assert run["provider"] == "command" and run["priority"] == "now"
-    assert store.cwd_of(conn, run["thread_id"]) == str(build)
+    tree = store.cwd_of(conn, run["thread_id"])                  # a worktree at the build's commit
+    assert tree == str(workspace.path_for(f"train-{build.name}")) and workspace.head(tree) == integration.main()
+    assert "--running" in run["prompt"]
     assert store.thread(conn, run["thread_id"])["title"] == f"train check: build {build.name}"
     assert traincheck.label(build) == "checking"
     assert train.release(conn)[0].startswith("train: checking build")   # still queued: waits

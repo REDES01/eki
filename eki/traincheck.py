@@ -3,7 +3,8 @@ eki.candidate first (docs/self-build.md, "Judging", gate 3).
 
 Gate 2 judges each item with the fast tests only; the drills and the candidate
 checks run here, once per train, on the very build that would be swapped to.
-The check is one provider='command' run with cwd=the build. Its result is
+The check is one provider='command' run in a worktree of the integration repo
+at the build's commit (the exported build has no .git). Its result is
 written beside the build's .eki-build.json as `.checked`:
 
     {"state": "running"|"green"|"red", "run": rid, "tail": str, "at": float}
@@ -68,8 +69,33 @@ def _python() -> str:
 
 
 def command(build: Path) -> str:
-    """The check's prompt, run with cwd=build (a build has no .venv of its own)."""
-    return json.dumps(["/bin/sh", "-c", f"EKI_PYTHON={shlex.quote(_python())}; export EKI_PYTHON; {SCRIPT}"])
+    """The check's prompt. It runs in a worktree of the integration repo at the
+    build's commit — the same ground as gate 2, with a .git and a linked .venv —
+    not in the exported build, where tests that ask git about the checkout
+    they're in would be asking about the wrong one. The candidate check is
+    told which build is running."""
+    running = builds.current() or builds.running()
+    return json.dumps(["/bin/sh", "-c", f"EKI_PYTHON={shlex.quote(_python())}; export EKI_PYTHON; "
+                       f"{SCRIPT} --running {shlex.quote(str(running))}"])
+
+
+def tree_for(build: Path) -> Path:
+    """The worktree the build's check runs in (made when it isn't there)."""
+    from . import integration, rebase
+    key = f"train-{build.name}"
+    dest = workspace.path_for(key)
+    if (dest / ".git").exists():
+        return dest
+    return rebase.gate_tree(integration.repo(), key, _commit(build))
+
+
+def _commit(build: Path) -> str:
+    return str(json.loads((Path(build) / ".eki-build.json").read_text())["commit"])
+
+
+def _done_with(build: Path) -> None:
+    from . import integration
+    workspace.remove(integration.repo(), f"train-{build.name}")
 
 
 def _write(build: Path, **rec: Any) -> Dict[str, Any]:
@@ -82,8 +108,9 @@ def _write(build: Path, **rec: Any) -> Dict[str, Any]:
 
 
 def _start(conn: sqlite3.Connection, build: Path) -> str:
+    tree = tree_for(build)
     with db.tx(conn):
-        tid = store.create_thread(conn, f"train check: build {build.name}", str(build))
+        tid = store.create_thread(conn, f"train check: build {build.name}", str(tree))
         rid = store.create_run(conn, tid, command(build), provider="command", priority="now")
     _write(build, state="running", run=rid)
     return rid
@@ -105,10 +132,12 @@ def step(conn: sqlite3.Connection, build: Path,
         return None, [f"train: checking build {build.name} ({run['id'][:8]})"]
     if run["state"] == "done":
         _write(build, state="green", run=run["id"])
+        _done_with(build)
         return True, [f"train: build {build.name} passed its check"]
     tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-TAIL_LINES:])
     tail = (tail + f"\n(train check {run['state']}: {run['error'] or ''})").strip()
     rec = _write(build, state="red", run=run["id"], tail=tail)
+    _done_with(build)
     return False, _red(conn, build, rec, carried)
 
 

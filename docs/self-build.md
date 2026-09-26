@@ -149,17 +149,106 @@ not the queue's, and the board says "waiting for a check slot". `bin/check`
 runs the suite in parallel (`-n auto`), so one check already fills the
 cores: two fast checks beat five crawling ones.
 
-**Gate 4 — better, not just working** (later, with the journal): every
-build records a score before and after — the local models' share of work,
-faults, redos, corrections. A build that makes it worse is flagged in the
-digest and offered for undo. The `builds` table has the columns from the
-start.
+**Gate 4 — better, not just working** (built; see the next section): every
+build that goes live gets a score before and after, from the journal — the
+local models' share of work, faults, corrections and redos, handoffs. A
+build that made things worse is flagged in `eki builds` and the digest and
+offered for undo. It is a trailing judgment, never a gate: nothing waits
+for it and nothing is undone by itself.
 
 None of these judge whether the change is *good code* beyond passing
 tests. The brief covers part of it (add tests for what you change; end with
 a plain-words `SUMMARY:`). A review run — a second agent reads the diff and
 objects or doesn't — can sit between gate 1 and the queue once the loop
 runs; it costs a turn per change.
+
+## The journal, the score and the digest
+
+**The journal** (`eki/observe.py`, table `journal`) is what eki writes down
+about itself, as it happens, from where it happens:
+
+- a **fault** — a traceback caught by the worker, the engine's tick, the
+  selfwork, queue and train ticks, a housekeeping step or a server request
+  handler; with where it was caught, the run, the innermost frame in eki's
+  own code (`eki/x.py:12`) and the exception type;
+- a **handoff** — a run ended handed off: the provider and its reason;
+- a **correction** — a new run in a chat thread within 10 minutes of the one
+  before whose prompt starts with "no", "not", "wrong", "actually",
+  "instead" or "I meant", or is a redo (90% the same text). Self-work
+  threads, command runs and sub-runs don't count;
+- a **limit** — a provider hit its limit;
+- a **run** row for every run that ended — provider, state, seconds, whether
+  a local model ran it, whether it handed off, seconds to the first text —
+  so the score is computed from the journal alone;
+- a **regression** — a build judged worse (below).
+
+Tracebacks keep their last 4000 characters; everything written is scrubbed
+of what looks like a secret (keys, tokens, `password=…`). Writing never
+raises: the journal must not break what it watches. Rows are kept 90 days
+(the housekeeping pass prunes at most once an hour). `eki observe [--since
+24h] [--kind fault|handoff|correction|limit|run|regression] [--full]` lists
+it; `--full` prints a fault's traceback.
+
+**Housekeeping** (`eki/housekeep.py`) runs on the engine's duty pass: prune,
+settle the scores, turn faults into items, write the digest when due. Each
+step runs on its own; one that raises is written down as a fault.
+
+**Faults become items** (`eki/faults.py`). A fault in eki's own code seen
+twice within 24 hours — same file:line, same exception type — opens a goal
+(source `fault`, owner `eki`) with one item, "fix fault eki/x.py:12
+KeyError": the latest traceback and the request of the run it happened in
+are the spec, and the write-set is the file plus `tests/test_<name>.py`. At
+most `self.fault_items_per_day` (3) such goals in 24 hours; a fault whose
+item is still open, or landed in the last 7 days, isn't opened again. Owner
+`eki` builds at background priority and, under `propose`, is only
+proposed. Faults outside eki's code (a rebase conflict, say) are written
+down, never made items.
+
+**The score** (`eki/score.py`) of a window of time, from its `run` rows:
+
+- `local_share` — runs a local model finished without handing off, of all
+  finished (done or handed off) runs;
+- `fault_rate`, `correction_rate`, `handoff_rate` — per 100 runs;
+- `median_first_text` — median seconds from a run's creation to its first
+  text.
+
+When the train sees a build go healthy it writes `before` into
+`build_scores`: the score from the previous build's healthy time to this
+one's, or, if that window has fewer than 30 runs, the last 30 runs before
+it. `after` — the window since — is recomputed on every housekeeping pass
+until it holds 30 runs; then it is frozen with a verdict. **Worse**: the
+fault or correction rate rose by more than 50% of itself and by at least 2
+per 100 runs, or `local_share` fell by more than 10 points. **Better**: the
+same the other way. Otherwise **same**. A failure to score is logged and
+never holds a build.
+
+**What 'worse' does**: a `regression` row in the journal, `worse` in the
+verdict column of `eki builds` (`measuring` until frozen), a line in the
+digest, and the offer of `eki self undo <build>` — a goal "undo build X"
+with one revert item for each item the build carried, newest first, each
+after the one before, going the ordinary path (gates, queue, train).
+Nothing about it is automatic, and it never blocks landing.
+
+**The digest** (`eki/digest.py`). Once a day after `self.digest_at` (default
+`09:00`, local time) the housekeeping pass writes
+`EKI_HOME/self/digests/YYYY-MM-DD.md`, built from the items table, the
+journal and `build_scores` — not by a model. It lists every item whose state
+changed since the last page (24 hours for the first), one line each with its
+id, title and what happened: **Landed and live** (with the build), **Went
+wrong** (unfit, rolled back, left, reverted by the train — with why),
+**Waits for you** (locked, proposed — with the `eki self apply` to run), and
+**Still moving** when something is mid-way. Then the score of the last 24
+hours beside the 24 before, the faults and corrections since the last page,
+and the builds judged worse, each with its `eki self undo`. `eki self
+digest` prints the latest page (writing one if there is none); `eki self
+digest now` writes a fresh one. The web UI's sidebar links the latest page.
+
+**Sync on a moved origin.** When integration main and `origin/main` have
+both moved (someone pushed in between), `integration.sync` rebases main onto
+`origin/main` in a worktree of its own, so the repo is never mid-rebase;
+main moves only if the rebase went through and main didn't move meanwhile,
+and landed items whose commits were rewritten follow them. A conflict aborts
+the rebase, leaves main as it was, and is written to the journal as a fault.
 
 ## Replacing the running engine
 
@@ -247,7 +336,10 @@ eki` and can't raise the setting, turn the loop on, or touch a locked file.
    Built by eki itself: one goal planned into ten items, three waves of
    parallel worktrees, the person as the merge queue for those; the queue
    then took its first change goal → live in 25 minutes.
-5. **The loop closes** — faults become items, the daily digest, the score.
+5. ~~**The loop closes**~~ — the journal (`eki/observe.py`), faults become
+   items (`eki/faults.py`), the score and gate 4 (`eki/score.py`), the daily
+   digest (`eki/digest.py`), all driven by `eki/housekeep.py`; sync rebases
+   onto a moved origin.
 
 ## What the first eki taught
 

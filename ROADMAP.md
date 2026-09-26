@@ -25,8 +25,9 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 - [x] **The queue.** The integration repo; speculative rebase and gate 2;
       the side path for conflicts with `rerere`; landing and pushing the
       train every five minutes; `self_autonomy apply`.
-- [ ] **The loop closes.** Faults from the journal become items; the daily
-      digest; the score before and after every build (gate 4).
+- [x] **The loop closes.** Faults from the journal become items; the daily
+      digest; the score before and after every build (gate 4). The journal
+      (`eki observe`), `eki self digest`, `eki self undo <build>`.
 - [ ] **A review run** between gate 1 and the queue, once the loop runs.
 
 ## After

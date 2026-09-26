@@ -18,6 +18,8 @@ def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("EKI_HOME", str(h))
+    for name in ("EKI_BUILD_DIR", "EKI_LAUNCHED", "EKI_RUN", "EKI_THREAD"):
+        monkeypatch.delenv(name, raising=False)      # a suite run by eki must not see eki's own build
     monkeypatch.setenv("EKI_AGENTS_SKILLS", str(tmp_path / "agents-skills"))
     monkeypatch.setenv("EKI_MACHINE", "ok")
     monkeypatch.setenv("EKI_PORT", "0")

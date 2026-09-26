@@ -101,10 +101,12 @@ def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
     selfwork._set(conn, first["id"], state="proposed", commit_sha=sha)
     selfwork.tick(conn)
     states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
-    assert states[second] == "building" and states[third] == "building"     # under propose, fit is enough
-    integration.fast_forward(sha)                                          # it lands in main
+    assert states[second] == "building" and states[third] == "waiting"     # proposed isn't in main yet
+    integration.fast_forward(sha)                                          # you apply it: it lands
     said = selfwork.tick(conn)
     assert item(conn, first["id"])["state"] == "applied" and any("applied" in x for x in said)
+    states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
+    assert states[third] == "building" and item(conn, third)["base"] == sha   # from a base that has it
 
 
 def test_under_apply_a_dependent_waits_until_its_dep_has_landed(conn, src):

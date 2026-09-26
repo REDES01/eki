@@ -27,8 +27,11 @@ log = logging.getLogger("eki.self")
 DEFAULTS = {"parallel": 3, "autonomy": "propose"}
 #: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
 #: under "apply" once it is in integration main, so the dependent is built on top of it
-FIT = {"propose": ("proposed", "locked", "queued", "resolving", "rechecking", "landed", "live", "applied"),
-       "apply": ("landed", "live")}
+#: a dependency counts once its code is in main — whoever put it there. Under
+#: propose that is the person's apply: a dependent that started from a base
+#: without its dependency would build against code it can't see
+FIT = {"propose": ("landed", "live", "applied"),
+       "apply": ("landed", "live", "applied")}
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
 CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python exec bin/check -q"]'
 

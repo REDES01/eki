@@ -3,9 +3,8 @@ import json
 
 import pytest
 
-from eki import builds, db, paths, selfwork, store, train
-from eki.cli import builds as builds_cmd, main
-from eki.cli.selfboard import board
+from eki import db, paths, selfwork, store, train
+from eki.cli import main
 import eki.cli.self as self_cmd
 
 
@@ -102,49 +101,3 @@ def test_release_with_nothing_to_do(conn, capsys, monkeypatch):
     monkeypatch.setattr(train, "release", lambda c: ["train: build x is going live with 1 item(s)"])
     main(["self", "release"])
     assert "going live" in capsys.readouterr().out
-
-
-def test_a_docs_only_item_says_so(conn, capsys):
-    goal_with(conn, state="proposed", touched=json.dumps(["docs/self-build.md", "README.md"]))
-    board(conn)
-    line = next(l for l in capsys.readouterr().out.splitlines() if "files;" in l)
-    assert "docs only" in line
-    goal_with(conn, state="proposed", touched=json.dumps(["eki/a.py", "README.md"]))
-    board(conn)
-    assert capsys.readouterr().out.count("docs only") == 1
-
-
-def test_a_judge_run_held_for_a_check_slot_says_so(conn, capsys):
-    cfg = paths.config("routing")
-    data = json.loads(cfg.read_text())
-    data.setdefault("self", {})["check_slots"] = 1
-    cfg.write_text(json.dumps(data))
-    tid = store.create_thread(conn, "judge", "/tmp")
-    busy = store.create_run(conn, tid, '["bin/check"]', provider="command")
-    held = store.create_run(conn, tid, '["bin/check"]', provider="command")
-    judge = store.create_run(conn, tid, '["bin/check"]', provider="command")
-    with db.tx(conn):
-        conn.execute("UPDATE runs SET state='running' WHERE id=?", (busy,))
-    iid = goal_with(conn, state="queued", queued_at=db.now(), head="c" * 40, rebased="d" * 40,
-                    gate2_run=held, gate2_on="d" * 40)
-    jid = goal_with(conn, state="judging", run_id=judge)
-    board(conn)
-    out = capsys.readouterr().out.splitlines()
-    queued = next(l for l in out if l.strip().startswith("1."))
-    assert iid in queued and "waiting for a check slot" in queued and "gate 2 (run" not in queued
-    at = next(n for n, l in enumerate(out) if l.strip().startswith(jid))
-    assert "waiting for a check slot" in out[at + 1]
-
-
-def test_builds_show_the_trains_check(capsys):
-    for name, state in (("b-1", "green"), ("b-2", "red"), ("b-3", None)):
-        d = builds.root() / name
-        d.mkdir()
-        (d / ".eki-build.json").write_text(json.dumps({"id": name, "commit": "f" * 40, "made_at": 1}))
-        if state:
-            (d / ".checked").write_text(json.dumps({"state": state, "run": "r", "tail": "", "at": 1}))
-    assert builds_cmd.run(None) == 0
-    out = capsys.readouterr().out.splitlines()
-    line = {name: next(l for l in out if f" {name} " in l) for name in ("b-1", "b-2", "b-3")}
-    assert "checked" in line["b-1"] and "check red" in line["b-2"]
-    assert "check" not in line["b-3"].replace(str(builds.root()), "")

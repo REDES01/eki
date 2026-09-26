@@ -50,15 +50,16 @@ def save_session(conn: sqlite3.Connection, tid: str, provider: str, sid: str, ru
 
 def create_run(conn: sqlite3.Connection, tid: str, prompt: str, *, provider: Optional[str] = None,
                priority: str = "now", parent: Optional[str] = None,
-               exclude: Optional[List[str]] = None, row: Optional[str] = None) -> str:
+               exclude: Optional[List[str]] = None, row: Optional[str] = None,
+               attachments: Optional[List[str]] = None) -> str:
     rid = new_id()
     seq = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM runs WHERE thread_id=?",
                        (tid,)).fetchone()[0]
     conn.execute(
         "INSERT INTO runs(id, thread_id, seq, prompt, provider, pinned, priority, parent, exclude,"
-        " row, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " row, attachments, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, tid, seq, prompt, provider, 1 if provider else 0, priority, parent,
-         dumps(exclude or []), row, now()))
+         dumps(exclude or []), row, dumps(attachments or []), now()))
     return rid
 
 
@@ -92,6 +93,15 @@ def update_run(conn: sqlite3.Connection, rid: str, **fields: Any) -> None:
         # (the web page's long poll, `eki follow`) hears about it at once
         attempt = conn.execute("SELECT attempt FROM runs WHERE id=?", (rid,)).fetchone()
         add_event(conn, rid, attempt[0] if attempt else 0, "state", {"state": fields["state"]})
+
+
+def attachments(row: sqlite3.Row) -> List[str]:
+    """The pictures sent with a run: absolute paths, [] when there are none."""
+    try:
+        value = json.loads(row["attachments"] or "[]")
+    except (IndexError, KeyError, ValueError):
+        return []
+    return [str(p) for p in value] if isinstance(value, list) else []
 
 
 def excluded(row: sqlite3.Row) -> List[str]:

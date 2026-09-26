@@ -16,6 +16,8 @@ def add(p) -> None:
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="continue the last thread")
     p.add_argument("--to", help="send it to this provider (claude, codex, local …)")
     p.add_argument("-C", "--cwd", help="work in this folder")
+    p.add_argument("--image", action="append", metavar="PATH",
+                   help="send this picture with the request (repeat for more)")
     p.add_argument("--bg", action="store_true", help="don't wait: print the run id and return")
     p.add_argument("--background", action="store_true",
                    help="background priority: runs only when the Mac has room")
@@ -28,7 +30,8 @@ def run(args) -> int:
         prompt = sys.stdin.read()
     c = conn()
     tid, rid = asking.submit(c, prompt, thread=args.thread, continue_last=args.cont, to=args.to,
-                             cwd=args.cwd, background=args.background)
+                             cwd=args.cwd, background=args.background,
+                             attachments=args.image)
     ensure_engine(quiet=args.bg)
     if args.bg:
         print(rid)

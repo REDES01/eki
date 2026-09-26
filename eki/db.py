@@ -159,6 +159,7 @@ ADDED = [
     ("items", "landed_at", "REAL"),
     ("items", "build", "TEXT"),         # the build that carried it live
     ("items", "locked", "TEXT"),        # JSON list of hard-locked files it touches
+    ("runs", "attachments", "TEXT"),    # JSON list of absolute paths (pictures) sent with it
 ]
 
 

@@ -69,8 +69,16 @@ def events(conn: sqlite3.Connection, tid: str, after: int, wait: float = 20) -> 
 def ask(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     tid, rid = asking.submit(conn, str(body.get("prompt") or ""), thread=body.get("thread") or None,
                              to=body.get("to") or None, cwd=body.get("cwd") or None,
-                             background=bool(body.get("background")))
+                             background=bool(body.get("background")),
+                             attachments=_paths(body.get("attachments")))
     return {"thread": tid, "run": rid}
+
+
+def _paths(value: Any) -> List[str]:
+    """A body's attachments: a list of paths, or one path on its own."""
+    if not value:
+        return []
+    return [str(value)] if isinstance(value, str) else [str(p) for p in value]
 
 
 def answer(conn: sqlite3.Connection, aid: str, body: Dict[str, Any]) -> Dict[str, Any]:

@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from . import db, providers, store
 
 
 def submit(conn: sqlite3.Connection, prompt: str, *, thread: Optional[str] = None,
            continue_last: bool = False, to: Optional[str] = None, cwd: Optional[str] = None,
-           background: bool = False) -> Tuple[str, str]:
+           background: bool = False,
+           attachments: Optional[List[str]] = None) -> Tuple[str, str]:
     """(thread id, run id). Raises KeyError/ValueError on a bad request."""
     prompt = (prompt or "").strip()
     if not prompt:
@@ -21,6 +22,12 @@ def submit(conn: sqlite3.Connection, prompt: str, *, thread: Optional[str] = Non
         cwd = os.path.abspath(os.path.expanduser(cwd))
         if not os.path.isdir(cwd):
             raise ValueError(f"no folder {cwd}")
+    files = []
+    for path in attachments or []:
+        path = os.path.abspath(os.path.expanduser(str(path)))
+        if not os.path.isfile(path):
+            raise ValueError(f"no file {path}")
+        files.append(path)
     with db.tx(conn):
         tid = None
         if thread:
@@ -36,5 +43,6 @@ def submit(conn: sqlite3.Connection, prompt: str, *, thread: Optional[str] = Non
         elif cwd:
             conn.execute("UPDATE threads SET cwd=? WHERE id=?", (cwd, tid))
         rid = store.create_run(conn, tid, prompt, provider=to or None,
-                               priority="background" if background else "now")
+                               priority="background" if background else "now",
+                               attachments=files)
     return tid, rid

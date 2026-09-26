@@ -10,7 +10,8 @@ Migration: an existing routing.json is never rewritten or reordered.
 The defaults here (needs, the cheapest-first general row) only reach a
 file eki writes for the first time; what a person wrote stays as written.
 The one exception is the picture rows (PICTURE_ROWS): rows() adds any the
-file lacks, in memory only, so an older table can still draw.
+file lacks, in memory only, so an older table can still draw; their
+targets are the providers that can do what the row needs.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from .. import paths, providers
 
 #: cheapest first: a local model, then a subscription, then anything else
-KIND_ORDER: Dict[str, int] = {"local": 0, "claude_code": 1, "codex": 1}
+KIND_ORDER: Dict[str, int] = {"local": 0, "comfyui": 0, "claude_code": 1, "codex": 1}
 
 
 def cheapest_first(targets: List[str], kinds: Optional[Dict[str, str]] = None) -> List[str]:
@@ -88,11 +89,21 @@ def rows() -> List[Dict[str, Any]]:
     The picture rows are added in memory only; routing.json is never
     rewritten for them, and a row of the same key the person wrote wins.
     Only the picture rows are added, not other missing defaults, so a
-    table someone trimmed keeps routing the way they left it.
+    table someone trimmed keeps routing the way they left it. An added
+    row goes to the providers that can do what it needs, cheapest first,
+    or to its default targets when none can.
     """
     out = list(settings().get("rows") or DEFAULT_ROWS)
     have = {r.get("key") for r in out}
-    out += [dict(r) for r in DEFAULT_ROWS if r["key"] in PICTURE_ROWS and r["key"] not in have]
+    missing = [r for r in DEFAULT_ROWS if r["key"] in PICTURE_ROWS and r["key"] not in have]
+    if missing:
+        cfgs = {n: c for n, c in providers.config().items()
+                if n not in providers.BUILTIN and not c.get("off")}
+        kinds = {n: str(c.get("kind", "")) for n, c in cfgs.items()}
+        for r in missing:
+            able = [n for n, c in cfgs.items()
+                    if set(r["needs"]) <= set(providers.capabilities(n, c))]
+            out.append({**r, "targets": cheapest_first(able, kinds) if able else list(r["targets"])})
     return out
 
 

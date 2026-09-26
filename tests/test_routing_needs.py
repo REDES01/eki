@@ -1,7 +1,7 @@
 """decide() honours what a request needs; the why keeps the whole chain; explain as JSON."""
 import json
 
-from eki import api, db, routing, store
+from eki import api, db, providers, routing, store
 
 
 def _setup(home, provs, rows):
@@ -101,3 +101,53 @@ def test_explain_counts_a_picture(home, conn, tmp_path):
     assert e["targets"][0]["why"] == "can't do pictures"
     e = routing.explain(conn, "what is here", cwd=str(tmp_path))
     assert e["row"] == "code" and e["why"] == "rule: has a folder" and e["needs"] == ["tools"]
+
+
+def _comfyui_here(tmp_path, monkeypatch):
+    d = tmp_path / "ComfyUI"
+    d.mkdir()
+    (d / "main.py").write_text("")
+    monkeypatch.setenv("EKI_COMFYUI_DIR", str(d))
+
+
+def test_draw_goes_to_comfyui_with_the_default_table(home, conn, tmp_path, monkeypatch):
+    _comfyui_here(tmp_path, monkeypatch)
+    (home / "routing.json").unlink()                       # written fresh with DEFAULT_ROWS
+    (home / "providers.json").write_text(json.dumps({"fake": {"kind": "fake"}}))
+    e = routing.explain(conn, "draw a lighthouse")
+    assert e["row"] == "image" and e["needs"] == ["image"]
+    assert [t["name"] for t in e["targets"]] == ["comfyui"]
+    assert "comfyui" in e["providers"]
+    _, rid = _run(conn, "draw a lighthouse")
+    d = routing.decide(conn, store.run(conn, rid))
+    assert d.row == "image" and d.why.startswith("rule: asks for a picture → image")
+
+
+def test_a_table_without_an_image_row_derives_one(home, conn):
+    _setup(home, {"fake": {"kind": "fake"}, "pics": {"kind": "comfyui", "base_url": "http://127.0.0.1:9"},
+                  "gone": {"kind": "comfyui", "off": True}},
+           [{"key": "general", "title": "all", "targets": ["fake"]}])
+    before = (home / "routing.json").read_bytes()
+    e = routing.explain(conn, "draw a lighthouse")
+    assert e["row"] == "image" and e["needs"] == ["image"]
+    assert [t["name"] for t in e["targets"]] == ["pics"]
+    assert (home / "routing.json").read_bytes() == before
+
+
+def test_a_picture_skips_a_text_model_and_can_land_on_codex(home, conn, tmp_path):
+    _setup(home, {"bare": {"kind": "fake", "harness": False}, "codex": {"kind": "codex"}},
+           [{"key": "general", "title": "all", "targets": ["bare", "codex"]},
+            {"key": "answer", "title": "answer", "targets": ["bare", "codex"]}])
+    e = routing.explain(conn, "what is this", attachments=[str(tmp_path / "a.png")])
+    t = {x["name"]: x for x in e["targets"]}
+    assert e["needs"] == ["text", "vision"]
+    assert t["bare"]["why"] == "can't do pictures"
+    assert "vision" in t["codex"]["can"] and not t["codex"]["why"].startswith("can't do")
+
+
+def test_comfyui_joins_a_file_without_it_but_off_keeps_it_off(home, tmp_path, monkeypatch):
+    _comfyui_here(tmp_path, monkeypatch)
+    assert "comfyui" in providers.all_providers()
+    (home / "providers.json").write_text(json.dumps({"fake": {"kind": "fake"},
+                                                     "comfyui": {"kind": "comfyui", "off": True}}))
+    assert "comfyui" not in providers.all_providers()

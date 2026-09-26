@@ -8,7 +8,7 @@ from eki import cli, providers
 
 @pytest.mark.parametrize("kind,can", [
     ("claude_code", ["text", "tools", "web", "vision"]),
-    ("codex", ["text", "tools", "web"]),
+    ("codex", ["text", "tools", "web", "vision"]),
     ("local", ["text"]),
     ("command", []),
     ("fake", ["text", "tools"]),

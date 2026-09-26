@@ -52,7 +52,7 @@ ABILITIES = ("text", "tools", "web", "vision", "image", "image-edit")
 #: what each kind can do unless its entry says otherwise with its own `can`
 CAN: Dict[str, List[str]] = {
     "claude_code": ["text", "tools", "web", "vision"],
-    "codex": ["text", "tools", "web"],
+    "codex": ["text", "tools", "web", "vision"],
     "local": ["text"],
     "comfyui": ["image", "image-edit"],
     "command": [],

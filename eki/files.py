@@ -1,7 +1,8 @@
 """Files an agent made or changed, shown in the thread.
 
 eki only ever serves a file a run pointed at — one a tool wrote or edited,
-or a path an answer named that exists — never an arbitrary path. HTML is
+or a path an answer named that exists — or a page of eki's own daily digest,
+never an arbitrary path. HTML is
 served sandboxed, so a page an agent wrote can't act as eki.
 """
 from __future__ import annotations
@@ -10,7 +11,10 @@ import mimetypes
 import os
 import re
 import sqlite3
+from pathlib import Path
 from typing import List, Optional
+
+from . import paths
 
 SHOWN = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".html", ".htm", ".md", ".pdf", ".txt",
          ".json", ".csv", ".mermaid", ".mmd")
@@ -33,9 +37,16 @@ def known(conn: sqlite3.Connection, path: str) -> bool:
     return row is not None
 
 
+def digest_page(path: str) -> bool:
+    """A .md file directly in EKI_HOME/self/digests — resolved, so '..' can't escape."""
+    folder = (paths.home() / "self" / "digests").resolve()
+    real = Path(path).resolve()
+    return real.suffix == ".md" and real.parent == folder
+
+
 def read(conn: sqlite3.Connection, path: str) -> Optional[tuple]:
-    """(bytes, content type) for a file a run pointed at, else None."""
-    if not path or not known(conn, path) or not os.path.isfile(path):
+    """(bytes, content type) for a file a run pointed at or a digest page, else None."""
+    if not path or not (known(conn, path) or digest_page(path)) or not os.path.isfile(path):
         return None
     if os.path.getsize(path) > 50 * 1024 * 1024:
         return None

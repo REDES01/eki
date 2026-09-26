@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, capacity, engine, machine, models, paths, providers, quota, routing, store
+from . import asking, asks, capacity, digest, engine, machine, models, paths, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -114,7 +114,8 @@ def model_action(name: str, action: str) -> Dict[str, Any]:
 def status(conn: sqlite3.Connection) -> Dict[str, Any]:
     active = store.runs_in(conn, store.ACTIVE)
     room, why = machine.room()
-    return {"engine": engine.running_pid(), "pid": os.getpid(), "home": str(paths.home()),
+    page = digest.latest()
+    return {"digest": str(page) if page else None,"engine": engine.running_pid(), "pid": os.getpid(), "home": str(paths.home()),
             "running": sum(r["state"] in ("starting", "running") for r in active),
             "queued": sum(r["state"] == "queued" for r in active),
             "room": room, "room_why": why, "memory_pressure": machine.memory_pressure()}

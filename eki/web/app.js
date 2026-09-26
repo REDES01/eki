@@ -132,6 +132,19 @@
     }).join("")}</div>`;
   }
 
+  // The latest daily digest, a line under the engine; a click opens it in the panel (panel.js).
+  function showDigest(path) {
+    let el = $("digest");
+    if (!path) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement("button");
+      el.type = "button"; el.id = "digest"; el.className = "file ghost small";
+      $("machine").appendChild(el);
+    }
+    el.dataset.file = path;
+    el.textContent = "Digest " + (path.split("/").pop() || "").replace(/\.md$/, "");
+  }
+
   async function loadProviders() {
     let ps, st;
     try {
@@ -157,6 +170,7 @@
       return `<div class="prov"><span class="led ${p.ok ? "ok" : m && m.starting ? "wait" : ""}"></span>
         <span class="pname">${md.esc(p.name)}</span><span class="dim pwhy" title="${md.esc(label)}">${p.quota ? (p.quota.plan || "") : md.esc(label)}</span>${action}</div>${meters(p.quota)}`;
     }).join("");
+    showDigest(st.digest);
     $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}`;
   }
 

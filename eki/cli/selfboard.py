@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from .. import checkslots, doccheck, queue, selfwork, store
+from .. import asks, checkslots, doccheck, queue, selfwork, store
 from .common import ago
 
 
@@ -17,6 +17,8 @@ def board(c) -> int:
     _queue(c)
     for g in goals:
         print(f"\n{g['id']}  {g['state']:<9} {ago(g['created_at']):>8}  {g['text'].splitlines()[0][:70]}")
+        if g["state"] == "drafting":
+            print(f"           {drafting(c, g)}")
         if g["error"]:
             print(f"           ! {g['error'][:200]}")
         for it in c.execute("SELECT * FROM items WHERE goal_id=? ORDER BY created_at", (g["id"],)):
@@ -25,6 +27,17 @@ def board(c) -> int:
             if note:
                 print(f"             {note}")
     return 0
+
+
+def drafting(c, g) -> str:
+    """A drafting goal's line: its draft run, and the question it is waiting on you for."""
+    line = f"drafting  (run {g['draft_run'] or '-'})"
+    for a in (asks.for_run(c, g["draft_run"]) if g["draft_run"] else []):
+        if a["state"] == "open":
+            qs = json.loads(a["payload"] or "{}").get("questions") or [{}]
+            q = (qs[0].get("question") or "a question").splitlines()[0][:100]
+            return f"{line}\n           asked you: {q} — eki answer {a['id']}"
+    return line
 
 
 def _queue(c) -> None:

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from eki import builds, db, paths, selfwork, store, train
+from eki import asks, builds, db, paths, selfwork, store, train
 from eki.cli import builds as builds_cmd, main
 from eki.cli.selfboard import board
 import eki.cli.self as self_cmd
@@ -148,3 +148,90 @@ def test_builds_show_the_trains_check(capsys):
     line = {name: next(l for l in out if f" {name} " in l) for name in ("b-1", "b-2", "b-3")}
     assert "checked" in line["b-1"] and "check red" in line["b-2"]
     assert "check" not in line["b-3"].replace(str(builds.root()), "")
+
+
+def drafting_goal(conn, question=None, answer=None, **fields):
+    """A goal with a draft run (and maybe a question on it), put in directly: no real draft."""
+    gid = store.new_id()
+    tid = store.create_thread(conn, "draft", "/tmp")
+    rid = store.create_run(conn, tid, "draft it", provider="fake")
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, draft_run, created_at)"
+                     " VALUES (?,?,?,?,?,?,?,?)",
+                     (gid, fields.get("text", "make it faster"), "make it faster", "ask", "you",
+                      fields.get("state", "drafting"), rid, db.now()))
+        aid = None
+        if question:
+            aid = asks.create(conn, rid, tid, "question", {"questions": [
+                {"question": question, "header": "Pick", "options": [{"label": "a"}, {"label": "b"}]}]})
+    if answer:
+        asks.answer(conn, aid, {"allow": True, "answers": {question: answer}})
+    return gid, rid, aid
+
+
+def test_a_drafting_goal_shows_its_run(conn, capsys):
+    gid, rid, _ = drafting_goal(conn)
+    board(conn)
+    out = capsys.readouterr().out
+    assert f"drafting  (run {rid})" in out and "asked you" not in out
+
+
+def test_a_drafting_goal_with_an_open_question_says_what_it_asked(conn, capsys):
+    gid, rid, aid = drafting_goal(conn, question="Which cache?\nmore")
+    board(conn)
+    lines = capsys.readouterr().out.splitlines()
+    at = next(n for n, l in enumerate(lines) if f"drafting  (run {rid})" in l)
+    assert lines[at + 1].strip() == f"asked you: Which cache? — eki answer {aid}"
+
+
+def test_show_a_goal_prints_wish_goal_questions_and_items(conn, capsys):
+    gid, rid, _ = drafting_goal(conn, question="Which cache?", answer="b", state="planned",
+                                text="What must be true when done: a cache.")
+    with db.tx(conn):
+        conn.execute("UPDATE goals SET drafted_at=? WHERE id=?", (db.now(), gid))
+        iid = selfwork.new_item(conn, gid, "add the cache", "do it", [], [], False)
+    assert main(["self", "show", gid[:6]]) == 0
+    out = capsys.readouterr().out
+    assert f"goal {gid}  planned" in out and "make it faster" in out
+    assert "goal (drafted " in out and "What must be true when done: a cache." in out
+    assert "? Which cache?" in out and "→ b" in out
+    assert iid in out and "add the cache" in out
+
+
+def test_show_a_goal_with_an_open_question_says_how_to_answer(conn, capsys):
+    gid, rid, aid = drafting_goal(conn, question="Which cache?")
+    main(["self", "show", gid])
+    assert f"(open — eki answer {aid})" in capsys.readouterr().out
+
+
+def test_show_an_item_is_unchanged(conn, capsys):
+    iid = goal_with(conn, state="proposed")
+    assert main(["self", "show", iid]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"item {iid}") and "title:    the item" in out
+
+
+def test_the_parser_takes_as_is_and_skips_the_draft(conn, capsys, monkeypatch):
+    got = {}
+    monkeypatch.setattr(selfwork, "submit", lambda c, text, **kw: got.update(kw) or _planned(c))
+    assert main(["self", "--as-is", "--bg", "a goal I wrote"]) == 0
+    assert got["draft"] is False and got["plan"] is True
+    main(["self", "--bg", "a wish"])
+    assert got["draft"] is True
+    main(["self", "--one", "one thing"])
+    assert got["draft"] is False and got["plan"] is False
+
+
+def test_a_wish_with_bg_says_it_is_drafting(conn, capsys, monkeypatch):
+    gid, rid, _ = drafting_goal(conn)
+    monkeypatch.setattr(selfwork, "submit", lambda c, text, **kw: gid)
+    assert main(["self", "--bg", "make it faster"]) == 0
+    assert capsys.readouterr().out.strip() == f"goal {gid}: drafting (run {rid})"
+
+
+def _planned(conn):
+    gid = store.new_id()
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, "g", "ask", "you", "planning", db.now()))
+    return gid

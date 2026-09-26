@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import builds, checkslots, db, machine, models, observe, paths, queue, quota, selfwork, store, train
+from . import builds, checkslots, db, housekeep, machine, models, observe, paths, queue, quota, selfwork, store, train
 
 log = logging.getLogger("eki.engine")
 
@@ -239,6 +239,8 @@ def tick(conn) -> bool:
     if time.time() - _last_duty[0] > DUTY_EVERY:
         _last_duty[0] = time.time()
         for line in models.duty(conn):
+            log.info(line)
+        for line in housekeep.tick(conn):
             log.info(line)
         in_use = [r["build"] for r in store.runs_in(conn, ("starting", "running")) if r["build"]]
         for gone in builds.sweep(in_use):

@@ -62,6 +62,8 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
     turn.extra["claude_plugin"] = skills.claude_plugin()
     turn.extra["claude_mcp"] = mcp.claude_config()
     turn.extra["codex_config"] = mcp.codex_config()
+    if r["model"]:
+        turn.extra["model"] = r["model"]
     return turn
 
 

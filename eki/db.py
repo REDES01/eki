@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS goals (          -- eki builds eki: what was asked fo
     text TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'ask',     -- ask | roadmap | fault
     owner TEXT NOT NULL DEFAULT 'you',      -- you | eki
-    state TEXT NOT NULL DEFAULT 'planning', -- planning | planned | failed
+    state TEXT NOT NULL DEFAULT 'planning', -- drafting | planning | planned | left | failed
     thread_id TEXT,
     plan_run TEXT,
     error TEXT,
@@ -160,6 +160,10 @@ ADDED = [
     ("items", "build", "TEXT"),         # the build that carried it live
     ("items", "locked", "TEXT"),        # JSON list of hard-locked files it touches
     ("runs", "attachments", "TEXT"),    # JSON list of absolute paths (pictures) sent with it
+    ("goals", "wish", "TEXT"),          # what the person typed
+    ("goals", "draft_run", "TEXT"),     # the run that drafts the goal from the wish
+    ("goals", "drafted_at", "REAL"),
+    ("runs", "model", "TEXT"),          # a per-run model override (the provider's default when NULL)
 ]
 
 

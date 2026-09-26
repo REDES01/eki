@@ -59,7 +59,7 @@ eki follow <run>  ◄── events table
 | `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
 | `rebase` | the git steps of the queue: rebase a branch onto its predicted head, carry on after a resolve, a fresh worktree for gate 2 |
 | `resolve` | the queue's side path: a run resolves a conflicted rebase, eki checks it, runs gate 1 again and puts the item at the back |
-| `candidate` | gate 2's own checks: the checkout's engine boots, it opens and migrates a copy of the db, and the running build opens the copy |
+| `candidate` | the train's own checks before a swap (gate 3): the checkout's engine boots, it opens and migrates a copy of the db, and the running build opens the copy |
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `cli/*` | one file per command |
@@ -118,8 +118,10 @@ the launcher starts the new one. Workers are untouched — each runs from the
 folder it started in until its run ends. After `EKI_WATCH` seconds (180) up,
 the engine marks its build healthy; if it dies before that, the launcher
 flips back to `previous` and writes `rollback.json`. `eki swap --back` goes
-back by hand, `eki swap --dev` returns to the checkout. The drill tries all
-of it in a sandbox (`eki drill`, `drill.swaps`). The schema only grows
+back by hand, `eki swap --dev` returns to the checkout. The train runs the
+full check plus the candidate checks on a build before it swaps to it, and
+reverts the newest item when that check is red. The drill tries all of it in
+a sandbox (`eki drill`, `drill.swaps`). The schema only grows
 (`db.ADDED`), so a worker from an older build keeps writing to a file a
 newer engine opened.
 

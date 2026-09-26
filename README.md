@@ -25,6 +25,7 @@ bin/eki swap HEAD | --back | --dev               # a new version live, checked f
 bin/eki builds                                   # which build runs, which it would go back to
 bin/build-mac                                         # build "Eki.app", the thin native shell
 bin/eki drill                                    # prove a restart loses nothing
+bin/check                                        # every test, in parallel (-n auto); EKI_CHECK_SERIAL=1 serial, EKI_CHECK_FAST=1 skips the drills
 ```
 
 Design: [docs/design.md](docs/design.md) · plan: [ROADMAP.md](ROADMAP.md) · how eki changes itself: [docs/self-build.md](docs/self-build.md). Stdlib only; Python 3.11+.

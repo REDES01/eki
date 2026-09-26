@@ -51,9 +51,9 @@ plan     agent run, read-only worktree          → items
 build    agent run in worktree self/<id>         → commit on branch self/<id>
 judge    command run: bin/check in the worktree  → verdict           (gate 1)
 queue    rebase onto the predicted head; a resolve run only on conflict
-judge    command run: bin/check on that head     → verdict           (gate 2)
+judge    command run: fast bin/check on that head → verdict          (gate 2)
 land     fast-forward the integration ref         (serial, milliseconds)
-train    build + swap, every few minutes          (serial, seconds)
+train    build, full check + candidate, swap  (serial; gate 3)
 ```
 
 `judge` and `resolve` need the **command** provider: a worker that runs an
@@ -72,7 +72,8 @@ Say `main` is at M and A, B, C join the queue in that order, each green on
 its own (gate 1). The queue predicts the future: A on M, B on M+A, C on
 M+A+B. Those bases are known at once, because A's and B's content is final
 the moment they're queued. The three rebases start together; when they're
-clean (milliseconds) the three test runs — of M+A, M+A+B, M+A+B+C — start
+clean (milliseconds) the three test runs — the fast tests of M+A, M+A+B,
+M+A+B+C; the drills and the candidate checks wait for the train — start
 together too. A minute later all three are green and landing is three
 fast-forwards and a push. One judge's duration for three changes, not three.
 
@@ -100,27 +101,53 @@ the measured conflict rate calls for it.
 ## Judging
 
 Three gates, each answering a different question; a fourth for later.
+Judge runs share a few check slots.
 
 **Gate 1 — on its own.** In the change's worktree, on the commit it made,
 before it may join the queue: `bin/check` — the tests, the file-size test,
 the restart drill — run by a command worker. The agent was told to run the
 tests itself; eki doesn't take its word. Red goes back to the change's
 thread with the failure; one retry with the failure in the brief, then it's
-left for you. Cheap, parallel, keeps junk out of the predicted futures.
+left for you. Cheap, parallel, keeps junk out of the predicted futures. A
+**docs-only** item — every touched file is `*.md` (any folder) or under
+`docs/` — runs no tests: its judge is `python -m eki.doccheck <base>..<sha>`
+(`eki/doccheck.py`), which checks that every changed file is UTF-8 text and
+that nothing outside the lane changed. Its board line says "docs only".
 
 **Gate 2 — in company.** On the predicted head, in a fresh detached
-worktree: `bin/check` again, plus what unit tests can't cover (`eki/candidate.py`):
-the engine boots in an empty home on port 0 and answers `/api/health`; it
-opens a *copy* of the real `eki.db` (SQLite's backup API) and lists the same
-threads; and the build running right now can still open that migrated copy
-afterwards — otherwise rollback would be a lie. When `mac/` changed, the
-Swift shell typechecks. Green: it may land once everything ahead has. Red:
-it's dropped, the changes behind it get new heads and are judged again.
+worktree: the fast tests only, `EKI_CHECK_FAST=1 bin/check` — the suite
+minus the tests marked `drill` (the ones that start a real engine or
+launcher). A docs-only item gets the doccheck again instead. Green: it may
+land once everything ahead has. Red: it's dropped, the changes behind it get
+new heads and are judged again.
 
-**Gate 3 — live.** After the swap, the launcher watches: the new engine has
-to come up, tick and write a healthy marker within the window; if it dies
+**Gate 3 — before the swap, then live.** The train (`eki/train.py`,
+`eki/traincheck.py`) runs one command run on the very build it is about to
+ship, before `current` moves: the full `bin/check`, drills included, plus
+what unit tests can't cover (`python -m eki.candidate`): the engine boots in
+an empty home on port 0 and answers `/api/health`; it opens a *copy* of the
+real `eki.db` (SQLite's backup API) and lists the same threads; and the
+build running right now can still open that migrated copy afterwards —
+otherwise rollback would be a lie. The build has no `.venv`, so the run's
+`EKI_PYTHON` is the source checkout's. Green: swap as before. Red: no swap;
+the newest item the build carries is reverted on integration main as a new
+commit (`git revert --no-edit`; main was pushed, so no reset), pushed, and
+marked unfit with the check's tail in its thread; the next tick builds the
+new main and tries again with the items left, until green or none are. A
+train that carries only docs-only items skips this check. The result lives
+beside the build's `.eki-build.json` as `.checked` (running, green or red),
+so a restart mid-check finds the run or starts it again; `eki builds` shows
+it per build. After the swap the launcher watches: the new engine has to
+come up, tick and write a healthy marker within the window; if it dies
 first, the launcher flips `current` back to `previous` and records why.
-Nothing waits for this.
+Nothing waits for the watch.
+
+**Check slots.** At most `self.check_slots` (`routing.json`, default 2)
+judge runs — gate 1, gate 2 and the train's check together — run at once;
+the rest stay queued, held by the engine's scheduling (`eki/checkslots.py`),
+not the queue's, and the board says "waiting for a check slot". `bin/check`
+runs the suite in parallel (`-n auto`), so one check already fills the
+cores: two fast checks beat five crawling ones.
 
 **Gate 4 — better, not just working** (later, with the journal): every
 build records a score before and after — the local models' share of work,
@@ -148,8 +175,8 @@ make that safe:
   while a worker started from it is alive.
 - **The schema only grows.** New tables and columns with defaults; no
   renames, no drops. An old worker writes to a DB the new engine migrated
-  and neither notices. Gate 2 checks that the previous build still opens
-  the migrated copy.
+  and neither notices. The train's check (gate 3) makes sure the previous
+  build still opens the migrated copy.
 - **The launcher supervises.** launchd runs a small shell script, not the
   engine. It loops: run `current`'s engine; if it exits with the *swap*
   code (the engine flipped the symlink first), run `current` again; if it
@@ -161,7 +188,8 @@ The web UI is read from disk on every request, so a swap makes it live on
 refresh. The Swift shell is rebuilt only when `mac/` changed.
 
 The **train** goes every `self_release_minutes` (5): if the integration ref
-is ahead of the running build and its head is green, build it, flip
+is ahead of the running build and its head is green, build it, run the
+full check on the build (gate 3; skipped when it carries only docs), flip
 `current`, and ask the engine to step aside. Every change landed since the
 last train goes live together. `eki swap <ref>` does the same by hand;
 `eki swap --back` goes to `previous`.

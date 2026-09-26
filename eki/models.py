@@ -1,6 +1,8 @@
-"""Local models: started, stopped and kept up by eki, on this Mac's terms.
+"""Managed servers: local models and ComfyUI, started, stopped and kept up by
+eki on this Mac's terms.
 
-A local provider with a `serve` block can be started by eki:
+A provider whose kind is in MANAGED_KINDS (the local model, ComfyUI) and that
+has a `serve` block can be started by eki:
 
     "local": {"kind": "local", "base_url": "http://127.0.0.1:8080",
               "serve": {"command": ["./.venv/bin/python", "-m", "mlx_lm", "server", …],
@@ -17,6 +19,11 @@ Without `keep_up` the model is *on demand*: it stays off until a request is
 sent its way (the worker starts it and waits), and `idle_stop` minutes
 (default 5; 0 never) after its last run eki stops it again. eki only ever
 stops a server it started; one you started yourself is left alone.
+
+ComfyUI is on demand the same way: the default `comfyui` entry serves
+`~/flux/ComfyUI/main.py`, a picture run starts it, it stops again after
+`idle_stop`, and it steps out under memory pressure when nothing is drawing.
+A ComfyUI you launched with `start.sh` is never stopped.
 """
 from __future__ import annotations
 
@@ -74,8 +81,17 @@ def _write(name: str, **fields: Any) -> None:
     _state_path(name).write_text(json.dumps(st))
 
 
-def local_models() -> Dict[str, Dict[str, Any]]:
-    return {n: c for n, c in providers.config().items() if c.get("kind") == "local"}
+#: provider kinds whose servers eki starts and stops
+MANAGED_KINDS = ("local", "comfyui")
+
+
+def managed() -> Dict[str, Dict[str, Any]]:
+    """Every provider entry of a managed kind, by name."""
+    return {n: c for n, c in providers.config().items() if c.get("kind") in MANAGED_KINDS}
+
+
+#: the old name, for callers that still use it
+local_models = managed
 
 
 def _alive(pid: Optional[int]) -> bool:
@@ -97,13 +113,13 @@ def _alive(pid: Optional[int]) -> bool:
 
 
 def status(name: str) -> Dict[str, Any]:
-    cfg = local_models().get(name)
+    cfg = managed().get(name)
     if cfg is None:
-        raise KeyError(f"no local model named {name!r}")
+        raise KeyError(f"no managed model named {name!r}")
     st = _read(name)
     up, why = providers.build(name, cfg).available()
     ours = _alive(st.get("pid"))
-    return {"name": name, "label": cfg.get("label") or name, "up": up, "why": why,
+    return {"name": name, "kind": cfg.get("kind"), "label": cfg.get("label") or name, "up": up, "why": why,
             "starting": ours and not up, "managed": ours, "startable": bool(cfg.get("serve")),
             "keep_up": bool(cfg.get("keep_up")), "held": bool(st.get("held")),
             "on_demand": bool(cfg.get("serve")) and not cfg.get("keep_up"),
@@ -111,9 +127,9 @@ def status(name: str) -> Dict[str, Any]:
 
 
 def start(name: str, *, by: str = "you") -> Dict[str, Any]:
-    cfg = local_models().get(name)
+    cfg = managed().get(name)
     if cfg is None:
-        raise KeyError(f"no local model named {name!r}")
+        raise KeyError(f"no managed model named {name!r}")
     st = status(name)
     if by == "you":
         _write(name, held=False)
@@ -191,7 +207,7 @@ def duty(conn) -> List[str]:
     """The engine's rounds: keep models up while there's room, step out when there isn't."""
     did: List[str] = []
     pressure = machine.memory_pressure()
-    for name, cfg in local_models().items():
+    for name, cfg in managed().items():
         if not cfg.get("serve"):
             continue
         st = status(name)

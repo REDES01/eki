@@ -148,3 +148,100 @@ def test_idle_stop_zero_never_stops(home, model, conn):
     assert models.ensure(model)
     time.sleep(0.05)
     assert models.duty(conn) == [] and models.status(model)["up"]
+
+
+# ---- ComfyUI: a managed server like the local model -------------------------------------
+
+@pytest.fixture
+def comfy(home):
+    """A local model and an on-demand ComfyUI entry, each a fake server on its own port."""
+    lport, cport = free_port(), free_port()
+    cfg = {"local": {"kind": "local", "base_url": f"http://127.0.0.1:{lport}",
+                     "serve": {"command": [sys.executable, "-c", SERVE, str(lport)]}},
+           "comfyui": {"kind": "comfyui", "label": "ComfyUI (pictures)", "base_url": f"http://127.0.0.1:{cport}",
+                       "serve": {"command": [sys.executable, "-c", SERVE, str(cport)]}, "idle_stop": 5}}
+    (home / "providers.json").write_text(json.dumps(cfg))
+    yield "comfyui"
+    models.stop("comfyui", by="test")
+    models.stop("local", by="test")
+
+
+def test_comfyui_is_managed_and_started_for_a_run(comfy, conn):
+    from eki import capacity
+    assert set(models.managed()) == {"local", "comfyui"} and models.local_models is models.managed
+    st = models.status(comfy)
+    assert st["kind"] == "comfyui" and st["on_demand"] and not st["up"]
+    assert models.duty(conn) == []                       # on demand: stays off
+    assert capacity.status(conn)[comfy] == (True, "off; starts for the run")
+    assert models.ensure(comfy, timeout=10) and models.status(comfy)["managed"]
+
+
+def test_comfyui_stops_when_idle(comfy, conn, monkeypatch):
+    assert models.ensure(comfy, timeout=10)
+    assert models.duty(conn) == []                       # just started: not idle yet
+    models._write(comfy, started_at=time.time() - 10 * 60)
+    assert models.duty(conn) == ["stopped comfyui: idle for 5 min"]
+    assert wait_up(comfy, up=False)
+
+
+def test_comfyui_steps_out_under_pressure_unless_drawing(comfy, conn, monkeypatch):
+    from eki import db, store
+    assert models.ensure(comfy, timeout=10)
+    with db.tx(conn):
+        rid = store.create_run(conn, store.create_thread(conn, "t", None), "draw a fox", provider=comfy)
+        store.update_run(conn, rid, state="running")
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "2")
+    assert models.in_use(conn, comfy) and models.duty(conn) == []
+    with db.tx(conn):
+        store.update_run(conn, rid, state="done", ended_at=time.time())
+    assert models.duty(conn) == ["stepped comfyui out: memory under pressure"]
+    assert wait_up(comfy, up=False)
+
+
+def test_a_comfyui_started_outside_eki_is_left_alone(comfy, conn, monkeypatch):
+    import subprocess
+    cfg = models.managed()[comfy]
+    proc = subprocess.Popen(cfg["serve"]["command"])
+    try:
+        assert wait_up(comfy)
+        models._write(comfy, started_at=0)
+        monkeypatch.setenv("EKI_MEMORY_PRESSURE", "4")
+        assert models.duty(conn) == []
+        monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
+        assert models.duty(conn) == []                   # nor for idleness
+        assert models.status(comfy)["up"] and not models.status(comfy)["managed"]
+    finally:
+        proc.terminate()
+
+
+def test_eki_models_lists_comfyui_beside_local(comfy, capsys):
+    from eki import cli
+    assert cli.main(["models"]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].startswith("local") and any(ln.startswith("comfyui") for ln in lines)
+    assert "  draft: flux-2-klein-4b" in lines and "  hq: qwen-image-2.1-Q8" in lines
+    assert "on demand" in out
+
+
+def test_the_default_comfyui_joins_only_where_it_is_installed(home, tmp_path, monkeypatch):
+    (home / "providers.json").write_text(json.dumps({"local": {"kind": "local", "base_url": "http://127.0.0.1:1"}}))
+    before = (home / "providers.json").read_bytes()
+    assert "comfyui" not in models.managed()             # conftest points at a missing folder
+    where = tmp_path / "ComfyUI"
+    where.mkdir()
+    (where / "main.py").write_text("")
+    monkeypatch.setenv("EKI_COMFYUI_DIR", str(where))
+    assert models.managed()["comfyui"]["kind"] == "comfyui"
+    assert models.status("comfyui")["startable"]
+    assert (home / "providers.json").read_bytes() == before
+
+
+def test_a_run_pinned_to_an_off_comfyui_starts_it_and_the_sidebar_sees_it(comfy, conn):
+    from eki import api, db, routing, store
+    with db.tx(conn):
+        rid = store.create_run(conn, store.create_thread(conn, "t", None), "draw a fox", provider=comfy)
+    d = routing.decide(conn, store.run(conn, rid))
+    assert d.provider == comfy and d.row == "picked"            # capacity: off, starts for the run
+    item = next(p for p in api.provider_list(conn) if p["name"] == comfy)
+    assert item["model"]["kind"] == "comfyui" and item["model"]["startable"]

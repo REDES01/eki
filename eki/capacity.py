@@ -17,7 +17,7 @@ import sqlite3
 import time
 from typing import Dict, Optional, Tuple
 
-from . import paths, providers, quota, store
+from . import models, paths, providers, quota, store
 
 #: a limit that came without a reset time is waited out this long
 DEFAULT_COOLDOWN = 15 * 60
@@ -58,7 +58,7 @@ def status(conn: sqlite3.Connection, background: bool = False) -> Dict[str, Tupl
             out[name] = providers.build(name, cfg).available()
         except KeyError as e:
             out[name] = (False, str(e))
-        if not out[name][0] and cfg.get("kind") == "local" and cfg.get("serve"):
+        if not out[name][0] and cfg.get("kind") in models.MANAGED_KINDS and cfg.get("serve"):
             out[name] = (True, "off; starts for the run")     # on demand: the worker starts it and waits
     return out
 

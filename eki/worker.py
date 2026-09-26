@@ -168,7 +168,7 @@ def main(rid: str) -> int:
         turn.extra["on_child"] = lambda pid: conn.execute(
             "UPDATE runs SET child_pid=? WHERE id=?", (pid, rid))
         kind = providers.config().get(provider, {}).get("kind")
-        if kind == "local" and not models.ensure(provider):
+        if kind in models.MANAGED_KINDS and not models.ensure(provider):
             emit("note", {"text": f"{provider} didn't come up"})
             finish(conn, r, provider, Outcome(state="limited", error="didn't come up"))
             return 0

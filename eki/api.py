@@ -108,7 +108,7 @@ def provider_list(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         ok, why = avail.get(name, (False, "?"))
         item = {"name": name, "kind": cfg.get("kind"), "label": cfg.get("label") or name,
                 "ok": ok, "why": why}
-        if cfg.get("kind") == "local":
+        if cfg.get("kind") in models.MANAGED_KINDS:
             item["model"] = models.status(name)
         q = quota.reading(conn, name)
         if q:

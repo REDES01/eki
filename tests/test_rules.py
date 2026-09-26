@@ -9,7 +9,8 @@ import importlib
 checking = importlib.import_module("eki.routing.check")
 from eki.routing import rules
 
-ALL = {"general", "code", "answer", "image", "image-edit", "vision"}
+ALL = {"general", "code", "answer", "image", "image-edit", "vision",
+       "image-hq", "image-anime", "image-upscale"}
 
 
 def match(prompt, keys=ALL, **kw):
@@ -66,6 +67,42 @@ def test_asks_for_a_picture():
     assert match("  ...generate an image of a lighthouse") == ("image", "rule: asks for a picture")
 
 
+def test_kinds_of_picture():
+    assert match("draw a lighthouse") == ("image", "rule: asks for a picture")
+    assert match("draw a detailed photorealistic lighthouse") == ("image-hq", "rule: asks for a detailed picture")
+    assert match("draw an anime girl") == ("image-anime", "rule: asks for an anime picture")
+    assert match("sketch a cat") == ("image", "rule: asks for a picture")
+    assert match("picture of a boat at dusk") == ("image", "rule: asks for a picture")
+
+
+def test_a_kind_without_its_row_falls_to_the_next():
+    assert match("draw an anime girl", keys=ALL - {"image-anime"}) == ("image", "rule: asks for a picture")
+
+
+def test_upscale_needs_a_picture():
+    assert match("upscale it", last_picture="/x/a.png") == ("image-upscale", "rule: upscale the picture")
+    assert match("enlarge this", attachments=["a.png"]) == ("image-upscale", "rule: upscale the picture")
+    assert match("upscale it") is None
+
+
+@pytest.mark.parametrize("prompt", ["make it bluer", "remove the hat", "add a hat"])
+def test_a_follow_up_to_a_picture_edits_it(prompt):
+    assert match(prompt, last_picture="/x/a.png", previous="Drew 1 picture") == \
+        ("image-edit", "rule: follow-up to a picture: edit it")
+
+
+def test_a_question_after_a_picture_is_no_picture_rule():
+    assert match("what is the capital of France?", last_picture="/x/a.png") is None
+    assert match("how do boats float", last_picture="/x/a.png") is None
+
+
+def test_an_attached_photo_still_asks_vision():
+    assert match("what is this", attachments=["photo.png"]) == ("vision", "rule: a picture attached")
+    assert match("what is this", attachments=["photo.png"], last_picture="/x/a.png") == \
+        ("vision", "rule: a picture attached")
+    assert match("make it red", attachments=["photo.png"]) == ("image-edit", "rule: edit the picture")
+
+
 @pytest.mark.parametrize("prompt,verb", [("fix the failing test", "fix"), ("Add a --json flag", "add a"),
                                          ("run the tests", "run"), ("DEPLOY it", "deploy"),
                                          ("- refactor store.py", "refactor")])
@@ -120,6 +157,13 @@ def test_check_passes_attachments(home):
     _rows(home, "answer")
     assert checking.check("what is this", checker="none", attachments=["x.png"]) == \
         ("answer", "rule: a picture attached")
+
+
+def test_check_passes_the_last_picture(home, monkeypatch):
+    _rows(home, "image-edit")
+    monkeypatch.setattr(checking.providers, "get", lambda n: pytest.fail("asked a model"))
+    assert checking.check("make it bluer", checker="none", last_picture="/x/a.png") == \
+        ("image-edit", "rule: follow-up to a picture: edit it")
 
 
 def test_no_rule_is_general_with_the_checker_reason():

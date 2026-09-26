@@ -17,9 +17,14 @@ from .. import paths
 from .needs import is_picture
 
 DOING = ("fix", "add a", "run", "build", "refactor", "install", "delete", "rename", "commit", "deploy")
-DRAW = ("draw", "generate an image", "make a picture", "paint")
+DRAW = ("draw", "generate an image", "make a picture", "paint", "picture of", "image of", "sketch")
 EDIT = ("edit", "make it", "change the", "remove the", "add a")
 REWRITE = ("make it", "shorter", "longer", "simpler", "again but", "rewrite", "in")
+UPSCALE = ("upscale", "enlarge", "higher resolution", "bigger version")
+ANIME = ("anime", "manga", "waifu", "chibi")
+QUALITY = ("high quality", "detailed", "hq", "photorealistic", "best quality", "4k")
+QUESTION = ("what", "why", "how", "who", "where", "when", "which", "is", "are", "does", "do",
+            "can", "could", "should", "explain", "tell me")
 
 
 @dataclass
@@ -29,6 +34,7 @@ class Ask:
     previous: Optional[str]
     cwd: Optional[str]
     attachments: List[str]
+    last_picture: Optional[str] = None    # the picture the last turn drew or was given
 
     @property
     def folder(self) -> bool:
@@ -63,6 +69,14 @@ def _names_path(a: Ask) -> bool:
     return False
 
 
+def _question(a: Ask) -> bool:
+    return a.text.strip().endswith("?") or _starts(a.words, QUESTION) is not None
+
+
+def _draws(a: Ask, bits: Iterable[str] = ()) -> bool:
+    return _starts(a.words, DRAW) is not None and (not bits or _has(a.words, bits))
+
+
 def _rewrite(a: Ask) -> bool:
     return bool(a.previous) and not a.folder and len(a.words.split()) <= 8 \
         and _starts(a.words, REWRITE) is not None
@@ -74,9 +88,15 @@ Rule = Tuple[Callable[[Ask], object], Callable[[Ask], str], Callable[[Ask], str]
 RULES: List[Rule] = [
     (lambda a: a.folder,                         lambda a: "code",       lambda a: "has a folder"),
     (_names_path,                                lambda a: "code",       lambda a: "names a path"),
+    (lambda a: _has(a.words, UPSCALE) and (a.picture or a.last_picture),
+     lambda a: "image-upscale", lambda a: "upscale the picture"),
     (lambda a: a.picture and _has(a.words, EDIT), lambda a: "image-edit", lambda a: "edit the picture"),
     (lambda a: a.picture,                        lambda a: "vision",     lambda a: "a picture attached"),
-    (lambda a: _starts(a.words, DRAW),           lambda a: "image",      lambda a: "asks for a picture"),
+    (lambda a: _draws(a, ANIME),                 lambda a: "image-anime", lambda a: "asks for an anime picture"),
+    (lambda a: _draws(a, QUALITY),               lambda a: "image-hq",   lambda a: "asks for a detailed picture"),
+    (_draws,                                     lambda a: "image",      lambda a: "asks for a picture"),
+    (lambda a: a.last_picture and not _question(a),
+     lambda a: "image-edit", lambda a: "follow-up to a picture: edit it"),
     (lambda a: _starts(a.words, DOING),          lambda a: "code",
      lambda a: f"starts with {_starts(a.words, DOING)}"),
     (_rewrite,                                   lambda a: "answer",     lambda a: "rewrites the last answer"),
@@ -88,10 +108,11 @@ def _clean(prompt: str) -> str:
 
 
 def match(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = None,
-          attachments: Optional[List[str]] = None, keys: Iterable[str] = ()) -> Optional[Tuple[str, str]]:
+          attachments: Optional[List[str]] = None, keys: Iterable[str] = (),
+          last_picture: Optional[str] = None) -> Optional[Tuple[str, str]]:
     """(row key, "rule: <reason>") for the first rule that fires, or None."""
     keys = set(keys)
-    a = Ask(prompt, _clean(prompt), previous, cwd, list(attachments or []))
+    a = Ask(prompt, _clean(prompt), previous, cwd, list(attachments or []), last_picture)
     for fires, row, reason in RULES:
         if not fires(a):
             continue

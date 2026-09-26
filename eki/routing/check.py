@@ -38,11 +38,13 @@ def _menu(table: List[Dict]) -> str:
 
 
 def check(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = None,
-          checker: str = "local", attachments: Optional[List[str]] = None) -> Tuple[str, str]:
+          checker: str = "local", attachments: Optional[List[str]] = None,
+          last_picture: Optional[str] = None) -> Tuple[str, str]:
     """(row key, why): a rule's if one fires, else the model's."""
     table = rows()
     keys = {r["key"] for r in table}
-    ruled = rules.match(prompt, previous=previous, cwd=cwd, attachments=attachments, keys=keys)
+    ruled = rules.match(prompt, previous=previous, cwd=cwd, attachments=attachments, keys=keys,
+                        last_picture=last_picture)
     if ruled:
         return ruled
     try:

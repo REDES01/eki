@@ -123,6 +123,26 @@ CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a w
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS items_state ON items(state);
+CREATE TABLE IF NOT EXISTS journal (        -- what happened to eki, written by eki/observe.py only
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    t REAL NOT NULL,
+    kind TEXT NOT NULL,                     -- fault | handoff | correction | limit | run | regression
+    run_id TEXT,
+    thread_id TEXT,
+    provider TEXT,
+    build TEXT,                             -- the build that was running
+    data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS journal_t ON journal(t);
+CREATE INDEX IF NOT EXISTS journal_kind ON journal(kind, t);
+CREATE TABLE IF NOT EXISTS build_scores (   -- gate 4: the score before and after a build went healthy
+    build TEXT PRIMARY KEY,
+    healthy_at REAL NOT NULL,
+    before TEXT,                            -- JSON score
+    after TEXT,                             -- JSON score, recomputed until frozen
+    measured_at REAL,
+    verdict TEXT                            -- better | same | worse; NULL until after is frozen
+);
 """
 
 

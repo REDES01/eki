@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
-from .. import builds
+from .. import builds, traincheck
 from .common import ago
 
 NAME = "builds"
@@ -21,9 +22,9 @@ def run(args) -> int:
     for b in st["builds"]:
         mark = "→" if b["path"] == cur else ("↩" if b["path"] == prev else " ")
         print(f"{mark} {b['id']:<14} {b.get('commit', '')[:12]:<12} {ago(b.get('made_at')):>8}"
-              f"  {'healthy' if b.get('healthy') else '-':<8} {b['path']}")
+              f"  {'healthy' if b.get('healthy') else '-':<8} {traincheck.label(Path(b['path'])):<9} {b['path']}")
     if cur and all(b["path"] != cur for b in st["builds"]):
-        print(f"→ dev            checkout                       {cur}")
+        print(f"→ dev            checkout                                 {cur}")
     sw, rb = st.get("swap"), st.get("rollback")
     if sw:
         print(f"last swap: {sw['state']} → {sw['target']} ({ago(sw.get('at'))}; {sw.get('why', '')})")

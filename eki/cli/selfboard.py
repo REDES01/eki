@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from .. import queue, selfwork, store
+from .. import checkslots, doccheck, queue, selfwork, store
 from .common import ago
 
 
@@ -36,7 +36,8 @@ def _queue(c) -> None:
     for n, it in enumerate(lined, 1):
         pos = f"{n}." if it["state"] == "queued" else "-"
         head = (it["head"] or "")[:8] or "-"
-        print(f"  {pos:<3} {it['id']}  on {head:<8}  {stage(c, it):<42} {it['title'][:40]}")
+        docs = " (docs only)" if doccheck.of_item(it) else ""
+        print(f"  {pos:<3} {it['id']}  on {head:<8}  {stage(c, it):<42} {it['title'][:40]}{docs}")
 
 
 def stage(c, it) -> str:
@@ -50,6 +51,8 @@ def stage(c, it) -> str:
     run = store.run(c, it["gate2_run"]) if it["gate2_run"] else None
     if run is None:
         return "gate 2 starting"
+    if checkslots.waiting(c, run):
+        return f"waiting for a check slot (run {run['id']})"
     if run["state"] in store.ACTIVE:
         return f"gate 2 (run {run['id']})"
     return f"gate 2 {run['state']} (run {run['id']})"
@@ -69,6 +72,17 @@ def _where(it) -> str:
 
 
 def _note(c, it) -> str:
+    """The item's second line: its note, with 'docs only' and a held judge run said first."""
+    marks = ["docs only"] if doccheck.of_item(it) else []
+    if it["state"] == "judging" and it["run_id"]:
+        run = store.run(c, it["run_id"])
+        if run is not None and checkslots.waiting(c, run):
+            marks.append("waiting for a check slot")
+    note = _said(it)
+    return " · ".join(marks + [note] if note else marks)
+
+
+def _said(it) -> str:
     state = it["state"]
     if state in ("left", "unfit", "rolled back") and it["error"]:
         return f"! {it['error'].splitlines()[0][:150]}"

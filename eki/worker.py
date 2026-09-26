@@ -20,7 +20,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import asks, capacity, files, db, mcp, models, paths, providers, quota, routing, skills, store
+from . import asks, capacity, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store
 from .providers.base import Outcome, Turn
 
 log = logging.getLogger("eki.worker")
@@ -80,6 +80,7 @@ def route(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
 
 def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome) -> None:
     rid, now = r["id"], db.now()
+    noted = None                               # what the journal is told, once the run is written
     with db.tx(conn):
         cur = store.run(conn, rid)
         if out.state == "done":               # finished before the stop landed: keep the answer
@@ -94,8 +95,10 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
             reason = reason if len(reason) <= 90 else reason[:89] + "…"
             store.update_run(conn, nxt, why=f"handed off by {provider}: {reason}")
             store.add_event(conn, rid, cur["attempt"], "handoff", {"to_run": nxt, "reason": out.reason})
+            noted = ("handoff", {"reason": out.reason, "to_run": nxt})
         elif out.state == "limited":
             until = capacity.limited(conn, provider, out.reset_at)
+            noted = ("limit", {"error": out.error, "reset_at": out.reset_at, "pinned": bool(r["pinned"])})
             store.add_event(conn, rid, cur["attempt"], "note", {"text": f"{provider}: {out.error}"})
             if r["pinned"]:
                 store.update_run(conn, rid, state="queued", pid=None, retry_at=until,
@@ -106,6 +109,10 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
                                  why=f"{provider} hit its limit; trying the next")
         else:
             store.update_run(conn, rid, state="failed", ended_at=now, error=out.error[:1000])
+    if noted:
+        observe.record(conn, noted[0], run_id=rid, thread_id=r["thread_id"], provider=provider,
+                       data=noted[1])
+    observe.run_ended(conn, rid)                # a run still queued (a limit) isn't written down
 
 
 def main(rid: str) -> int:
@@ -113,6 +120,8 @@ def main(rid: str) -> int:
     r = claim(conn, rid)
     if r is None:
         return 0
+    if r["attempt"] == 1 and r["parent"] is None:
+        observe.check_correction(conn, rid)
     stop = threading.Event()
     done = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -173,6 +182,8 @@ def main(rid: str) -> int:
         log.error(err)
         with db.tx(conn):
             store.update_run(conn, rid, state="failed", ended_at=db.now(), error=err[-1000:])
+        observe.fault(conn, "worker", err, run_id=rid, thread_id=r["thread_id"])
+        observe.run_ended(conn, rid)
     finally:
         done.set()
     return 0

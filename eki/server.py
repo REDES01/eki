@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, db
+from . import api, db, observe
 
 log = logging.getLogger("eki.server")
 
@@ -88,6 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(e)}, 400)
         except Exception as e:                       # noqa: BLE001
             log.exception("api error")
+            observe.fault(None, f"server {self.path}")
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
         finally:
             conn.close()

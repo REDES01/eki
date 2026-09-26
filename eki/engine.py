@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import builds, checkslots, db, machine, models, paths, queue, quota, selfwork, store, train
+from . import builds, checkslots, db, machine, models, observe, paths, queue, quota, selfwork, store, train
 
 log = logging.getLogger("eki.engine")
 
@@ -81,10 +81,12 @@ def reap(conn) -> None:
 
 
 def interrupted(conn, r) -> None:
+    ended = False
     with db.tx(conn):
         cur = store.run(conn, r["id"])
         if cur["state"] not in ("starting", "running"):
             return
+        ended = bool(cur["cancel"]) or cur["attempt"] >= MAX_ATTEMPTS
         store.add_event(conn, r["id"], cur["attempt"], "interrupted", {"pid": cur["pid"]})
         stop_child(cur["child_pid"])
         if cur["cancel"]:
@@ -94,6 +96,8 @@ def interrupted(conn, r) -> None:
                              error=f"interrupted {cur['attempt']} times")
         else:
             store.update_run(conn, r["id"], state="queued", pid=None)
+    if ended:
+        observe.run_ended(conn, r["id"])
     log.info("run %s interrupted; %s", r["id"], "queued to resume")
 
 
@@ -224,12 +228,14 @@ def tick(conn) -> bool:
                 log.info("self: %s", line)
         except Exception:                                # noqa: BLE001 — self-work must not stop the rest
             log.exception("self-work tick failed")
+            observe.fault(conn, "selfwork.tick")
         for name, step in (("queue", queue.tick), ("train", train.tick)):
             try:
                 for line in step(conn):
                     log.info("self: %s", line)
             except Exception:                            # noqa: BLE001 — one failing never stops the other
                 log.exception("%s tick failed", name)
+                observe.fault(conn, f"{name}.tick")
     if time.time() - _last_duty[0] > DUTY_EVERY:
         _last_duty[0] = time.time()
         for line in models.duty(conn):
@@ -306,6 +312,7 @@ def serve() -> int:
                 break
         except Exception:                                # noqa: BLE001 — keep managing
             log.exception("tick failed")
+            observe.fault(conn, "engine.tick")
         time.sleep(TICK)
     log.info("engine %s down; workers left running", os.getpid())
     held.close()

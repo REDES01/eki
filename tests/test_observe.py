@@ -108,9 +108,7 @@ def test_run_ended_for_a_fake_run(conn):
     rid = store.create_run(conn, tid, "hello", provider="fake")
     r = run_inline(conn, rid)
     assert r["state"] == "done"
-    jid = observe.run_ended(conn, rid)
-    assert jid
-    assert observe.run_ended(conn, rid) is None                       # once per run
+    assert observe.run_ended(conn, rid) is None     # the worker wrote it already: once per run
     rows = observe.entries(conn, kind="run")
     assert len(rows) == 1
     e = rows[0]

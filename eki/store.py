@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from typing import Any, Dict, List, Optional
@@ -150,6 +151,24 @@ def answer(conn: sqlite3.Connection, rid: str) -> str:
         by_attempt.setdefault(r["attempt"], []).append(json.loads(r["data"]).get("text", ""))
     # a resumed attempt carries on from where the last one stopped: keep them all
     return "".join("".join(parts) for _, parts in sorted(by_attempt.items()))
+
+
+def last_picture(conn: sqlite3.Connection, tid: str, before_seq: int) -> Optional[str]:
+    """The newest picture in a thread before a run: one a run drew (a `tool`
+    event named image) or was given (a picture attachment), whichever came
+    later. A run's attachments come before its events. Only a file still there."""
+    from .routing.needs import is_picture
+    for r in reversed([r for r in thread_runs(conn, tid) if r["seq"] < before_seq]):
+        found: List[str] = [p for p in attachments(r) if is_picture(p)]
+        for e in conn.execute("SELECT data FROM events WHERE run_id=? AND kind='tool' ORDER BY id",
+                              (r["id"],)).fetchall():
+            data = json.loads(e["data"] or "{}")
+            if data.get("name") == "image" and data.get("path"):
+                found.append(str(data["path"]))
+        for p in reversed(found):
+            if os.path.isfile(p):
+                return p
+    return None
 
 
 def transcript(conn: sqlite3.Connection, tid: str, before_seq: int) -> List[Dict[str, str]]:

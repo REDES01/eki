@@ -63,16 +63,22 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
     cwd = thread["cwd"] if thread else None
     atts = store.attachments(run)
     prev = None if run["row"] else _previous_answer(conn, run)
+    pic = None if run["row"] else previous_picture(conn, run["thread_id"], run["seq"])
     note = ""
+    ruled = None
     if thread and thread["provider"] and not run["row"]:
         # only the rules and the attachments count here: staying costs no model call
         ruled = rules.match(run["prompt"], previous=prev, cwd=cwd, attachments=atts,
-                            keys={r["key"] for r in table_rows()})
+                            keys={r["key"] for r in table_rows()}, last_picture=pic)
         want = needs.request_needs(table_row(ruled[0]) if ruled else {"needs": []}, atts)
         mine = thread["provider"]
         lack = needs.lacking(mine, want)
         ok, why = can(mine)
-        if lack:
+        if providers.config().get(mine, {}).get("kind") == "comfyui":
+            # a picture thread never answers as "thread": the rule's row picks the graph
+            if not ruled:
+                note = f"{mine} draws pictures, this isn't one; "
+        elif lack:
             note = f"{mine} can't take it (needs {', '.join(lack)}); "
         elif ok:
             return Decision(mine, "thread", f"thread stays with {mine}")
@@ -81,9 +87,11 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
 
     if run["row"]:
         key, reason = run["row"], (run["why"] or f"row {run['row']}")
+    elif ruled:
+        key, reason = ruled
     else:
         key, reason = check(run["prompt"], previous=prev, cwd=cwd, checker=checker_name(),
-                            attachments=atts)
+                            attachments=atts, last_picture=pic)
     entry = table_row(key)
     want = needs.request_needs(entry, atts)
     targets = list(entry["targets"])
@@ -109,12 +117,32 @@ def _previous_answer(conn: sqlite3.Connection, run: sqlite3.Row) -> Optional[str
     return store.answer(conn, before[-1]["id"]) if before else None
 
 
+def previous_picture(conn: sqlite3.Connection, tid: str, seq: int) -> Optional[str]:
+    """The picture the thread's previous run drew or was given, or None
+    (an older picture doesn't make a follow-up an edit)."""
+    before = [r for r in store.thread_runs(conn, tid) if r["seq"] < seq]
+    pic = store.last_picture(conn, tid, seq) if before else None
+    if pic is None:
+        return None
+    last = before[-1]
+    drawn = [json.loads(e["data"] or "{}") for e in store.events_after(conn, last["id"])
+             if e["kind"] == "tool"]
+    mine = store.attachments(last) + [str(d.get("path")) for d in drawn if d.get("name") == "image"]
+    return pic if pic in mine else None
+
+
 def explain(conn: sqlite3.Connection, prompt: str, *, cwd: Optional[str] = None,
-            attachments: Optional[List[str]] = None) -> Dict[str, Any]:
+            attachments: Optional[List[str]] = None,
+            thread_id: Optional[str] = None) -> Dict[str, Any]:
     """What would happen to a new request, without making a run: the row,
     the rule or model's reason, the request's needs, and for each target
-    whether it may take it and why not."""
-    key, reason = check(prompt, cwd=cwd, checker=checker_name(), attachments=attachments)
+    whether it may take it and why not. With a thread, as its next request."""
+    pic = None
+    if thread_id:
+        nxt = max([r["seq"] for r in store.thread_runs(conn, thread_id)] or [0]) + 1
+        pic = previous_picture(conn, thread_id, nxt)
+    key, reason = check(prompt, cwd=cwd, checker=checker_name(), attachments=attachments,
+                        last_picture=pic)
     entry = table_row(key)
     want = needs.request_needs(entry, attachments)
     avail = capacity.status(conn)

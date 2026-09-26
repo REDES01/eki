@@ -27,6 +27,8 @@ from .routing.needs import is_picture
 log = logging.getLogger("eki.worker")
 
 HEARTBEAT = 2.0
+#: rows whose provider works on a source picture
+SOURCED = ("image-edit", "image-upscale")
 #: what a program is told when its turn was cut off and it's resumed
 CARRY_ON = ("(eki restarted while you were working on this. Carry on with the request "
             "where you left off; don't start over.)")
@@ -53,6 +55,12 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
                 cwd=(thread["cwd"] if thread and thread["cwd"] else str(paths.scratch())),
                 images=[p for p in store.attachments(r) if is_picture(p)])
     turn.extra["full_history"] = full
+    turn.extra["row"] = r["row"]
+    carry = bool(sess) and sess["seen_run"] == r["id"]
+    if r["row"] in SOURCED and not carry and not turn.images:
+        # an edit or upscale with nothing attached works on the thread's last picture
+        last = store.last_picture(conn, r["thread_id"], r["seq"])
+        turn.images = [last] if last else []
     if sess:
         turn.resume = sess["session_id"]
         if sess["seen_run"] == r["id"]:

@@ -8,7 +8,8 @@ passes the full check first (eki/traincheck.py — red reverts the newest item
 and the next tick tries again); `current` points at it, and the launcher
 does the rest. Everything landed since the last train goes live together.
 `settle` watches the swap record afterwards: the items a build carried are
-'live' once it's healthy, 'rolled back' if the launcher went back from it.
+'live' once it's healthy (and the score before it is written down for gate 4,
+eki/score.py), 'rolled back' if the launcher went back from it.
 
 Nothing is kept in memory but the time of the last check; losing it on a
 restart only means one early check. What a train carried is the items'
@@ -23,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import builds, db, selfwork, store, traincheck
+from . import builds, db, score, selfwork, store, traincheck
 
 log = logging.getLogger("eki.train")
 
@@ -114,7 +115,7 @@ def settle(conn: sqlite3.Connection) -> List[str]:
     st = builds.status()
     swap, back = st.get("swap") or {}, st.get("rollback") or {}
     healthy = {Path(b["path"]).name for b in st["builds"] if b.get("healthy")}
-    said = []
+    said, went_live = [], {}
     for it in items:
         path = _resolved(builds.root() / it["build"])
         if back and _resolved(back.get("from")) == path and _at(back) >= int(_at(swap)):
@@ -124,7 +125,20 @@ def settle(conn: sqlite3.Connection) -> List[str]:
         elif it["build"] in healthy or (_resolved(swap.get("target")) == path and swap.get("state") == "healthy"):
             _mark(conn, it, "live", f"live in build {it['build']}")
             said.append(f"item {it['id']}: live in build {it['build']}")
+            went_live[it["build"]] = swap.get("healthy_at") if _resolved(swap.get("target")) == path else None
+    for name, swapped_at in went_live.items():
+        _score(conn, name, swapped_at)
     return said
+
+
+def _score(conn: sqlite3.Connection, name: str, swapped_at: Any) -> None:
+    """Gate 4's 'before': written once per build (record_build is idempotent).
+    A failure here is logged; it never holds a build or its items."""
+    try:
+        at = score.healthy_at(name) or float(swapped_at or 0) or time.time()
+        score.record_build(conn, name, at)
+    except Exception:
+        log.exception("train: couldn't record the score for build %s", name)
 
 
 def _mark(conn: sqlite3.Connection, it: sqlite3.Row, state: str, text: str, **more: Any) -> None:

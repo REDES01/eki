@@ -28,7 +28,10 @@ Rules of thumb:
 
 ## eki self — eki changes itself
 
-A goal in words is planned into small items; each item is built by an agent
+A wish is enough: eki drafts it into a goal (the strongest model reads the
+design, the code and recent faults) and may ask you a question or two where
+the wish is really open — answer in eki's window or with `eki answer`. Use
+`--as-is` for a goal you wrote yourself. The goal is planned into small items; each item is built by an agent
 in a git worktree of its own and judged by `bin/check`; a change that passes
 is proposed as a branch `self/<id>` (merge it, or `eki swap self/<id>` to put
 it live). Use it when the change is to eki itself — its code, docs or skills —
@@ -42,10 +45,12 @@ hard-locked file (the launcher, `bin/check`, the drill, quotas, …) waits for a
 person's `eki self apply <item> --yes`.
 
 ```
-eki self "…"            # plan a goal into items and build them side by side
+eki self "…"            # draft the wish into a goal, plan it into items, build them side by side
+eki self --as-is "…"    # a goal you wrote: no draft, straight to planning
 eki self --one "…"      # no planning: the goal is one item
-eki self                # the board: goals, their items, and where each one stands
+eki self                # the board: goals (drafting, planning, …), their items, where each stands
 eki self show <item>    # one item in full
+eki self show <goal>    # the wish, the goal as drafted, its questions and answers, the items
 eki self diff <item>    # what it changed
 eki self follow <item>  # its build run, live
 eki self drop <item> | eki self retry <item>

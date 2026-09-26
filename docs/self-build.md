@@ -30,6 +30,42 @@ turns it into **items**: each with a title, a spec, a declared *write-set*
 any interface two items share, written down before either starts ("engine
 exposes `spawn(conn, rid)`; item B calls it").
 
+**The draft.** A wish from `eki self "…"` first becomes a goal. A **draft
+run** — an agent in a read-only worktree `draft-<goal>` — reads
+`docs/design.md`, this file, `ROADMAP.md`, the last digest, a week of faults
+and corrections (`eki observe --since 7d --kind fault,correction`), the code
+the wish touches, and, when `~/eki-2026-09-26` exists, the old eki's version
+of the same thing as reference. Where the wish leaves a real choice open it
+asks you — at most three questions, 2–4 options each, through
+AskUserQuestion; they arrive as cards in eki's window and in the CLI's
+`eki answer`, like a build run's questions — and folds the answers in. It
+changes no file and ends with `GOAL:` and the goal text, then
+`DRAFT: done` or `DRAFT: person <why>`. The goal is stored (`goals.wish` is
+what you typed, `goals.text` the goal as drafted, `goals.drafted_at` when)
+and planned on the same thread, draft → plan. No `GOAL:` block, or
+`DRAFT: person`, leaves the goal `left` with the reason; a failed draft run
+fails the goal. `--as-is` (the text is already the goal), `--one`, faults and
+other eki-owned goals skip the draft. Like the plan stage, it resumes from
+the goals table alone.
+
+Draft and plan runs are the thinking, so they go to the strongest model:
+`routing.json` `"self": {"planner": {"provider": "claude", "model": "opus"}}`.
+The provider defaults to the `code` row's first target, the model to the
+provider's default. Both runs are pinned to that provider and carry the
+model on the run (`--model` for Claude Code, `-m` for Codex); build, judge
+and resolve runs are unchanged.
+
+A goal has four parts, and a planner can split it without guessing:
+
+- **What must be true when done** — the outcomes, numbered, each one
+  checkable: behaviour, states, names, commands.
+- **Read first** — the docs, modules and functions (real paths) the work
+  starts from.
+- **Item shape and shared files** — how it splits into items, which module
+  holds what, and the files more than one item touches.
+- **Tests** — what the tests prove, with which fixtures (the fake provider,
+  temp homes), and that `bin/check` stays green.
+
 Items are small on purpose — a few files, an hour of agent work at most.
 Conflicts scale with change size times time in flight; the first eki's
 median change touched seven files and a third of them needed an agent to
@@ -47,6 +83,7 @@ Every stage of an item is an ordinary run, so the reap/resume machinery
 covers all of it and nothing needs a resumption system of its own:
 
 ```
+draft    agent run, read-only worktree          → goal
 plan     agent run, read-only worktree          → items
 build    agent run in worktree self/<id>         → commit on branch self/<id>
 judge    command run: bin/check in the worktree  → verdict           (gate 1)

@@ -1,21 +1,30 @@
 """ComfyUI, running on this Mac, for pictures.
 
-eki doesn't start or stop ComfyUI; it posts a workflow in API format to
-`/prompt`, polls `/history/<id>` and fetches what was made through `/view`
-into `~/.eki/images/<run>/`. The workflow is `comfyui_default.json` beside
-this file (FLUX.2-klein, text to image) unless the entry names its own:
+eki may start ComfyUI for a run and stop it again when idle, as it does the
+local model (see models.py); one the person started is left alone. This
+module only talks HTTP: it posts a graph in API format to `/prompt`, polls
+`/history/<id>` and fetches what was made through `/view` into
+`~/.eki/images/<run>/`.
+
+There are five graphs, one per row (`comfyui_graphs.py`): a quick draft, a
+high-quality picture, an anime picture, an edit and an upscale. The run's
+row comes in `turn.extra["row"]`. An edit or upscale works on a source
+picture, `turn.images[0]`, which is uploaded to `/upload/image` first. An
+entry may name its own graphs and size:
 
     {"kind": "comfyui", "base_url": "http://127.0.0.1:8188",
-     "workflow": "~/my-graph.json", "width": 1024, "height": 1024}
+     "graphs": {"image-hq": "~/my-graph.json"}, "width": 1024, "height": 1024}
 
-A workflow's strings "{{prompt}}", "{{seed}}", "{{width}}" and "{{height}}"
-are filled in (the last three as numbers). The prompt id is the session: a
-run eki restarted mid-drawing polls it again instead of drawing twice.
+The prompt id is the session: a run eki restarted mid-drawing polls it
+again instead of uploading or drawing twice.
 """
 from __future__ import annotations
 
 import json
+import mimetypes
 import random
+import re
+import uuid
 import time
 import urllib.error
 import urllib.parse
@@ -24,10 +33,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .. import paths
+from . import comfyui_graphs
 from .base import Emit, Outcome, Provider, Turn
 
-DEFAULT_WORKFLOW = Path(__file__).with_name("comfyui_default.json")
 POLL = 1.0
+SOURCED = ("image-edit", "image-upscale")          # rows that work on a source picture
+NO_SOURCE = "no picture to edit — attach one or draw one first"
+VERBS = {"image-edit": "Edited", "image-upscale": "Upscaled"}
+# what an upscale request says when it says nothing about the picture itself
+UPSCALE_ONLY = re.compile(r"\b(please|can|could|you|would|it|this|that|the|a|an|picture|image|photo|"
+                          r"upscale|upscaled|enlarge|make|higher|resolution|bigger|version|of|to|by|"
+                          r"\d+(\.\d+)?x|x\d+|times|twice|double|size)\b", re.I)
 
 
 class ComfyError(Exception):
@@ -67,6 +83,26 @@ class Comfyui(Provider):
             raise ComfyError(_refusal(json.dumps(got).encode()))
         return str(got["prompt_id"])
 
+    def _upload(self, path: str, run_id: str) -> str:
+        """Send the source picture to ComfyUI's input folder; its name there for LoadImage."""
+        src = Path(path)
+        name = f"eki_src_{run_id}_{src.name}"
+        kind = mimetypes.guess_type(src.name)[0] or "application/octet-stream"
+        boundary = uuid.uuid4().hex
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\n"
+                f"Content-Type: {kind}\r\n\r\n").encode() + src.read_bytes() + (
+                f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\n"
+                f"true\r\n--{boundary}--\r\n").encode()
+        req = urllib.request.Request(self.base + "/upload/image", data=body,
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                got = json.load(r)
+        except urllib.error.HTTPError as e:
+            raise ComfyError(_refusal(e.read())) from e
+        sub = got.get("subfolder") or ""
+        return f"{sub}/{got['name']}" if sub else str(got["name"])
+
     def _queued(self, pid: str) -> bool:
         """Still waiting or drawing (ComfyUI may have lost it in a restart of its own)."""
         try:
@@ -78,18 +114,24 @@ class Comfyui(Provider):
 
     # ---- the workflow --------------------------------------------------------------------
 
-    def graph(self, prompt: str) -> Dict[str, Any]:
-        path = Path(self.cfg["workflow"]).expanduser() if self.cfg.get("workflow") else DEFAULT_WORKFLOW
-        values = {"{{prompt}}": prompt, "{{seed}}": random.randint(0, 2 ** 32 - 1),
-                  "{{width}}": int(self.cfg.get("width", 1024)),
-                  "{{height}}": int(self.cfg.get("height", 1024))}
-        return _fill(json.loads(path.read_text()), values)
+    def graph(self, row: Optional[str], prompt: str, image: Optional[str] = None) -> Dict[str, Any]:
+        """The row's graph, filled in (`image` is the uploaded source's name)."""
+        if row == "image-upscale" and not UPSCALE_ONLY.sub("", prompt).strip(" \t\n.,!?"):
+            prompt = "high detail"
+        values: Dict[str, Any] = {"{{prompt}}": prompt, "{{seed}}": random.randint(0, 2 ** 32 - 1),
+                                  "{{width}}": int(self.cfg.get("width", 1024)),
+                                  "{{height}}": int(self.cfg.get("height", 1024))}
+        if image is not None:
+            values["{{image}}"] = image
+        return comfyui_graphs.load(row, self.cfg, values)
 
     # ---- a turn --------------------------------------------------------------------------
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         from ..worker import CARRY_ON         # the worker imports the providers
         pid: Optional[str] = None
+        row = turn.extra.get("row")
+        kind, model = comfyui_graphs.kind_of(row)
         detail = turn.prompt
         try:
             if turn.resume and (turn.prompt == CARRY_ON or not turn.prompt.strip()):
@@ -100,7 +142,12 @@ class Comfyui(Provider):
                     emit("note", {"text": "ComfyUI no longer knows that drawing; nothing to carry on"})
                     return Outcome("failed", "ComfyUI lost the drawing (was it restarted?)")
             if pid is None:
-                pid = self._post_prompt(self.graph(turn.prompt))
+                image = None
+                if row in SOURCED:
+                    if not turn.images:
+                        return Outcome("failed", NO_SOURCE)
+                    image = self._upload(turn.images[0], turn.run_id or "run")
+                pid = self._post_prompt(self.graph(row, turn.prompt, image))
                 emit("session", {"id": pid})
             entry = self._wait(pid, turn)
             if entry is None:
@@ -112,10 +159,13 @@ class Comfyui(Provider):
             return Outcome("failed", f"ComfyUI at {self.base}: {e}")
         if not made:
             return Outcome("failed", "ComfyUI finished but made no picture")
+        what = f"{kind} · {model}"
         for path in made:
-            emit("tool", {"name": "image", "detail": detail, "path": str(path)})
-        names = ", ".join(p.name for p in made)
-        emit("text", {"text": f"Drew {len(made)} picture{'s' if len(made) > 1 else ''}: {names}\n"
+            emit("tool", {"name": "image", "detail": f"{detail} ({what})", "path": str(path),
+                          "prompt": detail, "row": row or comfyui_graphs.DEFAULT_ROW,
+                          "kind": kind, "model": model})
+        verb = VERBS.get(row or "", "Drew")
+        emit("text", {"text": f"{verb} {len(made)} picture{'s' if len(made) > 1 else ''} ({what}):\n"
                               + "\n".join(str(p) for p in made)})
         return Outcome("done", finished=True)
 
@@ -154,20 +204,6 @@ class Comfyui(Provider):
                 dest.write_bytes(data)
                 made.append(dest.resolve())
         return made
-
-
-def _fill(value: Any, values: Dict[str, Any]) -> Any:
-    if isinstance(value, str):
-        if value in values:
-            return values[value]
-        for key, v in values.items():
-            value = value.replace(key, str(v))
-        return value
-    if isinstance(value, dict):
-        return {k: _fill(v, values) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_fill(v, values) for v in value]
-    return value
 
 
 def _refusal(body: bytes) -> str:

@@ -46,7 +46,7 @@ eki follow <run>  ◄── events table
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers |
-| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
+| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
 | `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
@@ -62,6 +62,8 @@ eki follow <run>  ◄── events table
 | `candidate` | the train's own checks before a swap (gate 3): the checkout's engine boots, it opens and migrates a copy of the db, and the running build opens the copy |
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
+| `attachments` | files sent with a request: made safe at intake (HEIC → JPEG, big pictures scaled down), and uploads from the window |
+| `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -113,12 +115,20 @@ only reach a fresh file.
 
 **Capabilities.** Each provider declares `can` from {text, tools, web,
 vision, image, image-edit}. Each kind has defaults (Claude Code: text,
-tools, web, vision; Codex: text, tools, web; local: text; command: none);
+tools, web, vision; Codex: text, tools, web, vision; local: text;
+comfyui: image, image-edit; command: none);
 an entry's own `can` in `providers.json` replaces them, and its optional
 `about` is a sentence or two on what it's for. Rows declare `needs`
 (default `text`; `code` needs tools, `web` needs web); a picture attached
 adds `vision`. `eki providers`, `eki route` and the prompt check's menu
 show the same tags and `about` the code enforces.
+
+**Picture rows.** `image` (a quick draft), `image-hq`, `image-anime`
+(need `image`), `image-edit` and `image-upscale` (need `image-edit`) all go
+to `comfyui`, which `KIND_ORDER` counts as cheap as `local`. A table
+without them gets them in memory from `table.rows()`, aimed at whichever
+providers can do what they need; `routing.json` isn't rewritten. The why
+reads "rule: asks for a picture → image → comfyui".
 
 ## Milestone 2: the window and the machine
 
@@ -141,6 +151,22 @@ show the same tags and `about` the code enforces.
   worker starts it and waits, the prompt check does the same — and stopped
   again `idle_stop` minutes (5) after its last run — it tends to be off. eki never stops a
   server it didn't start.
+- **Pictures in** (`eki/attachments.py`). `eki ask --image a.png "…"`, or
+  in the window paste, drop, or the 📎 picker; each picture is uploaded
+  at once (`POST /api/attachments`, raw body plus `X-Filename`, saved as
+  `~/.eki/attachments/<date>/<id><ext>`; not a picture extension or over
+  20 MB → 400) and shown in a strip above the textarea until sent. At
+  intake (`asking.submit`) a HEIC becomes a JPEG and a picture over 5 MB is
+  scaled down (`sips -Z 2000`) into `~/.eki/attachments/<date>/`; the
+  original is never changed. A file that isn't a picture passes through as
+  a path in the prompt. The run's pictures are `Turn.images` and reach the
+  program as it expects them: an image block in Claude Code's stream-json
+  message, a `localImage` item in Codex's `turn/start`, an `image_url`
+  data URL for a local model whose `can` has `vision` (none otherwise). A
+  run that hands off passes its attachments on; history given to a
+  provider joining mid-way marks a past picture as `[picture: <path>]`; a
+  carry-on resume sends none, the session has them. `/api/file` serves a
+  path any run was given, and the thread shows them as thumbnails.
 - **Pictures** (`eki/providers/comfyui.py`, `comfyui_graphs.py`,
   `eki/gallery.py`): ComfyUI is a provider kind (`comfyui`, can `image` and
   `image-edit`). When `~/flux/ComfyUI` (or `EKI_COMFYUI_DIR`) holds a
@@ -165,6 +191,12 @@ show the same tags and `about` the code enforces.
   for a text model. Everything drawn stays in `~/.eki/images/<run>/` and is
   browsable: `eki pictures`, `GET /api/pictures?limit=&before=`, and the
   window's Pictures view (a grid, a picture opens in the side panel).
+- **A drawing run** (`eki/providers/comfyui.py`): eki fills the row's
+  graph (the old single `"workflow"` key still means the `image` graph),
+  posts it to `/prompt`, polls `/history/<id>` and saves each output
+  through `/view`, one `tool` event named `image` per file, shown inline in
+  the thread. The prompt id is the session, so a restarted run polls
+  instead of drawing twice; a ComfyUI error fails the run with its message.
 
 ## Going live
 

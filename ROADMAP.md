@@ -34,13 +34,13 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 
 - [x] Routing complete: capabilities, rules-first check, cheapest fallback
 - [ ] Codex driving the local model (rung 2)
-- [ ] ComfyUI provider kind (rung 3)
+- [x] ComfyUI provider kind (rung 3)
 - [ ] eki models add/remove
 
 ## After
 
 - [ ] Goals and the idle shift (background work while the Mac has room).
-- [ ] Image generation as a provider (ComfyUI), routed like any other.
+- [x] Image generation as a provider (ComfyUI), routed like any other.
 - [ ] Learned preferences: routing overrides learned from behaviour, with
       a notice and undo.
 - [ ] The Swift shell rebuilt by eki when `mac/` changes.

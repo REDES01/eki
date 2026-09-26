@@ -141,6 +141,30 @@ show the same tags and `about` the code enforces.
   worker starts it and waits, the prompt check does the same — and stopped
   again `idle_stop` minutes (5) after its last run — it tends to be off. eki never stops a
   server it didn't start.
+- **Pictures** (`eki/providers/comfyui.py`, `comfyui_graphs.py`,
+  `eki/gallery.py`): ComfyUI is a provider kind (`comfyui`, can `image` and
+  `image-edit`). When `~/flux/ComfyUI` (or `EKI_COMFYUI_DIR`) holds a
+  `main.py` and providers.json has no `comfyui` entry, the default one joins
+  the file's entries in memory — the file is never written; an entry you
+  write, even `{"off": true}`, wins. It is a managed server like the local
+  model (`models.MANAGED_KINDS`): started on demand by the run, stopped
+  `idle_stop` minutes after its last run, stepped out under memory pressure
+  when nothing uses it, listed and started/stopped by `eki models` and the
+  sidebar; a ComfyUI eki didn't start is never stopped. Five rows, each with
+  its own graph in `comfyui_graphs/`: `image` (draft.json, FLUX.2-klein 4B,
+  4 steps), `image-hq` (hq.json, Qwen-Image 2.1 Q8 GGUF, 30 steps),
+  `image-anime` (anime.json, NoobAI-XL), `image-edit` (edit.json, klein 4B
+  shown the source) and `image-upscale` (upscale.json, 2× then a light klein
+  pass). The worker puts the row in `turn.extra["row"]`; an entry's
+  `"graphs"` can override any of them. Rules pick the row from the words
+  (upscale, edit an attached picture, anime, quality words, "draw …"); a
+  follow-up that isn't a question, in a thread whose last picture is known,
+  edits it — the thread's last picture (`store.last_picture`, drawn or
+  attached) is the source, uploaded to ComfyUI. A comfyui thread never stays
+  by "thread": the rule's row picks the graph, and a text question leaves it
+  for a text model. Everything drawn stays in `~/.eki/images/<run>/` and is
+  browsable: `eki pictures`, `GET /api/pictures?limit=&before=`, and the
+  window's Pictures view (a grid, a picture opens in the side panel).
 
 ## Going live
 
@@ -172,5 +196,5 @@ gate 2. Order of building in [ROADMAP.md](../ROADMAP.md).
 
 ## Not built yet
 
-Goals / idle shift, image generation, learned preferences. Each is built on
+Goals / idle shift, learned preferences. Each is built on
 the pieces above, not beside them.

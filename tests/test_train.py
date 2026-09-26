@@ -41,7 +41,9 @@ def autonomy(value, **more):
 
 
 def land(conn, name, gate2="green"):
-    """What the queue leaves: a commit on integration main and a landed item carrying it."""
+    """What the queue leaves: a commit on integration main and a landed item carrying it.
+    The item says it touched only docs, so the train swaps without its check
+    (that check is tests/test_traincheck.py's)."""
     r = integration.repo()
     (r / "eki" / f"{name}.py").write_text(f"# {name}\n")
     workspace.git(r, "add", "-A")
@@ -51,7 +53,7 @@ def land(conn, name, gate2="green"):
     tid = store.create_thread(conn, name, str(r))
     rid = store.create_run(conn, tid, "check", provider="fake")
     conn.execute("UPDATE items SET state='landed', rebased=?, commit_sha=?, gate2=?, run_id=?, "
-                 "landed_at=? WHERE id=?", (sha, sha, gate2, rid, db.now(), iid))
+                 "landed_at=?, touched=? WHERE id=?", (sha, sha, gate2, rid, db.now(), '["docs/x.md"]', iid))
     return iid
 
 

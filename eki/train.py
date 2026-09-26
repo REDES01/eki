@@ -3,7 +3,9 @@
 
 Every self.release_minutes the engine asks: is integration main ahead of the
 build that runs, is nothing swapping, and was every landed item's gate 2
-green? Then main becomes a build, `current` points at it, and the launcher
+green? Then main becomes a build; unless it carries only docs, the build
+passes the full check first (eki/traincheck.py — red reverts the newest item
+and the next tick tries again); `current` points at it, and the launcher
 does the rest. Everything landed since the last train goes live together.
 `settle` watches the swap record afterwards: the items a build carried are
 'live' once it's healthy, 'rolled back' if the launcher went back from it.
@@ -21,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import builds, db, selfwork, store
+from . import builds, db, selfwork, store, traincheck
 
 log = logging.getLogger("eki.train")
 
@@ -65,14 +67,21 @@ def _go(conn: sqlite3.Connection) -> List[str]:
     red = [it["id"] for it in landed if it["gate2"] != "green"]
     if red:
         return [f"train: waiting — gate 2 isn't green for {', '.join(red)}"]
-    build = builds.make(integration.repo(), "main")
+    build = traincheck.pending(conn) or builds.make(integration.repo(), "main")
     sha = _commit_of(build) or main
     carried = [it for it in waiting if integration.contains(it["rebased"] or it["commit_sha"] or "", sha)]
+    if traincheck.needed(carried):
+        green, said = traincheck.step(conn, build, carried)
+        if not green:
+            _last_check[0] = 0.0                      # the result, or the next train, is up next tick
+            return said
+    else:
+        said = []
     builds.swap_to(build, why=f"train: {len(carried)} item(s)")
     with db.tx(conn):
         for it in carried:
             conn.execute("UPDATE items SET build=?, updated_at=? WHERE id=?", (build.name, db.now(), it["id"]))
-    said = [f"train: build {build.name} ({sha[:12]}) is going live with {len(carried)} item(s)"]
+    said += [f"train: build {build.name} ({sha[:12]}) is going live with {len(carried)} item(s)"]
     said += [f"item {it['id']}: on the train in build {build.name}" for it in carried]
     return said
 

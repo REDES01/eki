@@ -42,8 +42,9 @@ class ClaudeCode(ProgramProvider):
             argv += ["--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"]
         else:
             argv += ["--permission-mode", self.cfg.get("permission_mode", "default")]
-        if self.cfg.get("model"):
-            argv += ["--model", self.cfg["model"]]
+        model = turn.extra.get("model") or self.cfg.get("model")   # a run's own model wins
+        if model:
+            argv += ["--model", model]
         if turn.resume:
             argv += ["--resume", turn.resume]
         if turn.cwd:

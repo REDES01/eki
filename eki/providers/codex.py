@@ -57,8 +57,9 @@ class Codex(ProgramProvider):
             "sandbox": "danger-full-access" if self.auto else "workspace-write"}
         if turn.cwd:
             params["cwd"] = turn.cwd
-        if self.cfg.get("model"):
-            params["model"] = self.cfg["model"]
+        model = turn.extra.get("model") or self.cfg.get("model")   # a run's own model wins
+        if model:
+            params["model"] = model
         if turn.extra.get("note"):
             params["developerInstructions"] = turn.extra["note"]
         return params

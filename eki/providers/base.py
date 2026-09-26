@@ -35,6 +35,7 @@ class Turn:
     thread_id: str = ""
     stop: threading.Event = field(default_factory=threading.Event)
     extra: Dict[str, Any] = field(default_factory=dict)   # skills dir, mcp config …
+    images: List[str] = field(default_factory=list)       # this run's pictures: absolute paths
 
 
 @dataclass

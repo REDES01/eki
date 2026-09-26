@@ -3,7 +3,7 @@
 It behaves like a real agent CLI — a session that can be resumed, output
 over time, limits and failures on request — without spending anything.
 Words in the prompt steer it: `steps=5`, `delay=0.5`, `limit`, `fail`,
-`handoff`. `EKI_FAKE_TOUCH=a.py,b.py` makes it write those files in its
+`handoff`. Each `--image PATH` it is given shows as `images=N` in its answer. `EKI_FAKE_TOUCH=a.py,b.py` makes it write those files in its
 folder; `EKI_FAKE_SAYS_FILE=<path>` is what it says at the end.
 """
 from __future__ import annotations
@@ -29,6 +29,8 @@ class Fake(ProgramProvider):
         argv = [sys.executable, "-m", "eki.providers.fake", "--name", self.name]
         if turn.resume:
             argv += ["--resume", turn.resume]
+        for image in turn.images:
+            argv += ["--image", image]
         return argv + [with_history(turn)]
 
     def env(self, turn: Turn) -> Dict[str, str]:
@@ -74,13 +76,15 @@ def _say(obj: Dict[str, Any]) -> None:
 
 
 def main(argv: List[str]) -> int:
-    name, resume = "fake", None
+    name, resume, images = "fake", None, []
     while argv and argv[0].startswith("--"):
         flag, value, argv = argv[0], argv[1], argv[2:]
         if flag == "--name":
             name = value
         elif flag == "--resume":
             resume = value
+        elif flag == "--image":
+            images.append(value)
     prompt = argv[-1] if argv else ""
     state_dir = Path(os.environ.get("EKI_HOME", ".")) / "fake-sessions"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +128,8 @@ def main(argv: List[str]) -> int:
             Path(rel).parent.mkdir(parents=True, exist_ok=True)
             Path(rel).write_text("made by fake\n")
             _say({"type": "tool", "name": "Write", "detail": rel, "path": str(Path(rel).resolve())})
-    _say({"type": "text", "text": f"{name} done: {ask.splitlines()[-1][:80]}"})
+    seen = f" images={len(images)}" if images else ""
+    _say({"type": "text", "text": f"{name} done{seen}: {ask.splitlines()[-1][:80]}"})
     if os.environ.get("EKI_FAKE_SAYS_FILE"):        # what the "agent" says at the end (a plan, a verdict)
         _say({"type": "text", "text": "\n" + Path(os.environ["EKI_FAKE_SAYS_FILE"]).read_text()})
     _say({"type": "done"})

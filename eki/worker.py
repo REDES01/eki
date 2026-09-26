@@ -22,6 +22,7 @@ from typing import Any, Dict
 
 from . import asks, capacity, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store
 from .providers.base import Outcome, Turn
+from .routing.needs import is_picture
 
 log = logging.getLogger("eki.worker")
 
@@ -49,13 +50,14 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
     full = store.transcript(conn, r["thread_id"], r["seq"])
     sess = store.session(conn, r["thread_id"], provider)
     turn = Turn(prompt=r["prompt"], history=full, run_id=r["id"], thread_id=r["thread_id"],
-                cwd=(thread["cwd"] if thread and thread["cwd"] else str(paths.scratch())))
+                cwd=(thread["cwd"] if thread and thread["cwd"] else str(paths.scratch())),
+                images=[p for p in store.attachments(r) if is_picture(p)])
     turn.extra["full_history"] = full
     if sess:
         turn.resume = sess["session_id"]
         if sess["seen_run"] == r["id"]:
             # this very run was under way in that session: carry on, don't repeat
-            turn.prompt, turn.history = CARRY_ON, []
+            turn.prompt, turn.history, turn.images = CARRY_ON, [], []   # the session has the pictures
         else:
             seen = store.run(conn, sess["seen_run"]) if sess["seen_run"] else None
             turn.history = store.transcript_since(conn, r["thread_id"], seen["seq"] if seen else 0, r["seq"])
@@ -92,7 +94,7 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
         elif out.state == "handed_off":
             store.update_run(conn, rid, state="handed_off", ended_at=now, error=None)
             nxt = store.create_run(conn, r["thread_id"], r["prompt"], priority=r["priority"], parent=rid,
-                                   exclude=[provider], row="code")
+                                   exclude=[provider], row="code", attachments=store.attachments(r))
             reason = " ".join((out.reason or "needs tools").split())
             reason = reason if len(reason) <= 90 else reason[:89] + "…"
             store.update_run(conn, nxt, why=f"handed off by {provider}: {reason}")

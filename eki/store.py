@@ -168,7 +168,8 @@ def transcript_since(conn: sqlite3.Connection, tid: str, after_seq: int,
             break
         if r["state"] == "handed_off":
             continue            # the same prompt comes again in the run it handed to
-        out.append({"role": "user", "content": r["prompt"]})
+        marks = "".join(f"\n[picture: {p}]" for p in attachments(r))   # past pictures, as text
+        out.append({"role": "user", "content": r["prompt"] + marks})
         said = answer(conn, r["id"])
         if said:
             out.append({"role": "assistant", "content": said})

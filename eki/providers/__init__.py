@@ -5,27 +5,46 @@ The file is written with defaults on first use and is yours to edit:
     {"claude": {"kind": "claude_code", "label": "Claude Code"},
      "codex":  {"kind": "codex", "label": "Codex"},
      "local":  {"kind": "local", "base_url": "http://127.0.0.1:8080"}}
+
+ComfyUI (pictures) is never written there. When the file has no "comfyui"
+entry and ComfyUI is on this Mac (`comfyui_dir()`: EKI_COMFYUI_DIR, else
+~/flux/ComfyUI, holding main.py), `config()` adds the default entry in
+memory only. An entry you write, even {"comfyui": {"off": true}}, wins.
 """
 from __future__ import annotations
 
+import copy
 import json
-from typing import Any, Dict, List
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from .. import paths
 from .base import Outcome, Provider, Turn
 from .claude_code import ClaudeCode
 from .codex import Codex
+from .comfyui import Comfyui
 from .command import Command
 from .fake import Fake
 from .local import Local
 
-KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, Local, Fake, Command)}
+KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, Local, Comfyui, Fake, Command)}
 
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     "claude": {"kind": "claude_code", "label": "Claude Code"},
     "codex": {"kind": "codex", "label": "Codex"},
     "local": {"kind": "local", "label": "Local model (MLX)", "base_url": "http://127.0.0.1:8080"},
+    # mirrors ~/flux/start.sh without the browser; joins config() only in memory
+    "comfyui": {"kind": "comfyui", "label": "ComfyUI (pictures)", "base_url": "http://127.0.0.1:8188",
+                "serve": {"command": ["~/flux/venv/bin/python", "main.py", "--output-directory",
+                                      "~/flux/output", "--port", "8188"],
+                          "cwd": "~/flux/ComfyUI",
+                          "env": {"PYTORCH_ENABLE_MPS_FALLBACK": "1", "EKI_STARTED": "1"}},
+                "idle_stop": 5, "about": "Draws, edits and upscales pictures on this Mac."},
 }
+
+#: defaults that are never written to providers.json, only joined in memory
+UNWRITTEN = ("comfyui",)
 
 #: what a provider can be asked to do; routing rows name what they need from it
 ABILITIES = ("text", "tools", "web", "vision", "image", "image-edit")
@@ -35,6 +54,7 @@ CAN: Dict[str, List[str]] = {
     "claude_code": ["text", "tools", "web", "vision"],
     "codex": ["text", "tools", "web"],
     "local": ["text"],
+    "comfyui": ["image", "image-edit"],
     "command": [],
     "fake": ["text", "tools"],
 }
@@ -57,11 +77,24 @@ BUILTIN: Dict[str, Dict[str, Any]] = {
 }
 
 
+def comfyui_dir() -> Optional[Path]:
+    """Where ComfyUI lives on this Mac, if it does: EKI_COMFYUI_DIR, else ~/flux/ComfyUI."""
+    d = Path(os.environ.get("EKI_COMFYUI_DIR") or "~/flux/ComfyUI").expanduser()
+    return d if (d / "main.py").is_file() else None
+
+
 def config() -> Dict[str, Dict[str, Any]]:
     path = paths.config("providers")
     if not path.exists():
-        path.write_text(json.dumps(DEFAULTS, indent=2) + "\n")
+        written = {n: c for n, c in DEFAULTS.items() if n not in UNWRITTEN}
+        path.write_text(json.dumps(written, indent=2) + "\n")
     got = json.loads(path.read_text())
+    if "comfyui" not in got:
+        where = comfyui_dir()
+        if where is not None:
+            entry = copy.deepcopy(DEFAULTS["comfyui"])
+            entry["serve"]["cwd"] = str(where)
+            got["comfyui"] = entry
     return {**BUILTIN, **got}
 
 
@@ -84,4 +117,4 @@ def get(name: str) -> Provider:
 
 
 __all__ = ["Outcome", "Provider", "Turn", "all_providers", "get", "config", "KINDS",
-           "ABILITIES", "CAN", "capabilities"]
+           "ABILITIES", "CAN", "capabilities", "comfyui_dir"]

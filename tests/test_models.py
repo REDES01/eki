@@ -27,6 +27,12 @@ def free_port():
     return p
 
 
+@pytest.fixture(autouse=True)
+def quick(monkeypatch):
+    monkeypatch.setenv("EKI_MODELS_POLL", "0.02")
+    monkeypatch.setenv("EKI_MODELS_STOP_WAIT", "0.5")
+
+
 @pytest.fixture
 def model(home):
     port = free_port()
@@ -42,7 +48,7 @@ def wait_up(name, up=True, t=10):
     while time.time() < end:
         if models.status(name)["up"] == up:
             return True
-        time.sleep(0.2)
+        time.sleep(0.02)
     return False
 
 
@@ -85,3 +91,23 @@ def test_a_server_eki_didnt_start_is_left_alone(model, conn, monkeypatch):
         assert models.status(model)["up"] and not models.status(model)["managed"]
     finally:
         proc.terminate()
+
+
+def test_a_short_step_out_pause_brings_it_back(model, conn, monkeypatch):
+    models.duty(conn)
+    assert wait_up(model)
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "2")
+    assert models.duty(conn) == ["stepped local out: memory under pressure"]
+    assert wait_up(model, up=False)
+    monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
+    monkeypatch.setenv("EKI_MODELS_STEP_OUT_PAUSE", "0")
+    assert models.duty(conn) == ["started local: kept up"]
+    assert wait_up(model)
+
+
+def test_intervals_from_the_environment(monkeypatch):
+    assert models.interval("step_out_pause") == models.STEP_OUT_PAUSE
+    monkeypatch.setenv("EKI_MODELS_POLL", "0.25")
+    assert models.interval("poll") == 0.25
+    monkeypatch.setenv("EKI_MODELS_STOP_WAIT", "not a number")
+    assert models.interval("stop_wait") == models.STOP_WAIT

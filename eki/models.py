@@ -30,6 +30,24 @@ log = logging.getLogger("eki.models")
 
 #: after stepping out for memory, wait this long before trying again
 STEP_OUT_PAUSE = 5 * 60
+#: between status polls while ensure() waits for a model to come up
+POLL = 1.0
+#: how long stop() gives the server to exit
+STOP_WAIT = 5.0
+
+#: each interval and the environment variable that overrides it (read at call time)
+INTERVALS = {"step_out_pause": ("EKI_MODELS_STEP_OUT_PAUSE", "STEP_OUT_PAUSE"),
+             "poll": ("EKI_MODELS_POLL", "POLL"),
+             "stop_wait": ("EKI_MODELS_STOP_WAIT", "STOP_WAIT")}
+
+
+def interval(name: str) -> float:
+    """Seconds for one of INTERVALS: its environment variable if set, else the default."""
+    var, default = INTERVALS[name]
+    try:
+        return float(os.environ[var])
+    except (KeyError, ValueError):
+        return float(globals()[default])
 
 
 def _state_path(name: str) -> Path:
@@ -58,6 +76,12 @@ def local_models() -> Dict[str, Dict[str, Any]]:
 def _alive(pid: Optional[int]) -> bool:
     if not pid:
         return False
+    try:
+        # a server we started and that has exited is a zombie until reaped
+        if os.waitpid(pid, os.WNOHANG)[0]:
+            return False
+    except ChildProcessError:
+        pass
     try:
         os.kill(pid, 0)
         return True
@@ -114,10 +138,10 @@ def stop(name: str, *, by: str = "you") -> Dict[str, Any]:
             os.killpg(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
-        for _ in range(50):
-            if not _alive(pid):
-                break
-            time.sleep(0.1)
+        wait = interval("stop_wait")
+        end = time.time() + wait
+        while _alive(pid) and time.time() < end:
+            time.sleep(min(0.1, wait / 10))
         log.info("stopped %s (pid %s) for %s", name, pid, by)
     _write(name, pid=None)
     return status(name)
@@ -135,7 +159,7 @@ def ensure(name: str, timeout: float = 180) -> bool:
     while time.time() < end:
         if status(name)["up"]:
             return True
-        time.sleep(1)
+        time.sleep(interval("poll"))
     return False
 
 
@@ -156,7 +180,7 @@ def duty(conn) -> List[str]:
             _write(name, stepped_out_at=time.time())
             did.append(f"stepped {name} out: memory under pressure")
         elif (cfg.get("keep_up") and not st["up"] and not st["starting"] and not st["held"]
-              and pressure == 1 and time.time() - (st["stepped_out_at"] or 0) > STEP_OUT_PAUSE):
+              and pressure == 1 and time.time() - (st["stepped_out_at"] or 0) > interval("step_out_pause")):
             start(name, by="keep_up")
             did.append(f"started {name}: kept up")
     return did

@@ -1,8 +1,11 @@
 """The prompt check: which row of the table a request is.
 
-One short call to the local model with the rows and their examples. When
-the local model isn't running, the request goes to the `general` row and
-the reason says so — it never silently guesses.
+Rules first (rules.py): the obvious requests are sorted without a model.
+Only when no rule fires is there one short call to the local model with the
+rows, their needs, and each target's tags. When the checker can't run, the
+request goes to the `general` row and the reason says so — it never
+silently guesses. A checker that is off on purpose (an on-demand model) is
+started for the check only if routing.json's `checker_wakes` is true.
 """
 from __future__ import annotations
 
@@ -11,7 +14,9 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from .. import providers
-from .table import rows
+from . import rules
+from .needs import describe, row_needs
+from .table import checker_wakes, rows
 
 ASK = (
     "Sort a request into one row of a routing table. Rows:\n{rows}\n\n"
@@ -26,21 +31,28 @@ def _menu(table: List[Dict]) -> str:
         if r["key"] == "general":
             continue
         ex = "; ".join(r.get("examples") or [])
-        lines.append(f"- {r['key']}: {r['title']}" + (f" (e.g. {ex})" if ex else ""))
+        lines.append(f"- {r['key']}: {r['title']}" + (f" (e.g. {ex})" if ex else "")
+                     + f"; needs {', '.join(row_needs(r)) or 'nothing'}")
+        lines += [f"    · {describe(t)}" for t in r.get("targets") or []]
     return "\n".join(lines)
 
 
 def check(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = None,
-          checker: str = "local") -> Tuple[str, str]:
-    """(row key, why)."""
+          checker: str = "local", attachments: Optional[List[str]] = None) -> Tuple[str, str]:
+    """(row key, why): a rule's if one fires, else the model's."""
     table = rows()
     keys = {r["key"] for r in table}
+    ruled = rules.match(prompt, previous=previous, cwd=cwd, attachments=attachments, keys=keys)
+    if ruled:
+        return ruled
     try:
         judge = providers.get(checker)
     except KeyError:
         return "general", "no prompt checker configured"
     ok, why_not = judge.available()
     if not ok and getattr(judge, "cfg", {}).get("serve"):
+        if not checker_wakes():
+            return "general", f"prompt check skipped: {checker} is off (checker_wakes is false)"
         from .. import models                         # off on purpose: start it for the check
         ok = models.ensure(checker)
         why_not = "didn't come up" if not ok else ""

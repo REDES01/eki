@@ -227,6 +227,6 @@ def test_prompt_check_uses_the_local_model(server, home):
     (home / "providers.json").write_text(json.dumps({"local": {"kind": "local", "base_url": server}}))
     _Server.reply = [{"content": '{"row": "code", "why": "changes files"}'}]
     (home / "routing.json").unlink()
-    assert check("fix the failing test") == ("code", "prompt check: changes files")
+    assert check("why does the suite hang sometimes") == ("code", "prompt check: changes files")
     _Server.reply = [{"content": "no idea"}]
     assert check("???")[0] == "general"

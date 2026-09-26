@@ -11,9 +11,12 @@ A local provider with a `serve` block can be started by eki:
 spare, and steps it out (stops it) when memory comes under pressure and
 nothing is using it — then brings it back once pressure has eased. A model
 you stop is treated like one stepped out: keep_up brings it back after the
-same pause. `stop --hold` (the sidebar's "keep off") holds it down until you
-start it again. eki only ever stops a server it started; one you started
-yourself is left alone.
+same pause. `stop --hold` holds it down until you start it again.
+
+Without `keep_up` the model is *on demand*: it stays off until a request is
+sent its way (the worker starts it and waits), and `idle_stop` minutes
+(default 30; 0 never) after its last run eki stops it again. eki only ever
+stops a server it started; one you started yourself is left alone.
 """
 from __future__ import annotations
 
@@ -103,6 +106,7 @@ def status(name: str) -> Dict[str, Any]:
     return {"name": name, "label": cfg.get("label") or name, "up": up, "why": why,
             "starting": ours and not up, "managed": ours, "startable": bool(cfg.get("serve")),
             "keep_up": bool(cfg.get("keep_up")), "held": bool(st.get("held")),
+            "on_demand": bool(cfg.get("serve")) and not cfg.get("keep_up"),
             "stepped_out_at": st.get("stepped_out_at"), "pid": st.get("pid") if ours else None}
 
 
@@ -171,6 +175,18 @@ def in_use(conn, name: str) -> bool:
     return any(r["provider"] == name for r in store.runs_in(conn, ("starting", "running")))
 
 
+def last_used(conn, name: str) -> float:
+    """When a run last touched the model — or when eki started it, if later."""
+    row = conn.execute("SELECT MAX(COALESCE(ended_at, started_at, created_at)) FROM runs WHERE provider=?",
+                       (name,)).fetchone()
+    return max(float(row[0] or 0), float(_read(name).get("started_at") or 0))
+
+
+def idle_stop(cfg: Dict[str, Any]) -> float:
+    """Seconds an on-demand model may sit unused; 0 never stops it."""
+    return float(cfg.get("idle_stop", 30)) * 60
+
+
 def duty(conn) -> List[str]:
     """The engine's rounds: keep models up while there's room, step out when there isn't."""
     did: List[str] = []
@@ -187,4 +203,8 @@ def duty(conn) -> List[str]:
               and pressure == 1 and time.time() - (st["stepped_out_at"] or 0) > interval("step_out_pause")):
             start(name, by="keep_up")
             did.append(f"started {name}: kept up")
+        elif (not cfg.get("keep_up") and st["managed"] and st["up"] and idle_stop(cfg) > 0
+              and not in_use(conn, name) and time.time() - last_used(conn, name) > idle_stop(cfg)):
+            stop(name, by="idle")
+            did.append(f"stopped {name}: idle for {int(idle_stop(cfg) // 60)} min")
     return did

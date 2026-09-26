@@ -58,6 +58,8 @@ def status(conn: sqlite3.Connection, background: bool = False) -> Dict[str, Tupl
             out[name] = providers.build(name, cfg).available()
         except KeyError as e:
             out[name] = (False, str(e))
+        if not out[name][0] and cfg.get("kind") == "local" and cfg.get("serve"):
+            out[name] = (True, "off; starts for the run")     # on demand: the worker starts it and waits
     return out
 
 

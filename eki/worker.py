@@ -166,6 +166,8 @@ def main(rid: str) -> int:
         kind = providers.config().get(provider, {}).get("kind")
         if kind == "local" and not models.ensure(provider):
             emit("note", {"text": f"{provider} didn't come up"})
+            finish(conn, r, provider, Outcome(state="limited", error="didn't come up"))
+            return 0
         if kind == "codex":
             skills.sync_codex()
         out = providers.get(provider).take(turn, emit)

@@ -25,6 +25,7 @@ def run(args) -> int:
         st = models.status(n)
         state = "up" if st["up"] else "starting" if st["starting"] else "down"
         flags = [f for f, on in (("eki runs it", st["managed"]), ("kept up", st["keep_up"]),
+                                 ("on demand", st.get("on_demand")),
                                  ("held down by you", st["held"]), ("can start", st["startable"])) if on]
         print(f"{n:<10} {state:<9} {', '.join(flags)}" + ("" if st["up"] else f"  — {st['why']}"))
     return 0

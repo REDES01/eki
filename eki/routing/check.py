@@ -40,6 +40,10 @@ def check(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = N
     except KeyError:
         return "general", "no prompt checker configured"
     ok, why_not = judge.available()
+    if not ok and getattr(judge, "cfg", {}).get("serve"):
+        from .. import models                         # off on purpose: start it for the check
+        ok = models.ensure(checker)
+        why_not = "didn't come up" if not ok else ""
     if not ok:
         return "general", f"prompt check skipped: {checker} {why_not}"
     request = prompt if not previous else f"(previous answer: {previous[:300]})\n{prompt}"

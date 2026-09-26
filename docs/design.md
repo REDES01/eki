@@ -104,8 +104,11 @@ session id per thread, so returning to it resumes its session.
   sidebar). With `keep_up`, the engine keeps it running while memory is
   normal and *steps it out* when memory comes under pressure and nothing
   is using it, coming back five minutes after pressure eases. A model you
-  stop stays stopped until you start it. eki never stops a server it
-  didn't start. A run sent to a stopped model starts it and waits.
+  stop comes back after the same pause (`--hold` keeps it down). Without
+  `keep_up` a model is *on demand*: off until a run is sent its way — the
+  worker starts it and waits, the prompt check does the same — and stopped
+  again `idle_stop` minutes (30) after its last run. eki never stops a
+  server it didn't start.
 
 ## Going live
 

@@ -122,3 +122,29 @@ def test_intervals_from_the_environment(monkeypatch):
     assert models.interval("poll") == 0.25
     monkeypatch.setenv("EKI_MODELS_STOP_WAIT", "not a number")
     assert models.interval("stop_wait") == models.STOP_WAIT
+
+
+def on_demand(home, model, idle_minutes):
+    cfg = json.loads((home / "providers.json").read_text())
+    cfg["local"].update(keep_up=False, idle_stop=idle_minutes)
+    (home / "providers.json").write_text(json.dumps(cfg))
+
+
+def test_an_on_demand_model_stays_off_until_a_run_and_stops_when_idle(home, model, conn):
+    from eki import capacity
+    on_demand(home, model, 0.001)                        # ~0.06 s idle
+    assert models.duty(conn) == []                       # not kept up: stays off
+    assert not models.status(model)["up"] and models.status(model)["on_demand"]
+    ok, why = capacity.status(conn)[model]
+    assert ok and "starts for the run" in why            # routing may still pick it
+    assert models.ensure(model) and models.status(model)["up"]   # a run starts it
+    time.sleep(0.1)
+    assert models.duty(conn) == ["stopped local: idle for 0 min"]
+    assert wait_up(model, up=False)
+
+
+def test_idle_stop_zero_never_stops(home, model, conn):
+    on_demand(home, model, 0)
+    assert models.ensure(model)
+    time.sleep(0.05)
+    assert models.duty(conn) == [] and models.status(model)["up"]

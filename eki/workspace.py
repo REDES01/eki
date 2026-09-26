@@ -113,15 +113,20 @@ def changed(where: str | Path, since: str) -> List[str]:
     return sorted(f for f in files if f)
 
 
-def commit_all(where: str | Path, message: str) -> Optional[str]:
-    """Commit everything in the worktree but the linked folders; None when nothing changed."""
-    # no pathspec: `git add` with one that matches an ignored path (a linked
-    # .venv, ignored or dangling) refuses the whole add
+def stage_all(where: str | Path) -> List[str]:
+    """Stage everything but the linked folders; the staged paths. No pathspec on
+    the add: one that matches an ignored path (a linked .venv, ignored or
+    dangling) makes git refuse the whole add."""
     git(where, "add", "-A")
     for name in LINKED:                    # a link (or one an agent added): never part of a change
         if git(where, "ls-files", "--", name):
             git(where, "rm", "-q", "--cached", "--", name)
-    staged = [f for f in git(where, "diff", "--cached", "--name-only").splitlines() if f]
+    return [f for f in git(where, "diff", "--cached", "--name-only").splitlines() if f]
+
+
+def commit_all(where: str | Path, message: str) -> Optional[str]:
+    """Commit everything in the worktree but the linked folders; None when nothing changed."""
+    staged = stage_all(where)
     if not staged:
         return None
     git(where, "commit", "-q", "-m", message)

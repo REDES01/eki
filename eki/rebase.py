@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List
 
 from . import paths, workspace
-from .workspace import LINKED, NOT_LINKED, WorkspaceError, git
+from .workspace import LINKED, NOT_LINKED, WorkspaceError, git, stage_all
 
 #: nothing waits for an editor: `rebase --continue` keeps the message it has
 NO_EDITOR = {"GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true"}
@@ -84,11 +84,8 @@ def onto(worktree: str | Path, head: str, since: str | None = None) -> List[str]
 
 
 def _stage(worktree: str | Path) -> None:
-    """Everything but the linked folders, like workspace.commit_all."""
-    for name in LINKED:
-        if git(worktree, "ls-files", "--", name):
-            git(worktree, "rm", "-q", "--cached", "--", name)
-    git(worktree, "add", "-A", "--", ".", *NOT_LINKED)
+    """Everything but the linked folders, the way workspace.commit_all does it."""
+    stage_all(worktree)
 
 
 def proceed(worktree: str | Path) -> List[str]:

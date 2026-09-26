@@ -15,12 +15,13 @@ routing's job.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 Emit = Callable[[str, Dict[str, Any]], None]
 
@@ -112,6 +113,17 @@ def with_history(turn: Turn) -> str:
     return ("Part of this conversation happened with another assistant. What was said "
             "that you haven't seen:\n\n"
             f"<earlier>\n{past}\n</earlier>\n\nThe request now:\n\n{turn.prompt}")
+
+
+MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".gif": "image/gif", ".webp": "image/webp"}
+
+
+def image_block(path: str) -> Tuple[str, str]:
+    """A picture as the programs take it inline: (media type, base64 of the file)."""
+    media = MEDIA_TYPES.get(os.path.splitext(path)[1].lower(), "image/png")
+    with open(path, "rb") as f:
+        return media, base64.b64encode(f.read()).decode("ascii")
 
 
 def short(value: Any, n: int = 120) -> str:

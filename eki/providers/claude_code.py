@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List
 
-from .base import Emit, Outcome, Turn, find_binary, short, with_history
+from .base import Emit, Outcome, Turn, find_binary, image_block, short, with_history
 from .program import Channel, ProgramProvider
 
 #: tools that ask *you* something, rather than ask permission to do something
@@ -64,8 +64,12 @@ class ClaudeCode(ProgramProvider):
         if ch.state.get("sent"):
             return
         ch.state["sent"] = True
+        content: List[Dict[str, Any]] = [{"type": "text", "text": with_history(ch.turn)}]
+        for path in ch.turn.images:
+            media, data = image_block(path)
+            content.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": data}})
         ch.write({"type": "user", "uuid": str(uuid.uuid4()), "session_id": "",
-                  "message": {"role": "user", "content": [{"type": "text", "text": with_history(ch.turn)}]},
+                  "message": {"role": "user", "content": content},
                   "parent_tool_use_id": None})
 
     def read(self, event: Dict[str, Any], emit: Emit, out: Outcome, ch: Channel) -> None:

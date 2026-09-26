@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from .base import Emit, Outcome, Provider, Turn
+from .base import Emit, Outcome, Provider, Turn, image_block
 
 SYSTEM = (
     "You are a model running locally on the user's Mac, inside eki. You can answer, "
@@ -99,9 +99,19 @@ class Local(Provider):
                         slot["arguments"] += fn.get("arguments") or ""
         return {"text": "".join(text), "tool_calls": list(calls.values())}
 
+    def _content(self, turn: Turn) -> Any:
+        """The request; with pictures as `image_url` parts only if the model can see."""
+        if not turn.images or "vision" not in self.can:
+            return turn.prompt
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": turn.prompt}]
+        for path in turn.images:
+            media, data = image_block(path)
+            parts.append({"type": "image_url", "image_url": {"url": f"data:{media};base64,{data}"}})
+        return parts
+
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         messages = [{"role": "system", "content": SYSTEM}, *turn.history,
-                    {"role": "user", "content": turn.prompt}]
+                    {"role": "user", "content": self._content(turn)}]
         buffer: List[str] = []
 
         def flush() -> None:

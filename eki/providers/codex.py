@@ -64,6 +64,14 @@ class Codex(ProgramProvider):
             params["developerInstructions"] = turn.extra["note"]
         return params
 
+    def _turn_params(self, turn: Turn, tid: str) -> Dict[str, Any]:
+        items: List[Dict[str, Any]] = [{"type": "text", "text": with_history(turn)}]
+        items += [{"type": "localImage", "path": path} for path in turn.images]
+        params: Dict[str, Any] = {"threadId": tid, "input": items}
+        if turn.cwd:
+            params["cwd"] = turn.cwd
+        return params
+
     def opening(self, ch: Channel, turn: Turn) -> None:
         self._call(ch, "initialize", {"protocolVersion": "2024-11-05",
                                       "capabilities": {"experimentalApi": True},
@@ -103,10 +111,7 @@ class Codex(ProgramProvider):
             tid = (result.get("thread") or {}).get("id") or result.get("threadId") or turn.resume
             ch.state["thread"] = tid
             emit("session", {"id": tid})
-            params: Dict[str, Any] = {"threadId": tid, "input": [{"type": "text", "text": with_history(turn)}]}
-            if turn.cwd:
-                params["cwd"] = turn.cwd
-            self._call(ch, "turn/start", params, "turn")
+            self._call(ch, "turn/start", self._turn_params(turn, tid), "turn")
 
     def _notified(self, method: str, params: Dict[str, Any], emit: Emit, out: Outcome, ch: Channel) -> None:
         if method == "item/agentMessage/delta":

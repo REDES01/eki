@@ -10,8 +10,10 @@ A local provider with a `serve` block can be started by eki:
 `keep_up` means the engine keeps it running while the Mac has memory to
 spare, and steps it out (stops it) when memory comes under pressure and
 nothing is using it — then brings it back once pressure has eased. A model
-you stop yourself stays stopped until you start it. eki only ever stops a
-server it started; one you started yourself is left alone.
+you stop is treated like one stepped out: keep_up brings it back after the
+same pause. `stop --hold` (the sidebar's "keep off") holds it down until you
+start it again. eki only ever stops a server it started; one you started
+yourself is left alone.
 """
 from __future__ import annotations
 
@@ -128,11 +130,13 @@ def start(name: str, *, by: str = "you") -> Dict[str, Any]:
     return status(name)
 
 
-def stop(name: str, *, by: str = "you") -> Dict[str, Any]:
+def stop(name: str, *, by: str = "you", hold: bool = False) -> Dict[str, Any]:
+    """Stop a model. Yours counts as a step-out (keep_up brings it back after
+    the pause) unless `hold`, which keeps it down until you start it."""
     st = _read(name)
     pid = st.get("pid")
     if by == "you":
-        _write(name, held=True)
+        _write(name, held=bool(hold), stepped_out_at=time.time())
     if _alive(pid):
         try:
             os.killpg(pid, signal.SIGTERM)

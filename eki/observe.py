@@ -98,9 +98,14 @@ def _eki_relative(path: str) -> Optional[str]:
     """'…/builds/<id>/eki/x.py' → 'eki/x.py'; None for a file outside an eki/ package."""
     parts = path.replace("\\", "/").split("/")
     for i in range(len(parts) - 2, -1, -1):
-        if parts[i] == "eki" and parts[-1].endswith(".py"):
+        # the package folder, not a checkout that happens to be called eki
+        # (~/eki/tests/x.py is a test, not eki's code)
+        if parts[i] == "eki" and parts[-1].endswith(".py") and parts[i + 1] not in NOT_CODE:
             return "/".join(parts[i:])
     return None
+
+
+NOT_CODE = ("tests", "docs", "bin", "skills", "mac", ".venv", "web")
 
 
 def top_frame(tb: str) -> Optional[Tuple[str, int]]:

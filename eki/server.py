@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/models/(\w+)/(start|stop)", p)
         if m:
             name, action = m.group(1), m.group(2)
-            return self._call(lambda _c: api.model_action(name, action))
+            return self._call(lambda _c: api.model_action(name, action, body))
         self._json({"error": "not found"}, 404)
 
 

@@ -57,7 +57,7 @@ def test_start_and_stop(model):
     models.start(model)
     assert wait_up(model)
     st = models.stop(model)
-    assert wait_up(model, up=False) and st["held"]
+    assert wait_up(model, up=False) and not st["held"]       # a plain stop is not a hold
 
 
 def test_ensure_starts_it_for_a_run(model):
@@ -75,9 +75,20 @@ def test_kept_up_and_stepped_out(model, conn, monkeypatch):
     assert models.duty(conn) == []          # waits a while before coming back
 
 
-def test_held_by_you_stays_down(model, conn):
-    models.stop(model)
+def test_your_stop_is_a_step_out_unless_held(model, conn, monkeypatch):
+    models.duty(conn)
+    assert wait_up(model)
+    models.stop(model)                                   # "give me the memory": comes back after the pause
+    assert wait_up(model, up=False)
     assert models.duty(conn) == []
+    monkeypatch.setenv("EKI_MODELS_STEP_OUT_PAUSE", "0")
+    assert models.duty(conn) == ["started local: kept up"]
+    assert wait_up(model)
+    models.stop(model, hold=True)                        # "keep it off": stays down
+    assert wait_up(model, up=False)
+    assert models.duty(conn) == [] and models.status(model)["held"]
+    models.start(model)                                  # your start lifts the hold
+    assert not models.status(model)["held"]
 
 
 def test_a_server_eki_didnt_start_is_left_alone(model, conn, monkeypatch):

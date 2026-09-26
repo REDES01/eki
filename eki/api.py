@@ -103,11 +103,11 @@ def provider_list(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return out
 
 
-def model_action(name: str, action: str) -> Dict[str, Any]:
+def model_action(name: str, action: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if action == "start":
         return models.start(name)
     if action == "stop":
-        return models.stop(name)
+        return models.stop(name, hold=bool((body or {}).get("hold")))
     raise ValueError(f"unknown action {action}")
 
 

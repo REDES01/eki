@@ -196,3 +196,9 @@ def test_parse_since():
     for bad in ("", "24", "h", "3w", "-1h"):
         with pytest.raises(ValueError):
             observe.parse_since(bad)
+
+
+def test_a_checkout_called_eki_is_not_mistaken_for_the_package():
+    assert observe._eki_relative("/Users/x/eki/tests/test_observe.py") is None
+    assert observe._eki_relative("/Users/x/eki/eki/queue.py") == "eki/queue.py"
+    assert observe._eki_relative("/Users/x/.eki/builds/abc/eki/cli/self.py") == "eki/cli/self.py"

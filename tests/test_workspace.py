@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -74,3 +75,15 @@ def test_runs_in_one_folder_take_turns(conn, tmp_path, monkeypatch):
         c = store.create_run(conn, store.create_thread(conn, "v", None), "c")
     engine.spawn_ready(conn)
     assert spawned == [a, c]
+
+
+def test_commit_all_with_an_ignored_dangling_link(repo, tmp_path):
+    """A linked .venv that is ignored (or points nowhere) must not stop the commit."""
+    wt = workspace.add(repo, "dl")
+    (wt / ".venv").unlink()
+    (wt / ".venv").symlink_to(tmp_path / "nowhere")
+    with open(Path(repo) / ".git" / "info" / "exclude", "a") as f:
+        f.write(".venv\n")
+    (wt / "a.txt").write_text("changed\n")
+    sha = workspace.commit_all(wt, "with a dangling ignored link")
+    assert sha and ".venv" not in workspace.git(wt, "show", "--stat", "--format=", sha)

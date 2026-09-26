@@ -176,7 +176,11 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             _set(conn, it["id"], state="left", error=f"the build run ended {run['state']}: {run['error'] or ''}")
             return [f"item {it['id']}: left — the build run ended {run['state']}"]
         verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
-        sha = workspace.commit_all(it["worktree"], f"self: {it['title']}\n\n{goal['text']}"[:2000])
+        try:
+            sha = workspace.commit_all(it["worktree"], f"self: {it['title']}\n\n{goal['text']}"[:2000])
+        except (workspace.WorkspaceError, OSError) as e:      # one item's git trouble stops one item
+            _set(conn, it["id"], state="left", error=f"couldn't commit the change: {e}"[:800])
+            return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
         sha = sha or it["commit_sha"]           # a retry that left things as they were: judge again
         touched = workspace.changed(it["worktree"], it["base"]) if sha else []
         if verdict == "person" or sha is None:

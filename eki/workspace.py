@@ -115,12 +115,14 @@ def changed(where: str | Path, since: str) -> List[str]:
 
 def commit_all(where: str | Path, message: str) -> Optional[str]:
     """Commit everything in the worktree but the linked folders; None when nothing changed."""
-    for name in LINKED:                    # one an agent (or an older eki) added anyway: untrack it
+    # no pathspec: `git add` with one that matches an ignored path (a linked
+    # .venv, ignored or dangling) refuses the whole add
+    git(where, "add", "-A")
+    for name in LINKED:                    # a link (or one an agent added): never part of a change
         if git(where, "ls-files", "--", name):
             git(where, "rm", "-q", "--cached", "--", name)
-    git(where, "add", "-A", "--", ".", *NOT_LINKED)
-    if not git(where, "status", "--porcelain", "--", ".", *NOT_LINKED) \
-            and not git(where, "diff", "--cached", "--name-only"):
+    staged = [f for f in git(where, "diff", "--cached", "--name-only").splitlines() if f]
+    if not staged:
         return None
     git(where, "commit", "-q", "-m", message)
     return head(where)

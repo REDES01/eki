@@ -18,6 +18,7 @@ def two_threads(home):
     return paths.db()
 
 
+@pytest.mark.drill
 def test_all_three_pass_on_this_checkout(two_threads):
     got = candidate.check(HERE, two_threads, HERE, sys.executable)
     assert [(n, ok) for n, ok, _ in got] == [
@@ -40,6 +41,7 @@ def test_a_missing_db_is_zero_threads(tmp_path):
     assert not (tmp_path / "nope.db").exists()
 
 
+@pytest.mark.drill
 def test_main_prints_three_ticks(two_threads, capsys):
     assert candidate.main(["--db", str(two_threads), "--running", str(HERE),
                            "--python", sys.executable]) == 0
@@ -47,6 +49,7 @@ def test_main_prints_three_ticks(two_threads, capsys):
     assert len(lines) == 3 and all(line.startswith("✓ ") for line in lines)
 
 
+@pytest.mark.drill
 def test_a_running_path_that_isnt_eki_fails(two_threads, tmp_path, capsys):
     got = candidate.check(HERE, two_threads, tmp_path, sys.executable)
     assert got[2][1] is False and "isn't an eki" in got[2][2]
@@ -55,6 +58,7 @@ def test_a_running_path_that_isnt_eki_fails(two_threads, tmp_path, capsys):
     assert "✗ the running build opens the migrated copy" in capsys.readouterr().out
 
 
+@pytest.mark.drill
 def test_a_check_that_raises_is_a_failed_line(two_threads, monkeypatch):
     def boom(*_):
         raise RuntimeError("no")

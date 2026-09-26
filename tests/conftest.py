@@ -5,9 +5,16 @@ from pathlib import Path
 
 import pytest
 
+# What a running eki puts in its children's environment; a check run by eki
+# must not see the live build, source or run through them.
+AMBIENT = [k for k in os.environ if k.startswith("EKI_") and k != "EKI_PYTHON"
+           and not k.startswith("EKI_CHECK_")]
+
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
+    for k in AMBIENT:
+        monkeypatch.delenv(k, raising=False)
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("EKI_HOME", str(h))

@@ -3,11 +3,21 @@
 # The interpreter is the first of $EKI_PYTHON, this folder's .venv, python3
 # that has pytest (the engine's own EKI_PYTHON may be a bare runtime), and
 # the tests see it as EKI_PYTHON.
+# In parallel (-n auto) when that interpreter has pytest-xdist, unless
+# EKI_CHECK_SERIAL is set; a bare build without xdist runs serially.
+# EKI_CHECK_FAST=1 skips the tests marked `drill` (real engines, launchers).
 set -e
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
 for py in "$EKI_PYTHON" "$here/.venv/bin/python" python3; do
-    [ -n "$py" ] && "$py" -c "import pytest" >/dev/null 2>&1 && EKI_PYTHON="$py" exec "$py" -m pytest -q "$@"
+    [ -n "$py" ] && "$py" -c "import pytest" >/dev/null 2>&1 || continue
+    if [ "${EKI_CHECK_FAST:-}" = 1 ]; then
+        set -- -m "not drill" "$@"
+    fi
+    if [ -z "${EKI_CHECK_SERIAL:-}" ] && "$py" -c "import xdist" >/dev/null 2>&1; then
+        set -- -n auto "$@"
+    fi
+    EKI_PYTHON="$py" exec "$py" -m pytest -q "$@"
 done
 echo "bin/check: no interpreter with pytest (tried \$EKI_PYTHON, .venv/bin/python, python3)" >&2
 exit 1

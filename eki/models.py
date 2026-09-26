@@ -15,7 +15,7 @@ same pause. `stop --hold` holds it down until you start it again.
 
 Without `keep_up` the model is *on demand*: it stays off until a request is
 sent its way (the worker starts it and waits), and `idle_stop` minutes
-(default 30; 0 never) after its last run eki stops it again. eki only ever
+(default 5; 0 never) after its last run eki stops it again. eki only ever
 stops a server it started; one you started yourself is left alone.
 """
 from __future__ import annotations
@@ -184,7 +184,7 @@ def last_used(conn, name: str) -> float:
 
 def idle_stop(cfg: Dict[str, Any]) -> float:
     """Seconds an on-demand model may sit unused; 0 never stops it."""
-    return float(cfg.get("idle_stop", 30)) * 60
+    return float(cfg.get("idle_stop", 5)) * 60
 
 
 def duty(conn) -> List[str]:

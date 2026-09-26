@@ -107,7 +107,7 @@ session id per thread, so returning to it resumes its session.
   stop comes back after the same pause (`--hold` keeps it down). Without
   `keep_up` a model is *on demand*: off until a run is sent its way — the
   worker starts it and waits, the prompt check does the same — and stopped
-  again `idle_stop` minutes (30) after its last run. eki never stops a
+  again `idle_stop` minutes (5) after its last run — it tends to be off. eki never stops a
   server it didn't start.
 
 ## Going live

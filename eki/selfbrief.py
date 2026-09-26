@@ -96,9 +96,54 @@ each file, what to check) and then one last line:
 `ITEM: done` — or `ITEM: person <why>` if this needs a person's hands.
 """
 
+DRAFT = """\
+Draft a goal for eki from this wish: {first}
+
+The whole wish, as the person typed it:
+
+{wish}
+
+This folder is a read-only worktree of eki's source at commit {base}. Do not
+change any file here; you are only writing the goal.
+
+Read first: docs/design.md, docs/self-build.md, ROADMAP.md and CLAUDE.md;
+{digest}; the output of `eki observe --since 7d --kind fault,correction` if it
+prints anything; then the code the wish touches.{old}
+
+Then write the goal a planner will split into items, in four parts with these
+headings:
+
+What must be true when done
+Read first
+Item shape and shared files
+Tests (bin/check green)
+
+Make it specific enough that a planner can split it without guessing: name real
+paths and modules that exist here, the functions and tables it changes, and the
+files items will share. Where the wish leaves a real choice open, ask the person
+with the AskUserQuestion tool — 2 to 4 options per question, at most three
+questions — and fold the answers into the goal. Where it doesn't, don't ask:
+decide, and say what you decided in the goal.
+
+End your answer with a line `GOAL:` followed by the goal text, then a final
+line `DRAFT: done` — or `DRAFT: person <why>` when the wish can't be made into
+a goal.
+"""
+
 
 def plan(goal: str, base: str) -> str:
     return PLAN.format(goal=goal.strip(), base=base[:12])
+
+
+def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[str] = None) -> str:
+    wish = wish.strip()
+    first = wish.splitlines()[0].strip() if wish else "(empty wish)"
+    seen = (f"the last digest, at {digest}" if digest
+            else "there is no digest yet, so skip that")
+    ref = (f"\n\nThe old eki's version of the same thing is at {old} — read it as reference\n"
+           "only; do not copy it or change it.") if old else ""
+    return DRAFT.format(first=first, wish=wish or "(empty wish)", base=base[:12],
+                        digest=seen, old=ref)
 
 
 def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, base: str,
@@ -169,3 +214,22 @@ def outcome(answer: str) -> Tuple[str, str, str]:
         summary = answer[s + len("SUMMARY:"):]
         summary = re.split(r"^\s*`?ITEM:", summary, maxsplit=1, flags=re.M)[0].strip()
     return verdict, reason, summary[:2000]
+
+
+def goal_in(answer: str) -> Tuple[Optional[str], str]:
+    """(goal text, "") from a drafter's answer, or (None, why) when there is no goal."""
+    lines = (answer or "").splitlines()
+    draft_at = [i for i, ln in enumerate(lines) if re.match(r"^\s*`?DRAFT:", ln)]
+    if draft_at:
+        last = re.sub(r"^\s*`?DRAFT:", "", lines[draft_at[-1]]).strip(" `")
+        m = re.match(r"person\b\s*(.*)$", last, re.I)
+        if m:
+            return None, m.group(1).strip(" `:-") or "the drafter left it for you"
+    goal_at = [i for i, ln in enumerate(lines) if re.match(r"^\s*`?GOAL:", ln)]
+    if not goal_at:
+        return None, "the draft has no GOAL: block"
+    g = goal_at[-1]
+    end = draft_at[-1] if draft_at and draft_at[-1] > g else len(lines)
+    body = [re.sub(r"^\s*`?GOAL:`?", "", lines[g])] + lines[g + 1:end]
+    text = "\n".join(ln for ln in body if not ln.strip().startswith("```")).strip()
+    return (text, "") if text else (None, "the draft has no GOAL: block")

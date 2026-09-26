@@ -25,11 +25,14 @@ class Stub:
         self.posted = []
         self.uploads = []           # (filename, bytes, overwrite)
         self.polls = 0
+        self.on_poll = None         # a test's hook, called on every /history poll
         self.known = {"p1"}
         self.subfolder = ""
 
     def history(self, pid):
         self.polls += 1
+        if self.on_poll:
+            self.on_poll()
         if pid not in self.known or self.mode == "pending" or self.polls < 2:
             return {}
         if self.mode == "exec_error":
@@ -249,7 +252,7 @@ def test_the_answer_names_kind_and_model(comfy):
 def test_a_stop_mid_poll_cancels(comfy):
     comfy.mode = "pending"
     turn = Turn(prompt="draw a cat", history=[], run_id="r1")
-    threading.Timer(0.2, turn.stop.set).start()
+    comfy.on_poll = turn.stop.set          # the stop lands after the first poll, however slow the machine
     t0 = time.time()
     out, events = run(comfy.provider, turn)
     assert out.state == "cancelled" and time.time() - t0 < 3

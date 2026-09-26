@@ -100,6 +100,14 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
+    def _upload(self) -> None:
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 20 * 1024 * 1024:
+            self.close_connection = True           # the body is left unread
+            return self._json({"error": "picture over 20 MB"}, 400)
+        data = self.rfile.read(n)
+        self._call(lambda _c: api.upload(data, self.headers.get("X-Filename") or ""))
+
     # ---- routes --------------------------------------------------------------------------
 
     def do_GET(self) -> None:
@@ -135,6 +143,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Eki") != "1":
             return self._json({"error": "missing X-Eki header"}, 403)
         p = urlparse(self.path).path
+        if p == "/api/attachments":
+            return self._upload()
         body = self._body()
         if p == "/api/ask":
             return self._call(api.ask, body)

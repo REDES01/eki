@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, capacity, digest, engine, machine, models, paths, providers, quota, routing, store
+from . import asking, asks, attachments, capacity, digest, engine, machine, models, paths, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -25,6 +25,7 @@ def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) ->
         view["last_event"] = max((e["id"] for e in store.events_after(conn, r["id"])), default=0)
         view["asks"] = [asks.view(a) for a in asks.for_run(conn, r["id"]) if a["state"] != "withdrawn"]
         view["files"] = sorted({e["path"] for e in view["steps"] if e.get("path")})
+        view["attachments"] = store.attachments(r)
     return view
 
 
@@ -72,6 +73,11 @@ def ask(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
                              background=bool(body.get("background")),
                              attachments=_paths(body.get("attachments")))
     return {"thread": tid, "run": rid}
+
+
+def upload(data: bytes, name: str) -> Dict[str, Any]:
+    """A picture from the window, saved to send with the next request."""
+    return {"path": attachments.save(data, name)}
 
 
 def _paths(value: Any) -> List[str]:

@@ -1,7 +1,7 @@
 """Files an agent made or changed, shown in the thread.
 
 eki only ever serves a file a run pointed at — one a tool wrote or edited,
-or a path an answer named that exists — or a page of eki's own daily digest,
+or a path an answer named that exists, or a file sent with a request — or a page of eki's own daily digest,
 never an arbitrary path. HTML is
 served sandboxed, so a page an agent wrote can't act as eki.
 """
@@ -32,8 +32,12 @@ def named_in(text: str) -> List[str]:
 
 
 def known(conn: sqlite3.Connection, path: str) -> bool:
+    """A path a tool event named, or one a run was sent as an attachment."""
     row = conn.execute("SELECT 1 FROM events WHERE kind='tool' AND json_extract(data, '$.path') = ? LIMIT 1",
                        (path,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT 1 FROM runs, json_each(CASE WHEN json_valid(runs.attachments) "
+                           "THEN runs.attachments ELSE '[]' END) AS a WHERE a.value = ? LIMIT 1", (path,)).fetchone()
     return row is not None
 
 

@@ -6,6 +6,7 @@ import sqlite3
 from typing import List, Optional, Tuple
 
 from . import db, providers, store
+from .attachments import intake
 
 
 def submit(conn: sqlite3.Connection, prompt: str, *, thread: Optional[str] = None,
@@ -27,7 +28,7 @@ def submit(conn: sqlite3.Connection, prompt: str, *, thread: Optional[str] = Non
         path = os.path.abspath(os.path.expanduser(str(path)))
         if not os.path.isfile(path):
             raise ValueError(f"no file {path}")
-        files.append(path)
+        files.append(intake(path))  # a HEIC or a huge picture gets a safe copy
     with db.tx(conn):
         tid = None
         if thread:

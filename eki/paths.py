@@ -52,3 +52,17 @@ def scratch() -> Path:
     p = home() / "scratch"
     p.mkdir(exist_ok=True)
     return p
+
+
+def attachments() -> Path:
+    """Pictures uploaded from the window, and safe copies made at intake."""
+    p = home() / "attachments"
+    p.mkdir(exist_ok=True)
+    return p
+
+
+def images() -> Path:
+    """Pictures a drawing program made, one folder per run."""
+    p = home() / "images"
+    p.mkdir(exist_ok=True)
+    return p

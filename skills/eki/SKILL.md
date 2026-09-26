@@ -66,4 +66,5 @@ eki open                        # open eki's window
 eki drill                       # prove a restart loses nothing (runs in a throwaway home)
 eki swap <commit> | --back      # make a build of a commit, check it, and put it live
 eki builds                      # list eki's builds: current, previous, and how the last swap went
+eki observe [--since 24h] [--kind fault|handoff|…] [--full]  # what eki wrote down: faults, handoffs, corrections, limits
 ```

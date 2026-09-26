@@ -19,6 +19,9 @@ def run(args) -> int:
         if name in providers.BUILTIN:
             continue
         ok, why = avail.get(name, (False, "?"))
+        can = "[" + ", ".join(providers.capabilities(name, cfg)) + "]"
         print(f"{'✓' if ok else '✗'} {name:<8} {cfg.get('kind', ''):<12} {cfg.get('label', '')}"
-              + ("" if ok else f"  — {why}"))
+              f"  {can}" + ("" if ok else f"  — {why}"))
+        if cfg.get("about"):
+            print(f"    {cfg['about']}")
     return 0

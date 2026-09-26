@@ -25,10 +25,6 @@ class Fake(ProgramProvider):
     kind = "fake"
     interactive = True
 
-    def __init__(self, name: str, cfg: Dict[str, Any]):
-        super().__init__(name, cfg)
-        self.harness = bool(cfg.get("harness", True))
-
     def argv(self, turn: Turn) -> List[str]:
         argv = [sys.executable, "-m", "eki.providers.fake", "--name", self.name]
         if turn.resume:

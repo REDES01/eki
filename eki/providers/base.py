@@ -48,13 +48,21 @@ class Outcome:
 
 class Provider:
     kind = "base"
-    #: the provider can use tools (files, commands, web): a harness
-    harness = False
 
     def __init__(self, name: str, cfg: Dict[str, Any]):
+        from . import capabilities   # the package imports this module
         self.name = name
         self.cfg = cfg
         self.label = cfg.get("label") or name
+        #: what it can do: text, tools, web, vision, image, image-edit
+        self.can: List[str] = capabilities(name, cfg)
+        #: a sentence or two on it, for the person and the prompt check alike
+        self.about: str = cfg.get("about", "")
+
+    @property
+    def harness(self) -> bool:
+        """It can use tools (files, commands, web)."""
+        return "tools" in self.can
 
     def available(self) -> tuple:
         """(can it take work at all, why not)."""

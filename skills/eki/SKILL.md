@@ -14,6 +14,7 @@ eki ask --bg "…"               # don't wait: prints a run id
 eki ask --bg --background "…"  # only when the Mac has room (plugged in, memory free)
 eki follow <run> | eki show <run> | eki runs | eki cancel <run>
 eki route "…"                  # where a request would go, and why, without running it
+eki providers                  # each provider, whether it can take work, and what it can do (its can tags)
 ```
 
 Rules of thumb:

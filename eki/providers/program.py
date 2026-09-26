@@ -76,7 +76,6 @@ class Channel:
 
 
 class ProgramProvider(Provider):
-    harness = True
     #: the program reads JSON on stdin while it works
     interactive = False
 

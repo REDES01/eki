@@ -40,7 +40,6 @@ DEFAULT_PARAMS = {"temperature": 1.0, "top_p": 0.95, "top_k": 20}
 
 class Local(Provider):
     kind = "local"
-    harness = False
 
     def __init__(self, name: str, cfg: Dict[str, Any]):
         super().__init__(name, cfg)

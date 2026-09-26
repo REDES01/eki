@@ -38,7 +38,6 @@ def argv_of(prompt: str) -> List[str]:
 
 class Command(Provider):
     kind = "command"
-    harness = False
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         out = Outcome()

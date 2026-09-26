@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from . import builds, db, doccheck, integration, paths, selfbrief, store, workspace
+from . import builds, db, doccheck, integration, paths, selfbrief, selfdraft, store, workspace
 
 log = logging.getLogger("eki.self")
 
@@ -54,22 +54,22 @@ def repo() -> Path:
 
 # ---- in ---------------------------------------------------------------------------------
 
-def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, files: Optional[List[str]] = None,
-           owner: str = "you", source_kind: str = "ask") -> str:
+def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: bool = False,
+           files: Optional[List[str]] = None, owner: str = "you", source_kind: str = "ask") -> str:
+    """A goal. With `draft` the text is a wish the draft run makes into a goal
+    first (eki/selfdraft.py); without `plan` it is one item as it stands."""
     text = (text or "").strip()
     if not text:
         raise ValueError("nothing to do")
     base = integration.sync()
     gid = store.new_id()
     with db.tx(conn):
-        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
-                     (gid, text, source_kind, owner, "planning" if plan else "planned", db.now()))
-        if plan:
-            wt = workspace.add(repo(), f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
-            tid = store.create_thread(conn, f"plan: {text}", str(wt))
-            rid = store.create_run(conn, tid, selfbrief.plan(text, base), row="code",
-                                   priority="now" if owner == "you" else "background")
-            conn.execute("UPDATE goals SET thread_id=?, plan_run=? WHERE id=?", (tid, rid, gid))
+        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at) VALUES (?,?,?,?,?,?,?)",
+                     (gid, text, text, source_kind, owner, "planning" if plan else "planned", db.now()))
+        if plan and draft:
+            selfdraft.start_draft(conn, gid, text, base, owner)
+        elif plan:
+            selfdraft.start_plan(conn, gid, text, base, owner)
         else:
             new_item(conn, gid, text.splitlines()[0][:120], text, files or [], [], False)
     return gid
@@ -90,6 +90,8 @@ def new_item(conn: sqlite3.Connection, gid: str, title: str, spec: str, files: L
 def tick(conn: sqlite3.Connection) -> List[str]:
     _tracked.clear()
     said: List[str] = []
+    for g in conn.execute("SELECT * FROM goals WHERE state='drafting'").fetchall():
+        said += selfdraft.conclude(conn, g)
     for g in conn.execute("SELECT * FROM goals WHERE state='planning'").fetchall():
         said += _conclude_plan(conn, g)
     for it in items_in(conn, ("building",)):

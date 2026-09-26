@@ -74,19 +74,51 @@ A run carries its `attempt`; after 3 interruptions in a row it fails.
 ## Threads
 
 A thread stays with the provider that answered it. It moves only when it
-must: the provider hands off (the local model's one tool), you pick
-another, it hit a limit, or it isn't available. A provider joining a thread
-mid-way gets the transcript so far as context. Each provider keeps its own
-session id per thread, so returning to it resumes its session.
+must: the provider can't do what the next request needs (a picture for a
+text-only model; tools, which the local model asks for with its one
+`handoff` tool), you pick another, it hit a limit, or it isn't available.
+A provider joining a thread mid-way gets the transcript so far as context.
+Each provider keeps its own session id per thread, so returning to it
+resumes its session.
 
 ## Routing
 
-1. **Prompt check** → a row. Uses the local model when it's up (one short
-   classification call, logged); otherwise the `general` row. `eki
-   route explain "…"` shows the row and why.
-2. **Table** → first target in the row that's available. Moving down the
-   row is failover. The table is a JSON file you can read and edit
-   (`~/.eki/routing.json`); defaults are written on first run.
+A request passes through five layers, in order; each adds its reason to the
+run's `why` ("rule: names a path → code → claude (codex last: five_hour
+82%)"). `eki route "…"` prints the chain; `routing.explain` returns it as
+JSON.
+
+1. **Thread.** A thread stays with its provider, unless that provider
+   can't take the request ("local can't take it (needs vision)").
+2. **Constraints** — pure code. What the request needs against what each
+   provider can do, plus availability, cooldowns and quota. A provider
+   that fails is skipped with the reason ("can't do images", "limit",
+   "off"); an on-demand model that's off still counts, it starts for the
+   run.
+3. **Intent** picks the row. Rules (`eki/routing/rules.py`) take the
+   obvious cases — a folder or a path → `code`, a picture → `vision`,
+   "draw …" → `image` — logged as "rule: <reason>". Only when no rule
+   fires does a small model classify. `checker_wakes` in `routing.json`
+   (default true) decides whether an off checker is started for that.
+4. **Preference.** The row's target order, bent by capacity: a target near
+   its limit moves to the back.
+5. **Failover** down the row.
+
+When the check can't run (no checker, an off checker not woken, no row
+given), the `general` row is used, cheapest first: local < subscriptions
+(Claude Code, Codex) < API. The table is `~/.eki/routing.json`, written
+with defaults on first run. Migration: an existing `routing.json` is left
+as the person wrote it; new defaults (row `needs`, the `general` order)
+only reach a fresh file.
+
+**Capabilities.** Each provider declares `can` from {text, tools, web,
+vision, image, image-edit}. Each kind has defaults (Claude Code: text,
+tools, web, vision; Codex: text, tools, web; local: text; command: none);
+an entry's own `can` in `providers.json` replaces them, and its optional
+`about` is a sentence or two on what it's for. Rows declare `needs`
+(default `text`; `code` needs tools, `web` needs web); a picture attached
+adds `vision`. `eki providers`, `eki route` and the prompt check's menu
+show the same tags and `about` the code enforces.
 
 ## Milestone 2: the window and the machine
 

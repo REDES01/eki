@@ -30,6 +30,13 @@ ticks them as they land. Items marked *(for a person)* are never taken.
       (`eki observe`), `eki self digest`, `eki self undo <build>`.
 - [ ] **A review run** between gate 1 and the queue, once the loop runs.
 
+## Providers and routing
+
+- [x] Routing complete: capabilities, rules-first check, cheapest fallback
+- [ ] Codex driving the local model (rung 2)
+- [ ] ComfyUI provider kind (rung 3)
+- [ ] eki models add/remove
+
 ## After
 
 - [ ] Goals and the idle shift (background work while the Mac has room).

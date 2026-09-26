@@ -11,7 +11,9 @@ from typing import Any, Dict, List, Optional
 from .. import providers
 
 #: what a row needs when it doesn't say
-ROW_NEEDS: Dict[str, List[str]] = {"code": ["tools"], "web": ["web"], "general": []}
+ROW_NEEDS: Dict[str, List[str]] = {"code": ["tools"], "web": ["web"], "general": [],
+                                   "image": ["image"], "image-hq": ["image"], "image-anime": ["image"],
+                                   "image-edit": ["image-edit"], "image-upscale": ["image-edit"]}
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic")
 
@@ -31,9 +33,11 @@ def is_picture(path: str) -> bool:
 
 
 def request_needs(row: Dict[str, Any], attachments: Optional[List[str]] = None) -> List[str]:
-    """The row's needs plus what the request's shape adds; no duplicates, order kept."""
+    """The row's needs plus what the request's shape adds; no duplicates, order kept.
+    A picture attached to an edit is the source to change, not one to read:
+    it adds no vision."""
     out = row_needs(row)
-    if any(is_picture(a) for a in attachments or []):
+    if "image-edit" not in out and any(is_picture(a) for a in attachments or []):
         out.append("vision")
     return list(dict.fromkeys(out))
 

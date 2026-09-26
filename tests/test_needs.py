@@ -55,7 +55,7 @@ def test_default_rows_declare_needs_and_general_is_cheapest_first(home):
     _providers(home, {"claude": {"kind": "claude_code"}, "codex": {"kind": "codex"},
                       "local": {"kind": "local"}})
     rows = {r["key"]: r for r in table.rows()}
-    assert set(rows) == {"answer", "code", "web", "general"}
+    assert set(rows) == {"answer", "code", "web", "general", *table.PICTURE_ROWS}
     assert rows["general"]["targets"] == ["local", "claude", "codex"]
     assert rows["general"]["needs"] == [] and rows["code"]["needs"] == ["tools"]
     assert rows["answer"]["needs"] == ["text"] and rows["web"]["needs"] == ["web"]

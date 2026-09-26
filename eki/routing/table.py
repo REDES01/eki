@@ -9,6 +9,8 @@ go cheapest first: local models, then subscriptions, then the rest.
 Migration: an existing routing.json is never rewritten or reordered.
 The defaults here (needs, the cheapest-first general row) only reach a
 file eki writes for the first time; what a person wrote stays as written.
+The one exception is the picture rows (PICTURE_ROWS): rows() adds any the
+file lacks, in memory only, so an older table can still draw.
 """
 from __future__ import annotations
 
@@ -41,12 +43,30 @@ DEFAULT_ROWS: List[Dict[str, Any]] = [
     {"key": "web", "title": "Needs current information from the web",
      "examples": ["latest Claude Code release notes", "price of an M5 Mac mini today"],
      "needs": ["web"], "targets": ["claude", "codex"]},
+    {"key": "image", "title": "A quick draft picture",
+     "examples": ["draw a lighthouse at dusk", "a picture of a cat on a windowsill", "sketch a red bicycle"],
+     "needs": ["image"], "targets": ["comfyui"]},
+    {"key": "image-hq", "title": "A high-quality, detailed picture",
+     "examples": ["draw a detailed photorealistic lighthouse", "a high quality 4k portrait of an old sailor"],
+     "needs": ["image"], "targets": ["comfyui"]},
+    {"key": "image-anime", "title": "An anime-style picture",
+     "examples": ["draw an anime girl with silver hair", "a chibi fox in manga style"],
+     "needs": ["image"], "targets": ["comfyui"]},
+    {"key": "image-edit", "title": "Change the previous or attached picture from an instruction",
+     "examples": ["make it bluer", "remove the hat", "turn the sky into a sunset"],
+     "needs": ["image-edit"], "targets": ["comfyui"]},
+    {"key": "image-upscale", "title": "Upscale a picture",
+     "examples": ["upscale it", "make a bigger version of this picture"],
+     "needs": ["image-edit"], "targets": ["comfyui"]},
     {"key": "general", "title": "Anything (used when the prompt check can't run)",
      "examples": [],
      "needs": [], "targets": cheapest_first(
          ["claude", "codex", "local"],
          {n: str(c["kind"]) for n, c in providers.DEFAULTS.items()})},
 ]
+
+#: the picture rows, which rows() adds to a table that lacks them
+PICTURE_ROWS: List[str] = ["image", "image-hq", "image-anime", "image-edit", "image-upscale"]
 
 
 def settings() -> Dict[str, Any]:
@@ -63,7 +83,17 @@ def checker_wakes() -> bool:
 
 
 def rows() -> List[Dict[str, Any]]:
-    return list(settings().get("rows") or DEFAULT_ROWS)
+    """The file's rows, then each picture row (PICTURE_ROWS) the file lacks.
+
+    The picture rows are added in memory only; routing.json is never
+    rewritten for them, and a row of the same key the person wrote wins.
+    Only the picture rows are added, not other missing defaults, so a
+    table someone trimmed keeps routing the way they left it.
+    """
+    out = list(settings().get("rows") or DEFAULT_ROWS)
+    have = {r.get("key") for r in out}
+    out += [dict(r) for r in DEFAULT_ROWS if r["key"] in PICTURE_ROWS and r["key"] not in have]
+    return out
 
 
 def row(key: str) -> Dict[str, Any]:
@@ -73,4 +103,4 @@ def row(key: str) -> Dict[str, Any]:
     for r in rows():
         if r["key"] == "general":
             return r
-    return DEFAULT_ROWS[-1]
+    return next(r for r in DEFAULT_ROWS if r["key"] == "general")

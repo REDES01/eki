@@ -152,7 +152,8 @@ def test_sync_picks_up_origin_and_the_source(src, origin, tmp_path):
 
     diverged = commit(other, "diverged.py")           # origin moves off main's line
     workspace.git(other, "push", "-q", "origin", "main")
-    assert integration.sync() == mine and not integration.contains(diverged)
+    rebased = integration.sync()                      # main is rebased onto it (test_integration_diverge.py)
+    assert integration.contains(diverged) and integration.carries(mine) and rebased != mine
 
 
 def test_sync_survives_an_unreachable_origin(src, origin, tmp_path):

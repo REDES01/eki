@@ -60,7 +60,7 @@ def _go(conn: sqlite3.Connection) -> List[str]:
     main = integration.main()
     if main == running:
         return []
-    if running is not None and not integration.contains(running, "main"):
+    if running is not None and not integration.carries(running, "main"):
         return [f"train: the running build {running[:12]} isn't in integration main {main[:12]}; not going"]
     swap = builds.status().get("swap") or {}
     if swap.get("state") == "swapping":
@@ -70,7 +70,7 @@ def _go(conn: sqlite3.Connection) -> List[str]:
         return [f"train: waiting — gate 2 isn't green for {', '.join(red)}"]
     build = traincheck.pending(conn) or builds.make(integration.repo(), "main")
     sha = _commit_of(build) or main
-    carried = [it for it in waiting if integration.contains(it["rebased"] or it["commit_sha"] or "", sha)]
+    carried = [it for it in waiting if integration.carries(it["rebased"] or it["commit_sha"] or "", sha)]
     if traincheck.needed(carried):
         green, said = traincheck.step(conn, build, carried)
         if not green:

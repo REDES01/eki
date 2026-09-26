@@ -1,7 +1,7 @@
 import json
 import time
 
-from eki import db, digest
+from eki import asks, db, digest
 
 DAY = 86400.0
 
@@ -153,3 +153,33 @@ def test_rewrite_today_and_restart_change_nothing(conn):
     assert path.read_text() == text and digest.last() == NOW
     assert digest.latest() == path
     assert not list(digest.folder().glob(".*.tmp"))
+
+
+def add_goal(conn, gid, state, wish=None, draft_run=None, text="the goal"):
+    conn.execute("INSERT INTO goals(id, text, state, wish, draft_run, created_at) VALUES (?,?,?,?,?,?)",
+                 (gid, text, state, wish, draft_run, NOW - 5 * DAY))
+
+
+def ask_colour(conn, run_id):
+    return asks.create(conn, run_id, "t1", "question",
+                       {"questions": [{"question": "Which colour?\nmore", "options": [
+                           {"label": "red"}, {"label": "blue"}]}]})
+
+
+def test_drafting_goal_with_open_question_waits_for_you(conn):
+    add_goal(conn, "gd1", "drafting", wish="make the window blue\nand more", draft_run="r1")
+    add_goal(conn, "gp1", "planning", wish="plan me", draft_run="r2")
+    add_goal(conn, "gq1", "drafting", wish="nothing asked", draft_run="r3")
+    aid = ask_colour(conn, "r1")
+    ask_colour(conn, "r2")
+    text = digest.write(conn, NOW).read_text()
+    body = section(text, "Waits for you")
+    assert f"- goal gd1 make the window blue — asked you: Which colour? (eki answer {aid})" in body
+    assert "Nothing." not in body
+    assert "gp1" not in text and "gq1" not in text
+    assert text.count("- goal gd1 ") == 1
+
+    asks.answer(conn, aid, {"answers": {"Which colour?": "blue"}})
+    text = digest.write(conn, NOW + 60).read_text()
+    assert "gd1" not in text
+    assert "## Waits for you\n\nNothing." in text

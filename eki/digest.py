@@ -154,6 +154,34 @@ def changed(conn: sqlite3.Connection, since: float, until: float) -> List[sqlite
                         (since, until)).fetchall()
 
 
+def _question(payload: Optional[str]) -> str:
+    """The first question an ask puts to you, in one line."""
+    try:
+        got = json.loads(payload or "{}")
+    except (ValueError, TypeError):
+        return ""
+    qs = got.get("questions") if isinstance(got, dict) else None
+    if isinstance(qs, list):
+        for q in qs:
+            if isinstance(q, dict) and _first_line(q.get("question")):
+                return _first_line(q.get("question"))
+    return _first_line(got.get("question")) if isinstance(got, dict) and isinstance(got.get("question"), str) else ""
+
+
+def asking(conn: sqlite3.Connection) -> List[str]:
+    """Goals still drafting whose draft run has a question open for you — listed whatever the window."""
+    out = []
+    for g in conn.execute("SELECT g.id, g.wish, g.text, a.id AS ask, a.payload FROM goals g"
+                          " JOIN asks a ON a.run_id=g.draft_run AND a.state='open'"
+                          " WHERE g.state='drafting' ORDER BY g.created_at, g.id, a.created_at"):
+        if out and out[-1][0] == g["id"]:
+            continue                         # one line a goal: its first open question
+        what = _first_line(g["wish"]) or _first_line(g["text"])
+        q = _question(g["payload"]) or "a question"
+        out.append((g["id"], f"- goal {g['id']} {what} — asked you: {q} (eki answer {g['ask']})"))
+    return [line for _, line in out]
+
+
 def _clock(t: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
@@ -182,6 +210,7 @@ def render(conn: sqlite3.Connection, since: float, until: float) -> str:
     for it in items:
         group, what = happened(it, autonomy)
         groups[group].append(f"- {it['id']} {it['title']} — {what}")
+    groups["Waits for you"] += asking(conn)
 
     out = [f"# eki digest — {_date(until)}", "",
            f"From {_clock(since)} to {_clock(until)}: {len(items)} item(s) changed.", ""]

@@ -90,3 +90,9 @@ def test_an_interrupted_run_carries_on_in_its_session(conn):
     store.update_run(conn, rid, provider="fake")
     turn = worker.build_turn(conn, store.run(conn, rid), "fake")
     assert turn.resume == "abc" and turn.prompt == worker.CARRY_ON
+
+
+def test_a_rule_routed_run_keeps_the_rule_in_its_why(conn):
+    _, rid = ask(conn, "fix steps=1 the test")
+    r = run_inline(conn, rid)
+    assert r["state"] == "done" and r["why"] == "rule: starts with fix → code → fake"

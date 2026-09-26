@@ -33,7 +33,7 @@ def test_a_plan_near_its_end_goes_last_in_its_row(conn):
     with db.tx(conn):
         rid = store.create_run(conn, store.create_thread(conn, "t", None), "x")
     d = routing.decide(conn, store.run(conn, rid))
-    assert d.provider == "fake2" and "fake last (week 85%)" in d.why
+    assert d.provider == "fake2" and "→ fake2 (fake last: week 85%)" in d.why
 
 
 def test_background_run_skips_a_plan_past_its_share(conn):

@@ -10,6 +10,11 @@ makes it unfit and the items behind it are judged again on new heads. The
 front of the queue lands — a fast-forward of integration main — once its
 gate 2 is green on the head main is at.
 
+Gate 2 is the fast tests only (bin/check with EKI_CHECK_FAST=1: no drills);
+the drills and the candidate checks run on the train, before the swap. A
+docs-only item (doccheck.py) is judged by the doccheck instead: its files
+parse as UTF-8 text and nothing outside the docs lane changed.
+
 Nothing is kept in memory: each tick rebuilds what to do from the items
 table and the runs, and every step is a run or an idempotent git operation,
 so a restart anywhere loses nothing.
@@ -22,14 +27,13 @@ import os
 import sqlite3
 from typing import Any, List
 
-from . import db, integration, locks, paths, rebase, resolve, selfwork, store, workspace
+from . import db, doccheck, integration, locks, paths, rebase, resolve, selfwork, store, workspace
 from .workspace import WorkspaceError, git
 
 log = logging.getLogger("eki.queue")
 
 #: gate 2, run in a fresh detached worktree of the predicted head plus the item
-GATE2 = ('["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python bin/check -q && '
-         'PYTHONPATH=$PWD $PWD/.venv/bin/python -m eki.candidate"]')
+GATE2 = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_FAST=1 exec bin/check -q"]'
 MODES = ("apply", "propose")
 #: states that give the queue something to do
 BUSY = ("proposed", "locked", "queued", "resolving", "rechecking")
@@ -207,10 +211,12 @@ def _start_gate2(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if row["state"] != "queued" or row["rebased"] != it["rebased"]:
             return []
         tid = store.create_thread(conn, f"gate 2: {it['title']}", str(tree))
-        rid = store.create_run(conn, tid, GATE2, provider="command",
+        docs = doccheck.of_item(it)
+        judge = doccheck.command(it["head"], it["rebased"]) if docs else GATE2
+        rid = store.create_run(conn, tid, judge, provider="command",
                                priority="now" if goal and goal["owner"] == "you" else "background")
         selfwork._set(conn, it["id"], gate2_run=rid, gate2_on=it["rebased"], gate2=None)
-    return [f"item {it['id']}: gate 2 on {it['rebased'][:12]} ({rid[:8]})"]
+    return [f"item {it['id']}: gate 2 on {it['rebased'][:12]} ({rid[:8]}){', docs only' if docs else ''}"]
 
 
 def _unfit(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:

@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from eki import db, integration, paths, queue, selfwork, store, workspace
 from eki.workspace import git
 from conftest import run_inline
 
+REAL_GATE2 = queue.GATE2
 STUB = '["/bin/sh", "-c", "exit ${EKI_TEST_CHECK_EXIT:-0}"]'
 
 
@@ -207,3 +209,44 @@ def test_a_failed_push_is_retried_later(conn, src, origin, tmp_path):
     git(r, "remote", "set-url", "origin", str(origin))
     queue.tick(conn)                                              # main is ahead of origin: pushed now
     assert git(origin, "rev-parse", "main") == A["rebased"]
+
+
+def test_gate_two_runs_the_fast_tests_without_the_candidate_checks(conn, src, monkeypatch):
+    monkeypatch.setattr(queue, "GATE2", REAL_GATE2)
+    autonomy("apply")
+    a = item(conn, "A", "a.py")
+    queue.tick(conn)
+    prompt = store.run(conn, get(conn, a)["gate2_run"])["prompt"]
+    assert "EKI_CHECK_FAST=1" in prompt and "bin/check" in prompt
+    assert "eki.candidate" not in prompt
+
+
+def test_a_docs_only_item_gets_the_doccheck(conn, src):
+    autonomy("apply")
+    a = item(conn, "A", "docs/a.md")
+    said = queue.tick(conn)
+    A = get(conn, a)
+    prompt = store.run(conn, A["gate2_run"])["prompt"]
+    assert "eki.doccheck" in prompt and f"{A['head']}..{A['rebased']}" in prompt
+    assert "bin/check" not in prompt
+    assert any("docs only" in line for line in said), said
+
+
+def test_a_green_doccheck_lands_the_item(conn, tmp_path, origin, monkeypatch):
+    seed = tmp_path / "seed"                      # the doccheck runs from the gate tree: put it there
+    (seed / "eki").mkdir(exist_ok=True)
+    (seed / "eki" / "__init__.py").write_text("")
+    commit(seed, "eki/doccheck.py", (Path(__file__).parents[1] / "eki" / "doccheck.py").read_text())
+    git(seed, "push", "-q", "origin", "main")
+    s = tmp_path / "src"
+    git(tmp_path, "clone", "-q", str(origin), str(s))
+    monkeypatch.setenv("EKI_SOURCE", str(s))
+    monkeypatch.setenv("EKI_PYTHON", sys.executable)
+    autonomy("apply")
+    a = item(conn, "A", "notes.md", "# notes\n")
+    queue.tick(conn)
+    run = run_inline(conn, get(conn, a)["gate2_run"])
+    assert run["state"] == "done", store.answer(conn, run["id"])
+    said = queue.tick(conn)
+    A = get(conn, a)
+    assert A["state"] == "landed" and integration.main() == A["rebased"], said

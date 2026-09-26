@@ -22,6 +22,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("EKI_MACHINE", "ok")
     monkeypatch.setenv("EKI_PORT", "0")
     monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
+    for k in ("EKI_SOURCE", "EKI_BUILD_DIR", "EKI_LAUNCHED", "EKI_PYTHON", "EKI_WATCH"):
+        monkeypatch.delenv(k, raising=False)   # a check run under the engine must not see its world
     real = Path("~").expanduser()
     assert not str(h).startswith(str(real / ".eki")), "tests must never use the real eki home"
     (h / "providers.json").write_text(json.dumps({

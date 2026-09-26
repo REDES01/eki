@@ -21,6 +21,7 @@ from . import models, paths, providers, quota, store
 
 #: a limit that came without a reset time is waited out this long
 DEFAULT_COOLDOWN = 15 * 60
+STARTS = "off; starts for the run"          # a managed server that is down but eki can start
 DEFAULT_LIMITS = {"stop_at": 0.98, "save_from": 0.8, "background_up_to": 0.7}
 
 
@@ -59,7 +60,7 @@ def status(conn: sqlite3.Connection, background: bool = False) -> Dict[str, Tupl
         except KeyError as e:
             out[name] = (False, str(e))
         if not out[name][0] and cfg.get("kind") in models.MANAGED_KINDS and cfg.get("serve"):
-            out[name] = (True, "off; starts for the run")     # on demand: the worker starts it and waits
+            out[name] = (True, STARTS)     # on demand: the worker starts it and waits
     return out
 
 

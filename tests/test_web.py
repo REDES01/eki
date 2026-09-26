@@ -43,6 +43,15 @@ def test_ui_files_are_served(web):
         get(web + "/ui/../server.py")
 
 
+def test_the_window_has_a_pictures_view(web):
+    _, body = get(web + "/")
+    assert '<script src="/ui/gallery.js"></script>' in body and 'id="pictures"' in body and ">Pictures<" in body
+    assert body.index("/ui/gallery.js") < body.index("/ui/app.js")
+    code, js = get(web + "/ui/gallery.js")
+    assert code == 200 and "/api/pictures" in js and "window.gallery" in js
+    assert json.loads(get(web + "/api/pictures?limit=5")[1]) == {"pictures": [], "more": False}
+
+
 def test_ask_then_read_the_thread(web, conn):
     code, got = post(web + "/api/ask", {"prompt": "steps=1 hello from the web"})
     assert code == 200

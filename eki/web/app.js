@@ -111,6 +111,8 @@
   }
 
   function open(id) {
+    if (id === "pictures") { state.thread = null; loadThreads(); return gallery.show(); }  // the gallery view (gallery.js)
+    gallery.hide();
     state.thread = id || null;
     state.after = 0;
     $("log").innerHTML = "";

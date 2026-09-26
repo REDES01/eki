@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from . import builds, db, integration, paths, selfbrief, store, workspace
+from . import builds, db, doccheck, integration, paths, selfbrief, store, workspace
 
 log = logging.getLogger("eki.self")
 
@@ -188,7 +188,8 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
                  touched=db.dumps(touched))
             return [f"item {it['id']}: left for you — {why}"]
-        rid = store.create_run(conn, it["thread_id"], CHECK, provider="command", priority=run["priority"])
+        judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
+        rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
         _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
              touched=db.dumps(touched), error=None if verdict == "done" else f"partial: {reason}")
     return [f"item {it['id']}: built ({len(touched)} files); judging"]

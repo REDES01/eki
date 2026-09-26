@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import builds, db, machine, models, paths, queue, quota, selfwork, store, train
+from . import builds, checkslots, db, machine, models, paths, queue, quota, selfwork, store, train
 
 log = logging.getLogger("eki.engine")
 
@@ -115,6 +115,7 @@ def spawn_ready(conn) -> int:
     # two runs in one folder would overwrite each other: they take turns
     busy_folders = {store.cwd_of(conn, r["thread_id"]) for r in active} - {None}
     slots = MAX_PARALLEL - len(active)
+    judging, judge_slots = sum(1 for r in active if checkslots.is_judge(r)), checkslots.limit()
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()
@@ -127,6 +128,10 @@ def spawn_ready(conn) -> int:
                 or folder in busy_folders:
             busy_threads.add(r["thread_id"])        # later runs of this thread wait their turn
             continue
+        judge = checkslots.is_judge(r)
+        if judge and judging >= judge_slots:
+            busy_threads.add(r["thread_id"])        # waiting for a check slot
+            continue
         if r["priority"] == "background":
             room = room or machine.room()
             if not room[0]:
@@ -135,6 +140,7 @@ def spawn_ready(conn) -> int:
         if folder:
             busy_folders.add(folder)
         spawn(conn, r["id"])
+        judging += judge
         slots -= 1
         started += 1
     return started

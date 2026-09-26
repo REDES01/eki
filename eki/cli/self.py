@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from .. import builds, queue, selfwork, train
+from .. import builds, digest, queue, score, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 
@@ -15,7 +15,7 @@ HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel wor
 
 def add(p) -> None:
     p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|retry|apply <item>, '
-                                               'release, autonomy apply|propose')
+                                               'release, autonomy apply|propose, digest [now], undo <build>')
     p.add_argument("--one", action="store_true", help="no planning: the goal is one item")
     p.add_argument("--files", help="with --one: the files it will touch, comma-separated")
     p.add_argument("--bg", action="store_true", help="don't follow the plan run")
@@ -41,6 +41,10 @@ def run(args) -> int:
         queue.set_autonomy(words[1])
         print(f"autonomy {selfwork.settings()['autonomy']}")
         return 0
+    if verb == "digest" and words[1:] in ([], ["now"]):
+        return show_digest(c, now=len(words) == 2)
+    if verb == "undo" and len(words) == 2:
+        return undo(c, words[1])
     text = " ".join(words)
     files = [f.strip() for f in (args.files or "").split(",") if f.strip()]
     gid = selfwork.submit(c, text, plan=not args.one, files=files)
@@ -52,6 +56,24 @@ def run(args) -> int:
     err(f"goal {gid}: planning (run {g['plan_run']})")
     code = follow(c, g["plan_run"], show_tools=False)
     return code or board(c)
+
+
+def show_digest(c, now: bool) -> int:
+    path = None if now else digest.latest()
+    if path is None:
+        path = digest.write(c)
+    if now:
+        print(f"wrote {path}\n")
+    print(path.read_text(), end="")
+    return 0
+
+
+def undo(c, build_id: str) -> int:
+    gid = score.undo(c, build_id)
+    n = c.execute("SELECT COUNT(*) FROM items WHERE goal_id=?", (gid,)).fetchone()[0]
+    print(f"goal {gid}: undo build {build_id} — {n} revert item(s), building when there is room")
+    ensure_engine(quiet=True)
+    return 0
 
 
 def show(c, iid: str) -> int:

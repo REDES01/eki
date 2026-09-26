@@ -23,15 +23,27 @@ def add(p) -> None:
     p.add_argument("--wait", action="store_true", help="wait until it's healthy or rolled back")
 
 
-def check(build: Path) -> bool:
-    """bin/check inside the build, with the source checkout's interpreter."""
-    py = os.environ.get("EKI_PYTHON") or str(builds.source() / ".venv" / "bin" / "python")
+def check(build: Path, repo: Path) -> bool:
+    """bin/check at the build's commit — in a worktree of `repo`, not in the
+    export: an export has no .git, and tests that ask git about the checkout
+    they run in must find their own."""
+    import json
+    from .. import rebase, workspace
+    py = os.environ.get("EKI_PYTHON") or str(repo / ".venv" / "bin" / "python")
     if not os.access(py, os.X_OK):
         py = builds.python()
     env = {**os.environ, "EKI_PYTHON": py}
-    env.pop("EKI_HOME", None)                       # the tests pick a throwaway home themselves
-    out = subprocess.run(["/bin/sh", str(build / "bin" / "check"), "-q"], cwd=str(build), env=env,
-                         capture_output=True, text=True)
+    for k in ("EKI_HOME", "EKI_BUILD_DIR", "EKI_LAUNCHED", "EKI_SOURCE"):
+        env.pop(k, None)                            # the tests pick a throwaway home themselves
+    commit = json.loads((build / ".eki-build.json").read_text()).get("commit")
+    key = f"swap-{build.name}"
+    where = build if commit in (None, "worktree") else rebase.gate_tree(repo, key, commit)
+    try:
+        out = subprocess.run(["/bin/sh", str(where / "bin" / "check"), "-q"], cwd=str(where), env=env,
+                             capture_output=True, text=True)
+    finally:
+        if where != build:
+            workspace.remove(repo, key)
     tail = (out.stdout + out.stderr).strip().splitlines()[-3:]
     for line in tail:
         err(f"  {line}")
@@ -52,7 +64,7 @@ def run(args) -> int:
             print(f"build {build.name} from {repo} @ {args.ref}")
         if not args.no_check:
             err("checking…")
-            if not check(build):
+            if not check(build, repo):
                 err("not fit: the build fails its checks; nothing swapped")
                 return 1
         rec = builds.swap_to(build, f"eki swap {args.ref}")

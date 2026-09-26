@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, attachments, capacity, digest, engine, machine, models, paths, providers, quota, routing, store
+from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -140,3 +140,9 @@ def route(conn: sqlite3.Connection, prompt: Optional[str]) -> Dict[str, Any]:
         from .routing.table import rows
         return {"checker": routing.checker_name(), "rows": rows()}
     return routing.explain(conn, prompt)
+
+
+def pictures(conn: sqlite3.Connection, limit: int = 60, before: Optional[float] = None) -> Dict[str, Any]:
+    """The gallery, newest first; `more` says another page (by `before`) may exist."""
+    got = gallery.pictures(conn, limit + 1, before)
+    return {"pictures": got[:limit], "more": len(got) > limit}

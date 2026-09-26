@@ -66,6 +66,7 @@ eki threads [<thread>]          # list threads, or print one as a conversation
 eki engine status|start|stop    # start, stop or check the engine; install it as a login agent
 eki providers                   # list providers and whether each can take work now
 eki models [start|stop <name>]  # list local models; start or stop one
+eki pictures [--limit N]        # the pictures eki has drawn: path, kind, prompt
 eki skills [add|remove|sync]    # list, add or remove skills (shared by every program)
 eki mcp [add|remove <name>]     # list, add or remove MCP servers (shared by every program)
 eki open                        # open eki's window

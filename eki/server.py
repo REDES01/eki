@@ -137,6 +137,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._call(api.provider_list)
         if p == "/api/route":
             return self._call(api.route, q.get("q"))
+        if p == "/api/pictures":
+            return self._call(api.pictures, max(1, min(_num(q.get("limit"), 60, int), 500)),
+                              _num(q.get("before"), None, float))
         self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:

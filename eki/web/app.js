@@ -57,14 +57,17 @@
     if (r.state === "cancelled") tail = `<div class="dim">Stopped.</div>`;
     const answer = r.state === "handed_off" ? "" : md.render(r.answer);
     return `<div class="turn" id="run-${r.id}">
-        ${r.parent ? "" : `<div class="user">${md.render(r.prompt)}</div>`}
+        ${r.parent ? "" : `<div class="user">${ekiAttach.thumbs(r.attachments)}${md.render(r.prompt)}</div>`}
         <div class="bot"><div class="route">${who}${why}</div>${steps}
           <div class="answer">${answer}</div>${(r.asks || []).map(cards.render).join("")}${files(r)}${tail}</div></div>`;
   }
 
   function files(r) {
     if (!r.files || !r.files.length) return "";
-    return `<div class="files">${r.files.map((p) => `<button type="button" class="file" data-file="${md.esc(p)}">
+    const pic = (p) => /\.(png|jpe?g|gif|webp)$/i.test(p);
+    const imgs = r.files.filter(pic).map((p) => `<button type="button" class="pic" data-file="${md.esc(p)}" title="${md.esc(p)}">
+      <img src="/api/file?path=${encodeURIComponent(p)}" alt="${md.esc(p.split("/").pop())}" loading="lazy"></button>`).join("");
+    return `${imgs}<div class="files">${r.files.map((p) => `<button type="button" class="file" data-file="${md.esc(p)}">
       ${md.esc(p.split("/").pop())}</button>`).join("")}</div>`;
   }
 
@@ -180,13 +183,15 @@
     e.preventDefault();
     const prompt = $("prompt").value.trim();
     if (!prompt) return;
+    if (ekiAttach.busy()) return alertLine("A picture is still uploading.");
     $("send").disabled = true;
     try {
       const got = await call("/api/ask", {
         prompt, thread: state.thread, to: $("to").value, cwd: $("cwd").value.trim(),
-        background: $("bg").checked,
+        background: $("bg").checked, attachments: ekiAttach.paths(),
       });
       $("prompt").value = "";
+      ekiAttach.clear();
       autosize();
       if (got.thread !== state.thread) { location.hash = got.thread; } else { await loadThread(true); }
     } catch (err) {

@@ -102,6 +102,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .file { font-size: 12px; background: var(--panel); border: 1px solid var(--line); padding: 3px 9px; font-family: ui-monospace, Menlo, monospace; }
 .file:hover { border-color: var(--teal); }
 
+/* ---- pictures ---- */
+#strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 6px; }
+#strip[hidden] { display: none; }
+.thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+  background: var(--panel); padding: 0; flex: none; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.pending img { opacity: .45; }
+.thumb.bad { border-color: var(--red); }
+.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; font-size: 10px; line-height: 18px;
+  border-radius: 50%; background: color-mix(in srgb, var(--text) 70%, transparent); color: var(--bg); }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 6px; }
+.thumbs .thumb:hover, .pic:hover { border-color: var(--teal); }
+.pic { display: block; padding: 0; margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.pic img { display: block; max-width: min(100%, 480px); max-height: 420px; }
+#composer.drop { border-color: var(--teal); box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 30%, transparent); }
+#attach { padding: 2px 8px; }
+
 /* ---- side panel ---- */
 #app.with-panel { grid-template-columns: 272px minmax(380px, 1fr) minmax(360px, 44%); }
 #panel[hidden] { display: none; }

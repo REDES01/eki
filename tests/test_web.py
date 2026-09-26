@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -120,3 +121,25 @@ def test_a_run_ending_wakes_the_page_at_once(web, conn):
     run_inline(conn, got["run"])
     ev = json.loads(get(f"{web}/api/threads/{got['thread']}/events?after={last}&wait=0")[1])
     assert ev["events"][-1]["kind"] == "state" and ev["events"][-1]["state"] == "done" and ev["active"] == 0
+
+
+def test_the_composer_takes_pictures(web):
+    _, page = get(web + "/")
+    assert '<script src="/ui/attach.js"></script>' in page
+    assert page.index("/ui/attach.js") < page.index("/ui/app.js")   # app.js calls ekiAttach
+    assert 'id="strip"' in page and 'id="attach"' in page and 'accept="image/*"' in page
+    code, js = get(web + "/ui/attach.js")
+    assert code == 200 and "window.ekiAttach" in js and "/api/attachments" in js
+
+
+def test_an_uploaded_picture_goes_with_the_ask_and_shows_in_the_thread(web, conn):
+    req = urllib.request.Request(web + "/api/attachments", data=b"\x89PNG\r\n\x1a\n", method="POST",
+                                 headers={"X-Eki": "1", "X-Filename": "shot.png"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        path = json.loads(r.read())["path"]
+    code, got = post(web + "/api/ask", {"prompt": "steps=1 what is this", "attachments": [path]})
+    assert code == 200
+    t = json.loads(get(f"{web}/api/threads/{got['thread']}")[1])
+    assert t["runs"][0]["attachments"] == [path]
+    with urllib.request.urlopen(web + "/api/file?path=" + urllib.parse.quote(path), timeout=10) as r:
+        assert r.status == 200 and r.read().startswith(b"\x89PNG")

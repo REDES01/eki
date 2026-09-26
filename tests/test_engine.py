@@ -73,3 +73,16 @@ def test_the_engine_sees_exit_codes(home):
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          env={**os.environ, "EKI_PORT": "0"})
     assert out.stdout.strip() == "3", out.stderr
+
+
+def test_serve_waits_out_a_probe_holding_the_lock(home, monkeypatch):
+    """`running_pid` takes the lock for an instant; an engine starting just then must not give up."""
+    import threading
+    held = engine.lock()
+    assert held is not None
+    threading.Timer(0.6, held.close).start()          # the probe lets go
+    monkeypatch.setattr(engine, "handle_signals", lambda stopping: stopping.append(1))
+    monkeypatch.setattr(engine, "tick", lambda conn: True)
+    from eki import server
+    monkeypatch.setattr(server, "start_in_background", lambda: None)
+    assert engine.serve() == 0

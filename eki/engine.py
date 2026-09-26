@@ -275,7 +275,12 @@ def handle_signals(stopping: list) -> None:
 
 
 def serve() -> int:
-    held = lock()
+    held = None
+    for _ in range(20):                 # a `running_pid` probe holds the lock for a moment: try again
+        held = lock()
+        if held is not None:
+            break
+        time.sleep(0.25)
     if held is None:
         log.info("another engine is running")
         return 1

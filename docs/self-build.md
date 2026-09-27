@@ -313,6 +313,103 @@ main moves only if the rebase went through and main didn't move meanwhile,
 and landed items whose commits were rewritten follow them. A conflict aborts
 the rebase, leaves main as it was, and is written to the journal as a fault.
 
+## The loop: eki picks its own work
+
+When nothing is queued, eki can pick its next piece of self-work
+(`eki/selfpick.py`), and every pick says why. It is **off** until you turn
+it on.
+
+**The switch.** `routing.json` `self.loop`, default `false`. `eki self loop
+on|off` sets it and prints the new state; nothing else writes it — not the
+picker, faults, selfwork or the queue. With the loop off the picker does
+nothing.
+
+**Where it runs.** `housekeep.STEPS` has a `pick` step right after `faults`,
+so it runs on the engine's duty pass like the other steps, and an exception
+in it is written down as a fault without stopping the rest. The engine
+itself doesn't know about it. The goals table is all the state there is: a
+restart loses nothing.
+
+**The idle test.** The picker only picks when:
+
+- no goal is `drafting` or `planning`;
+- no item is `waiting`, `building`, `judging`, `reviewing`, `queued`,
+  `resolving` or `rechecking`;
+- no run with priority `now` is `queued` or `running`.
+
+It opens at most one goal per pass, and that goal makes eki busy, so picks
+happen one at a time. At most `self.picks_per_day` (6) goals in any 24
+hours, counting every goal eki opened for itself — `faults.tick`'s
+included.
+
+**Waiting on you stops it.** `selfpick.waiting` counts items that are
+`proposed` or `locked`, plus open asks on the threads of goals and items.
+When that reaches `self.review_max` (3), nothing is picked, and the board
+says `loop: stopped — N wait for you (eki self apply …)`. Apply, drop or
+answer, and it picks again.
+
+**The three stages, in order.** The first that has something wins.
+
+1. **Faults.** Any fault in eki's own code seen at least once in the last
+   7 days (`faults.pending`) that isn't open or recently landed gets a goal
+   through `faults.open_goal` — the same function `faults.tick` uses — and
+   `self.fault_items_per_day` still caps it. Why: "fault eki/x.py:12
+   KeyError, seen N times in 7 days".
+2. **The journal's costliest cluster** (`eki/costs.py`, last 7 days):
+   - `handoff` on a row that could stay local: handed-off runs on a row
+     one of whose targets is a local provider able to do what the row
+     needs;
+   - `correction` on a row: corrections, keyed by the row of the run you
+     corrected (`data.previous`).
+
+   A cluster needs `self.pick_min_cluster` (3) rows; the biggest wins, and
+   on a tie corrections come first. The winner opens a goal (source
+   `journal`, pick key `journal:<kind>:<row>`) that goes straight to
+   planning. Its text names the cluster, the row, the count and up to 5
+   example prompts (scrubbed, 200 characters each) with their run ids, and
+   asks the planner to make these requests stay local, or be routed and
+   answered right. A cluster isn't picked again while its goal has open
+   items or within 7 days of it landing; after a landing only newer
+   journal rows count.
+3. **ROADMAP.md** (`eki/roadmap.py`), read from integration `main`. The
+   open `- [ ]` entries are eligible, except those marked *(for a person)*,
+   everything under `## Not planned`, and any already picked
+   (`roadmap:<key>`, however that goal ended). The key is a hash of the
+   entry's text, so an edited entry is eligible again. The picker opens a
+   goal (source `roadmap`, state `drafting`) whose draft run, on the
+   planner model in a read-only worktree `draft-<goal>`, gets the numbered
+   entries, the last digest and the 7-day score. It is told not to ask
+   questions, and answers `PICK: <n>`, `WHY: <one line>`, `GOAL:` with the
+   entry's goal in the four-part shape, and `DRAFT: done` (or `DRAFT:
+   person <why>`). The goal then plans as usual, told to add a last
+   docs-only item that ticks the entry's box and depends on every other
+   item. A missing or out-of-range `PICK` leaves the goal `left` with
+   `pick_key` `roadmap:none`; `DRAFT: person` or a missing goal leaves it
+   `left` with the picked key recorded.
+
+**`pick_key` and `why`.** Every goal the picker opens has both on the goals
+table: `fault:<file:line type>`, `journal:<kind>:<row>` or
+`roadmap:<key>`, and a one-line reason. The why shows on `eki self` under
+the goal line, in `eki self show <goal>`, and in the digest's **Picked by
+eki** section (goal id, first line, why).
+
+**The dry run.** `eki self pick` shows what the picker would do now without
+doing it: idle or not and why, the waiting count against `review_max`, and
+the stage it would take with its why. For the roadmap stage it only lists
+the eligible entries: the ranking is a run.
+
+**How far a pick goes.** Picked goals are owner `eki`: background priority,
+and no further than `self_autonomy` allows. The queue and the lock list are
+the same as for any other change.
+
+| Setting (`self.` in routing.json) | Default | |
+|---|---|---|
+| `loop` | `false` | the switch; only `eki self loop on\|off` writes it |
+| `review_max` | 3 | stop while this many results wait for you |
+| `picks_per_day` | 6 | goals eki opens for itself in any 24 hours |
+| `pick_min_cluster` | 3 | journal rows a cluster needs |
+| `fault_items_per_day` | 3 | fault goals in any 24 hours (as before) |
+
 ## Replacing the running engine
 
 The engine holds no state and workers are detached, so it can be replaced

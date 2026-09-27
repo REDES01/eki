@@ -55,6 +55,9 @@ eki follow <run>  ◄── events table
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
+| `selfpick` | the loop (docs/self-build.md): when eki is idle and the switch is on, open its own next goal — a fault, then the journal's costliest cluster, then the ROADMAP entry a model ranks first — each with its why |
+| `costs` | the journal's costly clusters: handoffs on rows that could stay local, corrections by the row they corrected |
+| `roadmap` | ROADMAP.md at integration `main` as open entries, each keyed by a hash of its text |
 | `selfview` | the `eki self` board's words as data (stage, drafting, where, note, the whole board), shared by the CLI and the Station page |
 | `api_station`, `api_settings` | the web's Station and Settings: what the self board, builds, journal and digest show and the self actions, each the CLI's own function; reading, checking and writing `routing.json`/`providers.json` |
 | `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |

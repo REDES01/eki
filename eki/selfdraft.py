@@ -10,15 +10,26 @@ goal on exactly once.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import db, integration, paths, projects, selfbrief, store, workspace
 from .routing import table
 
 #: the old eki, read as reference by a draft when it is there
 OLD = "~/eki-2026-09-26"
+
+#: the first line of a ranking goal's wish; one `<n>. roadmap:<key> <title>` line per entry follows
+RANK = "rank the open ROADMAP.md entries"
+
+TICK = """\
+
+When the plan is made: add a last, docs-only item that ticks this entry's box
+in ROADMAP.md (change `- [ ]` to `- [x]` on the entry "{title}"), and make that
+item depend on every other item."""
 
 
 def planner() -> Tuple[str, Optional[str]]:
@@ -68,6 +79,63 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     return rid
 
 
+def open_rank(conn: sqlite3.Connection, entries: List[Any], why: str) -> str:
+    """Open a goal whose draft run ranks the open ROADMAP entries (roadmap.Entry)
+    and drafts the winner's goal. The wish lists the entries by number, so
+    `conclude` maps PICK back to a key from the goals table alone."""
+    from . import digest, score        # both read selfwork's settings: import them late
+    base = integration.sync()
+    wish = "\n".join([RANK] + [f"{n}. roadmap:{e.key} {e.title}" for n, e in enumerate(entries, 1)])
+    now = time.time()
+    last = digest.latest()
+    prompt = selfbrief.rank(entries, base, digest=str(last) if last else None,
+                            score=score.window(conn, now - 7 * 86400, now))
+    gid = store.new_id()
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key) "
+                     "VALUES (?,?,?,'roadmap','eki','drafting',?,?,NULL)", (gid, wish, wish, db.now(), why))
+        wt = workspace.add(integration.repo(), f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
+        tid = store.create_thread(conn, f"draft: {RANK}", str(wt))
+        provider, model = planner()
+        rid = store.create_run(conn, tid, prompt, provider=provider, model=model, row="code",
+                               priority=_priority("eki"))
+        conn.execute("UPDATE goals SET thread_id=?, draft_run=? WHERE id=?", (tid, rid, gid))
+    return gid
+
+
+def _ranked(wish: str) -> Dict[int, Tuple[str, str]]:
+    """{n: (pick_key, title)} from a ranking goal's wish."""
+    out: Dict[int, Tuple[str, str]] = {}
+    for ln in (wish or "").splitlines():
+        m = re.match(r"^(\d+)\. (roadmap:\S+) ?(.*)$", ln.strip())
+        if m:
+            out[int(m.group(1))] = (m.group(2), m.group(3).strip())
+    return out
+
+
+def _conclude_rank(conn: sqlite3.Connection, g: sqlite3.Row, answer: str) -> List[str]:
+    """A ranking draft's answer (inside the caller's tx): plan the picked entry, or leave it."""
+    gid = g["id"]
+    n, why = selfbrief.pick_in(answer)
+    picked = _ranked(g["wish"]).get(n) if n is not None else None
+    if picked is None:
+        err = "the ranking has no PICK" if n is None else f"the ranking picked {n}, which isn't listed"
+        conn.execute("UPDATE goals SET state='left', error=?, pick_key='roadmap:none' WHERE id=?", (err, gid))
+        return [f"goal {gid}: left — {err}"]
+    key, title = picked
+    why = why or g["why"]
+    goal, err = selfbrief.goal_in(answer)
+    if goal is None:
+        conn.execute("UPDATE goals SET state='left', error=?, pick_key=?, why=? WHERE id=?",
+                     (err, key, why, gid))
+        return [f"goal {gid}: left — {err}"]
+    text = goal + TICK.format(title=title)
+    conn.execute("UPDATE goals SET text=?, drafted_at=?, pick_key=?, why=? WHERE id=?",
+                 (text, db.now(), key, why, gid))
+    start_plan(conn, gid, text, integration.sync(), g["owner"])
+    return [f"goal {gid}: picked {key} → planning"]
+
+
 def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
     """Move a drafting goal on once its draft run has ended: to planning, left or failed."""
     run = store.run(conn, g["draft_run"]) if g["draft_run"] else None
@@ -82,6 +150,8 @@ def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
             err = f"the draft run ended {run['state']}: {run['error'] or ''}".strip()
             conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, gid))
             said = [f"goal {gid}: {err}"]
+        elif g["source"] == "roadmap":
+            said = _conclude_rank(conn, g, store.answer(conn, run["id"]))
         else:
             goal, why = selfbrief.goal_in(store.answer(conn, run["id"]))
             if goal is None:

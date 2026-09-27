@@ -130,6 +130,50 @@ line `DRAFT: done` — or `DRAFT: person <why>` when the wish can't be made into
 a goal.
 """
 
+RANK = """\
+Pick eki's next piece of self-work from its open ROADMAP.md entries, and draft
+the goal for it. Nobody asked for this: eki is idle and picks its own work, so
+do NOT ask the person any questions — decide, and say what you decided.
+
+This folder is a read-only worktree of eki's source at commit {base}. Do not
+change any file here; you are only choosing and writing the goal.
+
+Read first: docs/design.md, docs/self-build.md, ROADMAP.md and CLAUDE.md;
+{digest}; then the code the entries touch.
+
+eki's score over the last 7 days:
+
+{score}
+
+The open entries:
+
+{entries}
+
+Pick the one entry with the most impact on eki now. Then write the goal a
+planner will split into items for that entry, in four parts with these
+headings:
+
+What must be true when done
+Read first
+Item shape and shared files
+Tests (bin/check green)
+
+Make it specific enough that a planner can split it without guessing: name real
+paths and modules that exist here, the functions and tables it changes, and the
+files items will share.
+
+Answer in this shape, the last lines of your answer:
+
+PICK: <the entry's number>
+WHY: <one line: why this entry, now>
+GOAL:
+<the goal text>
+DRAFT: done
+
+— or `DRAFT: person <why>` as the last line when the picked entry can't be
+made into a goal without a person.
+"""
+
 
 def plan(goal: str, base: str) -> str:
     return PLAN.format(goal=goal.strip(), base=base[:12])
@@ -144,6 +188,19 @@ def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[s
            "only; do not copy it or change it.") if old else ""
     return DRAFT.format(first=first, wish=wish or "(empty wish)", base=base[:12],
                         digest=seen, old=ref)
+
+
+def rank(entries: List[Any], base: str, *, digest: Optional[str] = None,
+         score: Optional[Dict[str, Any]] = None) -> str:
+    """The brief for the draft run that ranks ROADMAP entries (roadmap.Entry:
+    .title, .section, .text) and drafts the winner's goal."""
+    seen = (f"the last digest, at {digest}" if digest
+            else "there is no digest yet, so skip that")
+    shown = "\n".join(f"{k}: {json.dumps(v) if isinstance(v, (dict, list)) else v}"
+                      for k, v in (score or {}).items()) or "(no score yet)"
+    listed = "\n\n".join(f"{n}. [{e.section}] {e.title}\n{e.text.strip()}"
+                          for n, e in enumerate(entries, 1)) or "(none)"
+    return RANK.format(base=base[:12], digest=seen, score=shown, entries=listed)
 
 
 def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, base: str,
@@ -240,3 +297,15 @@ def goal_in(answer: str) -> Tuple[Optional[str], str]:
     body = [re.sub(r"^\s*`?GOAL:`?", "", lines[g])] + lines[g + 1:end]
     text = "\n".join(ln for ln in body if not ln.strip().startswith("```")).strip()
     return (text, "") if text else (None, "the draft has no GOAL: block")
+
+
+def pick_in(answer: str) -> Tuple[Optional[int], str]:
+    """(n, why) from the last `PICK:` and `WHY:` lines of a ranking answer.
+    n is None when there is no PICK or it isn't a number; why is "" when missing."""
+    n: Optional[int] = None
+    picks = re.findall(r"^\s*`?PICK:\s*(.*)$", answer or "", re.M)
+    if picks:
+        m = re.fullmatch(r"#?(\d+)\.?", picks[-1].strip(" `*"))
+        n = int(m.group(1)) if m else None
+    whys = re.findall(r"^\s*`?WHY:\s*(.*)$", answer or "", re.M)
+    return n, (whys[-1].strip(" `") if whys else "")

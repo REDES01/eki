@@ -95,3 +95,89 @@ def test_planner_defaults(home):
     assert selfdraft.planner() == ("fake", None)
     set_planner(model="opus")
     assert selfdraft.planner() == ("fake", "opus")
+
+
+class Entry:
+    def __init__(self, key, title):
+        self.key, self.title, self.section = key, title, "Next"
+        self.text = f"- [ ] {title}: more words."
+
+
+ENTRIES = [Entry("aaa111", "Faster answers"), Entry("bbb222", "Quieter board")]
+
+RANKED = """I read ROADMAP.md.
+
+PICK: 2
+WHY: x
+GOAL:
+What must be true when done: the board is quieter.
+DRAFT: done
+"""
+
+
+def rank(conn, tmp_path, monkeypatch, answer):
+    gid = selfdraft.open_rank(conn, ENTRIES, "roadmap: nothing else to do")
+    says(tmp_path, monkeypatch, answer)
+    run_inline(conn, goal(conn, gid)["draft_run"])
+    return gid
+
+
+def test_a_ranking_draft_plans_the_picked_entry(conn, src, tmp_path, monkeypatch):
+    gid = selfdraft.open_rank(conn, ENTRIES, "roadmap: nothing else to do")
+    g = goal(conn, gid)
+    assert (g["source"], g["owner"], g["state"], g["pick_key"]) == ("roadmap", "eki", "drafting", None)
+    assert g["why"] == "roadmap: nothing else to do"
+    assert "1. roadmap:aaa111 Faster answers" in g["wish"] and "2. roadmap:bbb222 Quieter board" in g["wish"]
+    run = store.run(conn, g["draft_run"])
+    assert run["priority"] == "background" and run["row"] == "code" and run["provider"] == "fake"
+    assert "2. [Next] Quieter board" in run["prompt"] and "PICK:" in run["prompt"]
+    assert store.cwd_of(conn, run["thread_id"]).endswith(f"draft-{gid}")
+    says(tmp_path, monkeypatch, RANKED)
+    run_inline(conn, run["id"])
+    said = selfwork.tick(conn)
+    assert any("roadmap:bbb222 → planning" in s for s in said)
+    g = goal(conn, gid)
+    assert (g["state"], g["pick_key"], g["why"]) == ("planning", "roadmap:bbb222", "x")
+    assert g["text"].startswith("What must be true when done: the board is quieter.")
+    assert '"Quieter board"' in g["text"] and "depend on every other item" in g["text"]
+    assert store.run(conn, g["plan_run"])["priority"] == "background"
+    assert not workspace.path_for(f"draft-{gid}").exists()
+
+
+def test_a_pick_out_of_range_leaves_it(conn, src, tmp_path, monkeypatch):
+    gid = rank(conn, tmp_path, monkeypatch, RANKED.replace("PICK: 2", "PICK: 9"))
+    selfwork.tick(conn)
+    g = goal(conn, gid)
+    assert (g["state"], g["pick_key"]) == ("left", "roadmap:none") and "9" in g["error"]
+    assert g["plan_run"] is None and not workspace.path_for(f"draft-{gid}").exists()
+
+
+def test_a_missing_pick_leaves_it(conn, src, tmp_path, monkeypatch):
+    gid = rank(conn, tmp_path, monkeypatch, RANKED.replace("PICK: 2\n", ""))
+    selfwork.tick(conn)
+    g = goal(conn, gid)
+    assert (g["state"], g["pick_key"]) == ("left", "roadmap:none") and "no PICK" in g["error"]
+
+
+def test_draft_person_leaves_it_with_the_pick_recorded(conn, src, tmp_path, monkeypatch):
+    answer = RANKED.replace("PICK: 2", "PICK: 1").replace("DRAFT: done", "DRAFT: person needs a design call")
+    gid = rank(conn, tmp_path, monkeypatch, answer)
+    selfwork.tick(conn)
+    g = goal(conn, gid)
+    assert (g["state"], g["pick_key"]) == ("left", "roadmap:aaa111")
+    assert "needs a design call" in g["error"] and g["plan_run"] is None
+
+
+def test_a_restart_between_run_and_conclude_concludes_from_the_goals_table(conn, src, tmp_path,
+                                                                           monkeypatch):
+    from eki import db
+    gid = rank(conn, tmp_path, monkeypatch, RANKED)
+    conn.close()
+    fresh = db.connect()
+    try:
+        assert any("planning" in s for s in selfwork.tick(fresh))
+        g = goal(fresh, gid)
+        assert (g["state"], g["pick_key"], g["why"]) == ("planning", "roadmap:bbb222", "x")
+        assert selfdraft.conclude(fresh, g) == []                        # once only
+    finally:
+        fresh.close()

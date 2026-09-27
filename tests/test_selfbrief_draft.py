@@ -58,3 +58,32 @@ def test_goal_in_fenced_multiline_and_last_block():
     goal, why = selfbrief.goal_in(ans)
     assert why == ""
     assert goal == "What must be true when done\n1. a\n\nRead first\n- docs/design.md"
+
+
+class E:
+    def __init__(self, n):
+        self.key, self.section, self.title = f"k{n}", f"Section {n}", f"Entry {n}"
+        self.text = f"- [ ] Entry {n}: the whole text of entry {n}."
+
+
+def test_rank_numbers_entries_forbids_questions_and_names_the_shape():
+    b = selfbrief.rank([E(1), E(2)], BASE, score={"runs": 12, "local_share": 0.5,
+                                                  "left_out": {"self": 1}})
+    assert "1. [Section 1] Entry 1" in b and "2. [Section 2] Entry 2" in b
+    assert "the whole text of entry 2" in b
+    assert "runs: 12" in b and "local_share: 0.5" in b
+    assert "NOT ask" in b and "most impact" in b and "read-only" in b and BASE[:12] in b
+    for w in ("PICK:", "WHY:", "GOAL:", "DRAFT: done", "DRAFT: person", "What must be true when done",
+              "Tests (bin/check green)", "docs/design.md", "ROADMAP.md", "CLAUDE.md"):
+        assert w in b
+    assert "no digest yet" in b
+    assert "/d/2026-09-25.md" in selfbrief.rank([E(1)], BASE, digest="/d/2026-09-25.md")
+
+
+def test_pick_in():
+    assert selfbrief.pick_in("PICK: 1\nWHY: old\nthinking\nPICK: 2\nWHY: it matters\nGOAL:\nx\n") == \
+        (2, "it matters")
+    assert selfbrief.pick_in("`PICK: #3`\n") == (3, "")
+    assert selfbrief.pick_in("GOAL:\nx\nDRAFT: done\n") == (None, "")
+    assert selfbrief.pick_in("PICK: the second one\nWHY: because") == (None, "because")
+    assert selfbrief.pick_in("") == (None, "")

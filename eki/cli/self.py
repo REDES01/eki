@@ -75,9 +75,18 @@ def run(args) -> int:
 
 
 def show_digest(c, now: bool, long: bool) -> int:
+    from .. import db, digestprose
     path = None if now else digest.latest()
     if path is None:
-        path = digest.write(c)
+        at = db.now()
+        since = digest.window_start(at)
+        path = digest.write(c, at)
+        # the page just written is the rules-only one; the local model's prose replaces
+        # it when the chore comes back (the engine runs it), as the daily page gets
+        rid = digestprose.start(c, path, since, at)
+        if rid:
+            ensure_engine(quiet=True)
+            print(f"the local model is writing the notes (run {rid}); the page below is the rules-only one until then\n")
     if now:
         print(f"wrote {path}\n")
     if long and digest.long_of(path).exists():   # a page from before the long one has none

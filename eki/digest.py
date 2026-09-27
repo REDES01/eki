@@ -94,6 +94,24 @@ def tick(conn: sqlite3.Connection, now: Optional[float] = None) -> Optional[Path
     return write(conn, now) if due(now) else None
 
 
+def window_start(now: float) -> float:
+    """Where today's page begins: the end of the page before it — kept beside the page,
+    so writing today's page again (`eki self digest now`) covers the same span rather
+    than the minutes since the last write."""
+    keep = folder() / f".{_date(now)}.since"
+    try:
+        since = float(keep.read_text().strip())
+        if since < now:
+            return since
+    except (OSError, ValueError):
+        pass
+    since = last()
+    if since is None or since >= now:
+        since = now - DAY
+    _atomic(keep, repr(since))
+    return since
+
+
 def _atomic(path: Path, text: str) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(text)
@@ -104,9 +122,7 @@ def write(conn: sqlite3.Connection, now: Optional[float] = None) -> Path:
     """Write today's pages (again, if they are there) for the time since the last one:
     the short page first, then the long one, then '.last'."""
     now = db.now() if now is None else now
-    since = last()
-    if since is None or since >= now:
-        since = now - DAY
+    since = window_start(now)
     path = page_for(now)
     _atomic(path, patchnotes.rules_page(changes(conn, since, now), now, waits(conn),
                                         verdict(conn, since, now)))

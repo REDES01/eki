@@ -37,12 +37,10 @@ def _prune(conn: sqlite3.Connection) -> List[str]:
 
 def _digest(conn: sqlite3.Connection) -> List[str]:
     now = db.now()
-    since = digest.last()
-    if since is None or since >= now:
-        since = now - digest.DAY            # the window digest.write takes
     page = digest.tick(conn, now)
     if not page:
         return []
+    since = digest.window_start(now)        # the window digest.write took (kept beside the page)
     rid = digestprose.start(conn, page, since, now)
     return [f"digest written: {page}"] + ([f"digest prose asked of the local model: run {rid}"] if rid else [])
 

@@ -330,3 +330,17 @@ def test_verdict_names_why_it_is_worse(conn):
         add_journal(conn, NOW - 3600 - i, "run", {"state": "done", "local": False})
     assert digest.verdict(conn, NOW - DAY, NOW) == "worse: less done locally"
     assert digest.verdict(conn, NOW, NOW + DAY) == "same as yesterday"      # nothing after: unknown
+
+
+def test_writing_todays_page_again_covers_the_same_span(conn, monkeypatch, tmp_path):
+    """`eki self digest now` twice in a day: the second page starts where the first did,
+    not at the first write (which would leave it nearly empty)."""
+    monkeypatch.setattr(digest, "folder", lambda: tmp_path)
+    t0 = 1_800_000_000.0
+    (tmp_path / ".last").write_text(repr(t0 - 3600))
+    assert digest.window_start(t0) == t0 - 3600
+    digest.write(conn, t0)
+    assert digest.last() == t0
+    assert digest.window_start(t0 + 600) == t0 - 3600           # kept beside the page
+    digest.write(conn, t0 + 600)
+    assert digest.window_start(t0 + 900) == t0 - 3600

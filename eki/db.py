@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS cooldowns (
 CREATE TABLE IF NOT EXISTS goals (          -- eki builds eki: what was asked for
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'ask',     -- ask | roadmap | fault
+    source TEXT NOT NULL DEFAULT 'ask',     -- ask | roadmap | fault | journal
     owner TEXT NOT NULL DEFAULT 'you',      -- you | eki
     state TEXT NOT NULL DEFAULT 'planning', -- drafting | planning | planned | left | failed
     thread_id TEXT,
@@ -179,6 +179,8 @@ ADDED = [
     ("items", "review_run", "TEXT"),    # the review chore's run
     ("items", "review", "TEXT"),        # ok | no: <why> | none: <why>
     ("items", "reviews", "INTEGER DEFAULT 0"),   # rebuilds a review's "no" asked for
+    ("goals", "pick_key", "TEXT"),      # what eki picked: fault:<k>, journal:handoff:answer, roadmap:<key>
+    ("goals", "why", "TEXT"),           # why eki picked it
 ]
 
 

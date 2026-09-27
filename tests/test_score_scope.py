@@ -69,9 +69,9 @@ def test_scope_rule(conn, pics):
 
 def test_scope_sees_chore_threads_once_the_table_exists(conn):
     tid = _thread(conn)
-    assert observe.scope(conn, tid, "fake", None) == "chat"      # no chores table: no chore threads
-    conn.execute("CREATE TABLE IF NOT EXISTS chores (id TEXT, thread_id TEXT)")
-    conn.execute("INSERT INTO chores(id, thread_id) VALUES ('c1', ?)", (tid,))
+    assert observe.scope(conn, tid, "fake", None) == "chat"      # no chore on it: not a chore thread
+    conn.execute("INSERT INTO chores(id, kind, subject, thread_id, created_at) VALUES ('c1', 'review', 'i1', ?, 0)",
+                 (tid,))
     assert observe.scope(conn, tid, "fake", None) == "self"
 
 

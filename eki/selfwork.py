@@ -24,7 +24,8 @@ from . import builds, db, doccheck, integration, paths, selfbrief, selfdraft, st
 
 log = logging.getLogger("eki.self")
 
-DEFAULTS = {"parallel": 3, "autonomy": "propose"}
+DEFAULTS = {"parallel": 3, "autonomy": "propose",
+            "loop": False, "review_max": 3, "picks_per_day": 6, "pick_min_cluster": 3}   # eki/selfpick.py
 #: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
 #: under "apply" once it is in integration main, so the dependent is built on top of it
 #: a dependency counts once its code is in main — whoever put it there. Under
@@ -55,7 +56,8 @@ def repo() -> Path:
 # ---- in ---------------------------------------------------------------------------------
 
 def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: bool = False,
-           files: Optional[List[str]] = None, owner: str = "you", source_kind: str = "ask") -> str:
+           files: Optional[List[str]] = None, owner: str = "you", source_kind: str = "ask",
+           why: Optional[str] = None, pick_key: Optional[str] = None) -> str:
     """A goal. With `draft` the text is a wish the draft run makes into a goal
     first (eki/selfdraft.py); without `plan` it is one item as it stands."""
     text = (text or "").strip()
@@ -64,8 +66,10 @@ def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: boo
     base = integration.sync()
     gid = store.new_id()
     with db.tx(conn):
-        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at) VALUES (?,?,?,?,?,?,?)",
-                     (gid, text, text, source_kind, owner, "planning" if plan else "planned", db.now()))
+        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key) "
+                     "VALUES (?,?,?,?,?,?,?,?,?)",
+                     (gid, text, text, source_kind, owner, "planning" if plan else "planned", db.now(),
+                      why, pick_key))
         if plan and draft:
             selfdraft.start_draft(conn, gid, text, base, owner)
         elif plan:

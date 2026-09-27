@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, db, observe
+from . import api, api_settings, db, observe
 
 log = logging.getLogger("eki.server")
 
@@ -82,6 +82,10 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect()
         try:
             self._json(fn(conn, *args))
+        except api_settings.Stale as e:
+            self._json({"error": str(e)}, 409)
+        except api_settings.Invalid as e:
+            self._json({"error": str(e), "problems": e.problems}, 400)
         except KeyError as e:
             self._json({"error": str(e).strip("'\"")}, 404)
         except ValueError as e:
@@ -182,6 +186,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/pictures":
             return self._call(api.pictures, max(1, min(_num(q.get("limit"), 60, int), 500)),
                               _num(q.get("before"), None, float))
+        m = re.fullmatch(r"/api/settings/(\w+)", p)
+        if m:
+            return self._call(api_settings.read, m.group(1))
         self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
@@ -205,6 +212,9 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             name, action = m.group(1), m.group(2)
             return self._call(lambda _c: api.model_action(name, action, body))
+        m = re.fullmatch(r"/api/settings/(\w+)", p)
+        if m:
+            return self._call(api_settings.write, m.group(1), body)
         self._json({"error": "not found"}, 404)
 
 

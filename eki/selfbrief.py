@@ -6,6 +6,20 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+SPLIT_RULES = """\
+- prefer items that don't depend on each other: they are built at the same time;
+- add a dep only when the later item's tests can't pass without the earlier
+  item's code;
+- a shared interface (an exact function signature, a table and its columns, a
+  JSON key) goes into the spec of every item that uses it, word for word, so
+  they agree without talking;
+- when several items need the same new names, one small first item adds them
+  (with working minimal bodies and their tests) and the rest depend only on it:
+  two levels deep, unless the goal truly can't be;
+- two items may share a file only if one depends on the other; otherwise they
+  become one item.
+"""
+
 PLAN = """\
 You are planning a change to eki — the program that is running you right now.
 This folder is a read-only worktree of eki's source at commit {base}. Do not
@@ -21,11 +35,7 @@ will build at the same time, each in a worktree of its own:
 
 - an item is small: one to three files, under an hour of work, with its tests;
 - each item declares the files it will touch (its write-set, as paths or globs);
-  two items that must touch the same file either become one item, or the later
-  one lists the earlier one in "deps";
-- when two items share an interface (a function one adds and another calls),
-  write the exact signature into both specs so they agree without talking;
-- a spec says what to build and how to tell it works — not how to code it;
+{split}- a spec says what to build and how to tell it works — not how to code it;
 - one item is fine when the goal is small.
 
 End your answer with a line `ITEMS:` followed by one JSON list, nothing after it:
@@ -120,7 +130,9 @@ Tests (bin/check green)
 
 Make it specific enough that a planner can split it without guessing: name real
 paths and modules that exist here, the functions and tables it changes, and the
-files items will share. Where the wish leaves a real choice open, ask the person
+files items will share. For "Item shape": items that don't depend on each other,
+shared interfaces written into every spec that uses them, and one small root
+item first when several items need the same new names. Where the wish leaves a real choice open, ask the person
 with the AskUserQuestion tool — 2 to 4 options per question, at most three
 questions — and fold the answers into the goal. Where it doesn't, don't ask:
 decide, and say what you decided in the goal.
@@ -176,7 +188,7 @@ made into a goal without a person.
 
 
 def plan(goal: str, base: str) -> str:
-    return PLAN.format(goal=goal.strip(), base=base[:12])
+    return PLAN.format(goal=goal.strip(), base=base[:12], split=SPLIT_RULES)
 
 
 def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[str] = None) -> str:
@@ -233,8 +245,9 @@ def resolve(*, goal: str, title: str, spec: str, summary: str, head: str, confli
 
 # ---- reading answers ----------------------------------------------------------------------
 
-def items_in(answer: str) -> List[Dict[str, Any]]:
-    """The JSON list after the last `ITEMS:` line. Raises ValueError when there isn't one."""
+def items_in(answer: str, allow_empty: bool = False) -> List[Dict[str, Any]]:
+    """The JSON list after the last `ITEMS:` line. Raises ValueError when there isn't one,
+    or when it is empty and `allow_empty` is not set (only a standing round may say `[]`)."""
     # the marker on a line of its own: a spec may well mention `ITEMS: []` in prose
     marks = [m for m in re.finditer(r"^\s*`?ITEMS:`?\s*$", answer or "", re.M)]
     if not marks:
@@ -259,7 +272,7 @@ def items_in(answer: str) -> List[Dict[str, Any]]:
                     "files": [str(f).strip() for f in (it.get("files") or []) if str(f).strip()],
                     "deps": [str(d).strip() for d in (it.get("deps") or []) if str(d).strip()],
                     "independent": bool(it.get("independent"))})
-    if not out:
+    if not out and not allow_empty:
         raise ValueError("the plan has no items")
     return out
 

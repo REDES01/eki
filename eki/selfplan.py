@@ -5,10 +5,12 @@ mid-plan just waits for the run and a goal is moved on exactly once.
 """
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from typing import Dict, List
 
-from . import db, projects, selfbrief, store, workspace
+from . import db, plangraph, projects, selfbrief, store, workspace
 
 
 def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
@@ -24,8 +26,9 @@ def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
             err = f"the plan run ended {run['state']}: {run['error'] or ''}".strip()
             conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, g["id"]))
             return [f"goal {g['id']}: {err}"]
-        try:
-            planned = selfbrief.items_in(store.answer(conn, run["id"]))
+        answer = store.answer(conn, run["id"])
+        try:                            # a standing round may find nothing worth doing now
+            planned = selfbrief.items_in(answer, allow_empty=bool(g["standing_id"]))
         except ValueError as e:
             conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (str(e), g["id"]))
             return [f"goal {g['id']}: {e}"]
@@ -36,6 +39,19 @@ def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
         for it in planned:
             deps = [ids[d] for d in it["deps"] if d in ids and ids[d] != ids[it["title"]]]
             selfwork._set(conn, ids[it["title"]], deps=db.dumps(deps))
-        conn.execute("UPDATE goals SET state='planned' WHERE id=?", (g["id"],))
+        why = None if planned else rest_why(answer)
+        conn.execute("UPDATE goals SET state='planned', shape=?, error=COALESCE(?, error) WHERE id=?",
+                     (json.dumps(plangraph.shape(planned)), why, g["id"]))
     workspace.remove(projects.repo_for(conn, g), f"plan-{g['id']}", delete_branch=True)
+    if why:
+        return [f"goal {g['id']}: nothing worth doing now — {why}"]
     return [f"goal {g['id']}: {len(planned)} item(s) planned"]
+
+
+def rest_why(answer: str) -> str:
+    """The plan's last non-empty line before its `ITEMS:` line: why nothing is worth doing."""
+    lines = (answer or "").splitlines()
+    marks = [i for i, ln in enumerate(lines) if re.match(r"^\s*`?ITEMS:", ln)]
+    before = lines[:marks[-1]] if marks else lines
+    said = [ln.strip(" `") for ln in before if ln.strip(" `")]
+    return said[-1][:300] if said else "the plan found nothing worth doing now"

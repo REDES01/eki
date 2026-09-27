@@ -87,3 +87,23 @@ def test_pick_in():
     assert selfbrief.pick_in("GOAL:\nx\nDRAFT: done\n") == (None, "")
     assert selfbrief.pick_in("PICK: the second one\nWHY: because") == (None, "because")
     assert selfbrief.pick_in("") == (None, "")
+
+
+def test_plan_and_draft_carry_the_width_rules():
+    p = selfbrief.plan("a goal with {braces}", BASE)
+    assert selfbrief.SPLIT_RULES in p and "{braces}" in p
+    for words in ("don't depend on each other", "tests can't pass without",
+                  "function signature", "one small first item", "two levels deep",
+                  "share a file only if one depends on the other"):
+        assert words in selfbrief.SPLIT_RULES
+    d = selfbrief.draft("wish", BASE)
+    assert "don't depend on each other" in d and "one small root" in d and "every spec" in d
+
+
+def test_items_in_empty_only_when_allowed():
+    import pytest
+    with pytest.raises(ValueError):
+        selfbrief.items_in("nothing to do\nITEMS:\n[]")
+    assert selfbrief.items_in("nothing to do\nITEMS:\n[]", allow_empty=True) == []
+    with pytest.raises(ValueError):
+        selfbrief.items_in("no list at all", allow_empty=True)

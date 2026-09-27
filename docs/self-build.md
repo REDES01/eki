@@ -219,11 +219,33 @@ build that made things worse is flagged in `eki builds` and the digest and
 offered for undo. It is a trailing judgment, never a gate: nothing waits
 for it and nothing is undone by itself.
 
-None of these judge whether the change is *good code* beyond passing
-tests. The brief covers part of it (add tests for what you change; end with
-a plain-words `SUMMARY:`). A review run — a second agent reads the diff and
-objects or doesn't — can sit between gate 1 and the queue once the loop
-runs; it costs a turn per change.
+**The review — a second reader** (`eki/review.py`). The gates judge
+whether a change works, not whether it does what it was asked. When gate 1
+is green the item goes to `reviewing`, not `proposed`, and a `review` chore
+(docs/design.md, "Chores") asks the local model — at `now` priority for
+your goals, `background` for eki's. It is given the goal (first 2000
+characters), the item's title, spec and `SUMMARY:`, and the diff
+`<base>..<commit>` from the integration repo (40 000 characters at most, with
+a note of what was cut), and asked whether the diff does what the spec and
+summary say, without obvious bugs, missing tests or stray changes. Its last
+`REVIEW:` line decides:
+
+- `REVIEW: ok` → `proposed`, review `ok`.
+- `REVIEW: no <why>`, the first time → back to `waiting` for one rebuild,
+  with "A second reader objected: … Answer it in the change, or say in
+  SUMMARY why it's wrong" in the build brief. The rebuild doesn't cost gate
+  1's one retry (`tries - reviews` is what's compared).
+- `REVIEW: no` a second time → `proposed` with the objection kept; the queue
+  never takes it by itself, even under `apply`. The digest lists it under
+  **Waits for you** with the objection; `eki self apply <id>` is the
+  person's call.
+- A review that can't judge — no local model, `self.review: false`, a failed
+  or cancelled run, an answer without the line — → `proposed` with
+  `none: <why>`. The reviewer never holds an item it couldn't judge.
+
+Docs-only items are reviewed too. The board shows `reviewing` with the
+chore's run, and the verdict under a proposed item. Like every stage it
+resumes from the item and its runs: a restart mid-review loses nothing.
 
 ## The journal, the score and the digest
 
@@ -267,6 +289,16 @@ item is still open, or landed in the last 7 days, isn't opened again. Owner
 proposed. Faults outside eki's code (a rebase conflict, say) are written
 down, never made items.
 
+**A fault's first brief.** When a fault opens its goal, a `brief` chore
+(background) gives the local model the template spec, the traceback and the
+fault's file ±60 lines around the frame, and asks for `BRIEF:` and a spec:
+the likely cause, where to look, what the reproducing test should do. The
+item isn't started while its goal has an open brief younger than
+`self.brief_wait` minutes (10). A done brief becomes the item's spec,
+followed by the template's traceback and request sections verbatim;
+anything else — a failed chore, no local model, the wait run out — and the
+template stands.
+
 **The score** (`eki/score.py`) of a window of time, from its `run` rows:
 
 - `local_share` — runs a local model finished without handing off, of all
@@ -305,6 +337,31 @@ hours beside the 24 before, the faults and corrections since the last page,
 and the builds judged worse, each with its `eki self undo`. `eki self
 digest` prints the latest page (writing one if there is none); `eki self
 digest now` writes a fresh one. The web UI's sidebar links the latest page.
+
+**The digest's prose and triage** (`eki/digestprose.py`). Once the page is
+written, a `digest` chore gives the local model the page and the journal's
+faults, corrections, handoffs and limits over its window (scrubbed, 20 000
+characters at most). It answers `PROSE:` — a few plain sentences on the day —
+and `TRIAGE:`, one line per thing worth a look: `- <what> — fix | watch |
+ignore — <why>`, a `fix` naming the `eki self "…"` wish to run. The
+housekeeping step `digestprose` puts `## In short` under the title and
+`## Triage` before `## Score`, once, atomically; a page that has them is
+left alone, and a failed chore or no local model leaves the page
+byte-identical. Triage only suggests: `faults.py` stays the only thing that
+opens items.
+
+**What the score counts.** Only what you asked for: runs of scope `chat`.
+Self-work (command runs, goal, item and chore threads) and picture runs are
+left out of every rate and share, and so are faults of those runs; the
+digest says "not counted: n self-work, m picture runs" under the table
+(docs/design.md, "The score's scope").
+
+**Settings for the local model's work** (`routing.json` `self`): `local` —
+the provider chores go to (default: the first of kind `local`; `"off"`
+means none, and each chore is `skipped`); `review` — `false` turns the
+second reader off, items go straight on with `none: self.review is off`
+(default `true`); `brief_wait` — minutes a fault item waits for its first
+brief (default 10).
 
 **Sync on a moved origin.** When integration main and `origin/main` have
 both moved (someone pushed in between), `integration.sync` rebases main onto
@@ -500,6 +557,10 @@ eki` and can't raise the setting, turn the loop on, or touch a locked file.
    items (`eki/faults.py`), the score and gate 4 (`eki/score.py`), the daily
    digest (`eki/digest.py`), all driven by `eki/housekeep.py`; sync rebases
    onto a moved origin.
+6. ~~**The local model's share**~~ — chores (`eki/chores.py`): the review
+   between gate 1 and the queue (`eki/review.py`), the digest's prose and
+   triage (`eki/digestprose.py`), fault items' first briefs; the score
+   counts only chat runs.
 
 ## What the first eki taught
 

@@ -46,7 +46,7 @@ eki follow <run>  ◄── events table
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers |
-| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
+| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
 | `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
@@ -68,6 +68,9 @@ eki follow <run>  ◄── events table
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `attachments` | files sent with a request: made safe at intake (HEIC → JPEG, big pictures scaled down), and uploads from the window |
+| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's prose and triage, a fault's first brief |
+| `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's `## In short` and `## Triage` |
+| `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `cli/*` | one file per command |
 
@@ -77,6 +80,20 @@ States: `queued → running → done | failed | cancelled | handed_off`, and
 `running → interrupted → queued` when a worker dies without finishing.
 A run carries its `attempt`; after 3 interruptions in a row it fails.
 `priority` is `now` (you're waiting) or `background` (gated by the machine).
+
+**Chores** (`eki/chores.py`, table `chores`) are jobs eki gives the local
+model instead of Claude: the review between gate 1 and the queue, the
+digest's prose and triage, and the first draft of a fault item's spec
+(docs/self-build.md). Each is an ordinary run on row `chore`, in a thread of
+its own (`chore: <kind> <subject>`, no folder), pinned to `self.local` in
+`routing.json` — else the first provider of kind `local`; `"off"` or none
+means a `skipped` chore and the caller goes on without it. A chore never
+reaches Claude: the local model is given no `handoff` tool on this row, and
+a chore run that hands off anyway fails with the reason and makes no
+follow-up. The chore's row (`kind`, `subject`, `run_id`, `state` open → done
+| failed | skipped, the parsed `result`) and its run are all the state there
+is: the caller finds finished chores with `chores.finished` and moves each on
+once under `db.tx`, so a restart mid-chore loses nothing.
 
 ## Threads
 
@@ -107,6 +124,14 @@ JSON.
    "draw …" → `image` — logged as "rule: <reason>". Only when no rule
    fires does a small model classify. `checker_wakes` in `routing.json`
    (default true) decides whether an off checker is started for that.
+   A request that lands on `code` (by rule or check), while a `code-easy`
+   row exists, is asked one narrower question with a menu of just `code`
+   and `code-easy` ("a small, well-defined change: rename, a flag, a typo,
+   one test"): "rule: has a folder → code; check: easy → code-easy →
+   codex-local". If that check can't run the request stays on `code` — easy
+   is never guessed — and a run whose row was set beforehand (self-work's
+   builds) is never narrowed. `eki route` and `routing.explain` show the
+   step.
 4. **Preference.** The row's target order, bent by capacity: a target near
    its limit moves to the back.
 5. **Failover** down the row.
@@ -121,7 +146,7 @@ only reach a fresh file.
 **Capabilities.** Each provider declares `can` from {text, tools, web,
 vision, image, image-edit}. Each kind has defaults (Claude Code: text,
 tools, web, vision; Codex: text, tools, web, vision; local: text;
-comfyui: image, image-edit; command: none);
+comfyui: image, image-edit; codex_local: text, tools; command: none);
 an entry's own `can` in `providers.json` replaces them, and its optional
 `about` is a sentence or two on what it's for. Rows declare `needs`
 (default `text`; `code` needs tools, `web` needs web); a picture attached
@@ -134,6 +159,44 @@ to `comfyui`, which `KIND_ORDER` counts as cheap as `local`. A table
 without them gets them in memory from `table.rows()`, aimed at whichever
 providers can do what they need; `routing.json` isn't rewritten. The why
 reads "rule: asks for a picture → image → comfyui".
+
+**Rung 2: Codex on the local model** (`eki/providers/codex_local.py`, kind
+`codex_local`, can text and tools). The same `codex app-server` as the Codex
+provider, told by `-c` flags to use a model provider of eki's own —
+`eki_local`, `wire_api="responses"`, base URL
+`http://127.0.0.1:<server port>/v1`, `http_headers={"X-Eki"="1"}`, the
+entry's `context_tokens` as `model_context_window`, and a raised
+`stream_max_retries` so an engine restart mid-stream costs a retry — and
+`-m <the local model id>`. Entry: `{"kind": "codex_local", "local": "<local
+provider>", "context_tokens": 32768, "handoff_after": 20}`. When Codex is
+installed and a local entry exists, a default `codex-local` joins
+`providers.config()` in memory only (like comfyui); an entry you write wins.
+It is the first try, not the last word: the model is told to end with
+`HANDOFF: <why>` if the job is beyond it, and the run ends `handed_off` on
+that line, on a failed turn, or after `handoff_after` minutes (the turn is
+interrupted first). `worker.finish` makes the follow-up on row `code`
+without this provider, so Claude takes it with the transcript; the files
+are left as they are and the reason says so. `KIND_ORDER` counts it as cheap
+as `local`; its finished runs count as local in the score; `models.in_use`
+counts its running runs against its local model, so `idle_stop` never stops
+the model mid-turn. The row `code-easy` (needs tools; targets `codex-local`,
+`claude`, `codex`) is added by `table.rows()` in memory when a `codex_local`
+provider exists; `routing.json` isn't rewritten.
+
+**The Responses adapter** (`eki/responses.py`, `eki/responses_stream.py`).
+Codex speaks only OpenAI's Responses API (it refuses `wire_api = "chat"`);
+mlx_lm serves only chat completions. The engine's server mounts
+`POST /v1/responses` — behind `X-Eki: 1` like every POST — which starts an
+on-demand model first (`models.ensure`), turns the request (`instructions`,
+`message`, `function_call` and `function_call_output` items, function
+tools, `stream`) into one chat-completions request to the local entry's
+`base_url`, and turns the chat stream back into the Responses events Codex
+reads (`response.created`, `output_item.added`/`.done`,
+`output_text.delta`, `function_call_arguments.delta`, `response.completed`
+with usage), stripping `<think>…</think>` across chunk boundaries. It holds
+no state — Codex sends the whole input, so `previous_response_id` is a 400
+— and it translates the protocol only: the tools, the loop and the sandbox
+are Codex's.
 
 ## Milestone 2: the window and the machine
 
@@ -265,6 +328,19 @@ plans a goal into items, builds them side by side in worktrees of the source
 repo, judges each with `bin/check` (gate 1), and proposes the fit ones as
 branches `self/<id>`; the go-live path (`eki swap`). Next: the queue and
 gate 2. Order of building in [ROADMAP.md](../ROADMAP.md).
+
+**The score's scope.** The score (gate 4) counts only what you asked for.
+Every `run` row in the journal carries `data.scope`, written by
+`observe.run_ended`: `self` when the provider is `command` or the thread is
+a goal's, an item's or a chore's; `picture` when the provider is a `comfyui`
+or the row is a picture row; `chat` otherwise. Rows written before the scope
+existed are classified at read time by the same rule. `score.compute` counts
+only `chat` runs in the share, the rates and the median, leaves out faults of
+non-chat runs (faults with no run stay in), and returns `left_out` — the
+digest prints "not counted: n self-work, m picture runs" under its score
+table. Verdicts already frozen are never rewritten; a still-open build's
+`before` is recomputed once under the rule and marked `"scoped": true`, so
+before and after compare like with like.
 
 ## Standing goals and the budget
 

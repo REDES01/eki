@@ -28,12 +28,15 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 - [x] **The loop closes.** Faults from the journal become items; the daily
       digest; the score before and after every build (gate 4). The journal
       (`eki observe`), `eki self digest`, `eki self undo <build>`.
-- [ ] **A review run** between gate 1 and the queue, once the loop runs.
+- [x] **A review run** between gate 1 and the queue (`eki/review.py`): a
+      `review` chore on the local model; one rebuild on a `no`, a second
+      `no` waits for `eki self apply`.
 
 ## Providers and routing
 
 - [x] Routing complete: capabilities, rules-first check, cheapest fallback
-- [ ] Codex driving the local model (rung 2)
+- [x] Codex driving the local model (rung 2): `codex_local` through the
+      Responses adapter; easy code requests (`code-easy`) go there first
 - [x] ComfyUI provider kind (rung 3)
 - [ ] eki models add/remove
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .. import builds, score, traincheck
+from .. import builds, selfview, traincheck
 from .common import ago, conn
 
 NAME = "builds"
@@ -39,10 +39,7 @@ def run(args) -> int:
 
 
 def _verdicts() -> dict:
-    """Gate 4 per build: better/same/worse, 'measuring' until judged."""
     try:
-        c = conn()
-        rows = c.execute("SELECT build, verdict FROM build_scores ORDER BY healthy_at").fetchall()
+        return selfview.verdicts(conn())
     except Exception:
         return {}
-    return {r["build"]: r["verdict"] or "measuring" for r in rows}

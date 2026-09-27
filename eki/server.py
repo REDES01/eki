@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, api_settings, db, observe
+from . import api, api_settings, api_station, db, observe
 
 log = logging.getLogger("eki.server")
 
@@ -190,6 +190,14 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/settings/(\w+)", p)
         if m:
             return self._call(api_settings.read, m.group(1))
+        if p == "/api/station":
+            return self._call(api_station.station)
+        if p == "/api/builds":
+            return self._call(api_station.builds_view)
+        if p == "/api/journal":
+            return self._call(api_station.journal, q.get("since"), q.get("kind"))
+        if p == "/api/digests":
+            return self._call(api_station.digests)
         self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
@@ -216,6 +224,23 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/settings/(\w+)", p)
         if m:
             return self._call(api_settings.write, m.group(1), body)
+        return self._station_post(p, body)
+
+    def _station_post(self, p: str, body: dict) -> None:
+        if p == "/api/self":
+            return self._call(api_station.submit, body)
+        m = re.fullmatch(r"/api/self/items/(\w+)/(apply|drop|retry)", p)
+        if m:
+            return self._call(api_station.item_action, m.group(1), m.group(2), body)
+        if p == "/api/self/release":
+            return self._call(api_station.release)
+        if p == "/api/self/autonomy":
+            return self._call(api_station.autonomy, body)
+        m = re.fullmatch(r"/api/builds/([\w.-]+)/undo", p)
+        if m:
+            return self._call(api_station.undo, m.group(1))
+        if p == "/api/digests/write":
+            return self._call(api_station.write_digest)
         self._json({"error": "not found"}, 404)
 
 

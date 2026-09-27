@@ -144,12 +144,39 @@ def fault(conn: Optional[sqlite3.Connection], where: str, tb: Optional[str] = No
 
 # ---- runs ------------------------------------------------------------------------------
 
-def _is_local(provider: Optional[str]) -> bool:
+def _kind(provider: Optional[str]) -> Optional[str]:
     try:
         from . import providers
-        return providers.config().get(provider or "", {}).get("kind") == "local"
+        return providers.config().get(provider or "", {}).get("kind")
     except Exception:
+        return None
+
+
+def _is_local(provider: Optional[str]) -> bool:
+    return _kind(provider) == "local"
+
+
+def _self_thread(conn: sqlite3.Connection, thread_id: Optional[str]) -> bool:
+    if not thread_id:
         return False
+    if conn.execute("SELECT 1 FROM goals WHERE thread_id=? UNION ALL "
+                    "SELECT 1 FROM items WHERE thread_id=? LIMIT 1", (thread_id, thread_id)).fetchone():
+        return True
+    try:
+        return conn.execute("SELECT 1 FROM chores WHERE thread_id=? LIMIT 1", (thread_id,)).fetchone() is not None
+    except sqlite3.OperationalError:     # no chores table yet: no chore threads
+        return False
+
+
+def scope(conn: sqlite3.Connection, thread_id: Optional[str], provider: Optional[str],
+          row: Optional[str]) -> str:
+    """'self' (eki's own work), 'picture', or 'chat' (what you asked for): the score counts only chat."""
+    if provider == "command" or _self_thread(conn, thread_id):
+        return "self"
+    from .routing import table
+    if _kind(provider) == "comfyui" or (row is not None and row in table.PICTURE_ROWS):
+        return "picture"
+    return "chat"
 
 
 def run_ended(conn: sqlite3.Connection, rid: str) -> Optional[int]:
@@ -164,7 +191,8 @@ def run_ended(conn: sqlite3.Connection, rid: str) -> Optional[int]:
                              (rid,)).fetchone()[0]
         data = {"state": r["state"], "seconds": round(r["ended_at"] - r["created_at"], 3),
                 "local": _is_local(r["provider"]), "handed_off": r["state"] == "handed_off",
-                "first_text": round(first - r["created_at"], 3) if first is not None else None}
+                "first_text": round(first - r["created_at"], 3) if first is not None else None,
+                "scope": scope(conn, r["thread_id"], r["provider"], r["row"])}
     except Exception:
         log.exception("journal: could not read run %s", rid)
         return None

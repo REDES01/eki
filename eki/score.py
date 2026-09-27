@@ -34,14 +34,50 @@ def _per100(n: int, runs: int) -> Optional[float]:
     return round(100.0 * n / runs, 3) if runs else None
 
 
+class _Scopes:
+    """Each run's scope: written on the row, else worked out now by observe.scope."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.memo: Dict[Any, str] = {}
+
+    def of_run(self, run_id: Optional[str], thread_id: Optional[str] = None,
+               provider: Optional[str] = None) -> str:
+        r = self.conn.execute("SELECT thread_id, provider, row FROM runs WHERE id=?",
+                              (run_id,)).fetchone() if run_id else None
+        row = r["row"] if r is not None else None
+        if r is not None:
+            thread_id = thread_id or r["thread_id"]
+            provider = provider or r["provider"]
+        key = (thread_id, provider, row)
+        if key not in self.memo:
+            self.memo[key] = observe.scope(self.conn, thread_id, provider, row)
+        return self.memo[key]
+
+    def of_entry(self, e: Dict[str, Any]) -> str:
+        got = e["data"].get("scope")
+        if got in ("self", "picture", "chat"):
+            return got
+        return self.of_run(e.get("run_id"), e.get("thread_id"), e.get("provider"))
+
+
 def compute(conn: sqlite3.Connection, since: float, until: Optional[float] = None) -> Dict[str, Any]:
-    """The score over the 'run' rows in [since, until)."""
-    runs = observe.entries(conn, since=since, until=until, kind="run")
+    """The score over the 'run' rows in [since, until) that you asked for (scope 'chat')."""
+    scopes = _Scopes(conn)
+    left_out = {"self": 0, "picture": 0}
+    runs: List[Dict[str, Any]] = []
+    for e in observe.entries(conn, since=since, until=until, kind="run"):
+        s = scopes.of_entry(e)
+        if s == "chat":
+            runs.append(e)
+        else:
+            left_out[s] = left_out.get(s, 0) + 1
     n = len(runs)
     finished = [r["data"] for r in runs if r["data"].get("state") in ("done", "handed_off")]
     local = [d for d in finished if d.get("local") and not d.get("handed_off")]
     handed = [r for r in runs if r["data"].get("handed_off")]
-    faults = len(observe.entries(conn, since=since, until=until, kind="fault"))
+    faults = len([f for f in observe.entries(conn, since=since, until=until, kind="fault")
+                  if not f.get("run_id") or scopes.of_run(f["run_id"], f.get("thread_id")) == "chat"])
     corrections = len(observe.entries(conn, since=since, until=until, kind="correction"))
     firsts = [r["data"]["first_text"] for r in runs
               if isinstance(r["data"].get("first_text"), (int, float))]
@@ -51,17 +87,26 @@ def compute(conn: sqlite3.Connection, since: float, until: Optional[float] = Non
             "correction_rate": _per100(corrections, n),
             "handoff_rate": _per100(len(handed), n),
             "median_first_text": statistics.median(firsts) if firsts else None,
+            "left_out": left_out,
             "since": since, "until": until}
 
 
 def last_runs(conn: sqlite3.Connection, n: int, until: float) -> Dict[str, Any]:
-    """The score of the window that holds the last `n` runs before `until`."""
-    row = conn.execute("SELECT t FROM journal WHERE kind='run' AND t<? ORDER BY t DESC, id DESC"
-                       " LIMIT 1 OFFSET ?", (until, max(n - 1, 0))).fetchone()
-    if row is None:        # fewer than n: all of them
-        row = conn.execute("SELECT MIN(t) FROM journal WHERE kind='run' AND t<?", (until,)).fetchone()
-    since = row[0] if row is not None and row[0] is not None else until
-    return compute(conn, since, until)
+    """The score of the window that holds the last `n` counted (chat) runs before `until`."""
+    scopes, seen, since = _Scopes(conn), 0, None
+    for row in conn.execute("SELECT * FROM journal WHERE kind='run' AND t<? ORDER BY t DESC, id DESC",
+                            (until,)):
+        e = dict(row)
+        try:
+            e["data"] = json.loads(e["data"] or "{}")
+        except ValueError:
+            e["data"] = {}
+        since = e["t"]                       # fewer than n: all of them
+        if scopes.of_entry(e) == "chat":
+            seen += 1
+            if seen >= max(n, 1):
+                break
+    return compute(conn, since if since is not None else until, until)
 
 
 def window(conn: sqlite3.Connection, since: float, until: Optional[float] = None,
@@ -108,13 +153,32 @@ def healthy_at(build_id: str) -> Optional[float]:
         return None
 
 
+def _before(conn: sqlite3.Connection, healthy_at: float) -> Dict[str, Any]:
+    """The score of the window from the previous build's healthy time to this one's."""
+    prev = conn.execute("SELECT MAX(healthy_at) FROM build_scores WHERE healthy_at<?",
+                        (healthy_at,)).fetchone()[0]
+    before = window(conn, since=prev or 0.0, until=healthy_at)
+    before["scoped"] = True
+    return before
+
+
+def _rescope(conn: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
+    """An open row's 'before' from before the score was scoped: worked out once again, chat only,
+    so before and after compare like with like."""
+    before = json.loads(row["before"] or "{}")
+    if before.get("scoped"):
+        return before
+    before = _before(conn, row["healthy_at"])
+    conn.execute("UPDATE build_scores SET before=? WHERE build=? AND verdict IS NULL",
+                 (db.dumps(before), row["build"]))
+    return before
+
+
 def record_build(conn: sqlite3.Connection, build_id: str, healthy_at: float) -> bool:
     """Write down the score before this build; once per build."""
     if conn.execute("SELECT 1 FROM build_scores WHERE build=?", (build_id,)).fetchone():
         return False
-    prev = conn.execute("SELECT MAX(healthy_at) FROM build_scores WHERE healthy_at<?",
-                        (healthy_at,)).fetchone()[0]
-    before = window(conn, since=prev or 0.0, until=healthy_at)
+    before = _before(conn, healthy_at)
     cur = conn.execute("INSERT OR IGNORE INTO build_scores(build, healthy_at, before) VALUES (?,?,?)",
                        (build_id, healthy_at, db.dumps(before)))
     return cur.rowcount > 0
@@ -125,12 +189,12 @@ def settle(conn: sqlite3.Connection, now: Optional[float] = None) -> List[str]:
     now = db.now() if now is None else now
     said: List[str] = []
     for row in conn.execute("SELECT * FROM build_scores WHERE verdict IS NULL").fetchall():
+        before = _rescope(conn, row)
         after = compute(conn, row["healthy_at"], now)
         if after["runs"] < LEAST:
             conn.execute("UPDATE build_scores SET after=?, measured_at=? WHERE build=? AND verdict IS NULL",
                          (db.dumps(after), now, row["build"]))
             continue
-        before = json.loads(row["before"] or "{}")
         v = verdict(before, after)
         with db.tx(conn):
             cur = conn.execute("UPDATE build_scores SET after=?, measured_at=?, verdict=?"

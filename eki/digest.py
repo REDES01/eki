@@ -222,7 +222,10 @@ def render(conn: sqlite3.Connection, since: float, until: float) -> str:
         out.append("")
 
     out += ["## Score", ""]
-    out += _score_table(score.compute(conn, until - DAY, until), score.compute(conn, until - 2 * DAY, until - DAY))
+    today = score.compute(conn, until - DAY, until)
+    out += _score_table(today, score.compute(conn, until - 2 * DAY, until - DAY))
+    left = today.get("left_out") or {}
+    out += ["", f"not counted: {left.get('self', 0)} self-work, {left.get('picture', 0)} picture runs"]
     faults = len(observe.entries(conn, since=since, until=until, kind="fault"))
     corrections = len(observe.entries(conn, since=since, until=until, kind="correction"))
     out += ["", f"In the journal since the last page: {faults} fault(s), {corrections} correction(s).", ""]

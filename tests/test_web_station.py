@@ -157,3 +157,18 @@ def test_autonomy_release_and_undo(web, conn, monkeypatch):
 @pytest.mark.parametrize("path", ["/api/self/items/x/explode", "/api/self/nothing"])
 def test_unknown_self_paths_are_not_found(web, path):
     assert post(web + path, {})[0] == 404
+
+
+def test_the_station_folds_its_sections_with_a_summary_each():
+    """Every section is a fold: closed by default but Self, opened by its heading, which
+    carries a one-line summary. A finished goal is one line until clicked."""
+    from eki import server
+    js = (server.WEB / "station.js").read_text()
+    for sect in ("self", "asks", "route", "builds", "journal", "digest"):
+        assert f'sect("{sect}"' in js, sect
+    assert 'new Set(["self"])' in js and "eki.station.open" in js
+    for sect in ("self", "asks", "route", "builds", "journal", "digest"):
+        assert f'sum("{sect}"' in js, f"no summary for {sect}"
+    assert 'closest("h3.st-h")' in js and '"goal:" +' in js
+    css = (server.WEB / "station.css").read_text()
+    assert ".st-fold { display: none" in css and ".st-sect.open .st-fold { display: block" in css

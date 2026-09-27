@@ -8,7 +8,22 @@
   const KINDS = ["fault", "handoff", "correction", "limit", "run", "regression"];   // observe.KINDS
   const ENDS = ["dropped", "applied", "landed", "live"];                            // nothing left to drop
   const RETRY = ["left", "unfit", "dropped", "rolled back"];
-  const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "" };
+  const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds() };
+  const FLIGHT = ["waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking"];
+  const YOURS = ["proposed", "locked", "left", "unfit", "rolled back"];              // waits for a person
+
+  // Which sections are open: Self by default; the choice is kept in this browser only.
+  function folds() {
+    try { const got = JSON.parse(localStorage.getItem("eki.station.open") || "null"); if (Array.isArray(got)) return new Set(got); } catch (e) { /* none */ }
+    return new Set(["self"]);
+  }
+  function fold(id, open) {
+    open ? S.folds.add(id) : S.folds.delete(id);
+    const el = $(`st-${id}`);
+    if (el) el.classList.toggle("open", open);
+    try { localStorage.setItem("eki.station.open", JSON.stringify([...S.folds])); } catch (e) { /* fine */ }
+  }
+  const sum = (id, text) => put(`st-${id}-sum`, esc(text));
 
   function ago(t) {
     if (!t) return "-";
@@ -27,25 +42,23 @@
     if (el) return el;
     el = document.createElement("div");
     el.id = "station-view";
-    const sect = (id, title, extra) => `<section class="st-sect" id="st-${id}"><h3>${title}${extra || ""}</h3><div id="st-${id}-body"></div></section>`;
+    // every section folds: its heading carries a one-line summary; the body opens on click
+    const head = (id, title, extra) => `<h3 class="st-h" data-sect="${id}"><span class="st-caret"></span>${title}
+        <span class="st-sum dim" id="st-${id}-sum"></span>${extra || ""}</h3>`;
+    const sect = (id, title, extra, inner) => `<section class="st-sect${S.folds.has(id) ? " open" : ""}" id="st-${id}">${head(id, title, extra)}
+        <div class="st-fold">${inner || ""}<div id="st-${id}-body"></div></div></section>`;
     el.innerHTML = `<div class="st-col">
-      <section class="st-sect"><h3>Self</h3>
-        <form id="st-wish" class="st-wish" autocomplete="off">
+      ${sect("self", "Self", "", `<form id="st-wish" class="st-wish" autocomplete="off">
           <textarea id="st-wish-text" rows="2" placeholder="A change to eki, in your words…"></textarea>
           <div class="st-row"><label class="st-check" title="Plan it as written, without drafting it first"><input type="checkbox" id="st-asis"> as-is</label>
             <span class="grow"></span><span id="st-wish-err"></span><button type="submit" class="st-btn primary">Ask eki to build it</button></div>
-        </form>
-        <div id="st-self-body"></div></section>
+        </form>`)}
       ${sect("asks", "Open questions")}
-      <section class="st-sect"><h3>Routing</h3>
-        <form id="st-try" class="st-row" autocomplete="off"><input id="st-try-q" placeholder="Try a request: where would it go?">
-          <button type="submit" class="st-btn">Explain</button></form>
-        <div id="st-try-out"></div><div id="st-route-body"></div></section>
+      ${sect("route", "Routing", "", `<form id="st-try" class="st-row" autocomplete="off"><input id="st-try-q" placeholder="Try a request: where would it go?">
+          <button type="submit" class="st-btn">Explain</button></form><div id="st-try-out"></div>`)}
       ${sect("builds", "Builds")}
-      <section class="st-sect"><h3>Journal
-        <select id="st-since"><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select>
-        <select id="st-kind"><option value="all">all but runs</option>${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></h3>
-        <div id="st-journal-body"></div></section>
+      ${sect("journal", "Journal", ` <span class="grow"></span><select id="st-since"><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select>
+        <select id="st-kind"><option value="all">all but runs</option>${KINDS.map((k) => `<option>${k}</option>`).join("")}</select>`)}
       ${sect("digest", "Digest", ` <span class="grow"></span><span id="st-digest-err"></span>${btn("digest", "Write now")}`)}
     </div>`;
     $("main").insertBefore(el, $("composer"));
@@ -79,16 +92,26 @@
         ${q.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(q.thread)}</div>`).join("") : "";
     const goals = s.goals.length ? s.goals.map(goal).join("") :
       '<div class="dim">nothing yet — the box above asks for a change</div>';
+    const items = s.goals.flatMap((g) => g.items);
+    const n = (states) => items.filter((it) => states.includes(it.state)).length;
+    const yours = n(YOURS), flight = n(FLIGHT);
+    sum("self", [yours ? `${yours} for you` : "", flight ? `${flight} in flight` : "", `${n(["live", "applied"])} live`, `autonomy ${s.autonomy}`]
+      .filter(Boolean).join(" · "));
     return top + queue + goals;
   }
 
+  // A goal with nothing left to do is one line; it opens on click. Others show their items.
   function goal(g) {
-    return `<div class="st-goal"><div class="st-ghead"><code>${esc(g.id)}</code>
+    const busy = g.items.some((it) => !ENDS.includes(it.state)) || ["drafting", "planning", "failed"].includes(g.state) || g.drafting || g.error;
+    const open = busy || S.open.has("goal:" + g.id);
+    const n = g.items.length, live = g.items.filter((it) => ["live", "applied"].includes(it.state)).length;
+    return `<div class="st-goal${open ? "" : " folded"}" data-goal="${esc(g.id)}"><div class="st-ghead${busy ? "" : " can-open"}"><code>${esc(g.id)}</code>
         <span class="st-state s-${esc(g.state.replace(/\s/g, "-"))}">${esc(g.state)}</span>
-        <span class="dim">${ago(g.created_at)}</span><span class="st-t" title="${esc(g.text)}">${esc(g.wish)}</span>${tlink(g.thread)}</div>
-      ${g.drafting ? `<div class="st-note">${esc(g.drafting).replace(/\n\s*/g, "<br>")}</div>` : ""}
+        <span class="dim">${ago(g.created_at)}</span><span class="st-t" title="${esc(g.text)}">${esc(g.wish)}</span>
+        ${busy ? "" : `<span class="dim">${live}/${n} live</span>`}${tlink(g.thread)}</div>
+      ${open ? `${g.drafting ? `<div class="st-note">${esc(g.drafting).replace(/\n\s*/g, "<br>")}</div>` : ""}
       ${g.error ? `<div class="st-note bad">! ${esc(g.error.slice(0, 200))}</div>` : ""}
-      ${g.items.map(item).join("")}</div>`;
+      ${g.items.map(item).join("")}` : ""}</div>`;
   }
 
   function item(it) {
@@ -119,6 +142,8 @@
     if (sw) lines.push(`last swap: ${esc(sw.state)} → ${esc(sw.target)} (${ago(sw.at)}; ${esc(sw.why || "")})`);
     if (rb && (!sw || (rb.at || 0) >= (sw.at || 0)))
       lines.push(`rolled back ${esc(clock(rb.at))}: ${esc(rb.from)} exited ${esc(rb.exit)} after ${esc(rb.after)}s → ${esc(rb.to)}`);
+    const cur = all.find((x) => x.current);
+    sum("builds", cur ? `running ${cur.id} · ${cur.healthy ? "healthy" : "not healthy yet"}${cur.verdict && cur.verdict !== "-" ? " · " + cur.verdict : ""} · ${all.length} kept` : `${all.length} kept`);
     const more = all.length > shown.length
       ? `<div class="st-line">${btn("builds-all", `show all ${all.length} builds`, "", "small")}</div>`
       : (S.allBuilds && all.length > BUILDS_SHOWN ? `<div class="st-line">${btn("builds-few", "show fewer", "", "small")}</div>` : "");
@@ -131,6 +156,7 @@
       ${t.can ? `<span class="dim">[${esc(t.can.join(", "))}]</span>` : ""}${t.why ? ` <span class="dim">(${esc(t.why)})</span>` : ""}</div>`;
 
   function table(r) {
+    sum("route", `${r.rows.length} rows · checker ${r.checker}`);
     return `<div class="st-line dim">checker: ${esc(r.checker)}</div>` + r.rows.map((row) => `<div class="st-rrow">
         <div><b>${esc(row.key)}</b> ${esc(row.title || "")} <span class="dim">needs: [${esc((row.needs || []).join(", "))}]</span></div>
         <div class="st-targets">${(row.targets || []).map((t) => `<span class="st-chip">${esc(t)}</span>`).join("")}</div></div>`).join("");
@@ -146,6 +172,7 @@
   }
 
   function digests(d) {
+    sum("digest", d.pages.length ? `latest ${d.pages[0].split("/").pop().replace(/\.md$/, "")}` : "none yet");
     const list = d.pages.map((p, i) => `<a class="st-chip" href="/api/file?path=${encodeURIComponent(p)}" target="_blank" rel="noopener">${esc(p.split("/").pop().replace(/\.md$/, ""))}${i ? "" : " · latest"}</a>`).join("");
     return (list ? `<div class="st-targets">${list}</div>` : '<div class="dim">no digest yet</div>') +
       (d.latest ? `<div class="st-md">${md.render(d.latest)}</div>` : "");
@@ -157,8 +184,11 @@
   }
 
   function journal() {
-    return part("journal", `/api/journal?since=${$("st-since").value}&kind=${$("st-kind").value}`,
-      (j) => j.entries.length ? j.entries.map(entry).join("") : '<div class="dim">nothing in this span</div>');
+    return part("journal", `/api/journal?since=${$("st-since").value}&kind=${$("st-kind").value}`, (j) => {
+      const faults = j.entries.filter((e) => e.kind === "fault").length;
+      sum("journal", `${j.entries.length} in ${$("st-since").value}${faults ? ` · ${faults} fault${faults === 1 ? "" : "s"}` : ""}`);
+      return j.entries.length ? j.entries.map(entry).join("") : '<div class="dim">nothing in this span</div>';
+    });
   }
 
   async function load() {
@@ -172,6 +202,8 @@
             S.asks = asks;
             put("st-asks-body", st.asks.length ? st.asks.map(cards.render).join("") : '<div class="dim">none — nothing is waiting on you</div>');
           }
+          sum("asks", st.asks.length ? `${st.asks.length} waiting for your answer` : "none");
+          if (st.asks.length && !S.folds.has("asks")) fold("asks", true);     // a question opens its section
           $("meta").textContent = `autonomy ${st.self.autonomy} · ${st.self.queue.length} in line · ${st.asks.length} open question${st.asks.length === 1 ? "" : "s"}`;
           return self(st.self);
         }),
@@ -193,6 +225,14 @@
   }
 
   function onClick(e) {
+    const h = e.target.closest("h3.st-h");
+    if (h && !e.target.closest("button, select, a, input")) return fold(h.dataset.sect, !S.folds.has(h.dataset.sect));
+    const gh = e.target.closest(".st-ghead.can-open");
+    if (gh && !e.target.closest("a")) {
+      const k = "goal:" + gh.parentElement.dataset.goal;
+      S.open.has(k) ? S.open.delete(k) : S.open.add(k);
+      return load();
+    }
     const entryEl = e.target.closest(".st-entry.can-open");
     if (entryEl && !e.target.closest("a, pre")) {
       const k = entryEl.dataset.key;

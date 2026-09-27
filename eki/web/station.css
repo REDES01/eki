@@ -7,6 +7,19 @@
 .st-sect h3 { display: flex; align-items: center; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--dim); margin: 0 0 8px; font-weight: 600; }
 .st-sect h3 select, .st-sect h3 button { text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* folded sections: the heading is the switch and carries a one-line summary */
+.st-h { cursor: pointer; padding: 6px 0; margin: 0; border-top: 1px solid var(--line); }
+.st-sect { margin: 0; }
+.st-sect:first-child .st-h { border-top: 0; }
+.st-caret { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
+.st-caret::before { content: "▸"; }
+.st-sect.open .st-caret { transform: rotate(90deg); }
+.st-sum { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; }
+.st-fold { display: none; padding: 4px 0 18px 18px; }
+.st-sect.open .st-fold { display: block; }
+.st-ghead.can-open { cursor: pointer; }
+.st-goal.folded { opacity: .75; }
+.st-goal.folded:hover { opacity: 1; }
 .st-sect select { font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 4px; }
 .st-row, .st-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin: 4px 0; }
 .st-line code, .st-q code, .st-ghead code, .st-ihead code, .st-entry code, .st-table code { font: 12px ui-monospace, Menlo, monospace; }

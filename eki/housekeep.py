@@ -2,8 +2,9 @@
 
 Each step runs on its own — one that raises is written down as a fault and
 the others still run: forget journal rows past 90 days (at most once an
-hour), settle the build scores, turn repeated faults into items, and write
-the daily digest when it is due. Nothing here is state that matters: the
+hour), settle the build scores, turn repeated faults into items, write
+the daily digest when it is due and give the local model its prose and
+triage (eki/digestprose.py). Nothing here is state that matters: the
 hour between prunes lives in memory, and losing it on a restart only means
 an early prune.
 """
@@ -14,7 +15,7 @@ import sqlite3
 import time
 from typing import Callable, List, Tuple
 
-from . import digest, faults, observe, score
+from . import db, digest, digestprose, faults, observe, score
 
 log = logging.getLogger("eki.housekeep")
 
@@ -34,8 +35,15 @@ def _prune(conn: sqlite3.Connection) -> List[str]:
 
 
 def _digest(conn: sqlite3.Connection) -> List[str]:
-    page = digest.tick(conn)
-    return [f"digest written: {page}"] if page else []
+    now = db.now()
+    since = digest.last()
+    if since is None or since >= now:
+        since = now - digest.DAY            # the window digest.write takes
+    page = digest.tick(conn, now)
+    if not page:
+        return []
+    rid = digestprose.start(conn, page, since, now)
+    return [f"digest written: {page}"] + ([f"digest prose asked of the local model: run {rid}"] if rid else [])
 
 
 STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
@@ -43,6 +51,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("score", lambda conn: score.settle(conn)),
     ("faults", lambda conn: faults.tick(conn)),
     ("digest", _digest),
+    ("digestprose", digestprose.tick),
 ]
 
 

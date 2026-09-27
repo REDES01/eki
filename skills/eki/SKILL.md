@@ -59,6 +59,20 @@ eki self release        # put integration main live now (the train, by hand)
 eki self autonomy apply|propose # queue and release by itself, or wait for you
 ```
 
+## eki goal — standing goals on the person's own projects
+
+A standing goal is a goal in words on a git folder; eki works on it in rounds
+when the Mac has room and the budget allows (more of each subscription window
+at night, never the last 10%). Each item lands as a branch `eki/<id>` in that
+repo, and the person merges it; eki never moves their branches. Only the
+person adds one.
+
+```
+eki goal add <folder> "…" [--check "<cmd>"] [--branch <name>]   # a standing goal on a git folder
+eki goal                        # each goal: state, why it waits, rounds, items and their merge hints; the budget
+eki goal pause|resume|drop|now <id>   # now: clear the rest (the Mac and the budget still decide)
+```
+
 ## Other commands
 
 ```

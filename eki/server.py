@@ -108,6 +108,48 @@ class Handler(BaseHTTPRequestHandler):
         data = self.rfile.read(n)
         self._call(lambda _c: api.upload(data, self.headers.get("X-Filename") or ""))
 
+    def _responses(self, body: dict) -> None:
+        """Codex's turn on the local model: start the model if it's asleep,
+        then stream the answer as Responses events."""
+        from . import models, providers, responses
+        try:
+            name, cfg = responses.local_for(body.get("model"))
+            responses.to_chat(body, "")                  # refuse what we don't do before waking a model
+        except KeyError as e:
+            return self._json({"error": str(e).strip("'\"")}, 404)
+        except responses.BadRequest as e:
+            return self._json({"error": str(e)}, 400)
+        if not models.ensure(name):
+            return self._json({"error": f"local model {name} is not up"}, 503)
+        started = []
+
+        def write(data: bytes) -> None:
+            if not started:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                started.append(True)
+            self.wfile.write(data)
+            self.wfile.flush()
+
+        self.close_connection = True                     # the stream ends when the connection does
+        try:
+            model = providers.build(name, cfg).model()
+            responses.serve(body, cfg.get("base_url") or "http://127.0.0.1:8080", model, write,
+                            params=responses.chat_params(cfg))
+        except (responses.Upstream, OSError, ValueError) as e:
+            if isinstance(e, (BrokenPipeError, ConnectionResetError)):
+                return                                   # Codex hung up (an interrupt)
+            if not started:
+                return self._json({"error": str(e)}, 502)
+            log.warning("responses stream: %s", e)
+        except Exception as e:                           # noqa: BLE001
+            log.exception("responses error")
+            observe.fault(None, "server /v1/responses")
+            if not started:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+
     # ---- routes --------------------------------------------------------------------------
 
     def do_GET(self) -> None:
@@ -149,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/attachments":
             return self._upload()
         body = self._body()
+        if p == "/v1/responses":
+            return self._responses(body)
         if p == "/api/ask":
             return self._call(api.ask, body)
         m = re.fullmatch(r"/api/asks/(\w+)/answer", p)

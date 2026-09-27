@@ -5,16 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>eki</title>
 <link rel="stylesheet" href="/ui/style.css">
+<link rel="stylesheet" href="/ui/chat.css">
+<link rel="stylesheet" href="/ui/station.css">
+<link rel="stylesheet" href="/ui/settings.css">
 <link rel="icon" href="/ui/mark.svg" type="image/svg+xml">
 </head>
 <body>
-<div id="app">
+<div id="app" data-view="chat">
   <aside id="side">
     <div class="side-head" data-drag>
       <img class="mark" src="/ui/mark.svg" alt="" aria-hidden="true"><span class="brand">eki</span>
       <button id="new" class="ghost" title="New thread (⌘K)">＋ New</button>
     </div>
-    <a id="pictures" href="#pictures" class="side-link">Pictures</a>
+    <nav id="views">
+      <a id="chat" href="#" class="side-link">Chat</a>
+      <a id="pictures" href="#pictures" class="side-link">Pictures</a>
+      <a id="station" href="#station" class="side-link">Station</a>
+      <a id="settings" href="#settings" class="side-link">Settings</a>
+    </nav>
     <nav id="threads"></nav>
     <section id="machine">
       <div class="sect">Providers</div>
@@ -55,7 +63,11 @@
 <script src="/ui/cards.js"></script>
 <script src="/ui/panel.js"></script>
 <script src="/ui/attach.js"></script>
+<script src="/ui/nav.js"></script>
 <script src="/ui/gallery.js"></script>
+<script src="/ui/station.js"></script>
+<script src="/ui/settings.js"></script>
+<script src="/ui/side.js"></script>
 <script src="/ui/app.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // The gallery: every picture eki drew, newest first, from /api/pictures.
-// It takes #main's place while the address is #pictures; nothing is kept here
+// It takes #main's place while the address is #pictures (nav.js); nothing is kept here
 // that the API doesn't give back after a refresh.
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -71,8 +71,6 @@
   function show() {
     state.on = true;
     box().hidden = false;
-    $("app").classList.add("gallery");
-    $("pictures").classList.add("on");
     $("title").textContent = "Pictures";
     $("meta").textContent = "";
     state.items = [];
@@ -83,9 +81,8 @@
     if (!state.on) return;
     state.on = false;
     box().hidden = true;
-    $("app").classList.remove("gallery");
-    $("pictures").classList.remove("on");
   }
 
   window.gallery = { show, hide, on: () => state.on };
+  nav.register("pictures", { show, hide });
 })();

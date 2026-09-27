@@ -46,10 +46,36 @@ def test_ui_files_are_served(web):
 def test_the_window_has_a_pictures_view(web):
     _, body = get(web + "/")
     assert '<script src="/ui/gallery.js"></script>' in body and 'id="pictures"' in body and ">Pictures<" in body
-    assert body.index("/ui/gallery.js") < body.index("/ui/app.js")
+    assert body.index("/ui/nav.js") < body.index("/ui/gallery.js") < body.index("/ui/app.js")   # gallery registers with nav
     code, js = get(web + "/ui/gallery.js")
     assert code == 200 and "/api/pictures" in js and "window.gallery" in js
     assert json.loads(get(web + "/api/pictures?limit=5")[1]) == {"pictures": [], "more": False}
+
+
+def test_the_page_has_its_views_and_scripts_in_order(web):
+    _, body = get(web + "/")
+    for view in ("chat", "pictures", "station", "settings"):
+        assert f'id="{view}"' in body
+    assert ">Station<" in body and ">Settings<" in body
+    scripts = ["md", "cards", "panel", "attach", "nav", "gallery", "station", "settings", "side", "app"]
+    at = [body.index(f'<script src="/ui/{s}.js"></script>') for s in scripts]
+    assert at == sorted(at)
+    css = ["style", "chat", "station", "settings"]
+    at = [body.index(f'<link rel="stylesheet" href="/ui/{c}.css">') for c in css]
+    assert at == sorted(at) and at[-1] < body.index("</head>")
+    for i in ("strip", "attach", "to", "cwd", "bg", "prompt", "send", "log", "scroll", "empty", "head", "title", "meta", "panel"):
+        assert f'id="{i}"' in body
+    assert body.count("data-drag") >= 3
+
+
+def test_the_shell_files_are_served(web):
+    code, nav = get(web + "/ui/nav.js")
+    assert code == 200 and "window.nav" in nav and "hashchange" in nav and "messageHandlers.eki" in nav
+    code, side = get(web + "/ui/side.js")
+    assert code == 200 and "/api/threads" in side and "/api/providers" in side and "window.side" in side
+    assert get(web + "/ui/chat.css")[0] == 200
+    _, app = get(web + "/ui/app.js")
+    assert "nav.thread(" in app and "nav.start()" in app
 
 
 def test_ask_then_read_the_thread(web, conn):

@@ -46,6 +46,6 @@ def test_mcp_registry():
 
 
 def test_no_file_over_400_lines():
-    big = [(p.relative_to(ROOT), n) for p in (ROOT / "eki").rglob("*.py")
-           if (n := len(p.read_text().splitlines())) > 400]
+    files = [*(ROOT / "eki").rglob("*.py"), *(ROOT / "eki" / "web").glob("*.js"), *(ROOT / "eki" / "web").glob("*.css")]
+    big = [(p.relative_to(ROOT), n) for p in files if (n := len(p.read_text().splitlines())) > 400]
     assert not big, f"split these: {big}"

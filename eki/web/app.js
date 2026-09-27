@@ -1,9 +1,9 @@
-// eki's web UI. Everything comes from the engine's API; nothing is kept here
+// eki's chat: the thread view and the composer (nav.js routes, side.js is the sidebar).
+// Everything comes from the engine's API; nothing is kept here
 // that the engine doesn't have, so a refresh or an engine restart loses nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
-  if (/EkiMac/.test(navigator.userAgent)) document.documentElement.dataset.shell = "mac";
-  const state = { thread: null, after: 0, polling: false, providers: [], offline: false };
+  const state = { thread: null, after: 0, polling: false };
 
   async function call(path, body) {
     const opts = body === undefined ? {} : {
@@ -14,26 +14,6 @@
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
-  }
-
-  function ago(t) {
-    const s = Math.max(0, Math.floor(Date.now() / 1000 - t));
-    if (s < 60) return "now";
-    if (s < 3600) return Math.floor(s / 60) + "m";
-    if (s < 86400) return Math.floor(s / 3600) + "h";
-    return Math.floor(s / 86400) + "d";
-  }
-
-  // ---- threads ---------------------------------------------------------------------------
-
-  async function loadThreads() {
-    const list = await call("/api/threads");
-    $("threads").innerHTML = list.map((t) => `
-      <a href="#${t.id}" class="thread ${t.id === state.thread ? "on" : ""}" data-id="${t.id}">
-        ${t.needs_you ? '<span class="dot you" title="needs you"></span>' : t.working ? '<span class="dot" title="working"></span>' : ""}
-        <span class="t">${md.esc(t.title || "(untitled)")}</span>
-        <span class="when dim">${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
-      </a>`).join("") || '<div class="dim pad">No threads yet.</div>';
   }
 
   function stepLine(s) {
@@ -72,8 +52,10 @@
   }
 
   async function loadThread(scroll) {
-    if (!state.thread) return;
-    const t = await call("/api/threads/" + state.thread);
+    const tid = state.thread;
+    if (!tid) return;
+    const t = await call("/api/threads/" + tid);
+    if (state.thread !== tid) return;   // the page moved on while this was loading
     $("title").textContent = t.title || "(untitled)";
     $("meta").textContent = [t.provider && "with " + t.provider, t.cwd].filter(Boolean).join(" · ");
     if (t.cwd && !$("cwd").value) $("cwd").value = t.cwd;
@@ -99,9 +81,9 @@
         if (got.events.length) {
           state.after = got.events[got.events.length - 1].id;
           await loadThread(false);
-          loadThreads();
+          side.loadThreads();
         }
-        if (!got.active) { await loadThread(false); loadThreads(); break; }
+        if (!got.active) { await loadThread(false); side.loadThreads(); break; }
       }
     } catch (e) {
       setTimeout(() => { state.polling = false; poll(); }, 1500);   // engine restarting: try again
@@ -111,72 +93,14 @@
   }
 
   function open(id) {
-    if (id === "pictures") { state.thread = null; loadThreads(); return gallery.show(); }  // the gallery view (gallery.js)
-    gallery.hide();
     state.thread = id || null;
     state.after = 0;
     $("log").innerHTML = "";
     $("empty").style.display = "";
     $("cwd").value = "";
     if (!id) { $("title").textContent = "New thread"; $("meta").textContent = ""; }
-    loadThreads();
     loadThread(true);
     $("prompt").focus();
-  }
-
-  // ---- providers and the machine ---------------------------------------------------------
-
-  const WINDOW = { five_hour: "5h", seven_day: "week", thirty_day: "30 days" };
-  function meters(q) {
-    if (!q || !q.windows) return "";
-    return `<div class="meters">${Object.entries(q.windows).map(([k, w]) => {
-      const pct = Math.round((w.used || 0) * 100);
-      const resets = w.resets_at ? new Date(w.resets_at * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "";
-      return `<div class="meter" title="${WINDOW[k] || k}: ${pct}% used${resets ? " · resets " + resets : ""}">
-        <span class="mlabel">${WINDOW[k] || k}</span><span class="mbar"><i style="width:${Math.min(pct, 100)}%" class="${pct >= 100 ? "full" : ""}"></i></span><span class="mpct">${pct}%</span></div>`;
-    }).join("")}</div>`;
-  }
-
-  // The latest daily digest, a line under the engine; a click opens it in the panel (panel.js).
-  function showDigest(path) {
-    let el = $("digest");
-    if (!path) { if (el) el.remove(); return; }
-    if (!el) {
-      el = document.createElement("button");
-      el.type = "button"; el.id = "digest"; el.className = "file ghost small";
-      $("machine").appendChild(el);
-    }
-    el.dataset.file = path;
-    el.textContent = "Digest " + (path.split("/").pop() || "").replace(/\.md$/, "");
-  }
-
-  async function loadProviders() {
-    let ps, st;
-    try {
-      [ps, st] = await Promise.all([call("/api/providers"), call("/api/status")]);
-    } catch (e) {
-      $("engine").textContent = "engine unreachable — reconnecting…";
-      state.offline = true;
-      return;
-    }
-    if (state.offline) { state.offline = false; loadThreads(); loadThread(false); }
-    state.providers = ps;
-    const sel = $("to"), cur = sel.value;
-    sel.innerHTML = '<option value="">Auto</option>' +
-      ps.map((p) => `<option value="${p.name}">${md.esc(p.label)}</option>`).join("");
-    sel.value = cur;
-    $("providers").innerHTML = ps.map((p) => {
-      const m = p.model;
-      let action = "";
-      if (m && m.startable) action = m.up || m.starting
-        ? `<button class="ghost small" data-model="${p.name}" data-act="stop">Stop</button>`
-        : `<button class="ghost small" data-model="${p.name}" data-act="start">Start</button>`;
-      const label = m && m.starting ? "starting…" : (p.ok ? "ready" : p.why);
-      return `<div class="prov"><span class="led ${p.ok ? "ok" : m && m.starting ? "wait" : ""}"></span>
-        <span class="pname">${md.esc(p.name)}</span><span class="dim pwhy" title="${md.esc(label)}">${p.quota ? (p.quota.plan || "") : md.esc(label)}</span>${action}</div>${meters(p.quota)}`;
-    }).join("");
-    showDigest(st.digest);
-    $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}`;
   }
 
   // ---- events ----------------------------------------------------------------------------
@@ -219,33 +143,12 @@
   document.addEventListener("click", async (e) => {
     const c = e.target.closest("[data-cancel]");
     if (c) { await call(`/api/runs/${c.dataset.cancel}/cancel`, {}); loadThread(false); }
-    const m = e.target.closest("[data-model]");
-    if (m) { m.disabled = true; await call(`/api/models/${m.dataset.model}/${m.dataset.act}`, {}).catch((x) => alertLine(x.message)); loadProviders(); }
   });
-  $("new").addEventListener("click", () => { location.hash = ""; open(null); });
-  document.addEventListener("keydown", (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); location.hash = ""; open(null); }
-  });
-  window.addEventListener("hashchange", () => open(location.hash.slice(1) || null));
-  window.addEventListener("eki:refresh", () => { loadThread(false); loadThreads(); });
+  window.addEventListener("eki:refresh", () => { loadThread(false); side.loadThreads(); });
 
-  // The Mac window moves when dragged by its title areas; tell it where they are.
-  function reportDrag() {
-    const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.eki;
-    if (!h) return;
-    const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
-    h.postMessage({
-      drag: [...document.querySelectorAll("[data-drag]")].map(box),
-      nodrag: [...document.querySelectorAll("[data-drag] button, [data-drag] a, [data-drag] input, [data-drag] select")].map(box),
-    });
-  }
-  new ResizeObserver(reportDrag).observe(document.body);
-  document.querySelectorAll("[data-drag]").forEach((el) => new ResizeObserver(reportDrag).observe(el));
-  window.addEventListener("resize", reportDrag);
-  reportDrag();
+  // Leaving the chat for another view (nav.js) stops following the thread.
+  window.addEventListener("eki:view", (e) => { if (e.detail !== "chat") state.thread = null; });
 
-  open(location.hash.slice(1) || null);
-  loadProviders();
-  setInterval(loadProviders, 5000);
-  setInterval(loadThreads, 4000);
+  nav.thread(open);
+  nav.start();
 })();

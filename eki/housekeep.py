@@ -4,7 +4,7 @@ Each step runs on its own — one that raises is written down as a fault and
 the others still run: forget journal rows past 90 days (at most once an
 hour), settle the build scores, turn repeated faults into items, let the
 loop pick eki's next self-work when it is on and eki is idle
-(eki/selfpick.py), write the daily digest when it is due and give the
+(eki/selfpick.py), open the next round of each standing goal (eki/standing.py), write the daily digest when it is due and give the
 local model its prose and triage (eki/digestprose.py). Nothing here is state that matters: the
 hour between prunes lives in memory, and losing it on a restart only means
 an early prune.
@@ -16,7 +16,7 @@ import sqlite3
 import time
 from typing import Callable, List, Tuple
 
-from . import db, digest, digestprose, faults, observe, score, selfpick
+from . import db, digest, digestprose, faults, observe, score, selfpick, standing
 
 log = logging.getLogger("eki.housekeep")
 
@@ -52,6 +52,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("score", lambda conn: score.settle(conn)),
     ("faults", lambda conn: faults.tick(conn)),
     ("pick", lambda conn: selfpick.tick(conn)),
+    ("standing", lambda conn: standing.tick(conn)),
     ("digest", _digest),
     ("digestprose", digestprose.tick),
 ]

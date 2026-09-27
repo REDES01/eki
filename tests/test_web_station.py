@@ -2,10 +2,11 @@
 import json
 import os
 import urllib.error
+import urllib.request
 
 import pytest
 
-from eki import asks, builds, db, digest, observe, paths, selfwork, store, traincheck
+from eki import asks, builds, db, digest, integration, observe, paths, selfwork, store, traincheck
 from test_self import src  # noqa: F401  (the source fixture)
 from test_self_cli import goal_with
 from test_web import get, post, web  # noqa: F401  (the fixture)
@@ -96,11 +97,24 @@ def test_digests_newest_first_and_write_now(web, conn):
     assert code == 200 and out["path"] in _get(web, "/api/digests")["pages"]
 
 
-def test_a_wish_needs_the_header_and_drafts_or_plans(web, conn, src):
+def _slow_post(url, body):
+    """A wish clones and adds worktrees: give it more than test_web.post's 10 s under load."""
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "X-Eki": "1"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def test_a_wish_needs_the_header_and_drafts_or_plans(web, conn, src, monkeypatch):
+    base = integration.sync()                            # the integration repo made here, not in a request
+    monkeypatch.setattr(integration, "sync", lambda: base)
     assert post(web + "/api/self", {"text": "make eki nicer"}, header=False)[0] == 403
-    code, out = post(web + "/api/self", {"text": "make eki nicer"})
+    code, out = _slow_post(web + "/api/self", {"text": "make eki nicer"})
     assert code == 200 and out["state"] == "drafting"
-    code, out = post(web + "/api/self", {"text": "exactly this", "as_is": True})
+    code, out = _slow_post(web + "/api/self", {"text": "exactly this", "as_is": True})
     assert code == 200 and out["state"] == "planning"
     assert post(web + "/api/self", {"text": "  "})[0] == 400
 

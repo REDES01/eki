@@ -47,7 +47,11 @@ def install() -> str:
         "ThrottleInterval": 5,
         "StandardOutPath": str(paths.logs() / "launcher.log"),
         "StandardErrorPath": str(paths.logs() / "launcher.log"),
-        "ProcessType": "Background",
+        # Standard, not Background: launchd throttles a Background job and every
+        # process it spawns to the efficiency cores at low priority — that is
+        # every agent, test suite and git call eki runs. Standard is the plain
+        # scheduling any program started from a terminal gets.
+        "ProcessType": "Standard",
     }
     p = plist_path()
     p.parent.mkdir(parents=True, exist_ok=True)

@@ -13,19 +13,19 @@ folder agents are told to stay out of; `repo()` is where the branches are.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-from . import builds, db, doccheck, integration, paths, selfbrief, selfdraft, store, workspace
+from . import builds, db, doccheck, integration, paths, projects, scheduler, selfbrief, selfdraft, selfplan, store, workspace
 
 log = logging.getLogger("eki.self")
 
-DEFAULTS = {"parallel": 3, "autonomy": "propose",
-            "loop": False, "review_max": 3, "picks_per_day": 6, "pick_min_cluster": 3}   # eki/selfpick.py
+DEFAULTS = {"parallel": 4, "autonomy": "propose",
+            "loop": False, "review_max": 3, "picks_per_day": 6, "pick_min_cluster": 3,   # eki/selfpick.py
+            "standing_rest_hours": 24, "standing_waiting_max": 3}                        # eki/standing.py
 #: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
 #: under "apply" once it is in integration main, so the dependent is built on top of it
 #: a dependency counts once its code is in main — whoever put it there. Under
@@ -57,19 +57,27 @@ def repo() -> Path:
 
 def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: bool = False,
            files: Optional[List[str]] = None, owner: str = "you", source_kind: str = "ask",
-           why: Optional[str] = None, pick_key: Optional[str] = None) -> str:
+           why: Optional[str] = None, pick_key: Optional[str] = None,
+           project: Optional[str] = None, standing_id: Optional[str] = None) -> str:
     """A goal. With `draft` the text is a wish the draft run makes into a goal
-    first (eki/selfdraft.py); without `plan` it is one item as it stands."""
+    first (eki/selfdraft.py); without `plan` it is one item as it stands.
+    With `project` it is work on a person's own repo (eki/projects.py)."""
     text = (text or "").strip()
     if not text:
         raise ValueError("nothing to do")
-    base = integration.sync()
+    if project is None:
+        base = integration.sync()
+    else:
+        row = projects.get(conn, project)
+        if row is None:
+            raise ValueError(f"no project {project}")
+        base = projects.base(row)
     gid = store.new_id()
     with db.tx(conn):
-        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key) "
-                     "VALUES (?,?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key, "
+                     "project, standing_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                      (gid, text, text, source_kind, owner, "planning" if plan else "planned", db.now(),
-                      why, pick_key))
+                      why, pick_key, project, standing_id))
         if plan and draft:
             selfdraft.start_draft(conn, gid, text, base, owner)
         elif plan:
@@ -92,18 +100,17 @@ def new_item(conn: sqlite3.Connection, gid: str, title: str, spec: str, files: L
 # ---- the tick -----------------------------------------------------------------------------
 
 def tick(conn: sqlite3.Connection) -> List[str]:
-    _tracked.clear()
     said: List[str] = []
     for g in conn.execute("SELECT * FROM goals WHERE state='drafting'").fetchall():
         said += selfdraft.conclude(conn, g)
     for g in conn.execute("SELECT * FROM goals WHERE state='planning'").fetchall():
-        said += _conclude_plan(conn, g)
+        said += selfplan.conclude_plan(conn, g)
     for it in items_in(conn, ("building",)):
         said += _conclude_build(conn, it)
     for it in items_in(conn, ("judging",)):
         said += _conclude_judge(conn, it)
     said += _settle_applied(conn)
-    said += _start_ready(conn)
+    said += scheduler.start_ready(conn)
     return said
 
 
@@ -142,35 +149,6 @@ def _set(conn: sqlite3.Connection, iid: str, **fields: Any) -> None:
     fields["updated_at"] = db.now()
     cols = ", ".join(f"{k}=?" for k in fields)
     conn.execute(f"UPDATE items SET {cols} WHERE id=?", (*fields.values(), iid))
-
-
-def _conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
-    run = store.run(conn, g["plan_run"]) if g["plan_run"] else None
-    if run is None or run["state"] in store.ACTIVE:
-        return []
-    with db.tx(conn):
-        cur = conn.execute("SELECT state FROM goals WHERE id=?", (g["id"],)).fetchone()
-        if cur["state"] != "planning":
-            return []
-        if run["state"] != "done":
-            err = f"the plan run ended {run['state']}: {run['error'] or ''}".strip()
-            conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, g["id"]))
-            return [f"goal {g['id']}: {err}"]
-        try:
-            planned = selfbrief.items_in(store.answer(conn, run["id"]))
-        except ValueError as e:
-            conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (str(e), g["id"]))
-            return [f"goal {g['id']}: {e}"]
-        ids: Dict[str, str] = {}
-        for it in planned:
-            ids[it["title"]] = new_item(conn, g["id"], it["title"], it["spec"], it["files"], [],
-                                        it["independent"])
-        for it in planned:
-            deps = [ids[d] for d in it["deps"] if d in ids and ids[d] != ids[it["title"]]]
-            _set(conn, ids[it["title"]], deps=db.dumps(deps))
-        conn.execute("UPDATE goals SET state='planned' WHERE id=?", (g["id"],))
-    workspace.remove(repo(), f"plan-{g['id']}", delete_branch=True)
-    return [f"goal {g['id']}: {len(planned)} item(s) planned"]
 
 
 def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
@@ -224,44 +202,9 @@ def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     return [f"item {it['id']}: unfit — left for you"]
 
 
-# ---- starting items -------------------------------------------------------------------------
+# ---- starting a build -------------------------------------------------------------------------
 
-def _start_ready(conn: sqlite3.Connection) -> List[str]:
-    parallel = int(settings()["parallel"])
-    live = items_in(conn, ("building", "judging"))
-    if len(live) >= parallel:
-        return []
-    done_ids = {r["id"] for r in items_in(conn, FIT.get(settings()["autonomy"], FIT["propose"]))}
-    taken: List[Set[str]] = [claims(x) for x in live]
-    names = None
-    said = []
-    for it in items_in(conn, ("waiting",)):
-        if len(live) >= parallel:
-            break
-        deps = json.loads(it["deps"] or "[]")
-        if any(d not in done_ids for d in deps):
-            continue
-        if names is None:
-            names = tracked(repo())
-        mine = expand(json.loads(it["files"] or "[]"), names)
-        if not it["independent"] and any(mine & t for t in taken):
-            continue
-        goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-        others = [(x["title"], json.loads(x["files"] or "[]")) for x in live]
-        with db.tx(conn):
-            _start_build(conn, it, goal, others)
-        live.append(store_item(conn, it["id"]))
-        taken.append(mine)
-        said.append(f"item {it['id']}: building ({it['title'][:50]})")
-    return said
-
-
-def claims(it: sqlite3.Row) -> Set[str]:
-    files = set(json.loads(it["files"] or "[]")) | set(json.loads(it["touched"] or "[]"))
-    return expand(sorted(files), tracked(repo()))
-
-
-def _start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, others) -> None:
+def start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, others) -> None:
     if not it["worktree"]:
         base = integration.sync()
         wt = workspace.add(repo(), it["id"], base=base, branch=f"self/{it['id']}")
@@ -279,32 +222,6 @@ def _start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, o
 
 def store_item(conn: sqlite3.Connection, iid: str) -> sqlite3.Row:
     return conn.execute("SELECT * FROM items WHERE id=? OR id LIKE ?", (iid, iid + "%")).fetchone()
-
-
-# ---- write-sets ------------------------------------------------------------------------------
-
-_tracked: Dict[str, List[str]] = {}
-
-
-def tracked(repo: Path) -> List[str]:
-    key = str(repo)
-    if key not in _tracked:
-        _tracked[key] = workspace.git(repo, "ls-files").splitlines()
-    return _tracked[key]
-
-
-def expand(patterns: List[str], names: List[str]) -> Set[str]:
-    """The files a write-set means. No write-set means everything."""
-    if not patterns:
-        return set(names) | {"*"}
-    out: Set[str] = set()
-    for p in patterns:
-        p = p.strip().lstrip("./")
-        if p.endswith("/"):
-            p += "*"
-        hits = fnmatch.filter(names, p)
-        out |= set(hits) if hits else {p}          # a file that doesn't exist yet: by name
-    return out
 
 
 # ---- out ---------------------------------------------------------------------------------------

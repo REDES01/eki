@@ -155,6 +155,26 @@ CREATE TABLE IF NOT EXISTS chores (         -- a local-model job eki gives itsel
     ended_at REAL
 );
 CREATE INDEX IF NOT EXISTS chores_kind ON chores(kind, state);
+CREATE TABLE IF NOT EXISTS projects (       -- a person's own git folder eki works on (eki/projects.py)
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    branch TEXT NOT NULL,                   -- the branch items are based on and merged into by the person
+    check_cmd TEXT,                         -- gate 1, a shell command; NULL: bin/check if there, else none
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS standing (       -- a standing goal, worked on in rounds
+    id TEXT PRIMARY KEY,
+    project TEXT,                           -- NULL: eki itself
+    text TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'on',       -- on | paused | stuck | dropped
+    why TEXT,                               -- why no round opened last time
+    rest_until REAL,
+    failures INTEGER NOT NULL DEFAULT 0,    -- failed rounds in a row
+    rounds INTEGER NOT NULL DEFAULT 0,
+    last_round_at REAL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -182,6 +202,10 @@ ADDED = [
     ("goals", "pick_key", "TEXT"),      # what eki picked: fault:<k>, journal:handoff:answer, roadmap:<key>
     ("goals", "why", "TEXT"),           # why eki picked it
     ("runs", "retries", "INTEGER NOT NULL DEFAULT 0"),   # the transient-error retries it has had
+    ("goals", "project", "TEXT"),       # projects.id; NULL: eki itself
+    ("goals", "standing_id", "TEXT"),   # the standing goal this is a round of
+    ("goals", "shape", "TEXT"),         # JSON: the plan's items, depth, width, chained
+    ("items", "why", "TEXT"),           # why it is still waiting
 ]
 
 

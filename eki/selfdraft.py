@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import db, integration, paths, selfbrief, store, workspace
+from . import db, integration, paths, projects, selfbrief, store, workspace
 from .routing import table
 
 #: the old eki, read as reference by a draft when it is there
@@ -55,8 +55,11 @@ def start_draft(conn: sqlite3.Connection, gid: str, wish: str, base: str, owner:
 
 
 def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: str) -> str:
-    """Start the plan run for goal `gid` (inside the caller's tx)."""
-    wt = workspace.add(integration.repo(), f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
+    """Start the plan run for goal `gid` (inside the caller's tx), in a
+    read-only worktree of the goal's repo: eki's own, or its project's."""
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone()
+    repo = projects.repo_for(conn, goal) if goal is not None else integration.repo()
+    wt = workspace.add(repo, f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
     tid = store.create_thread(conn, f"plan: {text}", str(wt))
     provider, model = planner()
     rid = store.create_run(conn, tid, selfbrief.plan(text, base), provider=provider, model=model,

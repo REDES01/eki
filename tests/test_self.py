@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import integration, paths, selfbrief, selfwork, store, workspace
+from eki import integration, paths, scheduler, selfbrief, selfwork, store, workspace
 from conftest import run_inline
 
 PLAN = """Here is the plan.
@@ -206,9 +206,9 @@ def test_reading_briefs():
     assert selfbrief.outcome("blah\nSUMMARY: it works\nnow.\nITEM: partial rest later") == \
         ("partial", "rest later", "it works\nnow.")
     assert selfbrief.outcome("no verdict")[0] == "done"
-    assert selfwork.expand(["eki/cli/"], ["eki/cli/a.py", "eki/x.py"]) == {"eki/cli/a.py"}
-    assert selfwork.expand(["new.py"], ["eki/x.py"]) == {"new.py"}
-    assert "*" in selfwork.expand([], ["eki/x.py"])
+    assert scheduler.expand(["eki/cli/"], ["eki/cli/a.py", "eki/x.py"]) == {"eki/cli/a.py"}
+    assert scheduler.expand(["new.py"], ["eki/x.py"]) == {"new.py"}
+    assert "*" in scheduler.expand([], ["eki/x.py"])
 
 
 def test_items_marker_inside_a_spec_is_not_the_list():

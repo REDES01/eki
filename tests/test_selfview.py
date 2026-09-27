@@ -49,7 +49,7 @@ def seed(conn):
 
 
 BOARD = """\
-(autonomy propose, 3 at once, source /src/eki)
+(autonomy propose, 4 at once, source /src/eki)
 
 queue
   1.  i3  on aaaaaaaa  gate 2 green — waiting for the ones ahead  item i3
@@ -86,7 +86,7 @@ def test_the_board_prints_exactly_what_it_did_before_the_words_moved(conn, capsy
 def test_board_as_data_has_the_same_words_and_order(conn):
     tid, rid, aid = seed(conn)
     b = selfview.board(conn)
-    assert (b["autonomy"], b["parallel"], b["source"]) == ("propose", 3, "/src/eki")
+    assert (b["autonomy"], b["parallel"], b["source"]) == ("propose", 4, "/src/eki")
     assert [(q["id"], q["pos"]) for q in b["queue"]] == [("i3", 1), ("i4", 2), ("i7", None)]
     assert b["queue"][0]["stage"] == "gate 2 green — waiting for the ones ahead"
     assert b["queue"][1]["stage"] == "rebasing" and b["queue"][1]["docs_only"]

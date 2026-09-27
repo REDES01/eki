@@ -231,3 +231,18 @@ def test_a_port_never_freed_is_given_up_on(monkeypatch, caplog):
     assert server._keep_trying(patience=0.2, pause=0.05) is None
     assert any("not served" in r.message for r in caplog.records)
     holder.server_close()
+
+
+def test_the_greeting_belongs_to_the_chat_view_only():
+    """With no thread open, #main is `blank` and the greeting is centred. Every rule
+    that shows #scroll or #empty in that state must be scoped to the chat view, or it
+    ties with the "other views hide #scroll" rule in style.css and, loading later,
+    wins: the greeting then sat above the Settings page."""
+    css = (server.WEB / "chat.css").read_text()
+    for line in css.splitlines():
+        rule = line.strip()
+        if rule.startswith("#main.blank") or rule.startswith("#main.blank "):
+            raise AssertionError(f"unscoped blank rule in chat.css: {rule}")
+    assert '#app[data-view="chat"] #main.blank #scroll' in css
+    style = (server.WEB / "style.css").read_text()
+    assert '#app:not([data-view="chat"]) #scroll' in style

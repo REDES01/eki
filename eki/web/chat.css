@@ -126,9 +126,12 @@
 #send:disabled { opacity: .5; }
 
 /* ---- nothing asked yet: the greeting and the composer, centered together ---- */
-#main.blank #scroll { display: flex; align-items: flex-end; justify-content: center; }
-#main.blank #empty { position: static; padding: 0 24px 22px; }
-#main.blank #log:empty { display: none; }
+/* scoped to the chat view: with no thread open, an unscoped `#main.blank #scroll`
+   ties with style.css's "hide #scroll on other views" and, loading later, wins —
+   the greeting then sat above the Settings and Station pages */
+#app[data-view="chat"] #main.blank #scroll { display: flex; align-items: flex-end; justify-content: center; }
+#app[data-view="chat"] #main.blank #empty { position: static; padding: 0 24px 22px; }
+#app[data-view="chat"] #main.blank #log:empty { display: none; }
 #app[data-view="chat"] #main.blank::after { content: ""; flex: 1; }
 
 @media (max-width: 720px) {

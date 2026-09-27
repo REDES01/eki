@@ -37,11 +37,11 @@
         </form>
         <div id="st-self-body"></div></section>
       ${sect("asks", "Open questions")}
-      ${sect("builds", "Builds")}
       <section class="st-sect"><h3>Routing</h3>
         <form id="st-try" class="st-row" autocomplete="off"><input id="st-try-q" placeholder="Try a request: where would it go?">
           <button type="submit" class="st-btn">Explain</button></form>
         <div id="st-try-out"></div><div id="st-route-body"></div></section>
+      ${sect("builds", "Builds")}
       <section class="st-sect"><h3>Journal
         <select id="st-since"><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select>
         <select id="st-kind"><option value="all">all but runs</option>${KINDS.map((k) => `<option>${k}</option>`).join("")}</select></h3>
@@ -103,20 +103,27 @@
       ${it.note ? `<div class="st-note">${esc(it.note)}</div>` : ""}</div>`;
   }
 
+  //: builds shown before "show all": the newest ones, plus whatever runs or ran last
+  const BUILDS_SHOWN = 8;
+
   function builds(b) {
-    const rows = b.builds.map((x) => `<tr class="${x.current ? "cur" : ""}"><td>${x.current ? "→" : x.previous ? "↩" : ""}</td>
+    const all = [...b.builds].sort((p, q) => (q.made_at || 0) - (p.made_at || 0));
+    const shown = S.allBuilds ? all : all.filter((x, i) => i < BUILDS_SHOWN || x.current || x.previous);
+    const rows = shown.map((x) => `<tr class="${x.current ? "cur" : ""}"><td>${x.current ? "→" : x.previous ? "↩" : ""}</td>
         <td><code>${esc(x.id)}</code></td><td><code>${esc((x.commit || "").slice(0, 12))}</code></td>
         <td class="dim">${ago(x.made_at)}</td><td>${x.healthy ? "healthy" : "-"}</td><td>${esc(x.check)}</td>
         <td class="v-${esc(x.verdict)}">${esc(x.verdict)}</td>
-        <td>${x.verdict === "worse" ? err("undo:" + x.id) + btn("undo", "undo", x.id, "warn") : ""}</td>
-        <td class="dim st-path">${esc(x.path)}</td></tr>`).join("");
+        <td>${x.verdict === "worse" ? err("undo:" + x.id) + btn("undo", "undo", x.id, "warn") : ""}</td></tr>`).join("");
     const sw = b.swap, rb = b.rollback;
     const lines = [`running: <code>${esc(b.running)}</code>`];
     if (sw) lines.push(`last swap: ${esc(sw.state)} → ${esc(sw.target)} (${ago(sw.at)}; ${esc(sw.why || "")})`);
     if (rb && (!sw || (rb.at || 0) >= (sw.at || 0)))
       lines.push(`rolled back ${esc(clock(rb.at))}: ${esc(rb.from)} exited ${esc(rb.exit)} after ${esc(rb.after)}s → ${esc(rb.to)}`);
+    const more = all.length > shown.length
+      ? `<div class="st-line">${btn("builds-all", `show all ${all.length} builds`, "", "small")}</div>`
+      : (S.allBuilds && all.length > BUILDS_SHOWN ? `<div class="st-line">${btn("builds-few", "show fewer", "", "small")}</div>` : "");
     return `<div class="st-line">${lines[0]}</div>` +
-      (rows ? `<table class="st-table">${rows}</table>` : '<div class="dim">no builds yet</div>') +
+      (rows ? `<table class="st-table">${rows}</table>` : '<div class="dim">no builds yet</div>') + more +
       lines.slice(1).map((l) => `<div class="st-line">${l}</div>`).join("");
   }
 
@@ -203,6 +210,7 @@
     if (a === "drop" && !confirm(`Drop item ${id}?`)) return;
     if (a === "drop" || a === "retry") return act(id, `/api/self/items/${encodeURIComponent(id)}/${a}`);
     if (a === "release") return act("release", "/api/self/release");
+    if (a === "builds-all" || a === "builds-few") { S.allBuilds = a === "builds-all"; return load(); }
     if (a === "autonomy") return act("autonomy", "/api/self/autonomy", { mode: id });
     if (a === "undo" && confirm(`Undo build ${id}? eki plans a goal to take its changes back.`))
       return act("undo:" + id, `/api/builds/${encodeURIComponent(id)}/undo`);

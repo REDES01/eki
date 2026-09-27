@@ -67,3 +67,16 @@ def test_a_healthy_mark_and_the_sweep(tmp_path, monkeypatch):
     assert builds.sweep(in_use=[old.name], days=1) == []     # a worker still runs from it
     assert builds.sweep(in_use=[], days=1) == [old.name]
     assert builds.sweep(in_use=[], days=1) == []             # current is never swept
+
+
+def test_status_lists_builds_newest_first(tmp_path):
+    r = _repo(tmp_path)
+    made = []
+    for i in range(3):
+        workspace.git(r, "commit", "-q", "--allow-empty", "-m", f"c{i}")
+        b = builds.make(r, "HEAD")
+        info = json.loads((b / ".eki-build.json").read_text())
+        info["made_at"] = 1000 + i                           # made a second apart, whatever their names sort as
+        (b / ".eki-build.json").write_text(json.dumps(info))
+        made.append(b.name)
+    assert [b["id"] for b in builds.status()["builds"]] == made[::-1]

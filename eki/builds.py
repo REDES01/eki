@@ -192,6 +192,7 @@ def status() -> Dict[str, Any]:
             data["healthy"] = (d / ".healthy").exists()
             data["path"] = str(d)
             out["builds"].append(data)
+    out["builds"].sort(key=lambda b: float(b.get("made_at") or 0), reverse=True)   # newest first
     for name in ("swap.json", "rollback.json"):
         p = root() / name
         if p.exists():

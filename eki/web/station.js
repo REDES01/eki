@@ -84,7 +84,9 @@
     const top = `<div class="st-line">autonomy <b>${esc(s.autonomy)}</b>
         ${btn("autonomy", s.autonomy === "apply" ? "switch to propose" : "switch to apply", s.autonomy === "apply" ? "propose" : "apply", "small")}
         · ${esc(s.parallel)} at once · source <code>${esc(s.source)}</code>
-        <span class="grow"></span>${err("release")}${btn("release", "Release a train now", "", "small")}${err("autonomy")}</div>`;
+        <span class="grow"></span>${err("autonomy")}${s.autonomy === "propose"
+          ? `${err("release")}${btn("release", "Release a train now", "", "small")}` : ""}</div>`;
+    // under "apply" the train goes by itself every few minutes: the button would only mean "sooner"
     const queue = s.queue.length ? `<div class="st-sub">queue</div>` + s.queue.map((q) => `<div class="st-q">
         <span class="st-pos">${q.pos ? q.pos + "." : "-"}</span><code>${esc(q.id)}</code>
         <span class="dim">on ${esc((q.head || "").slice(0, 8) || "-")}</span>

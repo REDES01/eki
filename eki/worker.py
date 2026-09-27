@@ -20,7 +20,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import asks, capacity, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store
+from . import asks, capacity, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store, transient
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
 
@@ -125,12 +125,21 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
                 store.update_run(conn, rid, state="queued", pid=None, provider=None, retry_at=None,
                                  exclude=db.dumps(store.excluded(r) + [provider]),
                                  why=f"{provider} hit its limit; trying the next")
+        elif transient.looks_transient(out.error) and (wait := transient.delay(cur["retries"] or 0)):
+            # a dropped connection says nothing about the work: queue it again on the same
+            # provider, so the next worker resumes the same session with CARRY_ON
+            store.update_run(conn, rid, state="queued", pid=None, retry_at=now + wait,
+                             retries=(cur["retries"] or 0) + 1,
+                             why=f"{provider}: transient error, trying again in {wait} s")
+            store.add_event(conn, rid, cur["attempt"], "note",
+                            {"text": f"transient error, trying again in {wait} s: {out.error[:300]}"})
+            noted = ("transient", {"error": out.error, "retry_in": wait, "retries": (cur["retries"] or 0) + 1})
         else:
             store.update_run(conn, rid, state="failed", ended_at=now, error=out.error[:1000])
     if noted:
         observe.record(conn, noted[0], run_id=rid, thread_id=r["thread_id"], provider=provider,
                        data=noted[1])
-    observe.run_ended(conn, rid)                # a run still queued (a limit) isn't written down
+    observe.run_ended(conn, rid)                # a run still queued (a limit, a retry) isn't written down
 
 
 def main(rid: str) -> int:

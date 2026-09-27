@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS items_state ON items(state);
 CREATE TABLE IF NOT EXISTS journal (        -- what happened to eki, written by eki/observe.py only
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     t REAL NOT NULL,
-    kind TEXT NOT NULL,                     -- fault | handoff | correction | limit | run | regression
+    kind TEXT NOT NULL,                     -- fault | handoff | correction | limit | run | regression | transient
     run_id TEXT,
     thread_id TEXT,
     provider TEXT,
@@ -181,6 +181,7 @@ ADDED = [
     ("items", "reviews", "INTEGER DEFAULT 0"),   # rebuilds a review's "no" asked for
     ("goals", "pick_key", "TEXT"),      # what eki picked: fault:<k>, journal:handoff:answer, roadmap:<key>
     ("goals", "why", "TEXT"),           # why eki picked it
+    ("runs", "retries", "INTEGER NOT NULL DEFAULT 0"),   # the transient-error retries it has had
 ]
 
 

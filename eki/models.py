@@ -187,14 +187,22 @@ def ensure(name: str, timeout: float = 180) -> bool:
     return False
 
 
+def _users(name: str) -> List[str]:
+    """The model and every codex_local entry whose `local` it is: their runs are on it."""
+    return [name] + [n for n, c in providers.config().items()
+                     if c.get("kind") == "codex_local" and c.get("local") == name]
+
+
 def in_use(conn, name: str) -> bool:
-    return any(r["provider"] == name for r in store.runs_in(conn, ("starting", "running")))
+    users = _users(name)
+    return any(r["provider"] in users for r in store.runs_in(conn, ("starting", "running")))
 
 
 def last_used(conn, name: str) -> float:
     """When a run last touched the model — or when eki started it, if later."""
-    row = conn.execute("SELECT MAX(COALESCE(ended_at, started_at, created_at)) FROM runs WHERE provider=?",
-                       (name,)).fetchone()
+    users = _users(name)
+    row = conn.execute("SELECT MAX(COALESCE(ended_at, started_at, created_at)) FROM runs WHERE provider IN "
+                       f"({','.join('?' * len(users))})", users).fetchone()
     return max(float(row[0] or 0), float(_read(name).get("started_at") or 0))
 
 

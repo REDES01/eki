@@ -153,7 +153,8 @@ def _kind(provider: Optional[str]) -> Optional[str]:
 
 
 def _is_local(provider: Optional[str]) -> bool:
-    return _kind(provider) == "local"
+    """A local model's run, or Codex's harness on one (rung 2)."""
+    return _kind(provider) in ("local", "codex_local")
 
 
 def _self_thread(conn: sqlite3.Connection, thread_id: Optional[str]) -> bool:

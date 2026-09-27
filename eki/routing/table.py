@@ -11,7 +11,9 @@ The defaults here (needs, the cheapest-first general row) only reach a
 file eki writes for the first time; what a person wrote stays as written.
 The one exception is the picture rows (PICTURE_ROWS): rows() adds any the
 file lacks, in memory only, so an older table can still draw; their
-targets are the providers that can do what the row needs.
+targets are the providers that can do what the row needs. So is the
+`code-easy` row (CODE_EASY), when a codex_local provider exists: its first
+target is that provider, then Claude and Codex.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from .. import paths, providers
 
 #: cheapest first: a local model, then a subscription, then anything else
-KIND_ORDER: Dict[str, int] = {"local": 0, "comfyui": 0, "claude_code": 1, "codex": 1}
+KIND_ORDER: Dict[str, int] = {"local": 0, "comfyui": 0, "codex_local": 0, "claude_code": 1, "codex": 1}
 
 
 def cheapest_first(targets: List[str], kinds: Optional[Dict[str, str]] = None) -> List[str]:
@@ -70,6 +72,14 @@ DEFAULT_ROWS: List[Dict[str, Any]] = [
 PICTURE_ROWS: List[str] = ["image", "image-hq", "image-anime", "image-edit", "image-upscale"]
 
 
+#: small code changes, for Codex on the local model (rung 2); added by rows() in memory only
+CODE_EASY: Dict[str, Any] = {
+    "key": "code-easy", "title": "A small, well-defined code change: rename, a flag, a typo, one test",
+    "examples": ["rename parse to parse_line", "add a --verbose flag", "fix the typo in README",
+                 "write a test for parse_date"],
+    "needs": ["tools"], "targets": ["claude", "codex"]}
+
+
 def settings() -> Dict[str, Any]:
     """The whole routing.json, written with the defaults if it's missing."""
     path = paths.config("routing")
@@ -96,9 +106,12 @@ def rows() -> List[Dict[str, Any]]:
     out = list(settings().get("rows") or DEFAULT_ROWS)
     have = {r.get("key") for r in out}
     missing = [r for r in DEFAULT_ROWS if r["key"] in PICTURE_ROWS and r["key"] not in have]
-    if missing:
+    if missing or CODE_EASY["key"] not in have:
         cfgs = {n: c for n, c in providers.config().items()
                 if n not in providers.BUILTIN and not c.get("off")}
+        easy = next((n for n, c in cfgs.items() if c.get("kind") == "codex_local"), None)
+        if easy is not None and CODE_EASY["key"] not in have:
+            out.append({**CODE_EASY, "targets": [easy] + CODE_EASY["targets"]})
         kinds = {n: str(c.get("kind", "")) for n, c in cfgs.items()}
         for r in missing:
             able = [n for n, c in cfgs.items()

@@ -1,6 +1,7 @@
 """Row and request needs, what a provider lacks, and the routing table's defaults."""
 import json
 
+from eki import providers
 from eki.routing import needs, table
 
 
@@ -50,7 +51,8 @@ def test_describe_has_tags_and_about(home):
     assert needs.describe("fake") == "fake [text, tools]"
 
 
-def test_default_rows_declare_needs_and_general_is_cheapest_first(home):
+def test_default_rows_declare_needs_and_general_is_cheapest_first(home, monkeypatch):
+    monkeypatch.setattr(providers, "codex_installed", lambda cfg: False)   # no code-easy row here
     (home / "routing.json").unlink()
     _providers(home, {"claude": {"kind": "claude_code"}, "codex": {"kind": "codex"},
                       "local": {"kind": "local"}})

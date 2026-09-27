@@ -10,6 +10,11 @@ ComfyUI (pictures) is never written there. When the file has no "comfyui"
 entry and ComfyUI is on this Mac (`comfyui_dir()`: EKI_COMFYUI_DIR, else
 ~/flux/ComfyUI, holding main.py), `config()` adds the default entry in
 memory only. An entry you write, even {"comfyui": {"off": true}}, wins.
+
+Codex on the local model ("codex-local", kind codex_local) joins the same
+way: when Codex is installed, the file has a `local`-kind entry and no
+"codex-local", the default entry pointed at that local model is added in
+memory only.
 """
 from __future__ import annotations
 
@@ -20,15 +25,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .. import paths
-from .base import Outcome, Provider, Turn
+from .base import Outcome, Provider, Turn, find_binary
 from .claude_code import ClaudeCode
 from .codex import Codex
+from .codex_local import CodexLocal, default_entry
 from .comfyui import Comfyui
 from .command import Command
 from .fake import Fake
 from .local import Local
 
-KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, Local, Comfyui, Fake, Command)}
+KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, CodexLocal, Local, Comfyui, Fake, Command)}
 
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     "claude": {"kind": "claude_code", "label": "Claude Code"},
@@ -44,7 +50,7 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
 }
 
 #: defaults that are never written to providers.json, only joined in memory
-UNWRITTEN = ("comfyui",)
+UNWRITTEN = ("comfyui", "codex-local")
 
 #: what a provider can be asked to do; routing rows name what they need from it
 ABILITIES = ("text", "tools", "web", "vision", "image", "image-edit")
@@ -53,6 +59,7 @@ ABILITIES = ("text", "tools", "web", "vision", "image", "image-edit")
 CAN: Dict[str, List[str]] = {
     "claude_code": ["text", "tools", "web", "vision"],
     "codex": ["text", "tools", "web", "vision"],
+    "codex_local": ["text", "tools"],
     "local": ["text"],
     "comfyui": ["image", "image-edit"],
     "command": [],
@@ -83,6 +90,11 @@ def comfyui_dir() -> Optional[Path]:
     return d if (d / "main.py").is_file() else None
 
 
+def codex_installed(cfg: Dict[str, Any]) -> bool:
+    """Whether the Codex program is on this Mac (the `codex` entry's binary, if it names one)."""
+    return find_binary(str(cfg.get("binary") or "codex")) is not None
+
+
 def config() -> Dict[str, Dict[str, Any]]:
     path = paths.config("providers")
     if not path.exists():
@@ -95,6 +107,10 @@ def config() -> Dict[str, Dict[str, Any]]:
             entry = copy.deepcopy(DEFAULTS["comfyui"])
             entry["serve"]["cwd"] = str(where)
             got["comfyui"] = entry
+    if "codex-local" not in got:
+        local = next((n for n, c in got.items() if c.get("kind") == "local" and not c.get("off")), None)
+        if local is not None and codex_installed(got.get("codex") or {}):
+            got["codex-local"] = default_entry(local)
     return {**BUILTIN, **got}
 
 

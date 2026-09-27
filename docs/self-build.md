@@ -236,8 +236,8 @@ summary say, without obvious bugs, missing tests or stray changes. Its last
   SUMMARY why it's wrong" in the build brief. The rebuild doesn't cost gate
   1's one retry (`tries - reviews` is what's compared).
 - `REVIEW: no` a second time → `proposed` with the objection kept; the queue
-  never takes it by itself, even under `apply`. The digest lists it under
-  **Waits for you** with the objection; `eki self apply <id>` is the
+  never takes it by itself, even under `apply`. The long digest page lists it
+  under **Waits for you** with the objection; `eki self apply <id>` is the
   person's call.
 - A review that can't judge — no local model, `self.review: false`, a failed
   or cancelled run, an answer without the line — → `proposed` with
@@ -324,36 +324,72 @@ with one revert item for each item the build carried, newest first, each
 after the one before, going the ordinary path (gates, queue, train).
 Nothing about it is automatic, and it never blocks landing.
 
-**The digest** (`eki/digest.py`). Once a day after `self.digest_at` (default
-`09:00`, local time) the housekeeping pass writes
-`EKI_HOME/self/digests/YYYY-MM-DD.md`, built from the items table, the
-journal and `build_scores` — not by a model. It lists every item whose state
-changed since the last page (24 hours for the first), one line each with its
-id, title and what happened: **Landed and live** (with the build), **Went
-wrong** (unfit, rolled back, left, reverted by the train — with why),
-**Waits for you** (locked, proposed — with the `eki self apply` to run), and
-**Still moving** when something is mid-way. Then the score of the last 24
-hours beside the 24 before, the faults and corrections since the last page,
-and the builds judged worse, each with its `eki self undo`. `eki self
-digest` prints the latest page (writing one if there is none); `eki self
-digest now` writes a fresh one. The web UI's sidebar links the latest page.
+**The digest** (`eki/digest.py`, `eki/patchnotes.py`). Once a day after
+`self.digest_at` (default `09:00`, local time) the housekeeping pass writes
+`EKI_HOME/self/digests/YYYY-MM-DD.md`: a short page in the style of a game's
+patch notes, readable in twenty seconds. It has `# eki MM-DD` (the local
+date of the window's end), a headline of at most 20 words, a section for
+each area that changed — in the order Self-build, Web UI, Models, Routing,
+Pictures, Engine, Docs, each a bare header with `- ` lines of at most 14
+words, at most 5 a section, 15 a page and 1 for Docs — and a closing line
+eki writes itself, never the model: `Waits for you: N.  Score: <verdict>.`
+(`nothing` when N is zero). A day with one change is a page with one line.
 
-**The digest's prose and triage** (`eki/digestprose.py`). Once the page is
-written, a `digest` chore gives the local model the page and the journal's
-faults, corrections, handoffs and limits over its window (scrubbed, 20 000
-characters at most). It answers `PROSE:` — a few plain sentences on the day —
-and `TRIAGE:`, one line per thing worth a look: `- <what> — fix | watch |
-ignore — <why>`, a `fix` naming the `eki self "…"` wish to run. The
-housekeeping step `digestprose` puts `## In short` under the title and
-`## Triage` before `## Score`, once, atomically; a page that has them is
-left alone, and a failed chore or no local model leaves the page
-byte-identical. Triage only suggests: `faults.py` stays the only thing that
-opens items.
+What counts as a change: an item on eki itself (not on a person's project)
+that became landed, live or applied in the window. Its area comes from the
+files it touched (`items.touched`, else `items.files`), `tests/` left out,
+by the path table in `patchnotes.area_of` (docs and top-level `*.md` → Docs,
+`eki/routing/` → Routing, `eki/web/` and the Station and Settings APIs → Web
+UI, ComfyUI and the gallery → Pictures, `eki/providers/` and `models` →
+Models, the self-build modules → Self-build, anything else → Engine); the
+area most of its paths map to wins, ties going to the earlier area. An item
+that only touched tests is left off; one that only touched docs gives at
+most the one Docs line. The verdict is `worse: build <sha7> judged worse,
+see --long` when a build was judged worse; otherwise the last 24 hours
+against the 24 before: `better than yesterday`, `same as yesterday`, or
+`worse: more faults | more corrections | less done locally`. "Waits for
+you" counts what waits now: locked and proposed items, and drafting goals
+with an open ask.
+
+`YYYY-MM-DD.long.md` beside it (`# eki digest — YYYY-MM-DD (long)`) is the
+old per-item page over the same window: every item whose state changed, one
+line each with its id — **Landed and live**, **Went wrong** (with why),
+**Waits for you** (with the `eki self apply` to run), **Still moving** —
+then **Picked by eki**, the score table with "not counted", the faults and
+corrections, the builds judged worse, each with its `eki self undo`, and the
+model's `## Triage`. Items on a person's project and items that went wrong
+appear only here. `digest.write` always writes the rules-only short page
+first, then the long page, then `.last`, each atomically, so the page is
+never missing. `eki self digest` prints the latest short page (writing one
+if there is none); `eki self digest now` writes a fresh one; `--long` on
+either prints the long page (a page from before the long one existed prints
+itself). The web UI's sidebar links the latest page; the Station's Digest
+heading shows its headline and links the long page.
+
+**The digest's notes and triage** (`eki/digestprose.py`). The rules-only
+page gives each changed area one line — the titles of its changes joined
+with `; `, cut to 14 words — under the headline `N changes landed: <areas>.`
+(`Nothing new landed.` and no sections on a quiet day). On the daily
+housekeeping write only, a `digest` chore then gives the local model the
+rules above and the example page, the changes one per line as `[Area]
+(kind) title` with no ids, and the journal's faults, corrections, handoffs
+and limits over the window (scrubbed, 20 000 characters at most). It answers
+`NOTES:` — the headline, then the section headers and `- ` lines — and
+`TRIAGE:`, one line per thing worth a look: `- <what> — fix | watch |
+ignore — <why>`, a `fix` naming the `eki self "…"` wish to run. Notes that
+pass `patchnotes.check` replace the page between its title and closing
+line. Otherwise the rules-only page stands and the chore closes `failed`
+with the reason: a headline or line too long, too many lines, an area not
+on the page, an id, a file name, or the words item, goal, gate or worktree.
+Triage goes on the long page before `## Score`, once, either way. A failed
+chore or no local model leaves both pages byte-identical. `eki self digest
+now` and the Station's Write now give the rules-only page. Triage only
+suggests: `faults.py` stays the only thing that opens items.
 
 **What the score counts.** Only what you asked for: runs of scope `chat`.
 Self-work (command runs, goal, item and chore threads) and picture runs are
 left out of every rate and share, and so are faults of those runs; the
-digest says "not counted: n self-work, m picture runs" under the table
+long digest page says "not counted: n self-work, m picture runs" under the table
 (docs/design.md, "The score's scope").
 
 **Settings for the local model's work** (`routing.json` `self`): `local` —

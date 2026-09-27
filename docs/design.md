@@ -68,8 +68,9 @@ eki follow <run>  ◄── events table
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `attachments` | files sent with a request: made safe at intake (HEIC → JPEG, big pictures scaled down), and uploads from the window |
-| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's prose and triage, a fault's first brief |
-| `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's `## In short` and `## Triage` |
+| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's patch notes and triage, a fault's first brief |
+| `patchnotes` | the short digest page's rules: the areas and the path table, the rules-only page, the check of the model's notes; pure |
+| `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's patch notes and the long page's `## Triage` |
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `cli/*` | one file per command |
@@ -83,7 +84,7 @@ A run carries its `attempt`; after 3 interruptions in a row it fails.
 
 **Chores** (`eki/chores.py`, table `chores`) are jobs eki gives the local
 model instead of Claude: the review between gate 1 and the queue, the
-digest's prose and triage, and the first draft of a fault item's spec
+digest's patch notes and triage, and the first draft of a fault item's spec
 (docs/self-build.md). Each is an ordinary run on row `chore`, in a thread of
 its own (`chore: <kind> <subject>`, no folder), pinned to `self.local` in
 `routing.json` — else the first provider of kind `local`; `"off"` or none
@@ -337,7 +338,7 @@ or the row is a picture row; `chat` otherwise. Rows written before the scope
 existed are classified at read time by the same rule. `score.compute` counts
 only `chat` runs in the share, the rates and the median, leaves out faults of
 non-chat runs (faults with no run stay in), and returns `left_out` — the
-digest prints "not counted: n self-work, m picture runs" under its score
+long digest page prints "not counted: n self-work, m picture runs" under its score
 table. Verdicts already frozen are never rewritten; a still-open build's
 `before` is recomputed once under the rule and marked `"scoped": true`, so
 before and after compare like with like.

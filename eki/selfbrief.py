@@ -174,10 +174,13 @@ def resolve(*, goal: str, title: str, spec: str, summary: str, head: str, confli
 
 def items_in(answer: str) -> List[Dict[str, Any]]:
     """The JSON list after the last `ITEMS:` line. Raises ValueError when there isn't one."""
-    idx = answer.rfind("ITEMS:")
-    if idx < 0:
+    # the marker on a line of its own: a spec may well mention `ITEMS: []` in prose
+    marks = [m for m in re.finditer(r"^\s*`?ITEMS:`?\s*$", answer or "", re.M)]
+    if not marks:
+        marks = [m for m in re.finditer(r"ITEMS:", answer or "")]
+    if not marks:
         raise ValueError("the plan has no ITEMS: list")
-    tail = answer[idx + len("ITEMS:"):]
+    tail = answer[marks[-1].end():]
     tail = re.sub(r"```(?:json)?", "", tail).strip()
     start, end = tail.find("["), tail.rfind("]")
     if start < 0 or end < start:

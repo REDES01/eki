@@ -209,3 +209,9 @@ def test_reading_briefs():
     assert selfwork.expand(["eki/cli/"], ["eki/cli/a.py", "eki/x.py"]) == {"eki/cli/a.py"}
     assert selfwork.expand(["new.py"], ["eki/x.py"]) == {"new.py"}
     assert "*" in selfwork.expand([], ["eki/x.py"])
+
+
+def test_items_marker_inside_a_spec_is_not_the_list():
+    answer = ('ITEMS:\n[{"title": "a", "spec": "the plan may answer `ITEMS: []` when nothing is worth doing",'
+              ' "files": ["a.py"], "deps": [], "independent": true}]\n')
+    assert [i["title"] for i in selfbrief.items_in(answer)] == ["a"]

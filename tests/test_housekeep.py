@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from eki import db, digest, engine, faults, housekeep, observe, score
+from eki import db, digest, engine, faults, housekeep, observe, score, selfpick
 
 DAY = 86400.0
 
@@ -65,6 +65,33 @@ def test_a_failing_step_is_a_fault_and_the_others_still_run(conn, monkeypatch):
     data = json.loads(row["data"])
     assert data["where"] == "housekeep.score"
     assert "score went wrong" in data["traceback"]
+
+
+def test_pick_runs_after_faults_and_a_raising_pick_is_a_fault(conn, monkeypatch):
+    not_due(monkeypatch)
+    names = [name for name, _ in housekeep.STEPS]
+    assert names.index("pick") == names.index("faults") + 1
+    ran = []
+
+    def boom(c):
+        ran.append("pick")
+        raise RuntimeError("pick went wrong")
+
+    monkeypatch.setattr(faults, "tick", lambda c, now=None: ran.append("faults") or [])
+    monkeypatch.setattr(selfpick, "tick", boom)
+    monkeypatch.setattr(digest, "tick", lambda c, now=None: ran.append("digest"))
+    housekeep.tick(conn)
+    assert ran == ["faults", "pick", "digest"]
+    data = json.loads(conn.execute("SELECT data FROM journal WHERE kind='fault'").fetchone()["data"])
+    assert data["where"] == "housekeep.pick" and "pick went wrong" in data["traceback"]
+
+
+def test_with_the_loop_off_the_pick_step_says_nothing(conn, monkeypatch):
+    not_due(monkeypatch)
+    monkeypatch.setattr(faults, "tick", lambda c, now=None: [])
+    housekeep.tick(conn)
+    assert conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0] == 0
+    assert not conn.execute("SELECT * FROM journal WHERE kind='fault'").fetchall()
 
 
 def test_with_the_digest_due_a_page_appears(conn, monkeypatch):

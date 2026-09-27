@@ -8,6 +8,14 @@ background priority and, under autonomy propose, the item is only proposed
 (eki/selfwork.py, eki/queue.py). The housekeeping pass calls `tick`; the
 picker (eki/selfpick.py) opens faults seen even once lately, through `pending`,
 `room` and `open_goal`.
+
+Opening a goal also asks the local model for a first draft of the item's spec
+(a `brief` chore, eki/chores.py): likely cause, where to look, what the
+reproducing test should do. The item waits for it up to `self.brief_wait`
+minutes (eki/selfwork.py `held`); `brief_tick` puts a done draft in front of
+the template's traceback and request, kept verbatim. Anything else — no local
+model, a failed run, an answer without `BRIEF:`, an item already started —
+leaves the template as it is.
 """
 from __future__ import annotations
 
@@ -15,9 +23,10 @@ import logging
 import posixpath
 import sqlite3
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, observe, selfwork
+from . import builds, chores, db, integration, observe, selfwork, store
 
 log = logging.getLogger("eki.faults")
 
@@ -25,6 +34,8 @@ DAY = 86400.0
 RECENT = 7 * DAY            # a fault fixed this recently isn't opened again
 SEEN = 2                    # occurrences within a day that make a fault worth an item
 PROMPT_MAX = 2000
+AROUND = 60                 # lines of the fault's file on each side of the frame, for the brief
+TAIL = "The latest traceback:"
 #: an item in one of these states is still the subject of work
 OPEN = ("waiting", "building", "judging", "reviewing", "proposed", "locked", "queued", "resolving", "rechecking")
 LANDED = ("landed", "live", "applied")
@@ -49,7 +60,7 @@ def title(k: str) -> str:
 
 def tick(conn: sqlite3.Connection, now: Optional[float] = None) -> List[str]:
     now = db.now() if now is None else now
-    said: List[str] = []
+    said: List[str] = brief_tick(conn)
     for k, found in _seen(conn, now - DAY, now).items():
         if len(found) < SEEN or _known(conn, k, now):
             continue
@@ -69,9 +80,97 @@ def open_goal(conn: sqlite3.Connection, k: str, found: List[Dict[str, Any]], why
               now: Optional[float] = None) -> str:
     """Open the goal for fault `k`: one item, write-set the top frame's file and its test."""
     path = found[-1]["data"]["frame"].rsplit(":", 1)[0]
-    return selfwork.submit(conn, _text(conn, k, found, db.now() if now is None else now), plan=False,
-                           files=[path, test_file(path)], owner="eki", source_kind="fault",
-                           why=why, pick_key=f"fault:{k}")
+    text = _text(conn, k, found, db.now() if now is None else now)
+    gid = selfwork.submit(conn, text, plan=False, files=[path, test_file(path)], owner="eki",
+                          source_kind="fault", why=why, pick_key=f"fault:{k}")
+    try:
+        with db.tx(conn):
+            chores.start(conn, "brief", gid, brief_prompt(text, found[-1]), "background")
+    except Exception:                              # the template stands without a brief
+        log.exception("faults: could not ask for a brief of %s", k)
+    return gid
+
+
+# ---- the brief ------------------------------------------------------------------------------
+
+BRIEF = """\
+A piece of eki, a program on this Mac, keeps failing. Another agent will fix
+it; write the first draft of its brief. Do not change anything.
+
+What eki wrote down about the fault:
+
+{template}
+
+The code around the frame ({frame}):
+
+```python
+{code}
+```
+
+Answer with `BRIEF:` on a line of its own, then the brief in plain words:
+the likely cause, where to look (files and functions), and what the test that
+reproduces the fault should do. Nothing after the brief.
+"""
+
+
+def brief_prompt(template: str, latest: Dict[str, Any]) -> str:
+    return BRIEF.format(template=template, frame=latest["data"]["frame"], code=_around(latest["data"]["frame"]))
+
+
+def _around(frame: str) -> str:
+    """The fault's file, ±AROUND lines of the frame, numbered; from the source or the integration repo."""
+    path, _, line = frame.rpartition(":")
+    try:
+        at = int(line)
+    except ValueError:
+        return "(no line)"
+    for root in (builds.source(), integration.repo()):
+        try:
+            lines = (Path(root) / path).read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        lo, hi = max(1, at - AROUND), min(len(lines), at + AROUND)
+        return "\n".join(f"{n:5} {lines[n - 1]}" for n in range(lo, hi + 1))
+    return "(the file could not be read)"
+
+
+def draft(answer: str) -> Optional[str]:
+    """What follows the last `BRIEF:` line, or None."""
+    got = None
+    lines = (answer or "").splitlines()
+    for n, l in enumerate(lines):
+        if l.strip().lstrip("*#").strip().upper().startswith("BRIEF:"):
+            first = l.split(":", 1)[1].strip().strip("*").strip()
+            got = "\n".join(([first] if first else []) + lines[n + 1:]).strip()
+    return got or None
+
+
+def brief_tick(conn: sqlite3.Connection) -> List[str]:
+    """Move each finished brief chore on once: a done draft becomes the spec of the
+    goal's item if it is still waiting and not started; anything else leaves the template."""
+    said = []
+    for c in chores.finished(conn, "brief"):
+        text = draft(store.answer(conn, c["run_id"])) if c["run_state"] == "done" else None
+        with db.tx(conn):
+            if text is None:
+                why = ("no BRIEF: in the answer" if c["run_state"] == "done"
+                       else c["run_error"] or f"run {c['run_state'] or 'gone'}")
+                if chores.close(conn, c["id"], "failed", why):
+                    said.append(f"goal {c['subject']}: no brief ({why[:80]}), the template stands")
+                continue
+            if not chores.close(conn, c["id"], "done", text):
+                continue
+            it = conn.execute("SELECT * FROM items WHERE goal_id=? AND state='waiting' AND run_id IS NULL"
+                              " ORDER BY created_at LIMIT 1", (c["subject"],)).fetchone()
+            if it is None:
+                said.append(f"goal {c['subject']}: brief came after the build started, unused")
+                continue
+            spec = it["spec"] or ""
+            at = spec.find(TAIL)
+            spec = text + ("\n\n" + spec[at:] if at >= 0 else "")
+            selfwork._set(conn, it["id"], spec=spec)
+            said.append(f"item {it['id']}: spec drafted by the local model")
+    return said
 
 
 def pending(conn: sqlite3.Connection, since: float,

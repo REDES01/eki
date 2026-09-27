@@ -26,7 +26,8 @@ log = logging.getLogger("eki.self")
 
 DEFAULTS = {"parallel": 4, "autonomy": "propose",
             "loop": False, "review_max": 3, "picks_per_day": 6, "pick_min_cluster": 3,   # eki/selfpick.py
-            "standing_rest_hours": 24, "standing_waiting_max": 3}                        # eki/standing.py
+            "standing_rest_hours": 24, "standing_waiting_max": 3,                        # eki/standing.py
+            "brief_wait": 10}                                                            # eki/faults.py
 #: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
 #: under "apply" once it is in integration main, so the dependent is built on top of it
 #: a dependency counts once its code is in main — whoever put it there. Under
@@ -145,9 +146,22 @@ def _is_ancestor(commit: str, head: str) -> bool:
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
+    """Items in these states, oldest first. Waiting items `held` for a brief are
+    left out: they aren't ready, and the scheduler is who asks for waiting ones."""
     marks = ",".join("?" * len(states))
-    return conn.execute(f"SELECT * FROM items WHERE state IN ({marks}) ORDER BY created_at",
+    rows = conn.execute(f"SELECT * FROM items WHERE state IN ({marks}) ORDER BY created_at",
                         states).fetchall()
+    if "waiting" not in states:
+        return rows
+    wait = held(conn)
+    return [r for r in rows if not (r["state"] == "waiting" and r["goal_id"] in wait)]
+
+
+def held(conn: sqlite3.Connection) -> set:
+    """Goals whose fault brief (eki/faults.py) is still open and younger than `self.brief_wait` minutes."""
+    since = db.now() - float(settings().get("brief_wait", 10)) * 60
+    return {r[0] for r in conn.execute("SELECT subject FROM chores WHERE kind='brief' AND state='open'"
+                                       " AND created_at>?", (since,))}
 
 
 def _set(conn: sqlite3.Connection, iid: str, **fields: Any) -> None:

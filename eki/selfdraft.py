@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, integration, paths, projects, selfbrief, store, workspace
+from . import db, integration, paths, projectbrief, projects, selfbrief, store, workspace
 from .routing import table
 
 #: the old eki, read as reference by a draft when it is there
@@ -73,7 +73,10 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     wt = workspace.add(repo, f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
     tid = store.create_thread(conn, f"plan: {text}", str(wt))
     provider, model = planner()
-    rid = store.create_run(conn, tid, selfbrief.plan(text, base), provider=provider, model=model,
+    project = projects.get(conn, goal["project"]) if goal is not None and goal["project"] else None
+    brief = (selfbrief.plan(text, base) if project is None
+             else projectbrief.plan(text, base, project, standing=bool(goal["standing_id"])))
+    rid = store.create_run(conn, tid, brief, provider=provider, model=model,
                            row="code", priority=_priority(owner))
     conn.execute("UPDATE goals SET thread_id=?, plan_run=?, state='planning' WHERE id=?", (tid, rid, gid))
     return rid
@@ -174,7 +177,8 @@ def retry(conn: sqlite3.Connection, gid: str) -> str:
         raise KeyError(f"no goal {gid}")
     if g["state"] not in ("failed", "left"):
         raise ValueError(f"goal {g['id']} is {g['state']}")
-    base = integration.sync()
+    project = projects.get(conn, g["project"]) if g["project"] else None
+    base = integration.sync() if project is None else projects.base(project)
     plan = bool(g["plan_run"] or g["drafted_at"] or not g["draft_run"])
     with db.tx(conn):
         cur = conn.execute("SELECT state FROM goals WHERE id=?", (g["id"],)).fetchone()

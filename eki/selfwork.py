@@ -19,8 +19,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, db, doccheck, integration, paths, projects, review, scheduler, selfbrief, selfdraft,
-               selfplan, store, workspace)
+from . import (builds, db, doccheck, integration, paths, projectbrief, projects, projectwork, review, scheduler,
+               selfbrief, selfdraft, selfplan, store, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -123,13 +123,19 @@ def tick(conn: sqlite3.Connection) -> List[str]:
 def _settle_applied(conn: sqlite3.Connection) -> List[str]:
     """A proposed item whose commit is now in main — integration main, or the
     source's main where you merged it by hand — is applied; items that depend
-    on it may start (from a base that has it)."""
+    on it may start (from a base that has it). A project's item is applied
+    once you merged it into the project's branch."""
     said = []
-    proposed = items_in(conn, ("proposed",))
-    if not proposed:
+    own, theirs = projectwork.split(conn, items_in(conn, ("proposed",)))
+    for it, project in theirs:
+        if it["commit_sha"] and projectwork.merged(project, it["commit_sha"]):
+            _set(conn, it["id"], state="applied")
+            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in {project['name']}"
+                        f" {project['branch']}")
+    if not own:
         return said
     main = workspace.head(source())
-    for it in proposed:
+    for it in own:
         if it["commit_sha"] and (integration.contains(it["commit_sha"]) or _is_ancestor(it["commit_sha"], main)):
             _set(conn, it["id"], state="applied")
             said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main ({main[:12]})")
@@ -137,12 +143,8 @@ def _settle_applied(conn: sqlite3.Connection) -> List[str]:
 
 
 def _is_ancestor(commit: str, head: str) -> bool:
-    """Is `commit` in `head`'s history? Judged by what git prints, not an exit code."""
-    if not commit or not head:
-        return False
-    base = workspace.git(source(), "merge-base", commit, head, check=False)
-    return bool(base) and base == workspace.git(source(), "rev-parse", "--verify", f"{commit}^{{commit}}",
-                                                 check=False)
+    """Is `commit` in `head`'s history (in the source checkout)?"""
+    return projectwork.is_ancestor(source(), commit, head)
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
@@ -175,6 +177,7 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if run is None or run["state"] in store.ACTIVE:
         return []
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    project = projectwork.project_of(conn, goal)
     with db.tx(conn):
         if conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()["state"] != "building":
             return []
@@ -183,7 +186,8 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             return [f"item {it['id']}: left — the build run ended {run['state']}"]
         verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
         try:
-            sha = workspace.commit_all(it["worktree"], f"self: {it['title']}\n\n{goal['text']}"[:2000])
+            sha = workspace.commit_all(it["worktree"], f"{'eki' if project else 'self'}: {it['title']}\n\n"
+                                                        f"{goal['text']}"[:2000])
         except (workspace.WorkspaceError, OSError) as e:      # one item's git trouble stops one item
             _set(conn, it["id"], state="left", error=f"couldn't commit the change: {e}"[:800])
             return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
@@ -194,10 +198,18 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
                  touched=db.dumps(touched))
             return [f"item {it['id']}: left for you — {why}"]
-        judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
+        error = None if verdict == "done" else f"partial: {reason}"
+        if project is not None:
+            judge = projects.check_argv(project)
+            if judge is None:              # nothing to judge with: proposed as it is
+                _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
+                     verdict=projectwork.NOT_JUDGED, error=error)
+                return [f"item {it['id']}: built — proposed on {it['branch']} ({projectwork.NOT_JUDGED})"]
+        else:
+            judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
         rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
         _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
-             touched=db.dumps(touched), error=None if verdict == "done" else f"partial: {reason}")
+             touched=db.dumps(touched), error=error)
     return [f"item {it['id']}: built ({len(touched)} files); judging"]
 
 
@@ -224,17 +236,21 @@ def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
 # ---- starting a build -------------------------------------------------------------------------
 
 def start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, others) -> None:
+    project = projectwork.project_of(conn, goal)
     if not it["worktree"]:
-        base = integration.sync()
-        wt = workspace.add(repo(), it["id"], base=base, branch=f"self/{it['id']}")
-        tid = store.create_thread(conn, f"self: {it['title']}", str(wt))
-        _set(conn, it["id"], worktree=str(wt), branch=f"self/{it['id']}", base=base, thread_id=tid)
+        if project is None:
+            base, branch = integration.sync(), f"self/{it['id']}"
+            wt = workspace.add(repo(), it["id"], base=base, branch=branch)
+        else:
+            wt, base, branch = projectwork.worktree(project, it["id"])
+        tid = store.create_thread(conn, f"{project['name'] if project else 'self'}: {it['title']}", str(wt))
+        _set(conn, it["id"], worktree=str(wt), branch=branch, base=base, thread_id=tid)
         it = store_item(conn, it["id"])
     failure = it["verdict"] if it["tries"] else None
-    prompt = selfbrief.build(goal=goal["text"], title=it["title"], spec=it["spec"],
-                             files=json.loads(it["files"] or "[]"), branch=it["branch"], base=it["base"],
-                             source=str(source()), others=others, failure=failure,
-                             objection=review.objection(it))
+    brief = dict(goal=goal["text"], title=it["title"], spec=it["spec"], files=json.loads(it["files"] or "[]"),
+                 branch=it["branch"], base=it["base"], source=str(source()), others=others, failure=failure,
+                 objection=review.objection(it))
+    prompt = selfbrief.build(**brief) if project is None else projectbrief.build(**brief, project=project)
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if goal["owner"] == "you" else "background")
     _set(conn, it["id"], state="building", run_id=rid, tries=it["tries"] + 1, error=None)
@@ -255,7 +271,9 @@ def drop(conn: sqlite3.Connection, iid: str) -> str:
             store.cancel(conn, rid)
     _set(conn, it["id"], state="dropped")
     if it["worktree"]:
-        workspace.remove(repo(), it["id"], delete_branch=(it["commit_sha"] is None))
+        goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+        where = projects.repo_for(conn, goal) if goal is not None else repo()
+        workspace.remove(where, it["id"], delete_branch=(it["commit_sha"] is None))
     return it["id"]
 
 

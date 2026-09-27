@@ -1,7 +1,8 @@
 """Check slots: how many judge runs may run at once.
 
 A judge run is a command run that checks a change — gate 1's bin/check,
-gate 2's check in company, the docs check, the train's check before a swap.
+gate 2's check in company, the docs check, the train's check before a swap,
+a project's own check (eki/projectwork.py).
 With the suite on every core, one check saturates the Mac: two fast checks
 beat five crawling ones. So at most `self.check_slots` (routing.json,
 default 2) run at a time; the rest stay queued. This is the engine's
@@ -14,7 +15,7 @@ import sqlite3
 from . import selfwork
 
 #: what a judge run's command line carries
-MARKS = ("bin/check", "eki.doccheck", "eki.candidate")
+MARKS = ("bin/check", "eki.doccheck", "eki.candidate", "eki-judge")    # eki-judge: a project's check
 
 
 def is_judge(run: sqlite3.Row) -> bool:

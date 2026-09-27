@@ -42,6 +42,12 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         if window.frame.origin == .zero { window.center() }
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
+        // full screen hides the window's buttons: the page stops leaving room for them
+        for (name, on) in [(NSWindow.didEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                self?.web.evaluateJavaScript("document.documentElement.dataset.fullscreen = '\(on ? "1" : "")'")
+            }
+        }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let img = Bundle.main.image(forResource: "MenuIcon") {
             img.isTemplate = true
@@ -171,6 +177,11 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     @objc func reload() { web.reload() }
     func load() { web.load(URLRequest(url: home, cachePolicy: .reloadIgnoringLocalCacheData)) }
 
+    func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+        let full = window.styleMask.contains(.fullScreen)
+        w.evaluateJavaScript("document.documentElement.dataset.fullscreen = '\(full ? "1" : "")'")
+    }
+
     // The engine isn't up: start it once, then keep trying.
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {
         if !startedEngine {
@@ -216,8 +227,10 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         sub("Edit", [item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "z", [.command, .shift]),
                      .separator(), item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
                      item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a")])
-        sub("View", [item("Reload", #selector(reload), "r"), item("New thread", #selector(newThread), "n")])
-        sub("Window", [item("Minimize", #selector(NSWindow.miniaturize(_:)), "m"), item("Close", #selector(NSWindow.performClose(_:)), "w")])
+        sub("View", [item("Reload", #selector(reload), "r"), item("New thread", #selector(newThread), "n"), .separator(),
+                     item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.control, .command])])
+        sub("Window", [item("Minimize", #selector(NSWindow.miniaturize(_:)), "m"), item("Zoom", #selector(NSWindow.performZoom(_:)), ""),
+                       item("Close", #selector(NSWindow.performClose(_:)), "w")])
         NSApp.mainMenu = bar
     }
 }

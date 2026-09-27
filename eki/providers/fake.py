@@ -3,7 +3,9 @@
 It behaves like a real agent CLI — a session that can be resumed, output
 over time, limits and failures on request — without spending anything.
 Words in the prompt steer it: `steps=5`, `delay=0.5`, `limit`, `fail`,
-`handoff`. Each `--image PATH` it is given shows as `images=N` in its answer. `EKI_FAKE_TOUCH=a.py,b.py` makes it write those files in its
+`handoff`, `flaky` (or `flaky=N`: the first N starts of a session fail with a
+transient error before any step; a resume after that carries on).
+Each `--image PATH` it is given shows as `images=N` in its answer. `EKI_FAKE_TOUCH=a.py,b.py` makes it write those files in its
 folder; `EKI_FAKE_SAYS_FILE=<path>` is what it says at the end.
 """
 from __future__ import annotations
@@ -100,6 +102,13 @@ def main(argv: List[str]) -> int:
     _say({"type": "session", "id": sid})
     ask = state["prompt"]
     words = set(ask.strip().splitlines()[0].split()) if ask.strip() else set()   # the request line steers
+    flaky = next((int(w.split("=", 1)[1]) for w in words if re.fullmatch(r"flaky=\d+", w)),
+                 1 if "flaky" in words else 0)
+    if state.get("flaked", 0) < flaky:              # a dropped connection, counted in the session
+        state["flaked"] = state.get("flaked", 0) + 1
+        (state_dir / sid).write_text(json.dumps(state))
+        _say({"type": "error", "message": "API Error: Connection dropped (ECONNRESET)"})
+        return 1
     if "fail" in words:
         _say({"type": "error", "message": "fake failure"})
         return 1

@@ -76,9 +76,21 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     }
 
     func inDragArea(_ e: NSEvent) -> Bool {
+        if onWindowButton(e) { return false }     // close, minimize, zoom: never a drag
         let p = web.convert(e.locationInWindow, from: nil)
         let q = web.isFlipped ? p : NSPoint(x: p.x, y: web.bounds.height - p.y)
         return dragRects.contains { $0.contains(q) } && !noDragRects.contains { $0.contains(q) }
+    }
+
+    // The web view fills the window (fullSizeContentView), so the sidebar's title area
+    // lies under the window's own buttons; a click on one of them is theirs.
+    func onWindowButton(_ e: NSEvent) -> Bool {
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let b = window.standardWindowButton(kind), let sup = b.superview else { continue }
+            let p = sup.convert(e.locationInWindow, from: nil)
+            if b.frame.insetBy(dx: -4, dy: -4).contains(p) { return true }
+        }
+        return false
     }
 
     // What a double-click on a title bar does is the person's choice (System Settings → Desktop & Dock).

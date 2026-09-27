@@ -11,6 +11,10 @@
    being saved goes last, and moving down the row is failover.
 
 A why reads "rule: names a path → code → claude (codex last: five_hour 82%)".
+A request that lands on `code` by rule or check, while a `code-easy` row
+exists, is asked once more whether it's small and well-defined (check.narrow):
+"rule: has a folder → code; check: easy → code-easy → codex-local". A run
+whose row was set beforehand is never narrowed.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .. import capacity, models, paths, providers, store
 from . import needs, rules
-from .check import check
+from .check import check, narrow
 from .table import row as table_row
 from .table import rows as table_rows
 
@@ -92,6 +96,8 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
     else:
         key, reason = check(run["prompt"], previous=prev, cwd=cwd, checker=checker_name(),
                             attachments=atts, last_picture=pic)
+    if not run["row"]:
+        key, reason = _narrowed(key, reason, run["prompt"], cwd)
     entry = table_row(key)
     want = needs.request_needs(entry, atts)
     targets = list(entry["targets"])
@@ -110,6 +116,17 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
         refused.append(f"{target}: {why}")
     return Decision(None, entry["key"], f"{note}{reason} → {entry['key']}: waiting — "
                     + ", ".join(refused))
+
+
+def _narrowed(key: str, reason: str, prompt: str, cwd: Optional[str]) -> Tuple[str, str]:
+    """`code` narrowed to `code-easy` when that row exists and the check says easy;
+    otherwise `code` stays, and a check that couldn't run leaves the why as it was."""
+    if key != "code" or not any(r["key"] == "code-easy" for r in table_rows()):
+        return key, reason
+    got = narrow(prompt, cwd=cwd, checker=checker_name())
+    if got is None:
+        return key, reason
+    return got[0], f"{reason} → code; {got[1]}"
 
 
 def _previous_answer(conn: sqlite3.Connection, run: sqlite3.Row) -> Optional[str]:
@@ -143,6 +160,7 @@ def explain(conn: sqlite3.Connection, prompt: str, *, cwd: Optional[str] = None,
         pic = previous_picture(conn, thread_id, nxt)
     key, reason = check(prompt, cwd=cwd, checker=checker_name(), attachments=attachments,
                         last_picture=pic)
+    key, reason = _narrowed(key, reason, prompt, cwd)
     entry = table_row(key)
     want = needs.request_needs(entry, attachments)
     avail = capacity.status(conn)

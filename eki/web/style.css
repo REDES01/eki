@@ -35,7 +35,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 [data-shell="mac"] .side-head .ghost { border-color: transparent; padding: 2px 8px; font-size: 13px; color: var(--dim); }
 [data-shell="mac"] .side-head .ghost:hover { color: var(--text); border-color: var(--line); }
 [data-shell="mac"] #views { padding-top: 6px; }
-[data-shell="mac"] #head { padding: 7px 28px 9px; min-height: 32px; }
+[data-shell="mac"] #head { padding: 5px 28px 5px; min-height: 32px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
 /* full screen: the window's buttons are gone, so the strip starts at the edge
    and gets the height of a normal header row again */
 [data-shell="mac"][data-fullscreen="1"] .side-head { padding: 0 10px 0 14px; height: 44px; }

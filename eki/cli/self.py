@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, queue, score, selfdraft, selfwork, train
+from .. import asks, builds, digest, projects, queue, score, selfdraft, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 
@@ -95,12 +95,17 @@ def show(c, iid: str) -> int:
         raise KeyError(f"no item {iid}")
     g = c.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     print(f"item {it['id']}  {it['state']}  (goal {g['id']}: {g['text'].splitlines()[0][:60]})")
+    project = projects.get(c, g["project"]) if g["project"] else None
+    if project is not None:
+        print(f"project:  {project['name']}  {project['path']}  (branch {project['branch']})")
     print(f"title:    {it['title']}")
     print(f"spec:     {it['spec'][:600]}")
     print(f"files:    {', '.join(json.loads(it['files'] or '[]')) or '(not declared)'}")
     print(f"touched:  {', '.join(json.loads(it['touched'] or '[]')) or '-'}")
     print(f"worktree: {it['worktree'] or '-'}  branch {it['branch'] or '-'}  base {(it['base'] or '')[:12]}")
     print(f"commit:   {it['commit_sha'] or '-'}   tries {it['tries']}   run {it['run_id'] or '-'}")
+    if project is not None and it["state"] == "proposed":
+        print(f"merge:    git -C {project['path']} merge {it['branch'] or 'eki/' + it['id']}")
     if it["summary"]:
         print(f"\nsummary:\n{it['summary']}")
     if it["verdict"]:
@@ -143,8 +148,12 @@ def diff(c, iid: str) -> int:
     it = selfwork.store_item(c, iid)
     if it is None or not it["commit_sha"]:
         raise KeyError(f"no committed change for item {iid}")
-    where = selfwork.repo()
-    if not _has(where, it["commit_sha"]):
+    g = c.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    if g is not None and g["project"]:
+        where = projects.repo_for(c, g)            # the person's repo: branch eki/<item>
+    else:
+        where = selfwork.repo()
+    if (g is None or not g["project"]) and not _has(where, it["commit_sha"]):
         where = builds.source()                    # built before the queue, from the source checkout
     out = subprocess.run(["git", "-C", str(where), "diff", f"{it['base']}..{it['commit_sha']}"],
                          capture_output=True, text=True)

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, observe, paths, score, selfwork
+from . import db, observe, paths, projects, score, selfwork
 
 DAY = 86400.0
 DEFAULT_AT = "09:00"
@@ -122,9 +122,17 @@ def _locked(it: sqlite3.Row) -> List[str]:
     return [str(f) for f in got] if isinstance(got, list) else []
 
 
-def happened(it: sqlite3.Row, autonomy: str) -> Tuple[str, str]:
-    """(group, what happened) for one item."""
+def _merge_hint(it: sqlite3.Row, project: sqlite3.Row) -> str:
+    return f"`git -C {project['path']} merge {it['branch'] or 'eki/' + it['id']}`"
+
+
+def happened(it: sqlite3.Row, autonomy: str, project: Optional[sqlite3.Row] = None) -> Tuple[str, str]:
+    """(group, what happened) for one item; `project` when its goal works on a person's repo."""
     state, iid = it["state"], it["id"]
+    if project is not None and state in ("locked", "proposed", "applied"):
+        if state == "applied":
+            return GROUPS[0], f"merged into {project['branch']}"
+        return GROUPS[2], f"proposed on {it['branch'] or 'eki/' + iid}; {_merge_hint(it, project)}"
     if state in LANDED:
         build = it["build"]
         if state == "live":
@@ -155,6 +163,12 @@ def happened(it: sqlite3.Row, autonomy: str) -> Tuple[str, str]:
 def changed(conn: sqlite3.Connection, since: float, until: float) -> List[sqlite3.Row]:
     return conn.execute("SELECT * FROM items WHERE updated_at>=? AND updated_at<? ORDER BY updated_at, id",
                         (since, until)).fetchall()
+
+
+def project_of(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[sqlite3.Row]:
+    """The project an item's goal works on, or None for eki itself."""
+    g = conn.execute("SELECT project FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    return projects.get(conn, g["project"]) if g is not None and g["project"] else None
 
 
 def _question(payload: Optional[str]) -> str:
@@ -220,8 +234,10 @@ def render(conn: sqlite3.Connection, since: float, until: float) -> str:
     groups: Dict[str, List[str]] = {g: [] for g in GROUPS}
     items = changed(conn, since, until)
     for it in items:
-        group, what = happened(it, autonomy)
-        groups[group].append(f"- {it['id']} {it['title']} — {what}")
+        project = project_of(conn, it)
+        group, what = happened(it, autonomy, project)
+        where = f" ({project['name']})" if project is not None else ""
+        groups[group].append(f"- {it['id']} {it['title']}{where} — {what}")
     groups["Waits for you"] += asking(conn)
 
     out = [f"# eki digest — {_date(until)}", "",

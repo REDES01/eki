@@ -210,3 +210,30 @@ def test_picked_by_eki_lists_goals_in_the_window_with_why(conn):
 def test_picked_by_eki_empty_says_nothing(conn):
     text = digest.write(conn, NOW).read_text()
     assert "## Picked by eki\n\nNothing." in text
+
+
+def _project(conn, tmp_path):
+    from eki import projects, workspace
+    r = tmp_path / "garden"
+    r.mkdir()
+    (r / "app.py").write_text("print('hi')\n")
+    workspace.git(r, "init", "-q", "-b", "trunk")
+    workspace.git(r, "add", "-A")
+    workspace.git(r, "commit", "-q", "-m", "first")
+    return projects.add(conn, r), r.resolve()
+
+
+def test_a_proposed_project_item_names_its_project_and_the_merge_hint(conn, tmp_path):
+    pid, path = _project(conn, tmp_path)
+    conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at, project) VALUES (?,?,?,?,?,?,?)",
+                 ("gp", "tidy the garden", "standing", "eki", "planned", NOW - DAY, pid))
+    add_item(conn, "pp1", "proposed", NOW - 3600, goal_id="gp", branch="eki/pp1")
+    add_item(conn, "pa1", "applied", NOW - 3600, goal_id="gp", branch="eki/pa1")
+    add_item(conn, "self1", "proposed", NOW - 3600)
+    text = digest.write(conn, NOW).read_text()
+    line = lines_with(section(text, "Waits for you"), "pp1")[0]
+    assert "(garden)" in line
+    assert f"`git -C {path} merge eki/pp1`" in line and "eki self apply" not in line
+    assert "merged into trunk" in lines_with(section(text, "Landed and live"), "pa1")[0]
+    assert "proposed; `eki self apply self1`" in lines_with(text, "self1")[0]
+    assert "(garden)" not in lines_with(text, "self1")[0]

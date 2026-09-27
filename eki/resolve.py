@@ -162,7 +162,12 @@ def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if not _still(conn, it, "rechecking"):
             return []
         if run is not None and run["state"] == "done":
-            selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=None, rebased=None,
+            # The branch now sits on the head it was resolved onto. Keep that head as the
+            # item's base so the next rebase moves only the item's own commits: a plain
+            # rebase would carry the predicted head's commits along, even ones whose
+            # item has since failed gate 2 and left the queue.
+            selfwork._set(conn, it["id"], state="queued", queued_at=db.now(),
+                          head=it["head"], rebased=it["commit_sha"],
                           verdict=tail[-800:], error=None)
             return [f"item {it['id']}: resolved and green; back in the queue"]
         selfwork._set(conn, it["id"], state="unfit", verdict=tail[-800:],

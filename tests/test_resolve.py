@@ -85,9 +85,35 @@ def test_a_clean_resolution_is_checked_and_requeued(conn, conflicted, tmp_path, 
     run_inline(conn, check["id"])
     said = resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "queued" and cur["queued_at"] and cur["head"] is None and cur["rebased"] is None
+    assert cur["state"] == "queued" and cur["queued_at"]
+    assert cur["head"] == head and cur["rebased"] == cur["commit_sha"]   # its base: the head it sits on
     assert any("back in the queue" in s for s in said)
     assert resolve.tick(conn) == []                                  # moved on once
+
+
+def test_a_resolved_item_does_not_carry_its_old_head_along(conn, repo, conflicted, tmp_path, monkeypatch):
+    """The head an item was resolved onto may leave the queue (gate 2 red). The next
+    rebase moves only the item's own commits, not that head's."""
+    it, head = conflicted
+    rid = resolve.start(conn, it, head, ["a.txt"])
+    says(tmp_path, monkeypatch, "ITEM: done\n")
+    monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
+    run_inline(conn, rid)
+    resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    run_inline(conn, cur["run_id"])
+    resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "queued"
+    # main moved on without `head` (its item failed gate 2): a new commit on the old base
+    git(repo, "reset", "-q", "--hard", "HEAD^")
+    other = commit(repo, "b.txt", "other\n", "another item")
+    from eki import queue
+    asked = []
+    monkeypatch.setattr(rebase, "onto", lambda wt, h, since=None: asked.append((h, since)) or [])
+    sha, said = queue._rebase(conn, cur, other)
+    assert sha and any("rebased on" in s for s in said), said
+    assert asked == [(other, head)]                    # `rebase --onto other head`: only its own commits move
 
 
 def test_markers_left_are_refused(conn, conflicted, tmp_path, monkeypatch):

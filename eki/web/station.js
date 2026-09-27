@@ -11,6 +11,7 @@
   const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds() };
   const FLIGHT = ["waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking"];
   const YOURS = ["proposed", "locked", "left", "unfit", "rolled back"];              // waits for a person
+  const GOALS_DONE_SHOWN = 3;                                                       // finished goals shown before "show all"
 
   // Which sections are open: Self by default; the choice is kept in this browser only.
   function folds() {
@@ -92,8 +93,15 @@
         <span class="dim">on ${esc((q.head || "").slice(0, 8) || "-")}</span>
         <span class="st-stage">${esc(q.stage)}</span><span class="st-t">${esc(q.title)}</span>
         ${q.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(q.thread)}</div>`).join("") : "";
-    const goals = s.goals.length ? s.goals.map(goal).join("") :
-      '<div class="dim">nothing yet — the box above asks for a change</div>';
+    // busy goals always; finished ones only the last few, the rest behind "show all"
+    const busyGoal = (g) => g.items.some((it) => !ENDS.includes(it.state)) || ["drafting", "planning", "failed"].includes(g.state) || g.drafting || g.error;
+    let done = 0;
+    const shownGoals = S.allGoals ? s.goals : s.goals.filter((g) => busyGoal(g) || done++ < GOALS_DONE_SHOWN);
+    const hidden = s.goals.length - shownGoals.length;
+    const goals = (s.goals.length ? shownGoals.map(goal).join("") :
+      '<div class="dim">nothing yet — the box above asks for a change</div>') +
+      (hidden > 0 ? `<div class="st-line">${btn("goals-all", `show ${hidden} older goal${hidden === 1 ? "" : "s"}`, "", "small")}</div>` :
+        (S.allGoals && s.goals.length > GOALS_DONE_SHOWN ? `<div class="st-line">${btn("goals-few", "show fewer", "", "small")}</div>` : ""));
     const items = s.goals.flatMap((g) => g.items);
     const n = (states) => items.filter((it) => states.includes(it.state)).length;
     const yours = n(YOURS), flight = n(FLIGHT);
@@ -253,6 +261,7 @@
     if (a === "drop" || a === "retry") return act(id, `/api/self/items/${encodeURIComponent(id)}/${a}`);
     if (a === "release") return act("release", "/api/self/release");
     if (a === "builds-all" || a === "builds-few") { S.allBuilds = a === "builds-all"; return load(); }
+    if (a === "goals-all" || a === "goals-few") { S.allGoals = a === "goals-all"; return load(); }
     if (a === "autonomy") return act("autonomy", "/api/self/autonomy", { mode: id });
     if (a === "undo" && confirm(`Undo build ${id}? eki plans a goal to take its changes back.`))
       return act("undo:" + id, `/api/builds/${encodeURIComponent(id)}/undo`);

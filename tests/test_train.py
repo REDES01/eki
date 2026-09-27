@@ -144,3 +144,21 @@ def test_under_apply_the_tick_runs_the_train_when_it_is_time(conn, src):
     autonomy("apply", release_minutes=0)
     train.tick(conn)
     assert item(conn, iid)["build"] and builds.current() is not None
+
+
+def test_an_item_whose_build_was_replaced_goes_live_with_the_build_that_carries_it(conn, src):
+    """Build A ships a; A is replaced (a swap by hand, a restart) before it is marked
+    healthy; B, on top of A, goes healthy: a is live, in B."""
+    a = land(conn, "a")
+    train.release(conn)
+    first = item(conn, a)["build"]
+    b = land(conn, "b")
+    later = builds.make(integration.repo(), "main")
+    builds.swap_to(later, why="by hand")
+    (later / ".healthy").write_text("1")
+    said = train.settle(conn)
+    it = item(conn, a)
+    assert it["state"] == "live" and it["build"] == first, it["error"]
+    assert any(a in s and later.name in s for s in said)
+    assert item(conn, b)["state"] == "landed"                 # b never rode a train: the next one takes it
+    assert train.settle(conn) == []

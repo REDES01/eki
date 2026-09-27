@@ -126,9 +126,28 @@ def settle(conn: sqlite3.Connection) -> List[str]:
             _mark(conn, it, "live", f"live in build {it['build']}")
             said.append(f"item {it['id']}: live in build {it['build']}")
             went_live[it["build"]] = swap.get("healthy_at") if _resolved(swap.get("target")) == path else None
+        elif _carried_by_a_later_build(it, st, healthy):
+            # its own build was replaced before it was marked healthy (a swap by hand,
+            # a restart): the healthy build that runs now carries the change
+            name = Path(st["current"]).name
+            _mark(conn, it, "live", f"live in build {name} (build {it['build']} was replaced first)")
+            said.append(f"item {it['id']}: live in build {name}")
     for name, swapped_at in went_live.items():
         _score(conn, name, swapped_at)
     return said
+
+
+def _carried_by_a_later_build(it: sqlite3.Row, st: Dict[str, Any], healthy: set) -> bool:
+    from . import integration
+    cur = st.get("current")
+    if not cur or Path(cur).name not in healthy or Path(cur).name == it["build"]:
+        return False
+    sha = _commit_of(Path(cur))
+    mine = it["rebased"] or it["commit_sha"] or ""
+    try:
+        return bool(sha and mine and integration.carries(mine, sha))
+    except Exception:                                  # a repo that's gone: not this tick
+        return False
 
 
 def _score(conn: sqlite3.Connection, name: str, swapped_at: Any) -> None:

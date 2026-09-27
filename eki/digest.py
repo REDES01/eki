@@ -182,6 +182,15 @@ def asking(conn: sqlite3.Connection) -> List[str]:
     return [line for _, line in out]
 
 
+def picked(conn: sqlite3.Connection, since: float, until: float) -> List[str]:
+    """Goals eki picked for itself in the window, newest first, each with its why."""
+    return [f"- {g['id']} {_first_line(g['text'])} — {_first_line(g['why']) or 'no reason written down'}"
+            f" ({g['state']})"
+            for g in conn.execute("SELECT id, text, why, state FROM goals WHERE pick_key IS NOT NULL"
+                                  " AND created_at>=? AND created_at<? ORDER BY created_at DESC, id",
+                                  (since, until))]
+
+
 def _clock(t: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
@@ -220,6 +229,10 @@ def render(conn: sqlite3.Connection, since: float, until: float) -> str:
         out += [f"## {g}", ""]
         out += groups[g] or ["Nothing."]
         out.append("")
+
+    out += ["## Picked by eki", ""]
+    out += picked(conn, since, until) or ["Nothing."]
+    out.append("")
 
     out += ["## Score", ""]
     today = score.compute(conn, until - DAY, until)

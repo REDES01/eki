@@ -183,3 +183,30 @@ def test_drafting_goal_with_open_question_waits_for_you(conn):
     text = digest.write(conn, NOW + 60).read_text()
     assert "gd1" not in text
     assert "## Waits for you\n\nNothing." in text
+
+
+def add_pick(conn, gid, created_at, pick_key, why, text="fix the fault\nmore", state="planning"):
+    conn.execute("INSERT INTO goals(id, text, state, created_at, pick_key, why) VALUES (?,?,?,?,?,?)",
+                 (gid, text, state, created_at, pick_key, why))
+
+
+def test_picked_by_eki_lists_goals_in_the_window_with_why(conn):
+    add_pick(conn, "gk1", NOW - 7200, "fault:eki/x.py:12", "fault eki/x.py:12 KeyError, seen 3 times in 7 days")
+    add_pick(conn, "gk2", NOW - 3600, "roadmap:abc", "the most impact\nmore", text="do the roadmap thing",
+             state="left")
+    add_pick(conn, "gk3", NOW - 3 * DAY, "journal:handoff:answer", "old pick")     # before the window
+    add_pick(conn, "gk4", NOW + 60, "journal:handoff:answer", "late pick")         # after the window
+    add_pick(conn, "gk5", NOW - 600, None, None, text="the person's goal")          # not picked by eki
+    text = digest.write(conn, NOW).read_text()
+    body = section(text, "Picked by eki")
+    assert body.strip().splitlines() == [
+        "- gk2 do the roadmap thing — the most impact (left)",
+        "- gk1 fix the fault — fault eki/x.py:12 KeyError, seen 3 times in 7 days (planning)"]
+    assert "gk3" not in text and "gk4" not in text and "gk5" not in text
+    assert text.index("## Picked by eki") < text.index("## Score")
+    assert text.index("## Waits for you") < text.index("## Picked by eki")
+
+
+def test_picked_by_eki_empty_says_nothing(conn):
+    text = digest.write(conn, NOW).read_text()
+    assert "## Picked by eki\n\nNothing." in text

@@ -55,6 +55,8 @@ eki follow <run>  ◄── events table
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
+| `selfview` | the `eki self` board's words as data (stage, drafting, where, note, the whole board), shared by the CLI and the Station page |
+| `api_station`, `api_settings` | the web's Station and Settings: what the self board, builds, journal and digest show and the self actions, each the CLI's own function; reading, checking and writing `routing.json`/`providers.json` |
 | `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |
 | `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
 | `rebase` | the git steps of the queue: rebase a branch onto its predicted head, carry on after a resolve, a fresh worktree for gate 2 |
@@ -138,6 +140,41 @@ reads "rule: asks for a picture → image → comfyui".
   POST needs the `X-Eki: 1` header, so only eki's own page can act.
   Nothing lives in the page that the engine doesn't have: refresh, or
   restart the engine mid-run, and the page picks up where it was.
+  One page, views on hash addresses (`eki/web/nav.js` sends each to its
+  view; a refresh reopens it): **Chat** (`#<thread>`, a centered column,
+  replies with the provider's mark and the route's why, a floating
+  composer with Send/Stop), **Pictures** (`#pictures`), **Station**
+  (`#station`) and **Settings** (`#settings`).
+  - *Station* (`eki/web/station.js`, `eki/api_station.py`) shows what
+    `eki self`, `eki builds`, `eki route`, `eki observe` and the digest
+    show, reloading every 5 s, and acts through the same functions the CLI
+    calls: a wish (`selfwork.submit`), apply/drop/retry an item
+    (`queue.apply`, a locked one only with `yes`; `selfwork.drop`,
+    `selfwork.retry`), release (`train.release`), autonomy
+    (`queue.set_autonomy`), undo a build judged worse (`score.undo`), write
+    the digest now (`digest.write`). Open questions of self runs are
+    answered in place. The board's words come from `eki/selfview.py`, so the
+    page and `eki self` say the same thing.
+  - *Settings* (`eki/web/settings.js`, `eki/api_settings.py`) edits
+    `routing.json` and `providers.json` with forms or raw JSON. Rows and
+    the ComfyUI entry that eki only adds in memory are shown as such and
+    written only when edited. The server checks the data before writing
+    (unique row keys, known targets, needs and `can` within the abilities,
+    a `general` row, a known autonomy and kind, no `command` entry; every
+    problem listed in a 400), keeps the old file as `<name>.json.bak`,
+    writes atomically (tmp + `os.replace`) and refuses a file whose mtime
+    changed since it was read with 409. Nothing reloads: the next decision
+    reads the new file.
+  - Endpoints: GET `/api/station`, `/api/builds`,
+    `/api/journal?since=&kind=`, `/api/digests`,
+    `/api/settings/(routing|providers)`; POST `/api/self`,
+    `/api/self/items/<id>/(apply|drop|retry)`, `/api/self/release`,
+    `/api/self/autonomy`, `/api/builds/<id>/undo`, `/api/digests/write`,
+    `/api/settings/<name>`. An unknown id is 404, a refused action 400 with
+    the reason. `/api/route` serves the table and a request's explain.
+  - The web's JS and CSS files are held to 400 lines too (the size test),
+    so the page is split by job: `nav.js`, `side.js`, `app.js`, one file
+    per view, `style.css` + `chat.css` + one stylesheet per view.
 - **A thin Mac shell** (`mac/main.swift`, built by `bin/build-mac`): a
   window and a menu bar item around the web UI; it starts the engine if
   it isn't up. It rarely needs to change.

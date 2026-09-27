@@ -17,13 +17,14 @@ HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel wor
 
 def add(p) -> None:
     p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|apply <item>, retry <item|goal>, '
-                                               'release, autonomy apply|propose, digest [now], undo <build>, '
+                                               'release, autonomy apply|propose, digest [now] [--long], undo <build>, '
                                                'loop on|off (eki picks its own work), pick (what it would pick now)')
     p.add_argument("--one", action="store_true", help="no planning: the goal is one item")
     p.add_argument("--as-is", action="store_true", help="the text is already a goal: skip the draft")
     p.add_argument("--files", help="with --one: the files it will touch, comma-separated")
     p.add_argument("--bg", action="store_true", help="don't follow the plan run")
     p.add_argument("--yes", action="store_true", help="with apply: queue it even if it touches locked files")
+    p.add_argument("--long", action="store_true", help="with digest: the long page, every item with its id")
 
 
 def run(args) -> int:
@@ -50,7 +51,7 @@ def run(args) -> int:
     if verb == "pick" and len(words) == 1:
         return pick(c)
     if verb == "digest" and words[1:] in ([], ["now"]):
-        return show_digest(c, now=len(words) == 2)
+        return show_digest(c, now=len(words) == 2, long=args.long)
     if verb == "undo" and len(words) == 2:
         return undo(c, words[1])
     text = " ".join(words)
@@ -73,12 +74,14 @@ def run(args) -> int:
     return code or board(c)
 
 
-def show_digest(c, now: bool) -> int:
+def show_digest(c, now: bool, long: bool) -> int:
     path = None if now else digest.latest()
     if path is None:
         path = digest.write(c)
     if now:
         print(f"wrote {path}\n")
+    if long and digest.long_of(path).exists():   # a page from before the long one has none
+        path = digest.long_of(path)
     print(path.read_text(), end="")
     return 0
 

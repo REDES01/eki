@@ -1,4 +1,4 @@
-"""`eki self digest [now]` prints the day's page; `eki self undo <build>` queues the reverts."""
+"""`eki self digest [now] [--long]` prints the day's page; `eki self undo <build>` queues the reverts."""
 import pytest
 
 from eki import db, digest, store
@@ -34,6 +34,36 @@ def test_digest_shows_the_latest_page_without_writing_again(conn, capsys):
     path.write_text("# kept\n")
     assert main(["self", "digest"]) == 0
     assert capsys.readouterr().out == "# kept\n"
+
+
+def test_digest_long_prints_the_long_page(conn, capsys):
+    path = digest.write(conn)
+    assert main(["self", "digest", "--long"]) == 0
+    out = capsys.readouterr().out
+    assert out == digest.long_of(path).read_text() and "(long)" in out
+
+
+def test_digest_now_long_writes_both_pages_and_prints_the_long_one(conn, capsys):
+    assert main(["self", "digest", "now", "--long"]) == 0
+    out = capsys.readouterr().out
+    path = digest.latest()
+    assert f"wrote {path}" in out
+    assert out.endswith(digest.long_of(path).read_text()) and path.read_text() not in out
+
+
+def test_digest_long_on_an_old_page_prints_the_page_itself(conn, capsys):
+    digest.folder().mkdir(parents=True, exist_ok=True)
+    old = digest.folder() / "2026-09-20.md"
+    old.write_text("# eki digest — 2026-09-20\n\nold page\n")
+    assert main(["self", "digest", "--long"]) == 0
+    assert capsys.readouterr().out == old.read_text()
+
+
+def test_digest_without_long_prints_the_short_page(conn, capsys):
+    path = digest.write(conn)
+    assert main(["self", "digest"]) == 0
+    out = capsys.readouterr().out
+    assert out == path.read_text() and out.startswith("# eki ") and "(long)" not in out
 
 
 def test_undo_with_carried_items_makes_the_goal(conn, capsys, no_engine):

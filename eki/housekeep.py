@@ -5,7 +5,7 @@ the others still run: forget journal rows past 90 days (at most once an
 hour), settle the build scores, turn repeated faults into items, let the
 loop pick eki's next self-work when it is on and eki is idle
 (eki/selfpick.py), open the next round of each standing goal (eki/standing.py), write the daily digest when it is due and give the
-local model its prose and triage (eki/digestprose.py). Nothing here is state that matters: the
+local model its patch notes and triage (eki/digestprose.py). Nothing here is state that matters: the
 hour between prunes lives in memory, and losing it on a restart only means
 an early prune.
 """

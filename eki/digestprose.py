@@ -73,12 +73,24 @@ def parse(text: str) -> Optional[Tuple[str, List[str]]]:
             blocks[current].append(line)
     if "NOTES" not in blocks or "TRIAGE" not in blocks:
         return None
-    notes = "\n".join(ln.strip() for ln in blocks["NOTES"] if ln.strip())
+    notes = "\n".join(trim(ln.strip() for ln in blocks["NOTES"] if ln.strip()))
     triage = [ln.strip() for ln in blocks["TRIAGE"] if ln.strip().startswith(("- ", "* "))]
     triage = ["- " + ln[2:].strip() for ln in triage]
     if not notes or not triage:
         return None
     return notes, triage
+
+
+def trim(lines) -> List[str]:
+    """The notes without what the page adds itself: a leading title (`# eki …`) and a
+    closing `Waits for you…` line — a small model writes them anyway, and they are
+    not what the check is for."""
+    out = [ln for ln in lines]
+    while out and out[0].startswith("#"):
+        out.pop(0)
+    while out and out[-1].lower().startswith("waits for you"):
+        out.pop()
+    return [ln.lstrip("#").strip() if ln.startswith("#") else ln for ln in out]   # '## Web UI' → 'Web UI'
 
 
 def weave(page: str, triage: List[str]) -> str:

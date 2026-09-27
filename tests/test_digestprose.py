@@ -204,3 +204,13 @@ def test_the_prompt_holds_the_rules_no_ids_and_is_capped_and_scrubbed(home, conn
     assert "hunter2" not in prompt and "[secret]" in prompt
     assert "not asked for" not in prompt and "handoff" in prompt
     assert len(body) < digestprose.CAP + 100 and "characters of the journal cut" in body
+
+
+def test_a_title_and_a_closing_line_in_the_notes_are_dropped_not_refused():
+    """A small model adds the page's own title and closing line however it is told;
+    the parse takes them off, and '## Area' headings lose their marks."""
+    answer = ("NOTES:\n# eki 09-28\nMerging runs without a person.\n\n## Web UI\n- Station folds.\n\n"
+              "Waits for you: nothing.  Score: same.\nTRIAGE:\n- nothing — ignore — quiet\n")
+    notes, triage = digestprose.parse(answer)
+    assert notes.splitlines() == ["Merging runs without a person.", "Web UI", "- Station folds."]
+    assert triage == ["- nothing — ignore — quiet"]

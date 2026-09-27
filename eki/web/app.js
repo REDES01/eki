@@ -3,7 +3,7 @@
 // that the engine doesn't have, so a refresh or an engine restart loses nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { thread: null, after: 0, polling: false };
+  const state = { thread: null, after: 0, polling: false, answers: {}, whys: new Set() };   // answers/whys: what the page shows, not keeps
 
   async function call(path, body) {
     const opts = body === undefined ? {} : {
@@ -23,12 +23,20 @@
     return `<div class="step warn">${md.esc(s.text || s.kind)}</div>`;
   }
 
+  // A provider's mark: its initial on a colour from its name, the same colour every time.
+  function mark(name) {
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return `<span class="pmark" style="background: hsl(${h} 45% 46%)">${md.esc(name.charAt(0).toUpperCase())}</span>`;
+  }
+
   function runHtml(r) {
     const live = ["queued", "starting", "running"].includes(r.state);
     const steps = r.steps.length
       ? `<details class="steps" ${live ? "open" : ""}><summary>${r.steps.length} step${r.steps.length > 1 ? "s" : ""}</summary>${r.steps.map(stepLine).join("")}</details>` : "";
-    const who = r.provider ? `<span class="who">${md.esc(r.provider)}</span>` : "";
-    const why = r.why ? `<span class="why" title="${md.esc(r.why)}">${md.esc(r.why)}</span>` : "";
+    const who = r.provider ? `${mark(r.provider)}<span class="who">${md.esc(r.provider)}</span>` : "";
+    const why = r.why ? `<button type="button" class="why ${state.whys.has(String(r.id)) ? "open" : ""}" data-why="${r.id}"
+                          title="Why this provider">${md.esc(r.why)}</button>` : "";
     let tail = "";
     const waiting = (r.asks || []).some((a) => a.state === "open");
     if (live) tail = `<div class="live"><span class="spin ${waiting ? "paused" : ""}"></span>${waiting ? "waiting for you" : r.state === "queued" ? "waiting" : "working"}
@@ -36,10 +44,44 @@
     if (r.state === "failed") tail = `<div class="err">Failed: ${md.esc(r.error || "")}</div>`;
     if (r.state === "cancelled") tail = `<div class="dim">Stopped.</div>`;
     const answer = r.state === "handed_off" ? "" : md.render(r.answer);
+    const copy = answer && !live ? `<div class="tools"><button type="button" class="copy" data-copy-run="${r.id}" title="Copy the answer">Copy</button></div>` : "";
     return `<div class="turn" id="run-${r.id}">
-        ${r.parent ? "" : `<div class="user">${ekiAttach.thumbs(r.attachments)}${md.render(r.prompt)}</div>`}
+        ${r.parent ? "" : `<div class="user">${ekiAttach.thumbs(r.attachments)}${r.prompt ? `<div class="bubble">${md.render(r.prompt)}</div>` : ""}</div>`}
         <div class="bot"><div class="route">${who}${why}</div>${steps}
-          <div class="answer">${answer}</div>${(r.asks || []).map(cards.render).join("")}${files(r)}${tail}</div></div>`;
+          <div class="answer">${answer}</div>${(r.asks || []).map(cards.render).join("")}${files(r)}${tail}${copy}</div></div>`;
+  }
+
+  // A copy button on each code block, added after md.render.
+  function codeButtons(root) {
+    root.querySelectorAll(".answer pre").forEach((pre) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "copy code-copy";
+      b.textContent = "Copy";
+      b.dataset.copyCode = "";
+      pre.appendChild(b);
+    });
+  }
+
+  // navigator.clipboard where the page may use it; a hidden textarea where it may not.
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) return await navigator.clipboard.writeText(text);
+    } catch (e) { /* fall through */ }
+    const t = document.createElement("textarea");
+    t.value = text;
+    t.setAttribute("readonly", "");
+    t.style.cssText = "position:fixed;top:-1000px;opacity:0";
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand("copy");
+    t.remove();
+  }
+
+  function greet() {
+    const h = new Date().getHours();
+    const part = h < 5 ? "Still up" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    $("empty").innerHTML = `<div class="hello">${part}.</div><div class="dim">Ask anything. eki picks who answers and says why.</div>`;
   }
 
   function files(r) {
@@ -63,6 +105,8 @@
     if (log.contains(document.activeElement) && document.activeElement.matches(".ask input")) return;  // don't wipe a half-typed answer
     const nearBottom = log.parentElement.scrollHeight - log.parentElement.scrollTop - log.parentElement.clientHeight < 80;
     log.innerHTML = t.runs.map(runHtml).join("");
+    state.answers = Object.fromEntries(t.runs.map((r) => [r.id, r.answer || ""]));
+    codeButtons(log);
     $("empty").style.display = t.runs.length ? "none" : "";
     state.after = Math.max(state.after, ...t.runs.map((r) => r.last_event || 0));
     if (scroll || nearBottom) log.parentElement.scrollTop = log.parentElement.scrollHeight;
@@ -95,8 +139,10 @@
   function open(id) {
     state.thread = id || null;
     state.after = 0;
+    state.whys.clear();
     $("log").innerHTML = "";
     $("empty").style.display = "";
+    greet();
     $("cwd").value = "";
     if (!id) { $("title").textContent = "New thread"; $("meta").textContent = ""; }
     loadThread(true);
@@ -142,7 +188,21 @@
 
   document.addEventListener("click", async (e) => {
     const c = e.target.closest("[data-cancel]");
-    if (c) { await call(`/api/runs/${c.dataset.cancel}/cancel`, {}); loadThread(false); }
+    if (c) { await call(`/api/runs/${c.dataset.cancel}/cancel`, {}); loadThread(false); return; }
+    const w = e.target.closest("[data-why]");
+    if (w) {   // the route's why: one dim line, the whole of it on a click
+      const id = w.dataset.why;
+      if (state.whys.has(id)) state.whys.delete(id); else state.whys.add(id);
+      w.classList.toggle("open", state.whys.has(id));
+      return;
+    }
+    const b = e.target.closest("[data-copy-run], [data-copy-code]");
+    if (b) {
+      const code = b.closest("pre");
+      await copyText(code ? code.querySelector("code").textContent : state.answers[b.dataset.copyRun] || "");
+      b.textContent = "Copied";
+      setTimeout(() => { b.textContent = "Copy"; }, 1200);
+    }
   });
   window.addEventListener("eki:refresh", () => { loadThread(false); side.loadThreads(); });
 

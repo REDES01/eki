@@ -46,7 +46,7 @@
   function render(a) {
     if (a.state !== "open") return answered(a);
     const body = a.kind === "question" ? question(a) : a.kind === "permission" ? permission(a) : form(a);
-    return `<div class="ask" data-ask="${a.id}" data-kind="${a.kind}"><div class="ask-tag">needs you</div>${body}</div>`;
+    return `<div class="ask" data-ask="${a.id}" data-kind="${a.kind}"><div class="ask-tag"><span class="ask-dot"></span>needs you</div>${body}</div>`;
   }
 
   function collect(card, act) {

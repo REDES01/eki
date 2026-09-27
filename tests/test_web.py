@@ -78,6 +78,20 @@ def test_the_shell_files_are_served(web):
     assert "nav.thread(" in app and "nav.start()" in app
 
 
+def test_the_chat_look_is_served(web):
+    _, app = get(web + "/ui/app.js")
+    assert "/api/threads/" in app and "/api/ask" in app
+    assert "pmark" in app and "data-why" in app and "navigator.clipboard" in app and "execCommand" in app
+    assert "cards.render" in app and "ekiAttach.thumbs" in app and "data-copy-code" in app
+    code, css = get(web + "/ui/chat.css")
+    assert code == 200 and "max-width: 760px" in css and ".bubble" in css and ".code-copy" in css
+    _, cards = get(web + "/ui/cards.js")
+    assert "window.cards = { render }" in cards and "/api/asks/${card.dataset.ask}/answer" in cards
+    _, body = get(web + "/")
+    for i in ("strip", "attach", "to", "cwd", "bg", "prompt", "send"):
+        assert f'id="{i}"' in body
+
+
 def test_ask_then_read_the_thread(web, conn):
     code, got = post(web + "/api/ask", {"prompt": "steps=1 hello from the web"})
     assert code == 200

@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -231,16 +232,39 @@ def serve(listen_port: Optional[int] = None) -> ThreadingHTTPServer:
     return srv
 
 
+#: how long a new engine keeps trying the port: the engine it replaces (a swap,
+#: a restart) may still hold it for a moment while it goes down
+BIND_PATIENCE = 60.0
+
+
 def start_in_background() -> Optional[ThreadingHTTPServer]:
-    """Run the server on a thread of the engine. A port in use is logged, not fatal:
-    the engine's real job is the runs."""
+    """Run the server on a thread of the engine. A port in use is retried for
+    BIND_PATIENCE seconds on a thread, then logged, not fatal: the engine's
+    real job is the runs."""
     if port() == 0 and os.environ.get("EKI_PORT") == "0":
         return None
     try:
         srv = serve()
     except OSError as e:
-        log.error("web UI not served: port %s: %s", port(), e)
+        log.warning("web UI: port %s: %s; trying again for %ds", port(), e, int(BIND_PATIENCE))
+        threading.Thread(target=_keep_trying, daemon=True, name="web-bind").start()
         return None
     threading.Thread(target=srv.serve_forever, daemon=True, name="web").start()
     log.info("web UI on http://127.0.0.1:%s", srv.server_address[1])
     return srv
+
+
+def _keep_trying(patience: float = BIND_PATIENCE, pause: float = 1.0) -> Optional[ThreadingHTTPServer]:
+    until = time.time() + patience
+    while time.time() < until:
+        time.sleep(pause)
+        try:
+            srv = serve()
+        except OSError as e:
+            last = e
+            continue
+        threading.Thread(target=srv.serve_forever, daemon=True, name="web").start()
+        log.info("web UI on http://127.0.0.1:%s", srv.server_address[1])
+        return srv
+    log.error("web UI not served: port %s: %s", port(), last)
+    return None

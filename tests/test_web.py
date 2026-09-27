@@ -192,3 +192,29 @@ def test_an_uploaded_picture_goes_with_the_ask_and_shows_in_the_thread(web, conn
     assert t["runs"][0]["attachments"] == [path]
     with urllib.request.urlopen(web + "/api/file?path=" + urllib.parse.quote(path), timeout=10) as r:
         assert r.status == 200 and r.read().startswith(b"\x89PNG")
+
+
+def test_a_port_still_held_is_tried_again(monkeypatch, conn):
+    """A new engine's port may still be the old engine's for a moment; it keeps trying."""
+    holder = server.serve(0)
+    taken = holder.server_address[1]
+    monkeypatch.setenv("EKI_PORT", str(taken))
+    scheduled = []
+    monkeypatch.setattr(server, "_keep_trying", lambda: scheduled.append(1))
+    assert server.start_in_background() is None                 # first try: in use; a retry thread
+    time.sleep(0.1)
+    assert scheduled
+    monkeypatch.undo()
+    monkeypatch.setenv("EKI_PORT", str(taken))
+    holder.server_close()
+    got = server._keep_trying(patience=5.0, pause=0.05)
+    assert got is not None and got.server_address[1] == taken
+    got.shutdown(); got.server_close()
+
+
+def test_a_port_never_freed_is_given_up_on(monkeypatch, caplog):
+    holder = server.serve(0)
+    monkeypatch.setenv("EKI_PORT", str(holder.server_address[1]))
+    assert server._keep_trying(patience=0.2, pause=0.05) is None
+    assert any("not served" in r.message for r in caplog.records)
+    holder.server_close()

@@ -1,7 +1,7 @@
 """Starting items: which waiting items may build now (docs/self-build.md, "Items").
 
 An item starts once its deps are fit and its write-set doesn't overlap what
-is already building or judging, up to `self.parallel` at once. Nothing is
+is already building, judging or being reviewed, up to `self.parallel` at once. Nothing is
 kept between ticks but a cache of the tracked files, cleared at every pass.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
     _tracked.clear()
     settings = selfwork.settings()
     parallel = int(settings["parallel"])
-    live = selfwork.items_in(conn, ("building", "judging"))
+    live = selfwork.items_in(conn, selfwork.LIVE)
     if len(live) >= parallel:
         return []
     done_ids = {r["id"] for r in selfwork.items_in(conn, selfwork.FIT.get(settings["autonomy"],

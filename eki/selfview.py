@@ -89,6 +89,8 @@ def stage(c, it) -> str:
 
 
 def where(it) -> str:
+    if it["state"] == "reviewing":
+        return f"review {it['review_run'] or '-'}"
     if it["state"] in ("building", "judging", "resolving", "rechecking") and it["run_id"]:
         return f"run {it['run_id']}"
     if it["state"] in ("proposed", "locked"):
@@ -116,11 +118,20 @@ def said(it) -> str:
     state = it["state"]
     if state in ("left", "unfit", "rolled back") and it["error"]:
         return f"! {it['error'].splitlines()[0][:150]}"
+    if state == "reviewing":
+        return "a second reader (the local model) is reading the diff"
     if state == "proposed":
         files = json.loads(it["touched"] or "[]")
+        got = it["review"] or ""
+        if got.startswith("no:"):
+            return (f"! the review says no: {got[3:].strip()[:120]}"
+                    f" — `eki self apply {it['id']}` if you agree")
+        seen = f" · review {got[:80]}" if got else ""
         if selfwork.settings().get("autonomy") == "apply":
-            return f"✓ {len(files)} files; joins the queue"
-        return f"✓ {len(files)} files; `eki self apply {it['id']}` queues it"
+            return f"✓ {len(files)} files; joins the queue{seen}"
+        return f"✓ {len(files)} files; `eki self apply {it['id']}` queues it{seen}"
+    if state == "waiting" and (it["review"] or "").startswith("no:"):
+        return f"! the review said no: {it['review'][3:].strip()[:120]} — rebuilding once"
     if state == "locked":
         files = ", ".join(json.loads(it["locked"] or "[]")) or "?"
         return f"! touches locked files: {files}; `eki self apply {it['id']} --yes` if you agree"

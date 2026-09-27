@@ -26,7 +26,7 @@ RECENT = 7 * DAY            # a fault fixed this recently isn't opened again
 SEEN = 2                    # occurrences within a day that make a fault worth an item
 PROMPT_MAX = 2000
 #: an item in one of these states is still the subject of work
-OPEN = ("waiting", "building", "judging", "proposed", "locked", "queued", "resolving", "rechecking")
+OPEN = ("waiting", "building", "judging", "reviewing", "proposed", "locked", "queued", "resolving", "rechecking")
 LANDED = ("landed", "live", "applied")
 
 

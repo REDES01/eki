@@ -143,6 +143,9 @@ def happened(it: sqlite3.Row, autonomy: str) -> Tuple[str, str]:
         files = ", ".join(_locked(it)) or "a locked file"
         return GROUPS[2], f"locked: touches {files}; `eki self apply {iid}`"
     if state == "proposed":
+        if (it["review"] or "").startswith("no:"):
+            objection = _first_line(it["review"][3:]) or "no reason given"
+            return GROUPS[2], f"a second reader objected twice: {objection}; `eki self apply {iid}` if you agree"
         if autonomy == "propose":
             return GROUPS[2], f"proposed; `eki self apply {iid}`"
         return GROUPS[2], "proposed"

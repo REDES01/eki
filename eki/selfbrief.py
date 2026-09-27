@@ -147,7 +147,8 @@ def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[s
 
 
 def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, base: str,
-          source: str, others: List[Tuple[str, List[str]]], failure: Optional[str] = None) -> str:
+          source: str, others: List[Tuple[str, List[str]]], failure: Optional[str] = None,
+          objection: Optional[str] = None) -> str:
     beside = ""
     if others:
         lines = "\n".join(f"- {t}: {', '.join(f) or '(files not declared)'}" for t, f in others)
@@ -157,6 +158,9 @@ def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, ba
     if failure:
         retry = ("\nA previous attempt at this item failed its checks. What failed:\n\n"
                  f"{failure.strip()}\n\nFix that as well.\n")
+    if objection:
+        retry += (f"\nA second reader objected: {objection.strip().rstrip('.')}. Answer it in the change,"
+                  " or say in SUMMARY why it's wrong.\n")
     return BUILD.format(goal=goal.strip(), title=title, spec=spec.strip(), branch=branch,
                         base=base[:12], source=source, others=beside, retry=retry,
                         files=", ".join(files) or "(not declared — say which in your summary)")

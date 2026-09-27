@@ -1,5 +1,5 @@
 """eki builds eki: goals, items, and the runs that carry each item through
-plan → build → judge → proposed (docs/self-build.md).
+plan → build → judge → review → proposed (docs/self-build.md).
 
 Everything here is a run in an ordinary thread, so a restart loses nothing
 and `eki follow` shows any of it. The engine calls `tick` every couple of
@@ -19,7 +19,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import builds, db, doccheck, integration, paths, projects, scheduler, selfbrief, selfdraft, selfplan, store, workspace
+from . import (builds, db, doccheck, integration, paths, projects, review, scheduler, selfbrief, selfdraft,
+               selfplan, store, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -33,6 +34,8 @@ DEFAULTS = {"parallel": 4, "autonomy": "propose",
 #: without its dependency would build against code it can't see
 FIT = {"propose": ("landed", "live", "applied"),
        "apply": ("landed", "live", "applied")}
+#: an item in one of these has a run going and holds its write-set
+LIVE = ("building", "judging", "reviewing")
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
 CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python exec bin/check -q"]'
 
@@ -109,6 +112,8 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         said += _conclude_build(conn, it)
     for it in items_in(conn, ("judging",)):
         said += _conclude_judge(conn, it)
+    for it in items_in(conn, ("reviewing",)):
+        said += review.conclude(conn, it)
     said += _settle_applied(conn)
     said += scheduler.start_ready(conn)
     return said
@@ -193,9 +198,9 @@ def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()["state"] != "judging":
             return []
         if run["state"] == "done":
-            _set(conn, it["id"], state="proposed", verdict=tail[-800:])
-            return [f"item {it['id']}: fit — proposed on {it['branch']}"]
-        if it["tries"] < 2 and run["state"] == "failed":
+            _set(conn, it["id"], verdict=tail[-800:])
+            return review.start(conn, it)          # a second reader, then proposed (eki/review.py)
+        if it["tries"] - (it["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
             _set(conn, it["id"], state="waiting", verdict=tail[-800:], error="checks failed; trying once more")
             return [f"item {it['id']}: checks failed; one more try"]
         _set(conn, it["id"], state="unfit", verdict=tail[-800:], error=f"checks {run['state']}")
@@ -214,7 +219,8 @@ def start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, ot
     failure = it["verdict"] if it["tries"] else None
     prompt = selfbrief.build(goal=goal["text"], title=it["title"], spec=it["spec"],
                              files=json.loads(it["files"] or "[]"), branch=it["branch"], base=it["base"],
-                             source=str(source()), others=others, failure=failure)
+                             source=str(source()), others=others, failure=failure,
+                             objection=review.objection(it))
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if goal["owner"] == "you" else "background")
     _set(conn, it["id"], state="building", run_id=rid, tries=it["tries"] + 1, error=None)
@@ -230,7 +236,7 @@ def drop(conn: sqlite3.Connection, iid: str) -> str:
     it = store_item(conn, iid)
     if it is None:
         raise KeyError(f"no item {iid}")
-    for rid in (it["run_id"], it["gate2_run"]):
+    for rid in (it["run_id"], it["gate2_run"], it["review_run"]):
         if rid:
             store.cancel(conn, rid)
     _set(conn, it["id"], state="dropped")
@@ -243,11 +249,11 @@ def retry(conn: sqlite3.Connection, iid: str) -> str:
     it = store_item(conn, iid)
     if it is None:
         raise KeyError(f"no item {iid}")
-    if it["state"] in ("building", "judging"):
+    if it["state"] in LIVE:
         raise ValueError(f"item {it['id']} is {it['state']}")
     fields: Dict[str, Any] = {"state": "waiting", "error": None}
     if it["worktree"] and not Path(it["worktree"]).exists():     # dropped: start afresh
         fields.update(worktree=None, branch=None, base=None, commit_sha=None, tries=0,
-                      touched="[]", verdict=None, summary=None)
+                      touched="[]", verdict=None, summary=None, review=None, reviews=0, review_run=None)
     _set(conn, it["id"], **fields)
     return it["id"]

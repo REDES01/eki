@@ -147,3 +147,52 @@ def test_the_item_builds_in_the_background_and_is_only_proposed(conn, src, tmp_p
     selfwork.tick(conn)
     queue.tick(conn)
     assert selfwork.store_item(conn, it["id"])["state"] == "proposed"
+
+
+def test_ticks_goals_carry_pick_key_and_why(conn, src):
+    now = db.now()
+    fault(conn, now - 100)
+    fault(conn, now - 50)
+    faults.tick(conn, now)
+    (g,) = goals(conn)
+    assert g["pick_key"] == "fault:eki/x.py:12 KeyError"
+    assert g["why"] == "fault eki/x.py:12 KeyError, seen 2 times today"
+
+
+def test_pending_finds_a_fault_seen_once_days_ago_and_skips_one_being_fixed(conn, src):
+    now = db.now()
+    fault(conn, now - 3 * DAY, tb(line=30))
+    fault(conn, now - 8 * DAY, tb(line=40))                 # outside the window
+    for t in (now - 200, now - 100):
+        fault(conn, t, tb(line=20))
+    faults.tick(conn, now)                                  # line 20 now has an open item
+    assert [k for k, _ in faults.pending(conn, now - 7 * DAY, now)] == ["eki/x.py:30 KeyError"]
+    fault(conn, now - 2 * DAY, tb(line=50))
+    fault(conn, now - 4 * DAY, tb(line=50))
+    ks = [k for k, _ in faults.pending(conn, now - 7 * DAY, now)]
+    assert ks == ["eki/x.py:50 KeyError", "eki/x.py:30 KeyError"]     # most seen first
+
+
+def test_open_goal_sets_owner_source_why_and_pick_key(conn, src):
+    now = db.now()
+    fault(conn, now - 3 * DAY)
+    ((k, found),) = faults.pending(conn, now - 7 * DAY, now)
+    gid = faults.open_goal(conn, k, found, f"fault {k}, seen 1 times in 7 days", now=now)
+    g = conn.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone()
+    assert (g["owner"], g["source"], g["state"]) == ("eki", "fault", "planned")
+    assert g["why"] == "fault eki/x.py:12 KeyError, seen 1 times in 7 days"
+    assert g["pick_key"] == "fault:eki/x.py:12 KeyError"
+    (it,) = items_of(conn, gid)
+    assert json.loads(it["files"]) == ["eki/x.py", "tests/test_x.py"]
+    assert "1 times in the last 3 days" in it["spec"]
+    assert faults.pending(conn, now - 7 * DAY, now) == []
+
+
+def test_room_is_false_once_the_cap_is_reached(conn, src):
+    now = db.now()
+    assert faults.room(conn, now)
+    for n in range(3):
+        fault(conn, now - 100, tb(line=10 + n))
+    for k, found in faults.pending(conn, now - 7 * DAY, now):
+        faults.open_goal(conn, k, found, "why", now=now)
+    assert len(goals(conn)) == 3 and not faults.room(conn, now)

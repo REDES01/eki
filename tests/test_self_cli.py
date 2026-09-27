@@ -283,3 +283,23 @@ def test_show_prints_the_why_and_the_pick_key(conn, capsys):
     assert main(["self", "show", gid]) == 0
     out = capsys.readouterr().out
     assert "why: fault eki/x.py:12 KeyError" in out and "picked: fault:eki/x.py:12 KeyError" in out
+
+
+def test_pick_names_the_same_gate_tick_uses(conn, capsys):
+    """The dry run's "(but … stops it)" is selfpick.stopped, the gate tick itself checks."""
+    from eki import observe, selfpick
+    observe.fault(conn, "worker", "Traceback (most recent call last):\n"
+                  '  File "/Users/someone/eki/eki/x.py", line 12, in go\n'
+                  "    thing['a']\nKeyError: 'a'\n")
+    selfpick.set_loop(True)
+    main(["self", "pick"])
+    out = capsys.readouterr().out
+    assert "would pick: fault eki/x.py:12 KeyError" in out and "(but" not in out
+    for _ in range(3):
+        goal_with(conn, state="proposed")
+    main(["self", "pick"])
+    out = capsys.readouterr().out
+    assert "waiting on you: 3 of review_max 3" in out
+    assert "(but 3 wait for you (review_max 3) stops it)" in out
+    assert selfpick.stopped(conn) == "3 wait for you (review_max 3)"
+    assert conn.execute("SELECT COUNT(*) FROM goals WHERE pick_key IS NOT NULL").fetchone()[0] == 0

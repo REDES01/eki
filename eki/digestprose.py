@@ -110,6 +110,8 @@ def weave(page: str, prose: str, triage: List[str]) -> str:
 def _finish(conn: sqlite3.Connection, c: sqlite3.Row) -> Tuple[str, Optional[str], str]:
     """(state, result, what was said) for one finished chore; writes the page if it may."""
     page = Path(c["subject"])
+    if digest.long_of(page).exists():
+        page = digest.long_of(page)        # the short page is patch notes; the prose goes beside it
     if c["run_state"] != "done":
         why = c["run_error"] or c["run_state"] or "its run is gone"
         return "failed", why, f"digest prose failed for {page.name}: {why}"

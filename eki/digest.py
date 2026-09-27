@@ -1,11 +1,16 @@
-"""The daily digest: one Markdown page a day of what eki did to itself
+"""The daily digest: two Markdown pages a day of what eki did to itself
 (docs/self-build.md, "The journal, the score and the digest").
 
-Built from the items table, the journal and build_scores — never by a model.
-Every item that changed state since the last page is on it, one line each,
-none left out. The page for a day is EKI_HOME/self/digests/YYYY-MM-DD.md;
-'.last' beside the pages says when the last one ended, so the next starts
-there. Holds no state beyond those files: a restart changes nothing.
+The short page, EKI_HOME/self/digests/YYYY-MM-DD.md, is patch notes: what
+landed on eki itself, one line per area (patchnotes.rules_page), then how
+many things wait for you and the score's verdict. The long page beside it,
+YYYY-MM-DD.long.md, lists every item that changed state since the last page,
+one line each, none left out, with the score table and worse builds.
+
+Both are built from the items table, the journal and build_scores — never by
+a model (digestprose may later swap in checked prose). '.last' beside the
+pages says when the last one ended, so the next starts there. Holds no state
+beyond those files: a restart changes nothing.
 """
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, observe, paths, projects, score, selfwork
+from . import db, observe, patchnotes, paths, projects, score, selfwork
 
 DAY = 86400.0
 DEFAULT_AT = "09:00"
@@ -46,6 +51,11 @@ def page_for(now: float) -> Path:
     return folder() / f"{_date(now)}.md"
 
 
+def long_of(page: Path) -> Path:
+    """The long page beside a short one: YYYY-MM-DD.md -> YYYY-MM-DD.long.md."""
+    return page.with_name(f"{page.stem}.long.md")
+
+
 def last() -> Optional[float]:
     """When the last page ended, or None before the first."""
     try:
@@ -55,6 +65,7 @@ def last() -> Optional[float]:
 
 
 def latest() -> Optional[Path]:
+    """The newest short page; the glob never matches a .long.md."""
     pages = sorted(folder().glob("????-??-??.md"))
     return pages[-1] if pages else None
 
@@ -90,13 +101,18 @@ def _atomic(path: Path, text: str) -> None:
 
 
 def write(conn: sqlite3.Connection, now: Optional[float] = None) -> Path:
-    """Write today's page (again, if it is there) for the time since the last one."""
+    """Write today's pages (again, if they are there) for the time since the last one:
+    the short page first, then the long one, then '.last'."""
     now = db.now() if now is None else now
     since = last()
     if since is None or since >= now:
         since = now - DAY
     path = page_for(now)
-    _atomic(path, render(conn, since, now))
+    _atomic(path, patchnotes.rules_page(changes(conn, since, now), now, waits(conn),
+                                        verdict(conn, since, now)))
+    long = render(conn, since, now).replace(f"# eki digest — {_date(now)}",
+                                            f"# eki digest — {_date(now)} (long)", 1)
+    _atomic(long_of(path), long)
     _atomic(folder() / ".last", repr(now))
     return path
 
@@ -169,6 +185,54 @@ def project_of(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[sqlite3.Ro
     """The project an item's goal works on, or None for eki itself."""
     g = conn.execute("SELECT project FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     return projects.get(conn, g["project"]) if g is not None and g["project"] else None
+
+
+def _paths(it: sqlite3.Row) -> List[str]:
+    for col in ("touched", "files"):
+        try:
+            got = json.loads(it[col] or "[]")
+        except (ValueError, TypeError):
+            got = []
+        if isinstance(got, list) and got:
+            return [str(p) for p in got]
+    return []
+
+
+def changes(conn: sqlite3.Connection, since: float, until: float) -> List[patchnotes.Change]:
+    """What landed on eki itself in [since, until), for the short page."""
+    out = []
+    for it in changed(conn, since, until):
+        if it["state"] in LANDED and project_of(conn, it) is None:
+            got = _paths(it)
+            out.append(patchnotes.Change(it["id"], it["title"] or "", patchnotes.area_of(got),
+                                         patchnotes.kind_of(got)))
+    return out
+
+
+def waits(conn: sqlite3.Connection) -> int:
+    """What waits for you now, whatever the window: locked and proposed items, open asks."""
+    n = conn.execute(f"SELECT COUNT(*) FROM items WHERE state IN ({','.join('?' * len(WAITS))})",
+                     WAITS).fetchone()[0]
+    return n + len(asking(conn))
+
+
+def verdict(conn: sqlite3.Connection, since: float, until: float) -> str:
+    """The short page's score, in words."""
+    worse = score.worse(conn, since)
+    if worse:
+        return f"worse: build {str(worse[-1]['build'])[:7]} judged worse, see --long"
+    before = score.compute(conn, until - 2 * DAY, until - DAY)
+    after = score.compute(conn, until - DAY, until)
+    said = score.verdict(before, after)
+    if said == "better":
+        return "better than yesterday"
+    if said != "worse":
+        return "same as yesterday"
+    if score._rose(before.get("fault_rate"), after.get("fault_rate")):
+        return "worse: more faults"
+    if score._rose(before.get("correction_rate"), after.get("correction_rate")):
+        return "worse: more corrections"
+    return "worse: less done locally"
 
 
 def _question(payload: Optional[str]) -> str:

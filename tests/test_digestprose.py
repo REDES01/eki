@@ -41,7 +41,10 @@ def test_a_done_chore_adds_in_short_and_triage_once(home, conn):
     finish(conn, rid)
     said = digestprose.tick(conn)
     assert said and "added" in said[0]
-    text = path.read_text()
+    short = path.read_text()
+    assert "## In short" not in short and "## Triage" not in short
+    long = digest.long_of(path)
+    text = long.read_text()
     lines = text.splitlines()
     assert lines[0].startswith("# eki digest") and lines[2] == "## In short"
     assert "A quiet day. One build landed and nothing broke." in text and "<think>" not in text
@@ -50,7 +53,7 @@ def test_a_done_chore_adds_in_short_and_triage_once(home, conn):
     assert tri < lines.index("## Score") and lines.index("## Score") - tri == 5
     assert text.count("## In short") == 1 and text.count("## Triage") == 1
     assert chores.latest(conn, "digest", str(path))["state"] == "done"
-    assert digestprose.tick(conn) == [] and path.read_text() == text
+    assert digestprose.tick(conn) == [] and long.read_text() == text
     assert conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0   # triage only suggests
 
 

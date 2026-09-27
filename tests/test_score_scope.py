@@ -152,6 +152,6 @@ def test_digest_says_what_was_not_counted(conn, pics):
     now = db.now()
     _ended(conn, now - 100)
     _noise(conn, now - 50)
-    text = digest.write(conn, now).read_text()
+    text = digest.long_of(digest.write(conn, now)).read_text()
     assert "not counted: 3 self-work, 2 picture runs" in text
     assert "| runs | 1 |" in text

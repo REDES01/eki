@@ -143,6 +143,18 @@ CREATE TABLE IF NOT EXISTS build_scores (   -- gate 4: the score before and afte
     measured_at REAL,
     verdict TEXT                            -- better | same | worse; NULL until after is frozen
 );
+CREATE TABLE IF NOT EXISTS chores (         -- a local-model job eki gives itself (eki/chores.py)
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,                     -- review | digest | brief
+    subject TEXT NOT NULL,                  -- an item id, a digest page path, or a goal id
+    run_id TEXT,
+    thread_id TEXT,
+    state TEXT NOT NULL DEFAULT 'open',     -- open | done | failed | skipped
+    result TEXT,                            -- the parsed text
+    created_at REAL NOT NULL,
+    ended_at REAL
+);
+CREATE INDEX IF NOT EXISTS chores_kind ON chores(kind, state);
 """
 
 
@@ -164,6 +176,9 @@ ADDED = [
     ("goals", "draft_run", "TEXT"),     # the run that drafts the goal from the wish
     ("goals", "drafted_at", "REAL"),
     ("runs", "model", "TEXT"),          # a per-run model override (the provider's default when NULL)
+    ("items", "review_run", "TEXT"),    # the review chore's run
+    ("items", "review", "TEXT"),        # ok | no: <why> | none: <why>
+    ("items", "reviews", "INTEGER DEFAULT 0"),   # rebuilds a review's "no" asked for
 ]
 
 

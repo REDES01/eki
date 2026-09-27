@@ -79,6 +79,8 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
 
 def route(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
     d = routing.decide(conn, r)
+    if r["row"]:
+        d.row = r["row"]                       # a row set up front (a chore, a build) stays
     with db.tx(conn):
         if d.provider is None:
             store.update_run(conn, r["id"], state="queued", why=d.why, row=d.row, pid=None,
@@ -99,6 +101,10 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
             store.update_run(conn, rid, state="done", ended_at=now, error=None)
         elif cur["cancel"] or out.state == "cancelled":
             store.update_run(conn, rid, state="cancelled", ended_at=now)
+        elif out.state == "handed_off" and r["row"] == "chore":   # a chore never reaches Claude
+            reason = " ".join((out.reason or "").split())
+            store.update_run(conn, rid, state="failed", ended_at=now,
+                             error=f"chore handed off: {reason}"[:1000])
         elif out.state == "handed_off":
             store.update_run(conn, rid, state="handed_off", ended_at=now, error=None)
             nxt = store.create_run(conn, r["thread_id"], r["prompt"], priority=r["priority"], parent=rid,

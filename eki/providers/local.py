@@ -23,6 +23,10 @@ SYSTEM = (
     "call the `handoff` tool at once instead of answering, and an agent with tools will take "
     "the thread. Otherwise just answer.")
 
+#: for a chore (row `chore`): eki's own job, answered here or not at all
+CHORE = ("You are a model running locally on the user's Mac, doing a job for eki. Answer "
+         "from what the request gives you, in the form it asks for.")
+
 HANDOFF_TOOL = {
     "type": "function",
     "function": {
@@ -110,7 +114,8 @@ class Local(Provider):
         return parts
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
-        messages = [{"role": "system", "content": SYSTEM}, *turn.history,
+        chore = turn.extra.get("row") == "chore"     # eki's own job: no one to hand it to
+        messages = [{"role": "system", "content": CHORE if chore else SYSTEM}, *turn.history,
                     {"role": "user", "content": self._content(turn)}]
         buffer: List[str] = []
 
@@ -125,15 +130,15 @@ class Local(Provider):
                 flush()
 
         try:
-            got = self.complete(messages, tools=[HANDOFF_TOOL], stop=turn.stop, on_text=on_text)
+            got = self.complete(messages, tools=None if chore else [HANDOFF_TOOL], stop=turn.stop, on_text=on_text)
         except (OSError, urllib.error.URLError, ValueError) as e:
             return Outcome("failed", f"{self.name}: {e}")
         if turn.stop.is_set():
             return Outcome("cancelled", "stopped")
-        for call in got["tool_calls"]:
+        for call in [] if chore else got["tool_calls"]:
             if call["name"] == "handoff":
                 return Outcome("handed_off", reason=_reason(call["arguments"]))
-        if "<tool_call>" in got["text"] and "handoff" in got["text"]:
+        if not chore and "<tool_call>" in got["text"] and "handoff" in got["text"]:
             # a server that doesn't parse tool calls hands them back as text
             return Outcome("handed_off", reason="the model asked for an agent")
         flush()

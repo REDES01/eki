@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, queue, score, selfwork, train
+from .. import asks, builds, digest, queue, score, selfdraft, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 
@@ -15,7 +15,7 @@ HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel wor
 
 
 def add(p) -> None:
-    p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|retry|apply <item>, '
+    p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|apply <item>, retry <item|goal>, '
                                                'release, autonomy apply|propose, digest [now], undo <build>')
     p.add_argument("--one", action="store_true", help="no planning: the goal is one item")
     p.add_argument("--as-is", action="store_true", help="the text is already a goal: skip the draft")
@@ -170,6 +170,13 @@ def drop(c, iid: str) -> int:
 
 
 def retry(c, iid: str) -> int:
-    print(f"queued again: {selfwork.retry(c, iid)}")
+    g = c.execute("SELECT * FROM goals WHERE id=? OR id LIKE ? ORDER BY id=? DESC",
+                  (iid, iid + "%", iid)).fetchone()
+    if g is None:
+        print(f"queued again: {selfwork.retry(c, iid)}")
+    else:
+        state = selfdraft.retry(c, g["id"])
+        g = c.execute("SELECT * FROM goals WHERE id=?", (g["id"],)).fetchone()
+        print(f"goal {g['id']}: {state} again (run {g['plan_run'] if state == 'planning' else g['draft_run']})")
     ensure_engine(quiet=True)
     return 0

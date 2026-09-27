@@ -90,3 +90,26 @@ def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
                 said = [f"goal {gid}: drafted → planning"]
     workspace.remove(integration.repo(), f"draft-{gid}", delete_branch=True)
     return said
+
+
+def retry(conn: sqlite3.Connection, gid: str) -> str:
+    """Run a failed or left goal's plan again — or its draft, when the draft
+    never produced a goal. Returns the goal's new state."""
+    g = conn.execute("SELECT * FROM goals WHERE id=? OR id LIKE ? ORDER BY id=? DESC",
+                     (gid, gid + "%", gid)).fetchone()
+    if g is None:
+        raise KeyError(f"no goal {gid}")
+    if g["state"] not in ("failed", "left"):
+        raise ValueError(f"goal {g['id']} is {g['state']}")
+    base = integration.sync()
+    plan = bool(g["plan_run"] or g["drafted_at"] or not g["draft_run"])
+    with db.tx(conn):
+        cur = conn.execute("SELECT state FROM goals WHERE id=?", (g["id"],)).fetchone()
+        if cur["state"] not in ("failed", "left"):
+            raise ValueError(f"goal {g['id']} is {cur['state']}")
+        conn.execute("UPDATE goals SET error=NULL WHERE id=?", (g["id"],))
+        if plan:
+            start_plan(conn, g["id"], g["text"], base, g["owner"])
+        else:
+            start_draft(conn, g["id"], g["wish"] or g["text"], base, g["owner"])
+    return "planning" if plan else "drafting"

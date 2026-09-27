@@ -44,7 +44,10 @@ changes no file and ends with `GOAL:` and the goal text, then
 what you typed, `goals.text` the goal as drafted, `goals.drafted_at` when)
 and planned on the same thread, draft → plan. No `GOAL:` block, or
 `DRAFT: person`, leaves the goal `left` with the reason; a failed draft run
-fails the goal. `--as-is` (the text is already the goal), `--one`, faults and
+fails the goal. A plan or draft run that fails on a passing error (a dropped
+connection, overload) is retried by the worker up to three times; after that
+the goal fails, and `eki self retry <goal id>` re-runs its plan (or its draft,
+when the draft never produced a goal). `--as-is` (the text is already the goal), `--one`, faults and
 other eki-owned goals skip the draft. Like the plan stage, it resumes from
 the goals table alone.
 

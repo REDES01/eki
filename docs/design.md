@@ -226,7 +226,57 @@ repo, judges each with `bin/check` (gate 1), and proposes the fit ones as
 branches `self/<id>`; the go-live path (`eki swap`). Next: the queue and
 gate 2. Order of building in [ROADMAP.md](../ROADMAP.md).
 
+## Standing goals and the budget
+
+A **standing goal** is a goal in words tied to a git folder
+(`eki goal add <folder> "…" [--check "<shell command>"] [--branch <name>]`).
+The folder is recorded once as a project (`projects`: path, branch — the
+folder's current one by default — and check); the goal is a row in
+`standing` (`on | paused | stuck | dropped`). eki works it in **rounds**, with
+the same machinery it uses on itself: plan → items in worktrees → gate 1 →
+proposed. A round is an ordinary goal owned by `eki` at background priority
+(`goals.standing_id`, `goals.project`); it skips the draft, since the standing
+text is the goal and the plan run reads the project. When a round has nothing
+open, the next plan run is told what the last three rounds did and plans the
+next one — or answers `ITEMS: []` with one line why, and the goal rests.
+
+**Landing is a branch you merge.** A project item builds in
+`~/.eki/work/<item id>` on branch `eki/<item id>` of the project's own repo
+(`.venv` and `node_modules` linked from the folder when untracked). Its gate 1
+is the project's `--check`, else its executable `bin/check`, else none: the
+item is proposed "no check configured — not judged". It stays `proposed`
+until its commit is in the project's branch (`git -C <path> merge eki/<id>`),
+then it is `applied`. eki only adds worktrees and `eki/*` branches: it never
+checks out, commits to, fetches into, resets or pushes the project's
+branches. Project items never enter eki's queue, train or swap.
+
+**When a round opens** (`standing.tick`, a housekeeping step): the goal is
+`on`, not resting, has no open round, the Mac has room (`machine.room`), the
+planner is available under the budget, and fewer than
+`self.standing_waiting_max` (3) of the project's items wait for you as
+proposed. Otherwise `standing.why` says which. An empty plan rests the goal
+`self.standing_rest_hours` (24 h); a failed round rests it an hour, and three
+failures in a row make it `stuck` until `eki goal resume`. `eki goal` lists
+each goal with its why, rounds, open and proposed items with their merge
+hint, and the budget right now; `eki goal pause|resume|drop|now <id>` —
+`now` clears the rest but still waits for the Mac and the budget. A standing
+goal whose folder is eki's own source has no project: its rounds are ordinary
+self goals (integration repo, queue, `self_autonomy`).
+
+**The budget** (`eki/budget.py`) is how much of each subscription window
+background work may spend: `routing.json`
+`"quota": {"background_day": 0.5, "background_night": 0.9, "night": "23:00-07:00"}`
+(local time; an older `background_up_to` is read as `background_day`, the
+file is never rewritten). Both ceilings are clamped to 0.9
+(`budget.NEVER_ABOVE`), so background work never spends the last 10% of any
+window. Windows a day or longer (week, month) are also held to pace: used no
+more than the share of the window already gone. `capacity.status(...,
+background=True)` asks for every window, not only the fullest, and says why
+("kept for you: 5h at 52% (day budget 50%; night from 23:00 up to 90%)"). A
+background run with no provider under budget stays queued with that why; a
+run already going is never stopped. Work you wait for (`now`) ignores the
+budget.
+
 ## Not built yet
 
-Goals / idle shift, learned preferences. Each is built on
-the pieces above, not beside them.
+Learned preferences. Built on the pieces above, not beside them.

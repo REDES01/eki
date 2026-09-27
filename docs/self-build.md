@@ -74,12 +74,35 @@ Conflicts scale with change size times time in flight; the first eki's
 median change touched seven files and a third of them needed an agent to
 resolve conflicts.
 
-The scheduler starts every ready item whose declared write-set is disjoint
-from the items already running, in parallel, up to the room the machine and
-the subscriptions give (`MAX_PARALLEL`, `machine.room`, `capacity`).
-Overlapping items go one after another; an item marked `independent` never
-waits. The write-set is a prediction, not a lock: at commit time eki records
-what was touched against what was declared, and the drift feeds the
+**How a plan is shaped.** Plans are wide, not long (`selfbrief.SPLIT_RULES`,
+shared by the self and project plan briefs; the draft's item-shape guidance
+says the same). Items that don't depend on each other are preferred; a dep
+is declared only when the later item's tests can't pass without the earlier
+item's code. A shared interface — the exact function signature, table and
+column, JSON key — is written into the spec of every item that uses it, so
+each can build without waiting to see the other. When several items need the
+same new names, one small root item adds them, with working minimal bodies
+and tests, and the rest depend only on it: two levels deep unless the goal
+truly can't be. Two items share a file only if one depends on the other.
+When a plan concludes, `plangraph.shape` measures it — depth is the longest
+dependency chain, width the most items on one level, `chained` the deps
+between disjoint write-sets — and stores it in `goals.shape`; the `eki self`
+board shows it on the goal line as "5 items · 2 deep · 4 wide".
+
+**The scheduler** (`eki/scheduler.py`) starts ready items across all goals
+at once. Waiting items are taken goal by goal, round-robin: the goal with the
+fewest items building goes first, then the older goal, then the older item.
+An item starts when its write-set is disjoint from the items already running
+*in the same repo* — items of different projects never block each other —
+up to the room the machine and the subscriptions give (`machine.room`,
+`capacity`). `self.parallel` (4) counts building items only; judging is
+limited by `self.check_slots`. Overlapping items go one after another; an
+item marked `independent` never waits. An item that stays waiting says why
+in `items.why`, written only when it changes and cleared when it starts —
+"after <dep title>", "shares eki/engine.py with <item id>", "no write-set:
+waits until its repo is quiet", "4 building (self.parallel)" — and the board
+shows it. The write-set is a prediction, not a lock: at commit time eki
+records what was touched against what was declared, and the drift feeds the
 planner's brief.
 
 Every stage of an item is an ordinary run, so the reap/resume machinery

@@ -39,7 +39,7 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 
 ## After
 
-- [ ] Goals and the idle shift (background work while the Mac has room).
+- [x] Goals and the idle shift (background work while the Mac has room).
 - [x] Image generation as a provider (ComfyUI), routed like any other.
 - [ ] Learned preferences: routing overrides learned from behaviour, with
       a notice and undo.

@@ -3,7 +3,9 @@
 // that the engine doesn't have, so a refresh or an engine restart loses nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { thread: null, after: 0, polling: false, answers: {}, whys: new Set() };   // answers/whys: what the page shows, not keeps
+  const state = { thread: null, after: 0, polling: false, answers: {}, whys: new Set(), live: null };   // answers/whys: what the page shows, not keeps
+
+  const LIVE = ["queued", "starting", "running"];
 
   async function call(path, body) {
     const opts = body === undefined ? {} : {
@@ -31,7 +33,7 @@
   }
 
   function runHtml(r) {
-    const live = ["queued", "starting", "running"].includes(r.state);
+    const live = LIVE.includes(r.state);
     const steps = r.steps.length
       ? `<details class="steps" ${live ? "open" : ""}><summary>${r.steps.length} step${r.steps.length > 1 ? "s" : ""}</summary>${r.steps.map(stepLine).join("")}</details>` : "";
     const who = r.provider ? `${mark(r.provider)}<span class="who">${md.esc(r.provider)}</span>` : "";
@@ -100,7 +102,10 @@
     if (state.thread !== tid) return;   // the page moved on while this was loading
     $("title").textContent = t.title || "(untitled)";
     $("meta").textContent = [t.provider && "with " + t.provider, t.cwd].filter(Boolean).join(" · ");
-    if (t.cwd && !$("cwd").value) $("cwd").value = t.cwd;
+    if (t.cwd && !$("cwd").value) { $("cwd").value = t.cwd; chip(); }
+    const last = t.runs[t.runs.length - 1];
+    sendMode(last && LIVE.includes(last.state) ? last.id : null);
+    $("main").classList.toggle("blank", !t.runs.length);
     const log = $("log");
     if (log.contains(document.activeElement) && document.activeElement.matches(".ask input")) return;  // don't wipe a half-typed answer
     const nearBottom = log.parentElement.scrollHeight - log.parentElement.scrollTop - log.parentElement.clientHeight < 80;
@@ -110,7 +115,7 @@
     $("empty").style.display = t.runs.length ? "none" : "";
     state.after = Math.max(state.after, ...t.runs.map((r) => r.last_event || 0));
     if (scroll || nearBottom) log.parentElement.scrollTop = log.parentElement.scrollHeight;
-    const active = t.runs.some((r) => ["queued", "starting", "running"].includes(r.state));
+    const active = t.runs.some((r) => LIVE.includes(r.state));
     if (active) poll();
   }
 
@@ -144,6 +149,9 @@
     $("empty").style.display = "";
     greet();
     $("cwd").value = "";
+    chip();
+    sendMode(null);
+    $("main").classList.add("blank");
     if (!id) { $("title").textContent = "New thread"; $("meta").textContent = ""; }
     loadThread(true);
     $("prompt").focus();
@@ -151,8 +159,40 @@
 
   // ---- events ----------------------------------------------------------------------------
 
+  // Send turns into Stop while the thread's latest run is live; Enter still sends.
+  function sendMode(id) {
+    state.live = id;
+    const b = $("send");
+    b.classList.toggle("stop", !!id);
+    b.textContent = id ? "■" : "↑";
+    b.title = id ? "Stop this run" : "Send (Enter)";
+    b.setAttribute("aria-label", id ? "Stop" : "Send");
+  }
+
+  // Who answers, folder and background live in the options menu; the chip says what's chosen.
+  function chip() {
+    const to = $("to"), cwd = $("cwd").value.trim();
+    const parts = [to.value ? to.options[to.selectedIndex].text : "Auto"];
+    if (cwd) parts.push("📁 " + (cwd.replace(/\/+$/, "").split("/").pop() || cwd));
+    if ($("bg").checked) parts.push("background");
+    $("chip").textContent = parts.join(" · ") + " ▾";
+  }
+  function menu(show) {
+    $("menu").hidden = !show;
+    $("chip").setAttribute("aria-expanded", String(show));
+  }
+  $("chip").addEventListener("click", () => menu($("menu").hidden));
+  ["to", "cwd", "bg"].forEach((id) => { $(id).addEventListener("input", chip); $(id).addEventListener("change", chip); });
+  new MutationObserver(chip).observe($("to"), { childList: true });   // side.js refills the providers
+  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#options")) menu(false); });
+  $("menu").addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); menu(false); $("prompt").focus(); } });
+
   $("composer").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (state.live && e.submitter === $("send")) {
+      try { await call(`/api/runs/${state.live}/cancel`, {}); } catch (err) { alertLine(err.message); }
+      return loadThread(false);
+    }
     const prompt = $("prompt").value.trim();
     if (!prompt) return;
     if (ekiAttach.busy()) return alertLine("A picture is still uploading.");
@@ -165,6 +205,7 @@
       $("prompt").value = "";
       ekiAttach.clear();
       autosize();
+      menu(false);
       if (got.thread !== state.thread) { location.hash = got.thread; } else { await loadThread(true); }
     } catch (err) {
       alertLine(err.message);

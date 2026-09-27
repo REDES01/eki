@@ -92,6 +92,19 @@ def test_the_chat_look_is_served(web):
         assert f'id="{i}"' in body
 
 
+def test_the_composer_is_a_card_with_options_and_send_stop(web):
+    _, body = get(web + "/")
+    form = body[body.index('<form id="composer"'):body.index("</form>")]
+    for i in ("strip", "attach", "attach-file", "to", "cwd", "bg", "prompt", "send", "chip", "menu"):
+        assert f'id="{i}"' in form
+    assert form.index('id="menu"') < form.index('id="to"') < form.index('id="cwd"') < form.index('id="bg"')
+    assert 'accept="image/*"' in form
+    _, app = get(web + "/ui/app.js")
+    assert "/cancel" in app and "sendMode" in app and "e.submitter" in app and "shiftKey" in app
+    _, css = get(web + "/ui/chat.css")
+    assert "#send.stop" in css and ".menu" in css and "#main.blank" in css
+
+
 def test_ask_then_read_the_thread(web, conn):
     code, got = post(web + "/api/ask", {"prompt": "steps=1 hello from the web"})
     assert code == 200

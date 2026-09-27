@@ -99,22 +99,39 @@
 #composer.drop { border-color: var(--teal); box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 30%, transparent); }
 #attach { padding: 2px 8px; }
 
-/* ---- composer ---- */
-#composer { max-width: 820px; width: calc(100% - 40px); margin: 0 auto 18px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 8px;
-  box-shadow: 0 1px 8px color-mix(in srgb, var(--text) 6%, transparent); }
-#prompt { width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 4px 2px; max-height: 240px; }
-.bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
-.bar select, .bar input { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
-#cwd { flex: 0 1 220px; min-width: 90px; }
-.check { display: flex; gap: 4px; align-items: center; color: var(--dim); }
+/* ---- composer: a rounded card floating at the bottom of the reading column ---- */
+#composer { max-width: 760px; width: calc(100% - 40px); margin: 0 auto 18px; background: var(--card); position: relative;
+  border: 1px solid var(--line); border-radius: 24px; padding: 12px 12px 8px 16px;
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--text) 9%, transparent); }
+#composer:focus-within { border-color: color-mix(in srgb, var(--text) 22%, var(--line)); }
+#prompt { width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 2px 0; max-height: 240px; }
+.bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; }
 .grow { flex: 1; }
-
-#send { background: var(--text); color: var(--bg); padding: 5px 14px; font-weight: 600; }
+.icon { background: transparent; padding: 3px 8px; border-radius: 999px; }
+.icon:hover, .optchip:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+#options { position: relative; min-width: 0; }
+.optchip { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--dim);
+  font-size: 12px; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 5; width: 260px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--text) 14%, transparent); }
+.menu[hidden] { display: none; }
+.mrow { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
+.mrow select, .mrow input { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px;
+  font-size: 13px; color: var(--text); }
+.check { display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 13px; }
+.round { width: 34px; height: 34px; padding: 0; border-radius: 50%; flex: none; font-weight: 700; line-height: 1; }
+#send { background: var(--text); color: var(--bg); font-size: 16px; }
+#send.stop { font-size: 12px; }
 #send:disabled { opacity: .5; }
 
+/* ---- nothing asked yet: the greeting and the composer, centered together ---- */
+#main.blank #scroll { display: flex; align-items: flex-end; justify-content: center; }
+#main.blank #empty { position: static; padding: 0 24px 22px; }
+#main.blank #log:empty { display: none; }
+#app[data-view="chat"] #main.blank::after { content: ""; flex: 1; }
+
 @media (max-width: 720px) {
-  #cwd { width: 110px; }
   #log { padding: 14px 16px 30px; }
   .bubble { max-width: 92%; }
 }

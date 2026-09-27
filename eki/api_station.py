@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import asks, builds, db, digest, observe, queue, score, selfview, selfwork, traincheck, train
+from . import asks, builds, db, digest, observe, patchnotes, queue, score, selfview, selfwork, traincheck, train
 
 
 # ---- what it shows ------------------------------------------------------------------------
@@ -54,7 +54,11 @@ def journal(conn: sqlite3.Connection, since: Optional[str] = "24h",
 
 def digests(conn: sqlite3.Connection) -> Dict[str, Any]:
     pages = sorted(digest.folder().glob("????-??-??.md"), reverse=True)
-    return {"pages": [str(p) for p in pages], "latest": pages[0].read_text() if pages else None}
+    latest = pages[0].read_text() if pages else None
+    long = pages[0].with_name(pages[0].name[:-len(".md")] + ".long.md") if pages else None
+    return {"pages": [str(p) for p in pages], "latest": latest,
+            "headline": patchnotes.headline(latest) if latest else "",
+            "long": str(long) if long and long.exists() else None}
 
 
 # ---- what it does --------------------------------------------------------------------------

@@ -182,9 +182,10 @@
   }
 
   function digests(d) {
-    sum("digest", d.pages.length ? `latest ${d.pages[0].split("/").pop().replace(/\.md$/, "")}` : "none yet");
+    sum("digest", !d.pages.length ? "none yet" : d.headline || `latest ${d.pages[0].split("/").pop().replace(/\.md$/, "")}`);
     const list = d.pages.map((p, i) => `<a class="st-chip" href="/api/file?path=${encodeURIComponent(p)}" target="_blank" rel="noopener">${esc(p.split("/").pop().replace(/\.md$/, ""))}${i ? "" : " · latest"}</a>`).join("");
-    return (list ? `<div class="st-targets">${list}</div>` : '<div class="dim">no digest yet</div>') +
+    const long = d.long ? `<a class="st-chip" href="/api/file?path=${encodeURIComponent(d.long)}" target="_blank" rel="noopener">long</a>` : "";
+    return (list ? `<div class="st-targets">${list}${long}</div>` : '<div class="dim">no digest yet</div>') +
       (d.latest ? `<div class="st-md">${md.render(d.latest)}</div>` : "");
   }
 

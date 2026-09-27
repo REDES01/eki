@@ -87,12 +87,28 @@ def test_journal_by_span_and_kind(web, conn):
 
 
 def test_digests_newest_first_and_write_now(web, conn):
-    assert _get(web, "/api/digests") == {"pages": [], "latest": None}
+    assert _get(web, "/api/digests") == {"pages": [], "latest": None, "headline": "", "long": None}
     (digest.folder() / "2026-09-24.md").write_text("# older\n")
     (digest.folder() / "2026-09-25.md").write_text("# newer\n")
     got = _get(web, "/api/digests")
     assert got["pages"] == [str(digest.folder() / "2026-09-25.md"), str(digest.folder() / "2026-09-24.md")]
     assert got["latest"] == "# newer\n"
+    assert got["headline"] == "" and got["long"] is None
+
+
+def test_digests_headline_and_long_page(web, conn):
+    (digest.folder() / "2026-09-27.md").write_text("# eki 09-27\nOlder news.\n")
+    (digest.folder() / "2026-09-27.long.md").write_text("# eki digest — 2026-09-27 (long)\n")
+    (digest.folder() / "2026-09-28.md").write_text("# eki 09-28\nMerging runs alone.\n\nWaits for you: nothing.  Score: same as yesterday.\n")
+    got = _get(web, "/api/digests")
+    assert got["headline"] == "Merging runs alone."
+    assert got["long"] is None                      # the newest page has no long page beside it
+    assert not any(p.endswith(".long.md") for p in got["pages"])
+    long = digest.folder() / "2026-09-28.long.md"
+    long.write_text("# eki digest — 2026-09-28 (long)\n")
+    got = _get(web, "/api/digests")
+    assert got["long"] == str(long)
+    assert got["pages"] == [str(digest.folder() / "2026-09-28.md"), str(digest.folder() / "2026-09-27.md")]
     code, out = post(web + "/api/digests/write", {})
     assert code == 200 and out["path"] in _get(web, "/api/digests")["pages"]
 

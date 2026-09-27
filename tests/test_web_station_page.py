@@ -30,6 +30,13 @@ def test_station_files_are_served(web):
         assert name in js, name
 
 
+def test_digest_summary_shows_the_headline_and_links_long(web):
+    js = get(web + "/ui/station.js")[1]
+    body = js[js.index("function digests(d)"):js.index("async function part(")]
+    assert "d.headline" in body.split("\n")[1]      # the summary line
+    assert "encodeURIComponent(d.long)" in body and "/api/file?path=" in body
+
+
 def test_station_actions_send_the_header(web):
     js = get(web + "/ui/station.js")[1]
     assert '"X-Eki": "1"' in js

@@ -61,7 +61,13 @@ def _go(conn: sqlite3.Connection) -> List[str]:
     if main == running:
         return []
     if running is not None and not integration.carries(running, "main"):
-        return [f"train: the running build {running[:12]} isn't in integration main {main[:12]}; not going"]
+        # a build swapped in by hand from the checkout (`eki swap HEAD`) runs commits the
+        # integration repo hasn't fetched yet: sync first, then judge again
+        main = integration.sync()
+        if main == running:
+            return []
+        if not integration.carries(running, "main"):
+            return [f"train: the running build {running[:12]} isn't in integration main {main[:12]}; not going"]
     swap = builds.status().get("swap") or {}
     if swap.get("state") == "swapping":
         return [f"train: a swap to {Path(swap.get('target') or '?').name} is still under way; waiting"]

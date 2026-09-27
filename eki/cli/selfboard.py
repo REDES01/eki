@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .. import doccheck, selfview, selfwork
+from .. import doccheck, selfpick, selfview, selfwork
 from ..selfview import drafting, stage  # noqa: F401  (said here before they moved)
 from .common import ago
 
@@ -13,13 +13,17 @@ def board(c) -> int:
     goals = selfview.goals(c)
     if not goals:
         print('nothing yet — `eki self "…"` asks for a change')
+        print(selfpick.line(c))
         return 0
     s = selfwork.settings()
     print(f"(autonomy {s['autonomy']}, {s['parallel']} at once, source {selfwork.source()})")
+    print(selfpick.line(c))
     _queue(c)
     for g in goals:
         form = f"  ({shape(g['shape'])})" if _has(g, "shape") and g["shape"] else ""
         print(f"\n{g['id']}  {g['state']:<9} {ago(g['created_at']):>8}  {g['text'].splitlines()[0][:70]}{form}")
+        if _has(g, "why") and g["why"]:
+            print(f"           why: {g['why']}")
         if g["state"] == "drafting":
             print(f"           {drafting(c, g)}")
         if g["error"]:

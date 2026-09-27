@@ -50,6 +50,7 @@ def seed(conn):
 
 BOARD = """\
 (autonomy propose, 4 at once, source /src/eki)
+loop: off (eki self loop on)
 
 queue
   1.  i3  on aaaaaaaa  gate 2 green — waiting for the ones ahead  item i3

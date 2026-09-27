@@ -9,6 +9,7 @@ from pathlib import Path
 from .. import asks, builds, digest, projects, queue, score, selfdraft, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
+from .selfloop import loop, pick
 
 NAME = "self"
 HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel worktrees; `self` shows it"
@@ -16,7 +17,8 @@ HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel wor
 
 def add(p) -> None:
     p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|apply <item>, retry <item|goal>, '
-                                               'release, autonomy apply|propose, digest [now], undo <build>')
+                                               'release, autonomy apply|propose, digest [now], undo <build>, '
+                                               'loop on|off (eki picks its own work), pick (what it would pick now)')
     p.add_argument("--one", action="store_true", help="no planning: the goal is one item")
     p.add_argument("--as-is", action="store_true", help="the text is already a goal: skip the draft")
     p.add_argument("--files", help="with --one: the files it will touch, comma-separated")
@@ -43,6 +45,10 @@ def run(args) -> int:
         queue.set_autonomy(words[1])
         print(f"autonomy {selfwork.settings()['autonomy']}")
         return 0
+    if verb == "loop":
+        return loop(words[1:])
+    if verb == "pick" and len(words) == 1:
+        return pick(c)
     if verb == "digest" and words[1:] in ([], ["now"]):
         return show_digest(c, now=len(words) == 2)
     if verb == "undo" and len(words) == 2:
@@ -117,6 +123,10 @@ def show(c, iid: str) -> int:
 
 def show_goal(c, g) -> int:
     print(f"goal {g['id']}  {g['state']}  ({g['source']}, {g['owner']})")
+    if g["why"]:
+        print(f"why: {g['why']}")
+    if g["pick_key"]:
+        print(f"picked: {g['pick_key']}")
     wish = g["wish"] or g["text"]
     print(f"\nwish:\n{wish}")
     if g["drafted_at"]:

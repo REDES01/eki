@@ -235,3 +235,51 @@ def _planned(conn):
         conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
                      (gid, "g", "ask", "you", "planning", db.now()))
     return gid
+
+
+def test_loop_on_then_off_round_trips_routing_json(conn, home, capsys):
+    assert main(["self", "loop", "on"]) == 0
+    assert capsys.readouterr().out.strip() == "loop on"
+    assert json.loads(paths.config("routing").read_text())["self"]["loop"] is True
+    assert main(["self", "loop", "off"]) == 0
+    assert capsys.readouterr().out.strip() == "loop off"
+    assert json.loads(paths.config("routing").read_text())["self"]["loop"] is False
+    assert main(["self", "loop", "maybe"]) == 2
+
+
+def test_pick_is_a_dry_run_that_names_the_fault(conn, capsys):
+    from eki import observe
+    observe.fault(conn, "worker", "Traceback (most recent call last):\n"
+                  '  File "/Users/someone/eki/eki/x.py", line 12, in go\n'
+                  "    thing['a']\nKeyError: 'a'\n")
+    assert main(["self", "pick"]) == 0
+    out = capsys.readouterr().out
+    assert "loop: off" in out
+    assert "idle: yes — nothing queued" in out
+    assert "waiting on you: 0 of review_max 3" in out
+    assert "picked today: 0 of picks_per_day 6" in out
+    assert "would pick: fault eki/x.py:12 KeyError — fault eki/x.py:12 KeyError, seen 1 times" in out
+    assert "(but the loop is off stops it)" in out
+    assert conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0] == 0
+
+
+def test_the_board_shows_the_loop_line_and_a_goals_why(conn, capsys):
+    main(["self"])
+    assert "loop: off (eki self loop on)" in capsys.readouterr().out
+    goal_with(conn, state="landed")
+    conn.execute("UPDATE goals SET why='3 handoffs on row answer', pick_key='journal:handoff:answer'")
+    main(["self", "loop", "on"])
+    capsys.readouterr()
+    main(["self"])
+    out = capsys.readouterr().out
+    assert "loop: on — idle, picks next pass" in out
+    assert "           why: 3 handoffs on row answer" in out
+
+
+def test_show_prints_the_why_and_the_pick_key(conn, capsys):
+    goal_with(conn, state="landed")
+    conn.execute("UPDATE goals SET why='fault eki/x.py:12 KeyError', pick_key='fault:eki/x.py:12 KeyError'")
+    gid = conn.execute("SELECT id FROM goals").fetchone()[0]
+    assert main(["self", "show", gid]) == 0
+    out = capsys.readouterr().out
+    assert "why: fault eki/x.py:12 KeyError" in out and "picked: fault:eki/x.py:12 KeyError" in out

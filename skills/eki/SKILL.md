@@ -95,4 +95,5 @@ eki drill                       # prove a restart loses nothing (runs in a throw
 eki swap <commit> | --back      # make a build of a commit, check it, and put it live
 eki builds                      # list eki's builds: current, previous, and how the last swap went
 eki observe [--since 24h] [--kind fault|handoff|…] [--full]  # what eki wrote down: faults, handoffs, corrections, limits
+eki notify [topic <name>|off|test]   # pushes to the phone via ntfy: show (topic masked), set or clear the topic, send a test
 ```

@@ -85,6 +85,19 @@ d = {dir!r}
 args = sys.argv[1:]
 with open(os.path.join(d, "calls.jsonl"), "a") as f:
     f.write(json.dumps(args) + "\\n")
+repos = os.path.join(d, "repos.json")
+if args[:2] == ["repo", "clone"] and len(args) >= 4 and os.path.exists(repos):
+    bare = json.load(open(repos)).get(args[2])
+    if bare:
+        import subprocess
+        dest, url = args[3], "https://github.com/%s.git" % args[2]
+        if not os.path.isdir(bare) or subprocess.call(["git", "clone", "-q", bare, dest]) != 0:
+            sys.stderr.write("fake gh: can't clone %s\\n" % args[2])
+            sys.exit(1)
+        for k, v in (("remote.origin.url", url), ("url.%s.insteadOf" % bare, url),
+                     ("remote.origin.pushurl", bare)):
+            subprocess.check_call(["git", "-C", dest, "config", k, v])
+        sys.exit(0)
 for k in ("_".join(args[:3]), "_".join(args[:2])):
     base = os.path.join(d, "answers", re.sub(r"[^A-Za-z0-9]", "_", k))
     if os.path.exists(base + ".out"):
@@ -103,6 +116,13 @@ class FakeGh:
     def calls(self):
         f = self.dir / "calls.jsonl"
         return [json.loads(ln) for ln in f.read_text().splitlines()] if f.exists() else []
+
+    def repo(self, name, bare):
+        """`gh repo clone <name> <dest>` from now on really clones `bare`, origin github.com/<name>."""
+        f = self.dir / "repos.json"
+        got = json.loads(f.read_text()) if f.exists() else {}
+        got[name] = str(bare)
+        f.write_text(json.dumps(got))
 
     def answer(self, args_prefix, out, code=0):
         key = re.sub(r"[^A-Za-z0-9]", "_", "_".join(args_prefix))

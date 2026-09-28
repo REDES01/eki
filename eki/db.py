@@ -208,12 +208,21 @@ ADDED = [
     ("items", "why", "TEXT"),           # why it is still waiting
     ("goals", "issue", "INTEGER"),      # the GitHub issue it came from (eki/issues.py)
     ("standing", "issue", "INTEGER"),
-    ("projects", "issues", "INTEGER DEFAULT 0"),   # 1: issues labelled eki are watched
+    ("projects", "issues", "INTEGER DEFAULT 0"),   # was: issues watched; nothing reads it any more
     ("items", "pr", "TEXT"),            # the pull request's URL (eki/prs.py)
     ("items", "pr_state", "TEXT"),      # open | merged | closed
     ("items", "pushed", "TEXT"),        # the sha last pushed to eki/<id> on origin
     ("items", "pr_seen", "TEXT"),       # ISO-8601 UTC time of the newest PR comment looked at
     ("items", "followups", "INTEGER DEFAULT 0"),   # changes made for comments on the PR
+    ("projects", "repo", "TEXT"),       # OWNER/REPO; NULL on the local path
+    ("projects", "state", "TEXT DEFAULT 'on'"),    # on | retired | dropped
+    ("projects", "setup", "TEXT"),      # NULL (local) | cloning | installing | ready | fault
+    ("projects", "setup_run", "TEXT"),  # the clone or install command run
+    ("projects", "fault", "TEXT"),      # "<clone|install> failed: <why>"
+    ("projects", "check_from", "TEXT"), # set | guessed: <why> | none: <why>
+    ("projects", "install_cmd", "TEXT"),   # run once in the clone before the first goal
+    ("projects", "ignored", "TEXT"),    # JSON list of issue numbers open when it was dropped
+    ("items", "judged_by", "TEXT"),     # the check that judged it, and where it came from
 ]
 
 

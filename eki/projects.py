@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import builds, db, github, integration, store, workspace
+from . import builds, db, github, integration, paths, store, workspace
 
 #: untracked folders a worktree needs to run, linked from the project folder
 DEPS = (".venv", "node_modules")
@@ -59,6 +59,18 @@ def unwatch(conn: sqlite3.Connection, folder: str | Path) -> str:
     with db.tx(conn):
         conn.execute("UPDATE projects SET issues=0 WHERE id=?", (got["id"],))
     return got["id"]
+
+
+def clone_path(repo: str) -> Path:
+    """Where eki keeps its own clone of OWNER/REPO."""
+    owner, name = repo.split("/", 1)
+    return paths.projects() / owner / name
+
+
+def by_repo(conn: sqlite3.Connection, repo: str) -> Optional[sqlite3.Row]:
+    """The project row for OWNER/REPO that isn't retired (a dropped one counts), or None."""
+    return conn.execute("SELECT * FROM projects WHERE repo=? AND COALESCE(state, 'on')!='retired' "
+                        "ORDER BY created_at DESC LIMIT 1", (repo,)).fetchone()
 
 
 def open_prs(conn: sqlite3.Connection) -> Dict[str, int]:

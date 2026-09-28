@@ -220,3 +220,76 @@ def test_the_stubs_do_nothing_yet(conn, fake_gh):
         assert mod.tick(conn) == []
         assert mod.tick(conn) == []
     assert fake_gh.calls() == []
+
+
+# ---- account-wide issues: the shared names ---------------------------------------------------
+
+def test_search_issues_argv_and_parse(fake_gh):
+    fake_gh.answer(["search", "issues"], '[{"number": 3, "repository": {"nameWithOwner": "me/proj"}}]')
+    got = github.search_issues("me")
+    assert got[0]["repository"]["nameWithOwner"] == "me/proj"
+    assert fake_gh.calls()[-1] == ["search", "issues", "--label", "eki", "--state", "open", "--owner", "me",
+                                   "--limit", "100", "--json", "number,title,body,labels,author,repository"]
+    fake_gh.answer(["search", "issues"], "")
+    assert github.search_issues("me") == []
+
+
+def test_soon_makes_due_true_again():
+    t = 1_000_000.0
+    assert github.due("issues", t)
+    assert not github.due("issues", t + 60)
+    github.soon("issues")
+    github.soon("never-seen")
+    assert github.due("issues", t + 60)
+
+
+def test_the_setup_columns(conn):
+    for table, cols in (("projects", {"repo", "state", "setup", "setup_run", "fault", "check_from",
+                                      "install_cmd", "ignored", "issues"}), ("items", {"judged_by"})):
+        assert cols <= {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def test_clone_path_and_by_repo(conn, home):
+    assert paths.projects() == home / "projects" and paths.projects().is_dir()
+    assert projects.clone_path("me/proj") == home / "projects" / "me" / "proj"
+    assert projects.by_repo(conn, "me/proj") is None
+    for pid, path, state in (("old", "/a", "retired"), ("new", "/b", "dropped")):
+        conn.execute("INSERT INTO projects(id, name, path, branch, created_at, repo, state) "
+                     "VALUES (?,?,?,?,?,?,?)", (pid, "me/proj", path, "main", db.now(), "me/proj", state))
+    assert projects.by_repo(conn, "me/proj")["id"] == "new"
+    conn.execute("DELETE FROM projects WHERE id='new'")
+    assert projects.by_repo(conn, "me/proj") is None
+
+
+def test_not_judged_both_ways(conn, proj):
+    from eki import projectwork
+    assert projectwork.not_judged(None) == projectwork.NOT_JUDGED
+    local = projects.get(conn, projects.add(conn, proj))
+    assert projectwork.not_judged(local) == projectwork.NOT_JUDGED
+    conn.execute("UPDATE projects SET repo='me/proj' WHERE id=?", (local["id"],))
+    assert projectwork.not_judged(projects.get(conn, local["id"])) == \
+        "not judged: no check found; set one with `eki project me/proj --check '…'`"
+
+
+def test_standing_add_on_a_given_project_skips_the_folder(conn):
+    conn.execute("INSERT INTO projects(id, name, path, branch, created_at, repo) "
+                 "VALUES ('p1','me/proj','/x','main',?,'me/proj')", (db.now(),))
+    sid = standing.add(conn, "/no/such/folder", "keep it tidy", project="p1")
+    assert standing.find(conn, sid)["project"] == "p1"
+    with pytest.raises(ValueError):
+        standing.add(conn, "/no/such/folder", "keep it tidy")
+
+
+def test_fake_gh_repo_clones_for_real(fake_gh, proj, tmp_path):
+    bare = tmp_path / "bare.git"
+    workspace.git(tmp_path, "clone", "-q", "--bare", str(proj), str(bare))
+    fake_gh.repo("me/proj", bare)
+    dest = tmp_path / "clone"
+    github._gh(["repo", "clone", "me/proj", str(dest), "--", "--filter=blob:none"])
+    assert (dest / "app.py").exists() and github.repo_of(dest) == "me/proj"
+    assert workspace.git(dest, "config", "--get", "remote.origin.pushurl") == str(bare)
+    assert workspace.git(dest, "symbolic-ref", "--short", "HEAD") == "trunk"
+    assert fake_gh.calls()[-1][:3] == ["repo", "clone", "me/proj"]
+    shutil.rmtree(bare)
+    with pytest.raises(github.GhError):
+        github._gh(["repo", "clone", "me/proj", str(tmp_path / "again")])

@@ -17,6 +17,14 @@ from . import projects, workspace
 NOT_JUDGED = "no check configured — not judged"
 
 
+def not_judged(project: Optional[sqlite3.Row]) -> str:
+    """What an item says with nothing to judge it: for a GitHub repo, how to set a check."""
+    repo = project["repo"] if project is not None and "repo" in project.keys() else None
+    if not repo:
+        return NOT_JUDGED
+    return f"not judged: no check found; set one with `eki project {repo} --check '…'`"
+
+
 def project_of(conn: sqlite3.Connection, goal: Optional[sqlite3.Row]) -> Optional[sqlite3.Row]:
     """The goal's project row, or None for eki itself."""
     if goal is None or "project" not in goal.keys() or not goal["project"]:

@@ -109,6 +109,13 @@ def issues(repo: str) -> List[dict]:
     return json.loads(out) if out.strip() else []
 
 
+def search_issues(login: str) -> List[dict]:
+    """Open issues labelled eki in every repo `login` owns; each carries repository.nameWithOwner."""
+    out = _gh(["search", "issues", "--label", "eki", "--state", "open", "--owner", login, "--limit", "100",
+               "--json", "number,title,body,labels,author,repository"])
+    return json.loads(out) if out.strip() else []
+
+
 def issue_state(repo: str, n: int) -> str:
     return _gh(["issue", "view", str(n), "--repo", repo, "--json", "state", "--jq", ".state"]).strip()
 
@@ -172,3 +179,8 @@ def due(name: str, now: Optional[float] = None) -> bool:
         return False
     _last[name] = t
     return True
+
+
+def soon(name: str) -> None:
+    """Forget when `name` last ran, so the next `due(name)` is True."""
+    _last.pop(name, None)

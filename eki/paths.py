@@ -66,3 +66,10 @@ def images() -> Path:
     p = home() / "images"
     p.mkdir(exist_ok=True)
     return p
+
+
+def projects() -> Path:
+    """eki's own clones of GitHub repos, one per <owner>/<repo>."""
+    p = home() / "projects"
+    p.mkdir(exist_ok=True)
+    return p

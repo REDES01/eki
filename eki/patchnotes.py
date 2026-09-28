@@ -7,7 +7,8 @@ what it returns; digestprose.py asks the local model for the notes with
 
 A page is the title `# eki MM-DD`, one headline sentence, a section per area
 that changed (the bare area name, then its `- ` lines) and the closing line
-eki writes itself: `Waits for you: N.  Score: <verdict>.`
+eki writes itself: `Waits for you: N.  Score: <verdict>.` (with `K PRs to review.`
+between them when pull requests are open)
 """
 from __future__ import annotations
 
@@ -111,8 +112,10 @@ def title(until: float) -> str:
     return time.strftime("# eki %m-%d", time.localtime(until))
 
 
-def closing(waits: int, verdict: str) -> str:
-    return f"Waits for you: {waits or 'nothing'}.  Score: {verdict}."
+def closing(waits: int, verdict: str, prs: int = 0) -> str:
+    """The line eki writes itself; open PRs get their own sentence, only when there are some."""
+    review = f"  {prs} PR{'' if prs == 1 else 's'} to review." if prs > 0 else ""
+    return f"Waits for you: {waits or 'nothing'}.{review}  Score: {verdict}."
 
 
 def _words(text: str) -> List[str]:
@@ -131,7 +134,7 @@ def _cut(text: str, words: int) -> str:
     return " ".join(w) if len(w) <= words else " ".join(w[:words]) + "…"
 
 
-def rules_page(changes: List[Change], until: float, waits: int, verdict: str) -> str:
+def rules_page(changes: List[Change], until: float, waits: int, verdict: str, prs: int = 0) -> str:
     """The page eki writes without a model: one line per changed area."""
     kept = [c for c in changes if c.kind != "tests"]
     by_area: Dict[str, List[str]] = {}
@@ -147,7 +150,7 @@ def rules_page(changes: List[Change], until: float, waits: int, verdict: str) ->
     for a in areas:
         line = "; ".join(t for t in by_area[a] if t) or "changed"
         out += [a, "- " + _cut(line, LINE_WORDS), ""]
-    out.append(closing(waits, verdict))
+    out.append(closing(waits, verdict, prs))
     return "\n".join(out) + "\n"
 
 

@@ -344,3 +344,49 @@ def test_writing_todays_page_again_covers_the_same_span(conn, monkeypatch, tmp_p
     assert digest.window_start(t0 + 600) == t0 - 3600           # kept beside the page
     digest.write(conn, t0 + 600)
     assert digest.window_start(t0 + 900) == t0 - 3600
+
+
+# ---- pull requests ------------------------------------------------------------------------
+
+PR = "https://github.com/me/garden/pull/"
+
+
+def _pr_goal(conn, tmp_path):
+    pid, _ = _project(conn, tmp_path)
+    conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at, project) VALUES (?,?,?,?,?,?,?)",
+                 ("gp", "tidy the garden", "issue", "eki", "planned", NOW - DAY, pid))
+
+
+def test_waits_leaves_out_an_item_whose_pr_is_open(conn, tmp_path):
+    _pr_goal(conn, tmp_path)
+    add_item(conn, "po1", "proposed", NOW - 60, goal_id="gp", pr=PR + "7", pr_state="open")
+    add_item(conn, "pl1", "proposed", NOW - 60, goal_id="gp")
+    assert digest.waits(conn) == 1
+    short = digest.write(conn, NOW).read_text()
+    assert short.rstrip("\n").splitlines()[-1].startswith("Waits for you: 1.  1 PR to review.  Score: ")
+
+
+def test_long_page_lists_open_prs_per_project_and_says_what_each_pr_did(conn, tmp_path):
+    _pr_goal(conn, tmp_path)
+    add_item(conn, "po1", "proposed", NOW - 3600, goal_id="gp", pr=PR + "7", pr_state="open")
+    add_item(conn, "po2", "proposed", NOW - 3500, goal_id="gp", pr=PR + "8", pr_state="open")
+    add_item(conn, "pm1", "applied", NOW - 3600, goal_id="gp", pr=PR + "5", pr_state="merged")
+    add_item(conn, "pc1", "dropped", NOW - 3600, goal_id="gp", pr=PR + "6", pr_state="closed",
+             error="PR closed without merging: not this way\nmore")
+    text = long_page(conn, NOW)
+    waits = section(text, "Waits for you")
+    assert f"- garden: 2 PRs open — {PR}7, {PR}8" in waits.splitlines()
+    assert lines_with(waits, "po1")[0].endswith(f"(garden) — PR open: {PR}7")
+    assert "git -C" not in waits
+    assert lines_with(section(text, "Landed and live"), "pm1")[0].endswith(f"merged on GitHub ({PR}5)")
+    assert lines_with(section(text, "Went wrong"), "pc1")[0].endswith(
+        "PR closed: PR closed without merging: not this way")
+    short = digest.page_for(NOW).read_text()
+    assert "2 PRs to review." in short
+
+
+def test_no_open_prs_no_pr_line(conn, tmp_path):
+    _pr_goal(conn, tmp_path)
+    add_item(conn, "pl1", "proposed", NOW - 60, goal_id="gp")
+    text = long_page(conn, NOW)
+    assert "PRs open" not in text and "PR to review" not in digest.page_for(NOW).read_text()

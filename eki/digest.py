@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, observe, patchnotes, paths, projects, score, selfwork
+from . import db, digestprs, observe, patchnotes, paths, projects, score, selfwork
 
 DAY = 86400.0
 DEFAULT_AT = "09:00"
@@ -125,7 +125,7 @@ def write(conn: sqlite3.Connection, now: Optional[float] = None) -> Path:
     since = window_start(now)
     path = page_for(now)
     _atomic(path, patchnotes.rules_page(changes(conn, since, now), now, waits(conn),
-                                        verdict(conn, since, now)))
+                                        verdict(conn, since, now), digestprs.total(conn)))
     long = render(conn, since, now).replace(f"# eki digest — {_date(now)}",
                                             f"# eki digest — {_date(now)} (long)", 1)
     _atomic(long_of(path), long)
@@ -161,6 +161,9 @@ def _merge_hint(it: sqlite3.Row, project: sqlite3.Row) -> str:
 def happened(it: sqlite3.Row, autonomy: str, project: Optional[sqlite3.Row] = None) -> Tuple[str, str]:
     """(group, what happened) for one item; `project` when its goal works on a person's repo."""
     state, iid = it["state"], it["id"]
+    pr = digestprs.happened(it, GROUPS) if project is not None else None
+    if pr is not None:
+        return pr
     if project is not None and state in ("locked", "proposed", "applied"):
         if state == "applied":
             return GROUPS[0], f"merged into {project['branch']}"
@@ -226,9 +229,10 @@ def changes(conn: sqlite3.Connection, since: float, until: float) -> List[patchn
 
 
 def waits(conn: sqlite3.Connection) -> int:
-    """What waits for you now, whatever the window: locked and proposed items, open asks."""
-    n = conn.execute(f"SELECT COUNT(*) FROM items WHERE state IN ({','.join('?' * len(WAITS))})",
-                     WAITS).fetchone()[0]
+    """What waits for you now, whatever the window: locked and proposed items, open asks.
+    An item whose PR is open waits on GitHub instead, and is counted as a PR."""
+    n = conn.execute(f"SELECT COUNT(*) FROM items WHERE state IN ({','.join('?' * len(WAITS))})"
+                     " AND (pr_state IS NULL OR pr_state != 'open')", WAITS).fetchone()[0]
     return n + len(asking(conn))
 
 
@@ -318,7 +322,7 @@ def render(conn: sqlite3.Connection, since: float, until: float) -> str:
         group, what = happened(it, autonomy, project)
         where = f" ({project['name']})" if project is not None else ""
         groups[group].append(f"- {it['id']} {it['title']}{where} — {what}")
-    groups["Waits for you"] += asking(conn)
+    groups["Waits for you"] += asking(conn) + digestprs.waiting(conn)
 
     out = [f"# eki digest — {_date(until)}", "",
            f"From {_clock(since)} to {_clock(until)}: {len(items)} item(s) changed.", ""]

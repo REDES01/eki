@@ -72,6 +72,21 @@ def test_title_and_closing():
     assert pn.closing(3, "better than yesterday") == "Waits for you: 3.  Score: better than yesterday."
 
 
+def test_closing_names_open_prs_only_when_there_are_some():
+    assert pn.closing(2, "same as yesterday", prs=0) == "Waits for you: 2.  Score: same as yesterday."
+    assert pn.closing(0, "same as yesterday", prs=1) == \
+        "Waits for you: nothing.  1 PR to review.  Score: same as yesterday."
+    assert pn.closing(2, "better than yesterday", prs=3) == \
+        "Waits for you: 2.  3 PRs to review.  Score: better than yesterday."
+
+
+def test_with_notes_keeps_a_closing_line_with_prs():
+    page = pn.rules_page([Change("1", "x", "Web UI", "change")], UNTIL, 1, "same as yesterday", prs=3)
+    assert page.rstrip("\n").splitlines()[-1] == "Waits for you: 1.  3 PRs to review.  Score: same as yesterday."
+    new = pn.with_notes(page, "Station folds.\n\nWeb UI\n- Folds.")
+    assert new.endswith("\n\nWaits for you: 1.  3 PRs to review.  Score: same as yesterday.\n")
+
+
 def test_one_change_is_one_line():
     page = pn.rules_page([Change("a1b2c3d4e5", "Station folds", "Web UI", "change")], UNTIL, 0, "same as yesterday")
     assert page.splitlines()[:2] == ["# eki 09-28", "1 change landed: Web UI."]

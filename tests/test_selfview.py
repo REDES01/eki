@@ -117,3 +117,20 @@ def test_verdicts_from_build_scores(conn):
         conn.execute("INSERT INTO build_scores(build, healthy_at, verdict) VALUES ('b1', 1, 'worse')")
         conn.execute("INSERT INTO build_scores(build, healthy_at) VALUES ('b2', 2)")
     assert selfview.verdicts(conn) == {"b1": "worse", "b2": "measuring"}
+
+
+def test_open_prs_on_the_board_and_the_item(conn):
+    with db.tx(conn):
+        conn.execute("INSERT INTO projects(id, name, path, branch, created_at) VALUES ('p1','proj','/p','main',?)", (T,))
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, project, created_at) "
+                     "VALUES ('g1','x','ask','you','planned','p1',?)", (T,))
+    url = "https://github.com/me/proj/pull/7"
+    item(conn, "i1", "g1", 1, "proposed", pr=url, pr_state="open", branch="eki/i1")
+    item(conn, "i2", "g1", 2, "proposed", branch="eki/i2")
+    item(conn, "i3", "g1", 3, "applied", pr="https://github.com/me/proj/pull/6", pr_state="merged")
+    b = selfview.board(conn)
+    assert b["prs"] == {"proj": 1}
+    its = {it["id"]: it for it in b["goals"][0]["items"]}
+    assert its["i1"]["pr"] == url and its["i2"]["pr"] is None
+    assert its["i1"]["note"] == f"PR open: {url}"
+    assert its["i2"]["note"] == "✓ 0 files; `eki self apply i2` queues it"

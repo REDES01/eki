@@ -5,15 +5,16 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, checkslots, doccheck, queue, selfwork, store
+from . import asks, checkslots, doccheck, projects, queue, selfwork, store
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
-    """Settings, the queue in order (then the side path), and the last 20 goals with their items."""
+    """Settings, the queue in order (then the side path), the last 20 goals with their items,
+    and each project's open pull requests (read from the db; no gh is run)."""
     s = selfwork.settings()
     return {"autonomy": s["autonomy"], "parallel": s["parallel"], "source": str(selfwork.source()),
             "queue": [_lined(c, n, it) for n, it in enumerate(lined(c), 1)],
-            "goals": [_goal(c, g) for g in goals(c)]}
+            "goals": [_goal(c, g) for g in goals(c)], "prs": projects.open_prs(c)}
 
 
 def goals(c: sqlite3.Connection) -> List[sqlite3.Row]:
@@ -49,7 +50,7 @@ def _goal(c, g) -> Dict[str, Any]:
 def _item(c, it) -> Dict[str, Any]:
     return {"id": it["id"], "state": it["state"], "title": it["title"], "where": where(it),
             "note": note(c, it), "docs_only": bool(doccheck.of_item(it)), "run": it["run_id"],
-            "thread": _thread(c, it["run_id"]), "branch": it["branch"]}
+            "thread": _thread(c, it["run_id"]), "branch": it["branch"], "pr": it["pr"]}
 
 
 def _thread(c, run_id: Optional[str]) -> Optional[str]:
@@ -120,6 +121,8 @@ def said(it) -> str:
         return f"! {it['error'].splitlines()[0][:150]}"
     if state == "reviewing":
         return "a second reader (the local model) is reading the diff"
+    if state == "proposed" and it["pr"]:
+        return f"PR open: {it['pr']}"
     if state == "proposed":
         files = json.loads(it["touched"] or "[]")
         got = it["review"] or ""

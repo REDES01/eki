@@ -102,6 +102,8 @@
         <span class="pname">${md.esc(p.name)}</span><span class="dim pwhy" title="${md.esc(label)}">${p.quota ? (p.quota.plan || "") : md.esc(label)}</span>${action}</div>${meters(p.quota)}`;
     }).join("");
     showDigest(st.digest);
+    const pr = $("prs");   // one line per project with PRs open; hidden when none
+    if (pr) { pr.innerHTML = prs.lines(st.prs); pr.hidden = !prs.total(st.prs); }
     $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}`;
   }
 

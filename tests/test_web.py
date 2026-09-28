@@ -7,7 +7,7 @@ import urllib.request
 
 import pytest
 
-from eki import server
+from eki import db, server
 from conftest import run_inline
 
 
@@ -57,7 +57,7 @@ def test_the_page_has_its_views_and_scripts_in_order(web):
     for view in ("chat", "pictures", "station", "settings"):
         assert f'id="{view}"' in body
     assert ">Station<" in body and ">Settings<" in body
-    scripts = ["md", "cards", "panel", "attach", "nav", "gallery", "station", "settings", "side", "app"]
+    scripts = ["md", "cards", "panel", "attach", "nav", "gallery", "prs", "station", "settings", "side", "app"]
     at = [body.index(f'<script src="/ui/{s}.js"></script>') for s in scripts]
     assert at == sorted(at)
     css = ["style", "chat", "station", "settings"]
@@ -131,7 +131,27 @@ def test_providers_and_status(web):
     ps = json.loads(get(web + "/api/providers")[1])
     assert {p["name"] for p in ps} == {"fake", "fake2", "bare"}
     st = json.loads(get(web + "/api/status")[1])
-    assert "running" in st and "room" in st
+    assert "running" in st and "room" in st and st["prs"] == {}
+
+
+def test_open_prs_are_shown_from_the_db(web, conn):
+    """The sidebar's PR lines, the Station's summary and the item's PR link: all read /api data."""
+    with db.tx(conn):
+        conn.execute("INSERT INTO projects(id, name, path, branch, created_at) VALUES ('p1','proj','/p','main',1)")
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, project, created_at) "
+                     "VALUES ('g1','x','ask','you','planned','p1',1)")
+        conn.execute("INSERT INTO items(id, goal_id, title, spec, files, deps, independent, created_at, updated_at, "
+                     "state, pr, pr_state) VALUES ('i1','g1','t','s','[]','[]',0,1,1,'proposed',"
+                     "'https://github.com/me/proj/pull/7','open')")
+    assert json.loads(get(web + "/api/status")[1])["prs"] == {"proj": 1}
+    _, body = get(web + "/")
+    assert 'id="prs"' in body
+    code, js = get(web + "/ui/prs.js")
+    assert code == 200 and "PR #" in js and "target=\"_blank\"" in js and "PRs open" in js
+    _, station = get(web + "/ui/station.js")
+    assert "prs.link(it.pr)" in station and "prs.summary(s.prs)" in station
+    _, side = get(web + "/ui/side.js")
+    assert "prs.lines(st.prs)" in side
 
 
 def test_events_wait_for_something_to_happen(web, conn):

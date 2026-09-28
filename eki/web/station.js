@@ -105,7 +105,7 @@
     const items = s.goals.flatMap((g) => g.items);
     const n = (states) => items.filter((it) => states.includes(it.state)).length;
     const yours = n(YOURS), flight = n(FLIGHT);
-    sum("self", [yours ? `${yours} for you` : "", flight ? `${flight} in flight` : "", `${n(["live", "applied"])} live`, `autonomy ${s.autonomy}`]
+    sum("self", [yours ? `${yours} for you` : "", flight ? `${flight} in flight` : "", prs.summary(s.prs), `${n(["live", "applied"])} live`, `autonomy ${s.autonomy}`]
       .filter(Boolean).join(" · "));
     return top + queue + goals;
   }
@@ -130,7 +130,7 @@
       (!ENDS.includes(it.state) ? btn("drop", "drop", it.id) : "");
     return `<div class="st-item" data-state="${esc(it.state)}"><div class="st-ihead"><code>${esc(it.id)}</code>
         <span class="st-state s-${esc(it.state.replace(/\s/g, "-"))}">${esc(it.state)}</span>
-        <span class="dim st-where">${esc(it.where)}</span><span class="st-t">${esc(it.title)}</span>
+        <span class="dim st-where">${it.pr ? prs.link(it.pr) : esc(it.where)}</span><span class="st-t">${esc(it.title)}</span>
         ${it.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(it.thread)}
         <span class="grow"></span>${err(it.id)}<span class="st-acts" data-state="${esc(it.state)}">${acts}</span></div>
       ${it.note ? `<div class="st-note">${esc(it.note)}</div>` : ""}</div>`;

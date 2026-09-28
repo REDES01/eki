@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, providers, quota, routing, store
+from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, projects, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -132,7 +132,8 @@ def status(conn: sqlite3.Connection) -> Dict[str, Any]:
     return {"digest": str(page) if page else None,"engine": engine.running_pid(), "pid": os.getpid(), "home": str(paths.home()),
             "running": sum(r["state"] in ("starting", "running") for r in active),
             "queued": sum(r["state"] == "queued" for r in active),
-            "room": room, "room_why": why, "memory_pressure": machine.memory_pressure()}
+            "room": room, "room_why": why, "memory_pressure": machine.memory_pressure(),
+            "prs": projects.open_prs(conn)}
 
 
 def route(conn: sqlite3.Connection, prompt: Optional[str]) -> Dict[str, Any]:

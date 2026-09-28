@@ -183,16 +183,6 @@ def test_settings_default_the_github_knobs():
     assert (got["issues_minutes"], got["pr_followups"], got["pr_mirror"]) == (10, 3, False)
 
 
-def test_watch_and_unwatch(conn, proj, tmp_path):
-    pid = projects.watch(conn, proj)
-    assert projects.get(conn, pid)["issues"] == 1
-    assert projects.watch(conn, proj) == pid
-    assert projects.unwatch(conn, proj) == pid
-    assert projects.get(conn, pid)["issues"] == 0
-    with pytest.raises(KeyError):
-        projects.unwatch(conn, tmp_path)
-
-
 def test_open_prs_counts_only_proposed_and_open(conn, proj):
     pid = projects.add(conn, proj)
     gid = selfwork.submit(conn, "a", plan=False, project=pid)

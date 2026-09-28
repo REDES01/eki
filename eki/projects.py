@@ -41,26 +41,6 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
     return pid
 
 
-def watch(conn: sqlite3.Connection, folder: str | Path, *, check: Optional[str] = None,
-          branch: Optional[str] = None) -> str:
-    """Record the project and take work from its issues labelled eki (eki/issues.py)."""
-    pid = add(conn, folder, check=check, branch=branch)
-    with db.tx(conn):
-        conn.execute("UPDATE projects SET issues=1 WHERE id=?", (pid,))
-    return pid
-
-
-def unwatch(conn: sqlite3.Connection, folder: str | Path) -> str:
-    """Stop taking work from its issues; KeyError when the folder isn't a project."""
-    where = Path(folder).expanduser().resolve()
-    got = conn.execute("SELECT id FROM projects WHERE path=?", (str(where),)).fetchone()
-    if got is None:
-        raise KeyError(f"{where} is not a project")
-    with db.tx(conn):
-        conn.execute("UPDATE projects SET issues=0 WHERE id=?", (got["id"],))
-    return got["id"]
-
-
 def clone_path(repo: str) -> Path:
     """Where eki keeps its own clone of OWNER/REPO."""
     owner, name = repo.split("/", 1)

@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import List, Optional
 
-from .. import budget, github, projects, standing
+from .. import budget, github, projects, projectsetup, standing
+from . import project as projectcli
 from .common import conn, err
 
 NAME = "goal"
-HELP = ("standing goals: add one on a git folder (or watch its GitHub issues), list them, "
-        "pause, resume, drop, or start a round now")
+HELP = ("standing goals: add one on a git folder, list them and the GitHub projects, "
+        "pause, resume, drop (a goal, or OWNER/REPO), or start a round now")
 
 #: an item in one of these is done with: not listed under its standing goal
 OVER = ("applied", "dropped", "left", "unfit", "landed", "live", "rolled back")
@@ -17,18 +19,20 @@ OVER = ("applied", "dropped", "left", "unfit", "landed", "live", "rolled back")
 
 def add(p) -> None:
     sub = p.add_subparsers(dest="action", metavar="<action>")
-    a = sub.add_parser("add", help="a standing goal on a git folder, or watch its issues")
+    a = sub.add_parser("add", help="a standing goal on a git folder (on GitHub: on eki's own clone of it)")
     a.add_argument("folder", help="the git folder (at least one commit)")
-    a.add_argument("text", nargs="?", help="the goal, in words (optional with --issues)")
-    a.add_argument("--issues", action="store_true",
-                   help="take work from its GitHub issues labelled eki, hand it back as PRs")
-    a.add_argument("--check", help="the shell command that judges an item (default: its bin/check)")
+    a.add_argument("text", nargs="?", help="the goal, in words")
+    a.add_argument("--issues", action="store_true", help="not needed: issues labelled eki in any repo you own "
+                   "are taken")
+    a.add_argument("--check", help="the shell command that judges an item (default: its bin/check, or the guess)")
     a.add_argument("--branch", help="the branch eki works from (default: the folder's current one)")
     for action, text in (("pause", "stop opening rounds"), ("resume", "on again, stuck and rest cleared"),
-                         ("drop", "never again"), ("now", "clear the rest: a round when the Mac and budget allow")):
+                         ("now", "clear the rest: a round when the Mac and budget allow")):
         sub.add_parser(action, help=text).add_argument("id", help="the standing goal's id (or its start)")
-    sub.add_parser("unwatch", help="stop taking work from a folder's GitHub issues").add_argument(
-        "folder", help="the git folder")
+    sub.add_parser("drop", help="never again: a standing goal, or all work on OWNER/REPO").add_argument(
+        "id", help="the standing goal's id (or its start), or OWNER/REPO")
+
+ISSUES_NOTE = "not needed: issues labelled eki in any repo you own are taken"
 
 
 def _first(text: Optional[str]) -> str:
@@ -40,8 +44,7 @@ def path_line(project) -> str:
     repo, why = github.path_of(project["path"])
     if repo is None:
         return f"  path: local — merge by hand ({why})"
-    watching = ", watching issues" if project["issues"] else ""
-    return f"  path: GitHub {repo} — issues labelled eki in, PRs out{watching}"
+    return f"  path: GitHub {repo} — issues labelled eki in, PRs out"
 
 
 def _items(c, where: str, arg: str, project) -> List[str]:
@@ -76,7 +79,8 @@ def _issue_goals(c, project) -> List[str]:
 
 
 def lines(c, t: Optional[float] = None) -> List[str]:
-    """The listing: each standing goal that isn't dropped, each watched project, then the budget."""
+    """The listing: each standing goal that isn't dropped, each GitHub project (OWNER/REPO) that isn't,
+    each folder project with issue goals, then the budget."""
     t = time.time() if t is None else t
     out: List[str] = []
     shown = set()
@@ -85,7 +89,7 @@ def lines(c, t: Optional[float] = None) -> List[str]:
         issue = f"#{st['issue']} " if st["issue"] else ""
         out.append(f"{st['id']}  {project['name'] if project else 'eki'}  {st['state']}  "
                    f"{issue}{_first(st['text'])}")
-        if project is not None and project["id"] not in shown:
+        if project is not None and project["id"] not in shown and not project["repo"]:
             shown.add(project["id"])
             out.append(path_line(project))
             out.extend(_issue_goals(c, project))
@@ -102,10 +106,13 @@ def lines(c, t: Optional[float] = None) -> List[str]:
             out.append(f"  round {g['id']} planning")
         out.extend(_items(c, "g.standing_id=?", st["id"], project))
     for project in projects.all(c):
-        if project["id"] in shown:
+        if project["id"] in shown or project["state"] == "dropped":
+            continue
+        if project["repo"]:
+            out.extend(projectcli.block(c, project))
             continue
         issue_goals = _issue_goals(c, project)
-        if not project["issues"] and not issue_goals:
+        if not issue_goals:
             continue
         out.append(f"{project['name']}  {project['path']}")
         out.append(path_line(project))
@@ -117,22 +124,42 @@ def lines(c, t: Optional[float] = None) -> List[str]:
 
 
 def _add(c, args) -> int:
-    if not args.text and not args.issues:
-        err("eki: say the goal in words, or --issues to take work from the folder's GitHub issues")
-        return 1
-    try:
+    if args.issues:
+        print(ISSUES_NOTE)
+    if not args.text:
         if args.issues:
-            repo, why = github.path_of(args.folder)
-            if repo is None:
-                err(f"eki: {args.folder} can't watch issues: {why}")
-                return 1
-            pid = projects.watch(c, args.folder, check=args.check, branch=args.branch)
-            if not args.text:
-                print(f"{pid}: watching issues labelled eki on {repo}")
-                return 0
-        print(standing.add(c, args.folder, args.text, check=args.check, branch=args.branch))
+            return 0
+        err("eki: say the goal in words")
+        return 1
+    folder = Path(args.folder).expanduser().resolve()
+    repo = None if projects.is_self(folder) or not folder.is_dir() else github.repo_of(folder)
+    try:
+        if repo is None:
+            print(standing.add(c, args.folder, args.text, check=args.check, branch=args.branch))
+            return 0
+        p = projectsetup.ensure(c, repo)
+        if args.check is not None:
+            projectcli.set_check(c, p, args.check)
+        if args.branch:
+            projectcli.set_branch(c, p, args.branch)
+        sid = standing.add(c, str(folder), args.text, project=p["id"])
     except ValueError as e:
         err(f"eki: {e}")
+        return 1
+    print(f"{repo}: working in eki's own clone at {projects.clone_path(repo)}, not {folder}")
+    print(sid)
+    return 0
+
+
+def _drop(c, arg: str) -> int:
+    """OWNER/REPO: all work on the project stops and its clone goes; otherwise a standing goal."""
+    if "/" not in arg:
+        print(f"{standing.drop(c, arg)}: dropped")
+        return 0
+    try:
+        print(projectsetup.drop(c, arg))
+    except KeyError as e:
+        err(f"eki: {e.args[0]}")
         return 1
     return 0
 
@@ -142,17 +169,11 @@ def run(args) -> int:
     action = getattr(args, "action", None)
     if action == "add":
         return _add(c, args)
-    if action == "unwatch":
-        try:
-            pid = projects.unwatch(c, args.folder)
-        except KeyError as e:
-            err(f"eki: {e.args[0]}")
-            return 1
-        print(f"{pid}: not watching issues")
-        return 0
-    if action in ("pause", "resume", "drop", "now"):
+    if action == "drop":
+        return _drop(c, args.id)
+    if action in ("pause", "resume", "now"):
         sid = getattr(standing, action)(c, args.id)
-        said = {"pause": "paused", "resume": "on", "drop": "dropped",
+        said = {"pause": "paused", "resume": "on",
                 "now": "rest cleared: a round opens when the Mac and the budget allow"}[action]
         print(f"{sid}: {said}")
         return 0

@@ -67,10 +67,17 @@ at night, never the last 10%). Each item lands as a branch `eki/<id>` in that
 repo, and the person merges it; eki never moves their branches. Only the
 person adds one.
 
+On GitHub no registration is needed: an issue labelled `eki` in any repo the
+person owns becomes work in eki's own clone (`~/.eki/projects/<owner>/<repo>`)
+and comes back as a PR. A folder whose origin is on GitHub gets its standing
+goal on that clone too; the folder itself is never touched.
+
 ```
 eki goal add <folder> "…" [--check "<cmd>"] [--branch <name>]   # a standing goal on a git folder
-eki goal                        # each goal: state, why it waits, rounds, items and their merge hints; the budget
+eki goal                        # each goal: state, why it waits, rounds, items and their merge hints; each OWNER/REPO: check, clone, setup, open PRs; the budget
 eki goal pause|resume|drop|now <id>   # now: clear the rest (the Mac and the budget still decide)
+eki goal drop <owner>/<repo>    # stop all work there, remove eki's clone; issues open now are ignored
+eki project <owner>/<repo> [--check "<cmd>"] [--branch <name>] [--retry]   # show it; set the check ('' for none) or branch; retry a setup fault
 ```
 
 ## Other commands

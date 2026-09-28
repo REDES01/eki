@@ -205,14 +205,24 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             judge = projects.check_argv(project)
             if judge is None:              # nothing to judge with: proposed as it is
                 _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
-                     verdict=projectwork.NOT_JUDGED, error=error)
-                return [f"item {it['id']}: built — proposed on {it['branch']} ({projectwork.NOT_JUDGED})"]
+                     verdict=projectwork.not_judged(project), error=error, judged_by=None)
+                return [f"item {it['id']}: built — proposed on {it['branch']} ({projectwork.not_judged(project)})"]
+            _set(conn, it["id"], judged_by=_judged_by(project, judge))
         else:
             judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
         rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
         _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
              touched=db.dumps(touched), error=error)
     return [f"item {it['id']}: built ({len(touched)} files); judging"]
+
+
+def _judged_by(project: sqlite3.Row, judge: str) -> str:
+    """The check's command and where it came from: `make x (set)`, `npm run test (guessed: …)`."""
+    cmd = json.loads(judge)[2]
+    source = project["check_from"] if "check_from" in project.keys() else None
+    if not source:
+        return cmd
+    return f"{cmd} ({source})" if source == "set" or source.startswith("guessed: ") else cmd
 
 
 def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:

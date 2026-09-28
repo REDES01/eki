@@ -16,8 +16,10 @@ def always_due(monkeypatch):
     monkeypatch.setattr(github, "due", lambda name, now=None: True)
 
 
-def proposed(conn, tmp_path, monkeypatch, proj, check=None):
+def proposed(conn, tmp_path, monkeypatch, proj, check=None, repo=None, check_from=None):
     pid, it = planned(conn, tmp_path, monkeypatch, proj, check)
+    if repo:                                   # as eki's own clone of `repo` would be
+        conn.execute("UPDATE projects SET repo=?, check_from=? WHERE id=?", (repo, check_from, pid))
     it = built(conn, tmp_path, monkeypatch, it)
     if check:
         run_inline(conn, it["run_id"])
@@ -66,6 +68,34 @@ def test_the_check_tail_and_part_of_while_another_item_is_unbuilt(conn, src, pro
     body = arg(creates(gh_repo)[0], "--body")
     assert "Part of #5" in body and "Closes" not in body
     assert "```" in body and "all-green-here" in body and projectwork.NOT_JUDGED not in body
+
+
+def test_a_repo_project_with_no_check_says_how_to_set_one(conn, src, proj, gh_repo, tmp_path, monkeypatch):
+    gh_repo.answer(["pr", "create"], PR)
+    (proj / "bin").mkdir()
+    (proj / "bin" / "check").write_text("#!/bin/sh\nexit 1\n")
+    (proj / "bin" / "check").chmod(0o755)                   # not used: the repo project's check is check_cmd only
+    _, it = proposed(conn, tmp_path, monkeypatch, proj, repo="me/proj", check_from="none: no check found")
+    line = "not judged: no check found; set one with `eki project me/proj --check '…'`"
+    assert it["verdict"] == line and it["judged_by"] is None
+    prs.tick(conn)
+    body = arg(creates(gh_repo)[0], "--body")
+    assert f"Check: {line}" in body and projectwork.NOT_JUDGED not in body
+
+
+def test_a_repo_projects_check_is_named(conn, src, proj, gh_repo, tmp_path, monkeypatch):
+    gh_repo.answer(["pr", "create"], PR)
+    _, it = proposed(conn, tmp_path, monkeypatch, proj, check="echo make-x-green", repo="me/proj", check_from="set")
+    assert it["judged_by"] == "echo make-x-green (set)"
+    prs.tick(conn)
+    body = arg(creates(gh_repo)[0], "--body")
+    assert "Check: `echo make-x-green` (set)\n```" in body and "make-x-green\n```" in body
+
+
+def test_a_guessed_check_says_so(conn):
+    assert prs._named("npm run test (guessed: package.json script test via npm)") == \
+        "Check: `npm run test` (guessed: package.json script test via npm)"
+    assert prs._named("make x") == "Check: `make x`" and prs._named(None) == "Check:"
 
 
 def test_an_existing_pr_is_reused(conn, src, proj, gh_repo, tmp_path, monkeypatch):

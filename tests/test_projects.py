@@ -75,6 +75,21 @@ def test_check_argv_three_ways(conn, proj):
     assert json.loads(projects.check_argv(none)) == ["/bin/sh", "-c", "bin/check", "eki-judge"]
 
 
+def test_check_argv_for_a_repo_project_is_check_cmd_only(conn, proj):
+    pid = projects.add(conn, proj)
+    (proj / "bin").mkdir()
+    (proj / "bin" / "check").write_text("#!/bin/sh\nexit 0\n")
+    (proj / "bin" / "check").chmod(0o755)
+    conn.execute("UPDATE projects SET repo='me/proj' WHERE id=?", (pid,))
+    assert projects.check_argv(projects.get(conn, pid)) is None          # no bin/check fallback
+    conn.execute("UPDATE projects SET check_cmd='' WHERE id=?", (pid,))
+    assert projects.check_argv(projects.get(conn, pid)) is None
+    conn.execute("UPDATE projects SET check_cmd='make x' WHERE id=?", (pid,))
+    assert json.loads(projects.check_argv(projects.get(conn, pid))) == ["/bin/sh", "-c", "make x", "eki-judge"]
+    conn.execute("UPDATE projects SET repo=NULL, check_cmd=NULL WHERE id=?", (pid,))
+    assert json.loads(projects.check_argv(projects.get(conn, pid)))[2] == "bin/check"   # local rule unchanged
+
+
 def test_link_deps_links_an_untracked_venv_and_keeps_it_out_of_git(conn, proj, tmp_path):
     (proj / ".venv" / "bin").mkdir(parents=True)
     p = projects.get(conn, projects.add(conn, proj))
@@ -114,3 +129,12 @@ def test_a_project_goal_plans_in_the_project_repo_without_moving_it(conn, src, p
     assert workspace.head(proj) == head
     assert workspace.git(proj, "symbolic-ref", "--short", "HEAD") == branch
     assert workspace.git(proj, "status", "--porcelain") == ""
+
+
+def test_the_brief_names_the_check(conn, proj):
+    from eki import projectbrief
+    pid = projects.add(conn, proj)
+    conn.execute("UPDATE projects SET repo='me/proj' WHERE id=?", (pid,))
+    assert "there is no check" in projectbrief._check(projects.get(conn, pid))
+    conn.execute("UPDATE projects SET check_cmd='pnpm run test' WHERE id=?", (pid,))
+    assert "`pnpm run test`" in projectbrief._check(projects.get(conn, pid))

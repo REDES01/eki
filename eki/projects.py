@@ -125,6 +125,8 @@ def base(project: sqlite3.Row) -> str:
 def check_argv(project: sqlite3.Row) -> Optional[str]:
     """Gate 1 as a command run's JSON argv, or None when the project has no check."""
     cmd = project["check_cmd"]
+    if "repo" in project.keys() and project["repo"]:     # eki's clone: the guess or the person's word only
+        return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"]) if cmd else None
     if not cmd:
         check = Path(project["path"]) / "bin" / "check"
         if not (check.is_file() and os.access(check, os.X_OK)):

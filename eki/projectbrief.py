@@ -66,6 +66,9 @@ another item, or `ITEM: person <why>` if this needs a person's hands.
 def _check(project) -> str:
     if project["check_cmd"]:
         return f"run `{project['check_cmd']}` before you finish and leave it green"
+    if "repo" in project.keys() and project["repo"]:
+        return ("there is no check for this project; run the project's own tests before you finish "
+                "and leave them green")
     if projects.check_argv(project):
         return "run `bin/check` before you finish and leave it green"
     return "run the project's own tests before you finish and leave them green"

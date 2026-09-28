@@ -37,6 +37,19 @@ def _items(conn: sqlite3.Connection, where: str) -> List[sqlite3.Row]:
         "ORDER BY i.created_at").fetchall()
 
 
+def _named(judged_by: Optional[str]) -> str:
+    """`Check: `make x` (set)` from items.judged_by; plain `Check:` when it wasn't recorded."""
+    if not judged_by:
+        return "Check:"
+    cmd, source = judged_by, ""
+    for mark in (" (set)", " (guessed: ", " (none: "):
+        at = judged_by.rfind(mark)
+        if at > 0 and judged_by.endswith(")"):
+            cmd, source = judged_by[:at], judged_by[at:]
+            break
+    return f"Check: `{cmd}`{source}"
+
+
 def body(conn: sqlite3.Connection, it: sqlite3.Row) -> str:
     """The PR body: summary, touched files, the check's tail, the issue line, eki's mark."""
     parts = [(it["summary"] or it["title"]).strip()]
@@ -44,11 +57,13 @@ def body(conn: sqlite3.Connection, it: sqlite3.Row) -> str:
     if touched:
         parts.append("Touched:\n" + "\n".join(f"- `{f}`" for f in touched))
     verdict = (it["verdict"] or "").strip()
-    if not verdict or verdict == projectwork.NOT_JUDGED:
-        parts.append(f"Check: {projectwork.NOT_JUDGED}")
+    if not verdict:
+        parts.append(f"Check: {projectwork.not_judged(projects.get(conn, it['project_id']))}")
+    elif verdict == projectwork.NOT_JUDGED or verdict.startswith("not judged: "):
+        parts.append(f"Check: {verdict}")
     else:
         tail = "\n".join(verdict.splitlines()[-TAIL:])
-        parts.append(f"Check:\n```\n{tail}\n```")
+        parts.append(f"{_named(it['judged_by'])}\n```\n{tail}\n```")
     n = it["goal_issue"]
     if n:
         others = conn.execute("SELECT state, pr FROM items WHERE goal_id=? AND id<>?",

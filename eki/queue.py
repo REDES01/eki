@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import sqlite3
-from typing import Any, List
+from typing import Any, Callable, List, Optional
 
 from . import db, doccheck, integration, locks, paths, rebase, resolve, selfwork, store, workspace
 from .workspace import WorkspaceError, git
@@ -101,13 +101,17 @@ def _ahead() -> bool:
         return False
 
 
-def _set_if(conn: sqlite3.Connection, it: sqlite3.Row, was: str, **fields: Any) -> bool:
-    """Write fields when the item is still in state `was` (a restart or a person may have moved it)."""
+def _set_if(conn: sqlite3.Connection, it: sqlite3.Row, was: str,
+            _then: Optional[Callable[[], Any]] = None, **fields: Any) -> bool:
+    """Write fields when the item is still in state `was` (a restart or a person may have moved it);
+    `_then` runs in the same transaction, only when they were written."""
     with db.tx(conn):
         row = conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()
         if row is None or row["state"] != was:
             return False
         selfwork._set(conn, it["id"], **fields)
+        if _then is not None:
+            _then()
     return True
 
 
@@ -128,7 +132,9 @@ def _admit(conn: sqlite3.Connection) -> List[str]:
         files = json.loads(it["touched"] or "[]") + json.loads(it["files"] or "[]")
         held = locks.locked_in(files)
         if held:
-            if _set_if(conn, it, "proposed", state="locked", locked=db.dumps(held)):
+            if _set_if(conn, it, "proposed", state="locked", locked=db.dumps(held),
+                       _then=lambda: selfwork.needs_you(conn, it, "locked", f"locked, touches {', '.join(held)}",
+                                                        f"eki self apply {it['id']} --yes")):
                 said.append(f"item {it['id']}: locked — touches {', '.join(held)}; needs a person")
         elif apply_mode and not (it["review"] or "").startswith("no:"):   # objected twice: a person's call
             if _set_if(conn, it, "proposed", state="queued", queued_at=db.now(), head=None,

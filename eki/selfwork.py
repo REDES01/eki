@@ -19,8 +19,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, db, doccheck, integration, paths, projectbrief, projects, projectwork, review, scheduler,
-               selfbrief, selfdraft, selfplan, store, workspace)
+from . import (builds, db, doccheck, integration, notify, paths, projectbrief, projects, projectwork, review,
+               scheduler, selfbrief, selfdraft, selfplan, store, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -174,6 +174,12 @@ def _set(conn: sqlite3.Connection, iid: str, **fields: Any) -> None:
     conn.execute(f"UPDATE items SET {cols} WHERE id=?", (*fields.values(), iid))
 
 
+def needs_you(conn: sqlite3.Connection, it: sqlite3.Row, state: str, what: str, act: str) -> bool:
+    """Queue a needs-you push for the item that just went to `state` (inside the caller's transaction)."""
+    body = " ".join(f"{it['title']} — {what}: {act}".split())[:200]
+    return notify.queue(conn, f"item:{it['id']}:{state}:{it['tries']}", "needs_you", "eki · needs you", body)
+
+
 def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     run = store.run(conn, it["run_id"])
     if run is None or run["state"] in store.ACTIVE:
@@ -199,6 +205,7 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             why = reason or ("the agent changed nothing" if sha is None else "")
             _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
                  touched=db.dumps(touched))
+            needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
             return [f"item {it['id']}: left for you — {why}"]
         error = None if verdict == "done" else f"partial: {reason}"
         if project is not None:

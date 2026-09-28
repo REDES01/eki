@@ -80,8 +80,9 @@ def _still(conn: sqlite3.Connection, it: sqlite3.Row, state: str) -> bool:
     return row is not None and row["state"] == state and row["run_id"] == it["run_id"]
 
 
-def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, **fields) -> List[str]:
-    """Stop the rebase and leave the item for a person, the branch as it was."""
+def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = False, **fields) -> List[str]:
+    """Stop the rebase and leave the item for a person, the branch as it was. `person`:
+    the resolver asked for one, so a push says so."""
     wt = it["worktree"]
     try:
         rebase.abort(wt)
@@ -94,6 +95,8 @@ def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, **fields) -> Lis
         if not _still(conn, it, it["state"]):
             return []
         selfwork._set(conn, it["id"], state="left", error=why, **fields)
+        if person:
+            selfwork.needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
     return [f"item {it['id']}: left for you — {why}"]
 
 
@@ -116,7 +119,7 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return _leave(conn, it, f"the resolve run ended {state}: {(run['error'] if run else '') or ''}".strip())
     verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
     if verdict == "person":
-        return _leave(conn, it, reason or "the resolver asked for a person")
+        return _leave(conn, it, reason or "the resolver asked for a person", person=True)
     wt, head = it["worktree"], it["head"]
     try:
         if rebase.in_progress(wt):

@@ -14,7 +14,7 @@ def test_check_skips_an_eki_python_without_pytest(tmp_path):
     bare.write_text("#!/bin/sh\nexit 1\n")          # a runtime with no pytest: every import fails
     bare.chmod(0o755)
     bindir = tmp_path / "bin"
-    bindir.mkdir()
+    bindir.mkdir(exist_ok=True)
     (bindir / "python3").symlink_to(sys.executable)  # one that has pytest, if .venv doesn't
     env = {**os.environ, "EKI_PYTHON": str(bare), "PATH": f"{bindir}:{os.environ.get('PATH', '')}"}
     out = subprocess.run(["/bin/sh", str(ROOT / "bin" / "check"), "--collect-only", "tests/test_skill_doc.py"],

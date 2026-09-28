@@ -145,8 +145,8 @@ CREATE TABLE IF NOT EXISTS build_scores (   -- gate 4: the score before and afte
 );
 CREATE TABLE IF NOT EXISTS chores (         -- a local-model job eki gives itself (eki/chores.py)
     id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,                     -- review | digest | brief
-    subject TEXT NOT NULL,                  -- an item id, a digest page path, or a goal id
+    kind TEXT NOT NULL,                     -- review | digest | brief | prcomment
+    subject TEXT NOT NULL,                  -- an item id, a digest page path, a goal id, or <item id>:<ISO time>
     run_id TEXT,
     thread_id TEXT,
     state TEXT NOT NULL DEFAULT 'open',     -- open | done | failed | skipped
@@ -206,6 +206,14 @@ ADDED = [
     ("goals", "standing_id", "TEXT"),   # the standing goal this is a round of
     ("goals", "shape", "TEXT"),         # JSON: the plan's items, depth, width, chained
     ("items", "why", "TEXT"),           # why it is still waiting
+    ("goals", "issue", "INTEGER"),      # the GitHub issue it came from (eki/issues.py)
+    ("standing", "issue", "INTEGER"),
+    ("projects", "issues", "INTEGER DEFAULT 0"),   # 1: issues labelled eki are watched
+    ("items", "pr", "TEXT"),            # the pull request's URL (eki/prs.py)
+    ("items", "pr_state", "TEXT"),      # open | merged | closed
+    ("items", "pushed", "TEXT"),        # the sha last pushed to eki/<id> on origin
+    ("items", "pr_seen", "TEXT"),       # ISO-8601 UTC time of the newest PR comment looked at
+    ("items", "followups", "INTEGER DEFAULT 0"),   # changes made for comments on the PR
 ]
 
 

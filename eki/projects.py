@@ -11,7 +11,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from . import builds, db, integration, store, workspace
 
@@ -38,6 +38,35 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
         conn.execute("INSERT INTO projects(id, name, path, branch, check_cmd, created_at) VALUES (?,?,?,?,?,?)",
                      (pid, name or where.name, str(where), branch, check, db.now()))
     return pid
+
+
+def watch(conn: sqlite3.Connection, folder: str | Path, *, check: Optional[str] = None,
+          branch: Optional[str] = None) -> str:
+    """Record the project and take work from its issues labelled eki (eki/issues.py)."""
+    pid = add(conn, folder, check=check, branch=branch)
+    with db.tx(conn):
+        conn.execute("UPDATE projects SET issues=1 WHERE id=?", (pid,))
+    return pid
+
+
+def unwatch(conn: sqlite3.Connection, folder: str | Path) -> str:
+    """Stop taking work from its issues; KeyError when the folder isn't a project."""
+    where = Path(folder).expanduser().resolve()
+    got = conn.execute("SELECT id FROM projects WHERE path=?", (str(where),)).fetchone()
+    if got is None:
+        raise KeyError(f"{where} is not a project")
+    with db.tx(conn):
+        conn.execute("UPDATE projects SET issues=0 WHERE id=?", (got["id"],))
+    return got["id"]
+
+
+def open_prs(conn: sqlite3.Connection) -> Dict[str, int]:
+    """Project name -> its proposed items with a pull request still open."""
+    rows = conn.execute(
+        "SELECT p.name, COUNT(*) AS n FROM items i JOIN goals g ON g.id=i.goal_id "
+        "JOIN projects p ON p.id=g.project WHERE i.state='proposed' AND i.pr_state='open' "
+        "GROUP BY p.name ORDER BY p.name").fetchall()
+    return {r["name"]: r["n"] for r in rows}
 
 
 def get(conn: sqlite3.Connection, pid: str) -> Optional[sqlite3.Row]:

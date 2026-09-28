@@ -1,6 +1,9 @@
 """Every test runs in a throwaway EKI_HOME. The suite refuses to touch your real one."""
 import json
 import os
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,6 +30,13 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("EKI_COMFYUI_DIR", str(tmp_path / "no-comfyui"))   # never the real ~/flux
     for k in ("EKI_SOURCE", "EKI_BUILD_DIR", "EKI_LAUNCHED", "EKI_PYTHON", "EKI_WATCH"):
         monkeypatch.delenv(k, raising=False)   # a check run under the engine must not see its world
+    bindir = tmp_path / "bin"                         # no test reaches the real gh
+    bindir.mkdir(exist_ok=True)
+    (bindir / "gh").write_text("#!/bin/sh\necho 'gh: not in tests' >&2\nexit 4\n")
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    from eki import github
+    monkeypatch.setattr(github, "_last", {})
     real = Path("~").expanduser()
     assert not str(h).startswith(str(real / ".eki")), "tests must never use the real eki home"
     (h / "providers.json").write_text(json.dumps({
@@ -50,3 +60,78 @@ def run_inline(conn, rid):
     store.update_run(conn, rid, state="starting")
     worker.main(rid)
     return store.run(conn, rid)
+
+
+@pytest.fixture
+def proj(tmp_path):
+    """A person's own git folder: branch trunk, one commit, untracked .venv and notes."""
+    from eki import workspace
+    r = tmp_path / "proj"
+    r.mkdir()
+    (r / "app.py").write_text("print('hi')\n")
+    (r / "README.md").write_text("# proj\n")
+    (r / ".venv").mkdir()                               # untracked, not ignored
+    (r / ".venv" / "marker").write_text("venv\n")
+    (r / "notes.txt").write_text("the person's own work in progress\n")
+    workspace.git(r, "init", "-q", "-b", "trunk")
+    workspace.git(r, "add", "app.py", "README.md")
+    workspace.git(r, "commit", "-q", "-m", "first")
+    return r
+
+
+FAKE_GH = """#!{python}
+import json, os, re, sys
+d = {dir!r}
+args = sys.argv[1:]
+with open(os.path.join(d, "calls.jsonl"), "a") as f:
+    f.write(json.dumps(args) + "\\n")
+for k in ("_".join(args[:3]), "_".join(args[:2])):
+    base = os.path.join(d, "answers", re.sub(r"[^A-Za-z0-9]", "_", k))
+    if os.path.exists(base + ".out"):
+        out = open(base + ".out").read()
+        code = int(open(base + ".code").read()) if os.path.exists(base + ".code") else 0
+        (sys.stdout if code == 0 else sys.stderr).write(out)
+        sys.exit(code)
+"""
+
+
+class FakeGh:
+    def __init__(self, where: Path):
+        self.dir = where
+        self.bare = None
+
+    def calls(self):
+        f = self.dir / "calls.jsonl"
+        return [json.loads(ln) for ln in f.read_text().splitlines()] if f.exists() else []
+
+    def answer(self, args_prefix, out, code=0):
+        key = re.sub(r"[^A-Za-z0-9]", "_", "_".join(args_prefix))
+        (self.dir / "answers" / f"{key}.out").write_text(out)
+        (self.dir / "answers" / f"{key}.code").write_text(str(code))
+
+
+@pytest.fixture
+def fake_gh(tmp_path, home):
+    """A gh that records each argv and answers from files: .answer(prefix, out, code)."""
+    d = tmp_path / "gh"
+    (d / "answers").mkdir(parents=True, exist_ok=True)
+    gh = tmp_path / "bin" / "gh"
+    gh.write_text(FAKE_GH.format(python=sys.executable, dir=str(d)))
+    gh.chmod(0o755)
+    return FakeGh(d)
+
+
+@pytest.fixture
+def gh_repo(proj, fake_gh, tmp_path):
+    """`proj` as if its origin were github.com/me/proj, pushing and fetching to a local bare repo."""
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(proj), str(bare)], check=True, capture_output=True)
+    url = "https://github.com/me/proj.git"
+    for k, v in (("remote.origin.url", url), ("remote.origin.pushurl", str(bare)),
+                 ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+                 (f"url.{bare}.insteadOf", url)):
+        subprocess.run(["git", "-C", str(proj), "config", k, v], check=True)
+    fake_gh.answer(["auth", "status"], "")
+    fake_gh.answer(["api", "user"], "me")
+    fake_gh.bare = bare
+    return fake_gh

@@ -27,7 +27,8 @@ log = logging.getLogger("eki.self")
 DEFAULTS = {"parallel": 4, "autonomy": "propose",
             "loop": False, "review_max": 3, "picks_per_day": 6, "pick_min_cluster": 3,   # eki/selfpick.py
             "standing_rest_hours": 24, "standing_waiting_max": 3,                        # eki/standing.py
-            "brief_wait": 10}                                                            # eki/faults.py
+            "brief_wait": 10,                                                            # eki/faults.py
+            "issues_minutes": 10, "pr_followups": 3, "pr_mirror": False}                 # eki/github.py
 #: a dependency is fit enough for its dependents to start: under "propose" once it is judged fit;
 #: under "apply" once it is in integration main, so the dependent is built on top of it
 #: a dependency counts once its code is in main — whoever put it there. Under
@@ -62,7 +63,8 @@ def repo() -> Path:
 def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: bool = False,
            files: Optional[List[str]] = None, owner: str = "you", source_kind: str = "ask",
            why: Optional[str] = None, pick_key: Optional[str] = None,
-           project: Optional[str] = None, standing_id: Optional[str] = None) -> str:
+           project: Optional[str] = None, standing_id: Optional[str] = None,
+           issue: Optional[int] = None) -> str:
     """A goal. With `draft` the text is a wish the draft run makes into a goal
     first (eki/selfdraft.py); without `plan` it is one item as it stands.
     With `project` it is work on a person's own repo (eki/projects.py)."""
@@ -79,9 +81,9 @@ def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: boo
     gid = store.new_id()
     with db.tx(conn):
         conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key, "
-                     "project, standing_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     "project, standing_id, issue) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                      (gid, text, text, source_kind, owner, "planning" if plan else "planned", db.now(),
-                      why, pick_key, project, standing_id))
+                      why, pick_key, project, standing_id, issue))
         if plan and draft:
             selfdraft.start_draft(conn, gid, text, base, owner)
         elif plan:

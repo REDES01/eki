@@ -38,16 +38,17 @@ FAILED = ("failed", "left")
 # ---- in ---------------------------------------------------------------------------------------
 
 def add(conn: sqlite3.Connection, folder: str, text: str, *, check: Optional[str] = None,
-        branch: Optional[str] = None) -> str:
-    """A standing goal on `folder`; ValueError when it isn't a git repo with a commit."""
+        branch: Optional[str] = None, issue: Optional[int] = None) -> str:
+    """A standing goal on `folder` (from GitHub issue `issue`, if any); ValueError when it
+    isn't a git repo with a commit."""
     text = (text or "").strip()
     if not text:
         raise ValueError("a standing goal needs words")
     pid = None if projects.is_self(folder) else projects.add(conn, folder, check=check, branch=branch)
     sid = store.new_id()
     with db.tx(conn):
-        conn.execute("INSERT INTO standing(id, project, text, state, created_at) VALUES (?,?,?,'on',?)",
-                     (sid, pid, text, db.now()))
+        conn.execute("INSERT INTO standing(id, project, text, state, created_at, issue) "
+                     "VALUES (?,?,?,'on',?,?)", (sid, pid, text, db.now(), issue))
     return sid
 
 
@@ -109,7 +110,8 @@ def tick(conn: sqlite3.Connection, now: Optional[float] = None) -> List[str]:
                     conn.execute("UPDATE standing SET why=? WHERE id=?", (why, st["id"]))
             continue
         gid = selfwork.submit(conn, round_text(conn, st), plan=True, draft=False, owner="eki",
-                              source_kind="standing", project=st["project"], standing_id=st["id"])
+                              source_kind="standing", project=st["project"], standing_id=st["id"],
+                              issue=st["issue"])
         with db.tx(conn):
             conn.execute("UPDATE standing SET rounds=(SELECT COUNT(*) FROM goals WHERE standing_id=?), "
                          "last_round_at=?, rest_until=NULL, why=NULL WHERE id=?", (st["id"], t, st["id"]))

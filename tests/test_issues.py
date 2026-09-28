@@ -125,3 +125,29 @@ def test_not_due_does_nothing(conn, src, proj, gh_repo, monkeypatch):
     monkeypatch.setattr(github, "due", lambda name, now=None: False)
     projects.watch(conn, proj)
     assert issues.tick(conn) == [] and gh_repo.calls() == []
+
+
+def test_a_drop_that_fails_leaves_the_goal_for_the_next_pass(conn, src, proj, gh_repo, monkeypatch):
+    projects.watch(conn, proj)
+    listed(gh_repo, issue(4))
+    issues.tick(conn)
+    [g] = goals(conn)
+    iid = selfwork.new_item(conn, g["id"], "greet", "make greet.py", ["greet.py"], [], False)
+    conn.commit()
+    listed(gh_repo)
+    gh_repo.answer(["issue", "view"], "CLOSED\n")
+    real = selfwork.drop
+
+    def broken(conn, iid):
+        raise OSError("worktree busy")
+    monkeypatch.setattr(selfwork, "drop", broken)
+    said = issues.tick(conn)
+    assert any("couldn't drop for issue #4" in s for s in said)
+    assert selfwork.store_item(conn, iid)["state"] == "waiting"
+    assert conn.execute("SELECT state FROM goals").fetchone()["state"] == "planning"
+
+    monkeypatch.setattr(selfwork, "drop", real)
+    issues.tick(conn)
+    assert selfwork.store_item(conn, iid)["state"] == "dropped"
+    g = conn.execute("SELECT * FROM goals").fetchone()
+    assert g["state"] == "left" and g["error"] == "issue #4 closed"

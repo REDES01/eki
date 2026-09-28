@@ -11,7 +11,7 @@ unfinished work it started; what is already proposed is left for the person.
 from __future__ import annotations
 
 import sqlite3
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 
 from . import db, github, selfwork, standing, store
 
@@ -84,16 +84,24 @@ def _closed(conn: sqlite3.Connection, project: sqlite3.Row, repo: str, open_numb
         n = g["issue"]
         if n in open_numbers or not _live(conn, g) or github.issue_state(repo, n) != "CLOSED":
             continue
-        dropped = _stop(conn, g, n)
-        said.append(f"{name}: issue #{n} closed — goal {g['id']} stopped, {dropped} item(s) dropped")
+        dropped, failed = _stop(conn, g, n)
+        said += failed
+        said.append(f"{name}: issue #{n} closed — goal {g['id']} "
+                    f"{'stopped' if not failed else 'kept open until its items drop'}, {dropped} item(s) dropped")
     for st in stands:
         n = st["issue"]
         if n in open_numbers or github.issue_state(repo, n) != "CLOSED":
             continue
+        dropped, failed = 0, []
+        for g in conn.execute("SELECT * FROM goals WHERE standing_id=? AND state NOT IN ('left','failed')",
+                              (st["id"],)).fetchall():
+            d, f = _stop(conn, g, n)
+            dropped, failed = dropped + d, failed + f
+        said += failed
+        if failed:                  # still on, so the next pass looks again; its open round holds new ones
+            said.append(f"{name}: issue #{n} closed — standing goal {st['id']} kept until its items drop")
+            continue
         standing.drop(conn, st["id"])
-        dropped = sum(_stop(conn, g, n) for g in
-                      conn.execute("SELECT * FROM goals WHERE standing_id=? AND state NOT IN ('left','failed')",
-                                   (st["id"],)).fetchall())
         said.append(f"{name}: issue #{n} closed — standing goal {st['id']} dropped, {dropped} item(s) dropped")
     return said
 
@@ -107,17 +115,25 @@ def _live(conn: sqlite3.Connection, g: sqlite3.Row) -> bool:
                              (g["id"], *UNFINISHED)).fetchone())
 
 
-def _stop(conn: sqlite3.Connection, g: sqlite3.Row, n: int) -> int:
-    """Cancel a goal still planning, drop its unfinished items; proposed ones are the person's."""
-    if g["state"] in PLANNING:
+def _stop(conn: sqlite3.Connection, g: sqlite3.Row, n: int) -> Tuple[int, List[str]]:
+    """Drop a goal's unfinished items, then cancel it if still planning; proposed ones are the person's.
+
+    The goal is marked left only once every item has dropped: a drop that fails
+    leaves the goal as it was, so the next pass finds it and tries again."""
+    marks = ",".join("?" * len(UNFINISHED))
+    items = conn.execute(f"SELECT id FROM items WHERE goal_id=? AND state IN ({marks})",
+                         (g["id"], *UNFINISHED)).fetchall()
+    dropped, failed = 0, []
+    for it in items:
+        try:
+            selfwork.drop(conn, it["id"])
+            dropped += 1
+        except Exception as e:                           # noqa: BLE001 — one item's trouble stops one item
+            failed.append(f"item {it['id']}: couldn't drop for issue #{n}: {str(e)[:120]}")
+    if not failed and g["state"] in PLANNING:
         for rid in (g["draft_run"], g["plan_run"]):
             if rid:
                 store.cancel(conn, rid)
         with db.tx(conn):
             conn.execute("UPDATE goals SET state='left', error=? WHERE id=?", (f"issue #{n} closed", g["id"]))
-    marks = ",".join("?" * len(UNFINISHED))
-    items = conn.execute(f"SELECT id FROM items WHERE goal_id=? AND state IN ({marks})",
-                         (g["id"], *UNFINISHED)).fetchall()
-    for it in items:
-        selfwork.drop(conn, it["id"])
-    return len(items)
+    return dropped, failed

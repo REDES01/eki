@@ -214,12 +214,14 @@ def test_housekeep_runs_the_github_steps_after_standing_and_before_digest():
     assert names.index("prmirror") < names.index("digest")
 
 
-def test_the_stubs_do_nothing_yet(conn, fake_gh):
+def test_with_nothing_to_do_only_the_issue_search_asks_gh(conn, fake_gh, monkeypatch):
     from eki import issues, prfollow, prmirror, prs
+    monkeypatch.setattr(github, "due", lambda name, now=None: True)
+    fake_gh.answer(["api", "user"], "me")
+    fake_gh.answer(["search", "issues"], "[]")
     for mod in (issues, prs, prfollow, prmirror):
         assert mod.tick(conn) == []
-        assert mod.tick(conn) == []
-    assert fake_gh.calls() == []
+    assert [c[:2] for c in fake_gh.calls()] == [["api", "user"], ["search", "issues"]]
 
 
 # ---- account-wide issues: the shared names ---------------------------------------------------

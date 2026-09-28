@@ -173,6 +173,9 @@ def _settle(conn: sqlite3.Connection, st: sqlite3.Row, t: float) -> List[str]:
 
 def _held(conn: sqlite3.Connection, st: sqlite3.Row) -> Optional[str]:
     """Why no round opens now, or None when one may."""
+    project = projects.get(conn, st["project"]) if st["project"] else None
+    if project is not None and project["state"] == "retired":
+        return f"moving to eki's own clone of {project['repo']}"
     ok, why = machine.room()
     if not ok:
         return f"waiting for the Mac: {why}"

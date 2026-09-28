@@ -210,7 +210,7 @@ def test_open_prs_counts_only_proposed_and_open(conn, proj):
 def test_housekeep_runs_the_github_steps_after_standing_and_before_digest():
     names = [n for n, _ in housekeep.STEPS]
     at = names.index("standing")
-    assert names[at + 1:at + 5] == ["issues", "prs", "prfollow", "prmirror"]
+    assert names[at + 1:at + 6] == ["projects", "issues", "prs", "prfollow", "prmirror"]
     assert names.index("prmirror") < names.index("digest")
 
 

@@ -68,11 +68,16 @@ eki follow <run>  ◄── events table
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `attachments` | files sent with a request: made safe at intake (HEIC → JPEG, big pictures scaled down), and uploads from the window |
-| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's patch notes and triage, a fault's first brief |
+| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's patch notes and triage, a fault's first brief, a PR comment's triage |
 | `patchnotes` | the short digest page's rules: the areas and the path table, the rules-only page, the check of the model's notes; pure |
 | `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's patch notes and the long page's `## Triage` |
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
+| `github` | the only way to GitHub: one function per `gh` call (a subprocess, 60 s), plain `git push`/`git fetch` against origin, which path a project is on, the in-memory interval of the GitHub steps |
+| `issues` | issues labelled `eki` in: a new one becomes a goal or a standing goal, a closed one drops the unfinished work |
+| `prs` | pull requests out: push `eki/<id>`, open or reuse its PR, poll it — merged is applied, closed is dropped; close the PR of an item you drop |
+| `prfollow` | your comments on an open PR: triage, the item back to `waiting` with the comment in its spec, push and answer in one line, up to the cap |
+| `prmirror` | eki's own landed items as read-only PRs against `eki/landed` (off by default) |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -84,8 +89,9 @@ A run carries its `attempt`; after 3 interruptions in a row it fails.
 
 **Chores** (`eki/chores.py`, table `chores`) are jobs eki gives the local
 model instead of Claude: the review between gate 1 and the queue, the
-digest's patch notes and triage, and the first draft of a fault item's spec
-(docs/self-build.md). Each is an ordinary run on row `chore`, in a thread of
+digest's patch notes and triage, the first draft of a fault item's spec
+(docs/self-build.md), and whether a comment on a pull request asks for a
+change (`prcomment`, subject `<item id>:<ISO time>`). Each is an ordinary run on row `chore`, in a thread of
 its own (`chore: <kind> <subject>`, no folder), pinned to `self.local` in
 `routing.json` — else the first provider of kind `local`; `"off"` or none
 means a `skipped` chore and the caller goes on without it. A chore never
@@ -357,7 +363,62 @@ text is the goal and the plan run reads the project. When a round has nothing
 open, the next plan run is told what the last three rounds did and plans the
 next one — or answers `ITEMS: []` with one line why, and the goal rests.
 
-**Landing is a branch you merge.** A project item builds in
+**GitHub is the front.** For a project on GitHub, issues are the way in and
+pull requests the way out; eki is the worker behind them. Which path a
+project is on (`github.path_of`) is decided fresh on every housekeeping pass,
+never cached: its configured `remote.origin.url` must be on github.com (else
+no `gh` is run at all), and `gh auth status` — never with `--show-token` —
+must succeed; otherwise it's the local path below, with the why ("origin
+isn't on GitHub", "gh isn't installed", "gh is not logged in"). A project that
+drops to local mid-flight keeps its open PRs untouched; they're looked at
+again when `gh` is back. The only way eki reaches GitHub is the official
+`gh` CLI as a subprocess, plus plain `git push`/`git fetch` against origin:
+no token read, no HTTP of its own.
+
+- **Only your words count.** An issue, comment or review counts only when its
+  author is the account `gh` is logged in as (`gh api user`); anything else
+  is ignored, and the log line or `items.why` says so. eki's own comments
+  carry the marker `<!-- eki -->` (`github.MARK`) and are never read back.
+- **Issues in.** `eki goal add <folder> --issues` watches a project
+  (`projects.issues = 1`; with text it also adds the standing goal as
+  before); on the local path it's refused with the why. `eki goal unwatch
+  <folder>` stops. Every `self.issues_minutes` (10) the `issues` step lists
+  the open issues labelled `eki`. A new one becomes a project goal
+  (`goals.issue`, planned without a draft), or a standing goal
+  (`standing.issue`) when it's also labelled `standing`. Each issue makes
+  one, once, whatever restarts; an edit after it's taken isn't followed. An
+  issue that closes drops the unfinished work: waiting and building items
+  are dropped, a goal still planning is `left` (`issue #N closed`), a
+  standing goal is dropped; items already out as a PR are left to you.
+  Issue work is owner `eki` at background priority, like standing rounds:
+  it waits for `machine.room` and the budget.
+- **PRs out.** A proposed item is pushed as `eki/<id>` and gets a PR
+  against the project's branch (one already there is reused): the item's
+  title; its summary, the files touched, the check's tail or "no check
+  configured — not judged", then `Closes #N` on the last piece of an issue
+  goal or `Part of #N` otherwise, and the marker. `items.pr` holds the URL,
+  `items.pr_state` is `open | merged | closed`, `items.pushed` the sha last
+  pushed. Merged on GitHub → `applied`, the worktree and branch removed;
+  closed unmerged → `dropped` with your last comment as the reason, the
+  branch kept. An item you drop in eki gets its PR closed. A gh or git
+  failure is the item's `why` and is tried again next pass.
+- **Follow-ups.** A comment of yours on an open PR newer than
+  `items.pr_seen` is triaged: approval words (lgtm, thanks, 👍…) are not a
+  change; anything else goes to a `prcomment` chore, and a skipped or failed
+  chore counts as a change. A change puts the item back to `waiting` with
+  the comment added to its spec; it builds on the same branch through gate 1
+  and the review, is pushed (a fast-forward) and answered in one line naming
+  the new sha. A follow-up that ends unfit or left says so on the PR, and
+  the branch goes back to what was pushed. After `self.pr_followups` (3)
+  (`items.followups`) eki says the next change is yours and waits.
+- **Branches.** Merges happen on GitHub, so on this path eki fetches the
+  project's branch into `refs/remotes/origin/<branch>` only and bases new
+  work there. It pushes only `eki/*` branches, never forced. It still never
+  checks out, commits to, resets or pushes the project's own branches.
+
+**The local path — landing is a branch you merge.** Any other project (origin
+not on GitHub, `gh` missing or logged out) works exactly as before, and no
+`gh` is started for it. A project item builds in
 `~/.eki/work/<item id>` on branch `eki/<item id>` of the project's own repo
 (`.venv` and `node_modules` linked from the folder when untracked). Its gate 1
 is the project's `--check`, else its executable `bin/check`, else none: the
@@ -375,7 +436,8 @@ proposed. Otherwise `standing.why` says which. An empty plan rests the goal
 `self.standing_rest_hours` (24 h); a failed round rests it an hour, and three
 failures in a row make it `stuck` until `eki goal resume`. `eki goal` lists
 each goal with its why, rounds, open and proposed items with their merge
-hint, and the budget right now; `eki goal pause|resume|drop|now <id>` —
+hint or PR, the path each project is on (a watched project's issue goals
+too), and the budget right now; `eki goal pause|resume|drop|now <id>` —
 `now` clears the rest but still waits for the Mac and the budget. A standing
 goal whose folder is eki's own source has no project: its rounds are ordinary
 self goals (integration repo, queue, `self_autonomy`).

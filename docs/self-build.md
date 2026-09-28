@@ -502,6 +502,9 @@ the same as for any other change.
 | `picks_per_day` | 6 | goals eki opens for itself in any 24 hours |
 | `pick_min_cluster` | 3 | journal rows a cluster needs |
 | `fault_items_per_day` | 3 | fault goals in any 24 hours (as before) |
+| `issues_minutes` | 10 | how often the GitHub steps look (issues, PRs, follow-ups, the mirror); kept in memory, so a restart only means an early look |
+| `pr_followups` | 3 | changes eki makes from your PR comments before the next one is yours |
+| `pr_mirror` | `false` | mirror eki's own landed items as read-only PRs (below) |
 
 ## Replacing the running engine
 
@@ -544,6 +547,19 @@ fast-forwards `~/eki` only when it's clean and on `main`; otherwise you
 pull. Your checkout is one more git peer, so your own commits reach eki the
 usual way: eki fetches before every rebase. Item worktrees are made from
 this repo, under `~/.eki/self/<id>`.
+
+**Read-only mirror PRs.** With `self.pr_mirror` on (off by default) and the
+integration repo's origin on GitHub with `gh` logged in, eki's own work can
+be read the way project work is (docs/design.md, "GitHub is the front").
+An item that landed or went live in the last day gets its landed commit
+pushed as `eki/<id>` and a PR `[landed] <title>` against `eki/landed`,
+which eki moves to the running build's commit by fast-forward only (a
+rejected push is a log line, never forced). The body says it's landed at
+`<sha7>`, read-only, don't merge. When the item goes live eki comments
+`already live in build <build>` and closes the PR; when it's rolled back,
+`rolled back: <error>`. `items.pr_state` records either. These PRs are a
+window, not a path: the integration repo, the queue, the train and the swap
+are untouched, and they aren't counted with the projects' open PRs.
 
 ## What eki may not change alone
 

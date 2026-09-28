@@ -103,3 +103,79 @@ def test_no_goals_still_shows_the_budget(conn, capsys):
     assert main(["goal"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert "no standing goals" in lines[0] and lines[-1].startswith("budget:")
+
+
+def project(conn, proj):
+    return conn.execute("SELECT * FROM projects WHERE path=?", (str(proj),)).fetchone()
+
+
+def test_issues_without_text_watches_and_adds_no_standing_goal(conn, capsys, proj, gh_repo):
+    assert main(["goal", "add", str(proj), "--issues"]) == 0
+    assert "watching issues labelled eki on me/proj" in capsys.readouterr().out
+    assert project(conn, proj)["issues"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM standing").fetchone()[0] == 0
+    assert ["auth", "status"] in gh_repo.calls()
+
+
+def test_issues_with_text_also_adds_a_standing_goal(conn, capsys, proj, gh_repo):
+    sid = added(capsys, proj, "--issues")
+    assert row(conn, sid)["project"] == project(conn, proj)["id"]
+    assert project(conn, proj)["issues"] == 1
+
+
+def test_issues_on_the_local_path_refuses(conn, capsys, proj, fake_gh):
+    assert main(["goal", "add", str(proj), "--issues"]) == 1
+    assert capsys.readouterr().err.strip() == f"eki: {proj} can't watch issues: origin isn't on GitHub"
+    assert project(conn, proj) is None and fake_gh.calls() == []
+
+
+def test_add_needs_text_or_issues(conn, capsys, proj):
+    assert main(["goal", "add", str(proj)]) == 1
+    assert "--issues" in capsys.readouterr().err
+
+
+def test_unwatch(conn, capsys, proj, gh_repo):
+    assert main(["goal", "add", str(proj), "--issues"]) == 0
+    assert main(["goal", "unwatch", str(proj)]) == 0
+    assert project(conn, proj)["issues"] == 0
+    capsys.readouterr()
+    assert main(["goal", "unwatch", str(proj.parent)]) == 1
+    assert "is not a project" in capsys.readouterr().err
+
+
+def test_the_local_path_line(conn, capsys, proj, fake_gh):
+    added(capsys, proj)
+    assert main(["goal"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1] == "  path: local — merge by hand (origin isn't on GitHub)"
+    assert fake_gh.calls() == []
+
+
+def test_a_watched_project_lists_its_path_issue_goals_and_pr(conn, capsys, proj, gh_repo):
+    assert main(["goal", "add", str(proj), "--issues"]) == 0
+    pid = project(conn, proj)["id"]
+    gid = store.new_id()
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at, project, issue)"
+                     " VALUES (?,?,?,?,?,?,?,?)", (gid, "Make it greet\n\nplease", "issue", "eki", "planned",
+                                                   db.now(), pid, 7))
+    it = selfwork.new_item(conn, gid, "say hello", "do it", ["app.py"], [], False)
+    url = "https://github.com/me/proj/pull/3"
+    selfwork._set(conn, it, state="proposed", branch=f"eki/{it}", pr=url, pr_state="open")
+    capsys.readouterr()
+    assert main(["goal"]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0] == f"garden  {proj}"
+    assert lines[1] == "  path: GitHub me/proj — issues labelled eki in, PRs out, watching issues"
+    assert f"  #7 Make it greet — goal {gid} planned" in lines
+    assert f"      {url}" in lines and "git -C" not in out
+    assert "no standing goals" not in out
+
+
+def test_a_standing_goal_from_an_issue_shows_its_number(conn, capsys, proj, gh_repo):
+    sid = standing.add(conn, str(proj), "keep it tidy", issue=12)
+    assert main(["goal"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == f"{sid}  garden  on  #12 keep it tidy"
+    assert lines[1] == "  path: GitHub me/proj — issues labelled eki in, PRs out"

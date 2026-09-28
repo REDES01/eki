@@ -175,6 +175,18 @@ CREATE TABLE IF NOT EXISTS standing (       -- a standing goal, worked on in rou
     last_round_at REAL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS notices (        -- a push to the person's phone, sent at most once (eki/notify.py)
+    key TEXT PRIMARY KEY,                   -- goal id + done, item id + state, ask id
+    kind TEXT NOT NULL,                     -- goal_done | needs_you
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    click TEXT,                             -- the URL a tap opens
+    created_at REAL NOT NULL,
+    sending_at REAL,                        -- claimed by a drain; claimed again after 60 s
+    sent_at REAL,
+    tries INTEGER NOT NULL DEFAULT 0,
+    error TEXT                              -- never holds the topic
+);
 """
 
 

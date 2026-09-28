@@ -354,7 +354,8 @@ before and after compare like with like.
 A **standing goal** is a goal in words tied to a git folder
 (`eki goal add <folder> "…" [--check "<shell command>"] [--branch <name>]`).
 The folder is recorded once as a project (`projects`: path, branch — the
-folder's current one by default — and check); the goal is a row in
+folder's current one by default — and check; a folder on GitHub becomes
+eki's own clone of it, below); the goal is a row in
 `standing` (`on | paused | stuck | dropped`). eki works it in **rounds**, with
 the same machinery it uses on itself: plan → items in worktrees → gate 1 →
 proposed. A round is an ordinary goal owned by `eki` at background priority
@@ -363,45 +364,111 @@ text is the goal and the plan run reads the project. When a round has nothing
 open, the next plan run is told what the last three rounds did and plans the
 next one — or answers `ITEMS: []` with one line why, and the goal rests.
 
-**GitHub is the front.** For a project on GitHub, issues are the way in and
-pull requests the way out; eki is the worker behind them. Which path a
-project is on (`github.path_of`) is decided fresh on every housekeeping pass,
-never cached: its configured `remote.origin.url` must be on github.com (else
-no `gh` is run at all), and `gh auth status` — never with `--show-token` —
-must succeed; otherwise it's the local path below, with the why ("origin
-isn't on GitHub", "gh isn't installed", "gh is not logged in"). A project that
-drops to local mid-flight keeps its open PRs untouched; they're looked at
-again when `gh` is back. The only way eki reaches GitHub is the official
-`gh` CLI as a subprocess, plus plain `git push`/`git fetch` against origin:
-no token read, no HTTP of its own.
+**GitHub is the front.** Label an issue `eki` in any repo you own and you
+get a PR. There is nothing to register: issues are the way in, pull requests
+the way out, and eki is the worker behind them. The only way eki reaches
+GitHub is the official `gh` CLI as a subprocess, plus plain `git`
+clone/fetch/push against origin: no token read, no HTTP of its own. Which
+path a project is on (`github.path_of`) is decided fresh on every
+housekeeping pass, never cached: its configured `remote.origin.url` must be
+on github.com (else no `gh` is run at all), and `gh auth status` — never
+with `--show-token` — must succeed; otherwise it's the local path below,
+with the why ("origin isn't on GitHub", "gh isn't installed", "gh is not
+logged in"). A project that drops to local mid-flight keeps its open PRs
+untouched; they're looked at again when `gh` is back.
 
 - **Only your words count.** An issue, comment or review counts only when its
   author is the account `gh` is logged in as (`gh api user`); anything else
   is ignored, and the log line or `items.why` says so. eki's own comments
   carry the marker `<!-- eki -->` (`github.MARK`) and are never read back.
-- **Issues in.** `eki goal add <folder> --issues` watches a project
-  (`projects.issues = 1`; with text it also adds the standing goal as
-  before); on the local path it's refused with the why. `eki goal unwatch
-  <folder>` stops. Every `self.issues_minutes` (10) the `issues` step lists
-  the open issues labelled `eki`. A new one becomes a project goal
+- **Issues in, account-wide.** At most every `self.issues_minutes` (10) the
+  `issues` step asks once, `gh search issues --label eki --state open
+  --owner <login>` (`github.search_issues`, the login from `gh api user`
+  once per pass). A repo in the answers with no project yet gets one on the
+  spot (`projectsetup.ensure`); its issues wait, with the why
+  (`<owner>/<repo>: issue #N waits — cloning`), until its setup is `ready`,
+  and the pass after it turns ready takes them without waiting the 10
+  minutes again (`github.soon`). A new issue becomes a project goal
   (`goals.issue`, planned without a draft), or a standing goal
   (`standing.issue`) when it's also labelled `standing`. Each issue makes
-  one, once, whatever restarts; an edit after it's taken isn't followed. An
+  one, once, whatever restarts or moves: it's looked for across every row of
+  that repo, retired ones too; an edit after it's taken isn't followed. An
   issue that closes drops the unfinished work: waiting and building items
   are dropped, a goal still planning is `left` (`issue #N closed`), a
   standing goal is dropped; items already out as a PR are left to you.
   Issue work is owner `eki` at background priority, like standing rounds:
   it waits for `machine.room` and the budget.
+- **eki's own clone.** A GitHub project is worked in eki's clone at
+  `~/.eki/projects/<owner>/<repo>` (`projects.clone_path`), never in your
+  folder: eki doesn't look for it and doesn't touch it. The clone is
+  blobless (`gh repo clone <repo> <dest>.part -- --filter=blob:none`, then
+  moved into place), not shallow, since basing and "merged?" need ancestry
+  and a shallow clone can refuse to push. It is a command run of its own
+  (`projects.setup = cloning`, `projects.setup_run`), so the engine never
+  waits on it and a restart just runs it again. When it lands, the
+  project's branch is the clone's checked-out default branch, and it is
+  fetched before every plan like any GitHub project. `eki goal add <folder>`
+  on a folder whose origin is on GitHub reads only that folder's
+  `remote.origin.url`, puts the goal on the `<owner>/<repo>` project and
+  says `working in eki's own clone at <clone path>, not <folder>`.
+  `--issues` is no longer needed and says so.
+- **The check is guessed, and said.** When the clone lands, eki guesses the
+  project's check once (`eki/checkguess.py`); the first rule that matches
+  wins:
+  1. an executable `bin/check`;
+  2. `package.json` with a script `check`, else `test`, else `build`, run by
+     the lockfile's manager (`pnpm`, `yarn`, `bun`, `npm` with
+     `package-lock.json` → install `npm ci`, no lockfile → `npm install`;
+     the others install `--frozen-lockfile`);
+  3. `pyproject.toml`, `pytest.ini` or `tests/` → `.venv/bin/python -m
+     pytest -q` after `uv sync` (with `uv.lock`), or after a `python3 -m
+     venv .venv` with pip installing `-e .`, `pytest` and
+     `-r requirements.txt` as present; with neither, bare `python3 -m pytest
+     -q`. A `src/` layout gets `PYTHONPATH=src` so the worktree's code is
+     tested, not the clone's editable install;
+  4. a `Makefile` with a `check:` target, else a `test:` one;
+  5. `Cargo.toml` → `cargo test`;
+  6. `go.mod` → `go test ./...`;
+  7. none: items are proposed "not judged: no check found; set one with
+     `eki project <owner>/<repo> --check '…'`".
+
+  It's recorded as `check_cmd`, `install_cmd` and `check_from` (`guessed:
+  <why>`, `none: no check found`, or `set`) and never guessed again. The
+  item keeps what judged it (`items.judged_by`), and every PR body names it:
+  ``Check: `<cmd>` (guessed: …)`` and its tail, or the not-judged line.
+  `eki project <owner>/<repo>` shows a project; `--check "…"` sets the
+  check (`--check ''` means none), `--branch <name>` the base branch.
+- **Install once.** When the guess has an install, it runs once, in the
+  clone, as a second command run (`setup = installing`) before the first
+  goal; later worktrees link `.venv`/`node_modules` from the clone. A clone
+  or install that fails sets `setup = fault` with `fault = "<clone|install>
+  failed: <first line>"`, shown on `eki goal`; the project's issues wait. A
+  fault is never retried by itself, so a broken lockfile doesn't loop:
+  `eki project <owner>/<repo> --retry` clears it and runs the failed step
+  again.
+- **Drop.** `eki goal drop <owner>/<repo>` drops the unfinished items of
+  every goal on the project and its standing goals, cancels the setup run,
+  removes the clone (only ever a path under `~/.eki/projects`), and records
+  the repo's `eki` issues open at that moment (`projects.ignored`; if `gh`
+  fails, the issues its goals came from, and it says so). Open PRs are left
+  to you. Those issues stay ignored; a newer labelled issue brings the
+  project back: a fresh clone and a fresh guess.
+- **Folder projects move.** A project registered from your folder before
+  this (`repo` unset, origin on GitHub) is `retired`: what it already has
+  building, proposed or out as a PR finishes in that folder as before, and
+  no new goal starts there. Its standing goals that are `on` move to the
+  `<owner>/<repo>` project once its clone is ready, waiting till then with
+  `moving to eki's own clone of <repo>`.
 - **PRs out.** A proposed item is pushed as `eki/<id>` and gets a PR
   against the project's branch (one already there is reused): the item's
-  title; its summary, the files touched, the check's tail or "no check
-  configured — not judged", then `Closes #N` on the last piece of an issue
-  goal or `Part of #N` otherwise, and the marker. `items.pr` holds the URL,
-  `items.pr_state` is `open | merged | closed`, `items.pushed` the sha last
-  pushed. Merged on GitHub → `applied`, the worktree and branch removed;
-  closed unmerged → `dropped` with your last comment as the reason, the
-  branch kept. An item you drop in eki gets its PR closed. A gh or git
-  failure is the item's `why` and is tried again next pass.
+  title; its summary, the files touched, the check line above, then
+  `Closes #N` on the last piece of an issue goal or `Part of #N` otherwise,
+  and the marker. `items.pr` holds the URL, `items.pr_state` is `open |
+  merged | closed`, `items.pushed` the sha last pushed. Merged on GitHub →
+  `applied`, the worktree and branch removed; closed unmerged → `dropped`
+  with your last comment as the reason, the branch kept. An item you drop in
+  eki gets its PR closed. A gh or git failure is the item's `why` and is
+  tried again next pass.
 - **Follow-ups.** A comment of yours on an open PR newer than
   `items.pr_seen` is triaged: approval words (lgtm, thanks, 👍…) are not a
   change; anything else goes to a `prcomment` chore, and a skipped or failed
@@ -416,8 +483,9 @@ no token read, no HTTP of its own.
   work there. It pushes only `eki/*` branches, never forced. It still never
   checks out, commits to, resets or pushes the project's own branches.
 
-**The local path — landing is a branch you merge.** Any other project (origin
-not on GitHub, `gh` missing or logged out) works exactly as before, and no
+**The local path — landing is a branch you merge.** For folders not on
+GitHub (origin elsewhere or none; also a GitHub project while `gh` is
+missing or logged out) eki works in your folder, exactly as before, and no
 `gh` is started for it. A project item builds in
 `~/.eki/work/<item id>` on branch `eki/<item id>` of the project's own repo
 (`.venv` and `node_modules` linked from the folder when untracked). Its gate 1
@@ -426,7 +494,9 @@ item is proposed "no check configured — not judged". It stays `proposed`
 until its commit is in the project's branch (`git -C <path> merge eki/<id>`),
 then it is `applied`. eki only adds worktrees and `eki/*` branches: it never
 checks out, commits to, fetches into, resets or pushes the project's
-branches. Project items never enter eki's queue, train or swap.
+branches. Project items never enter eki's queue, train or swap. `eki goal
+add` on a folder whose origin is on GitHub doesn't take this path: it uses
+eki's own clone and says so.
 
 **When a round opens** (`standing.tick`, a housekeeping step): the goal is
 `on`, not resting, has no open round, the Mac has room (`machine.room`), the
@@ -436,8 +506,11 @@ proposed. Otherwise `standing.why` says which. An empty plan rests the goal
 `self.standing_rest_hours` (24 h); a failed round rests it an hour, and three
 failures in a row make it `stuck` until `eki goal resume`. `eki goal` lists
 each goal with its why, rounds, open and proposed items with their merge
-hint or PR, the path each project is on (a watched project's issue goals
-too), and the budget right now; `eki goal pause|resume|drop|now <id>` —
+hint or PR, the path each project is on, and the budget right now; a
+GitHub project is listed as `<owner>/<repo>` with its check and where it
+came from, its clone, its setup (`ready | cloning | installing | fault:
+<why>`, or `retired — finishing in <folder>`), its issue goals and its open
+PRs; `eki goal pause|resume|drop|now <id>` —
 `now` clears the rest but still waits for the Mac and the budget. A standing
 goal whose folder is eki's own source has no project: its rounds are ordinary
 self goals (integration repo, queue, `self_autonomy`).

@@ -101,7 +101,7 @@
         ${field("Parallel", `<input class="set-in" type="number" min="1" data-f="parallel" value="${esc(me.parallel == null ? "" : me.parallel)}" placeholder="3">`)}
         ${field("Planner", `<select class="set-in" data-f="planner.provider">${opt("", pl.provider || "", "code row's first")}${names.map((n) => opt(n, pl.provider || "")).join("")}</select>`)}
         ${field("Planner model", text("planner.model", pl.model, "provider's default"))}
-      </div></section>
+      </div></section>${window.settingsNotify ? settingsNotify.form(d) : ""}
       <section class="set-sect"><h3>Rows</h3>
         ${(d.rows || []).map((r, i) => rowCard(r || {}, "d" + i, false)).join("")}
         ${addedRows().map((r) => rowCard(r, "a:" + r.key, true)).join("")}
@@ -124,6 +124,7 @@
 
   function editRouting(el, card) {
     const d = S.draft.routing, f = el.dataset.f;
+    if (el.closest("[data-notify]")) return settingsNotify.edit(el, d);   // settingsnotify.js
     if (el.closest("[data-self]")) {
       if (!d.self || typeof d.self !== "object") d.self = {};
       if (f === "autonomy") d.self.autonomy = el.value;
@@ -222,8 +223,7 @@
       d[name] = cfg;
       card.removeAttribute("data-unw");
       card.classList.remove("added");
-      const m = card.querySelector(".set-mem");
-      if (m) m.remove();
+      card.querySelector(".set-mem")?.remove();
     }
     return d[name];
   }

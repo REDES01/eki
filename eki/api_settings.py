@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import paths, providers, queue
+from . import notify, paths, providers, queue
 from .routing import table
 
 NAMES = ("routing", "providers")
@@ -68,6 +69,29 @@ def _strings(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
+TOPIC = re.compile(r"[A-Za-z0-9_-]{0,64}")
+
+
+def _check_notify(n: Any) -> List[str]:
+    """The "notify" block; the topic is a secret, so a bad one is described, never quoted."""
+    if not isinstance(n, dict):
+        return ["notify must be an object"]
+    out: List[str] = []
+    server = n.get("server", notify.DEFAULTS["server"])
+    if not isinstance(server, str) or not re.match(r"https?://[^\s/]+", server):
+        out.append(f"notify.server must be an http:// or https:// address, not {server!r}")
+    topic = n.get("topic", "")
+    if not isinstance(topic, str) or not TOPIC.fullmatch(topic):
+        out.append("notify.topic must be up to 64 letters, digits, '-' or '_'")
+    events = n.get("events", list(notify.KINDS))
+    if not _strings(events):
+        out.append(f"notify.events must be a list of {', '.join(notify.KINDS)}")
+    else:
+        out += [f"notify.events: {e!r} is not an event (one of {', '.join(notify.KINDS)})"
+                for e in events if e not in notify.KINDS]
+    return out
+
+
 def _check_routing(data: Any, known: set) -> List[str]:
     if not isinstance(data, dict):
         return ["routing settings must be an object"]
@@ -105,6 +129,8 @@ def _check_routing(data: Any, known: set) -> List[str]:
         out.append("self must be an object")
     elif me and "autonomy" in me and me["autonomy"] not in queue.MODES:
         out.append(f"self.autonomy is one of {', '.join(queue.MODES)}, not {me['autonomy']!r}")
+    if "notify" in data:
+        out += _check_notify(data["notify"])
     return out
 
 

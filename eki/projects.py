@@ -1,9 +1,10 @@
 """A person's own git folders eki works on (standing goals, docs/design.md).
 
 A project is one row per path. eki only ever adds worktrees and `eki/*`
-branches to it: it never checks out, commits to, fetches into, resets or
-pushes the project's branches — the person merges `eki/<item>` when they
-want it. A goal with `project` NULL is eki itself (the integration repo).
+branches to it: it never checks out, commits to, resets or pushes the
+project's branches. On the local path the person merges `eki/<item>` when
+they want it; on the GitHub path (eki/github.py) merges happen there, so new
+work is based on origin's branch, fetched into refs/remotes/origin only. A goal with `project` NULL is eki itself (the integration repo).
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import builds, db, integration, store, workspace
+from . import builds, db, github, integration, store, workspace
 
 #: untracked folders a worktree needs to run, linked from the project folder
 DEPS = (".venv", "node_modules")
@@ -93,8 +94,20 @@ def repo_for(conn: sqlite3.Connection, goal: sqlite3.Row) -> Path:
 
 
 def base(project: sqlite3.Row) -> str:
-    """The sha at the tip of the project's branch — read, never fetched or checked out."""
-    return workspace.git(project["path"], "rev-parse", "--verify", f"refs/heads/{project['branch']}^{{commit}}")
+    """The sha at the tip of the project's branch, never checked out. On the GitHub path that is
+    origin's branch, fetched first into refs/remotes/origin/<branch> (a failed fetch keeps the last
+    one fetched); locally, or when origin has never been fetched, refs/heads/<branch>."""
+    where, branch = project["path"], project["branch"]
+    if github.path_of(where)[0] is not None:
+        try:
+            github.fetch(where, branch)
+        except github.GhError:
+            pass
+        got = workspace.git(where, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}^{{commit}}",
+                            check=False)
+        if got:
+            return got
+    return workspace.git(where, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
 
 
 def check_argv(project: sqlite3.Row) -> Optional[str]:

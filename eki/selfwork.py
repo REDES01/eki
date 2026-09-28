@@ -205,7 +205,8 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             why = reason or ("the agent changed nothing" if sha is None else "")
             _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
                  touched=db.dumps(touched))
-            needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
+            if verdict == "person":                 # "changed nothing" is a failed try, not a question
+                needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
             return [f"item {it['id']}: left for you — {why}"]
         error = None if verdict == "done" else f"partial: {reason}"
         if project is not None:

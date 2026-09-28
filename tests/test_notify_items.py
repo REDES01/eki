@@ -118,6 +118,16 @@ def test_build_body_is_one_line_and_short(conn, built, lit, tmp_path, monkeypatc
     assert len(body) <= 200 and "\n" not in body
 
 
+def test_a_build_that_changed_nothing_is_no_notice(conn, built, lit, tmp_path, monkeypatch):
+    it = building(conn)
+    says(tmp_path, monkeypatch, "ITEM: done\n")
+    run_inline(conn, it["run_id"])
+    selfwork.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "left" and "changed nothing" in cur["error"]
+    assert notices(conn) == []
+
+
 def test_a_failed_build_run_is_no_notice(conn, built, lit):
     it = building(conn)
     run_inline(conn, it["run_id"])

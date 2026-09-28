@@ -78,6 +78,8 @@ eki follow <run>  ◄── events table
 | `prs` | pull requests out: push `eki/<id>`, open or reuse its PR, poll it — merged is applied, closed is dropped; close the PR of an item you drop |
 | `prfollow` | your comments on an open PR: triage, the item back to `waiting` with the comment in its spec, push and answer in one line, up to the cap |
 | `prmirror` | eki's own landed items as read-only PRs against `eki/landed` (off by default) |
+| `notify` | pushes to your phone through ntfy: the notices table, the settings, the send and the housekeeping drain |
+| `notifygoals` | which goals ended — self, standing and GitHub — as `goal done` notices |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -528,6 +530,39 @@ background=True)` asks for every window, not only the fullest, and says why
 background run with no provider under budget stays queued with that why; a
 run already going is never stopped. Work you wait for (`now`) ignores the
 budget.
+
+## Notifications
+
+eki pushes to your phone through [ntfy](https://ntfy.sh): a plain HTTP POST,
+no account, no SDK. Only two kinds of event are sent, nothing else.
+
+- **eki · goal done** (or **eki · goal ended, N left**) when a goal ends —
+  every item live or landed, or stopped with items left. The body is the
+  goal's title; a GitHub goal's notification opens its PR or issue.
+- **eki · needs you** (high priority) when an item goes `locked`, an item is
+  left for a person, or an agent's question or permission card opens. The
+  body says what and the command to act (`eki self apply <item> --yes`).
+
+**Settings.** `routing.json`
+`"notify": {"server": "https://ntfy.sh", "topic": "", "events": ["goal_done", "needs_you"]}`.
+An empty topic means off. The topic is a secret: it is shown masked and never
+written to logs, digests or PR bodies.
+
+**Delivery.** Each event has a stable key — `goal:<id>:done`,
+`item:<id>:<state>:<tries>`, `ask:<id>` — recorded in the `notices` table at
+the transition. The housekeeping drain sends each at most once, on a thread
+(5 s timeout, 3 tries, never blocking the engine), so a restart neither
+re-sends nor loses one. A goal counts only if it ended within the last day.
+
+**CLI.** `eki notify` (on or off, the events, the topic masked),
+`eki notify topic <name>`, `eki notify test`.
+
+**On the phone and the Watch.** Install ntfy from the App Store and subscribe
+to the same topic on the same server (ntfy.sh by default). Pick a long,
+unguessable topic: anyone who knows it can read it. Allow ntfy's
+notifications in iOS Settings. The Watch mirrors iPhone notifications while
+the iPhone is locked or asleep and ntfy's are on: in the Watch app, under
+Notifications, mirror ntfy. Then `eki notify test`.
 
 ## Not built yet
 

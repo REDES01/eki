@@ -12,7 +12,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import store
+from . import notify, store
 from .db import dumps, now, tx
 
 
@@ -21,7 +21,29 @@ def create(conn: sqlite3.Connection, run_id: str, thread_id: str, kind: str,
     aid = store.new_id()
     conn.execute("INSERT INTO asks(id, run_id, thread_id, kind, payload, created_at) VALUES (?,?,?,?,?,?)",
                  (aid, run_id, thread_id, kind, dumps(payload), now()))
+    try:
+        notify.queue(conn, f"ask:{aid}", "needs_you", "eki · needs you", _notice(aid, kind, payload))
+    except Exception:                                    # noqa: BLE001 — a push never stops an ask
+        pass
     return aid
+
+
+def _notice(aid: str, kind: str, payload: Dict[str, Any]) -> str:
+    """One line for the phone: what is asked, then the command that answers it."""
+    if kind == "permission":
+        tool, title = str(payload.get("tool") or "").strip(), str(payload.get("title") or "").strip()
+        what = ": ".join(x for x in (f"permission for {tool}" if tool else "permission", title) if x)
+        what = "a permission" if what == "permission" else what
+    else:
+        qs = payload.get("questions") or []
+        first = qs[0] if isinstance(qs, list) and qs else {}
+        what = str((first.get("question") if isinstance(first, dict) else first) or payload.get("message") or "")
+    what = " ".join(what.split()) or ("a permission" if kind == "permission" else "a question")
+    tail = f" — eki answer {aid}"
+    room = 200 - len(tail)
+    if len(what) > room:
+        what = what[:room - 1].rstrip() + "…"
+    return what + tail
 
 
 def view(row: sqlite3.Row) -> Dict[str, Any]:

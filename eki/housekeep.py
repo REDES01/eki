@@ -8,7 +8,8 @@ loop pick eki's next self-work when it is on and eki is idle
 clones of GitHub repos — clone, guessed check, install once, retired folder
 rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on GitHub (eki/issues.py, prs.py, prfollow.py,
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
-local model its patch notes and triage (eki/digestprose.py), and push the
+local model its patch notes and triage (eki/digestprose.py), queue a notice for each goal
+that ended (eki/notifygoals.py), and push the
 queued notices to the person's phone through ntfy (eki/notify.py). Nothing here is state that matters: the
 hour between prunes lives in memory, and losing it on a restart only means
 an early prune.
@@ -20,8 +21,8 @@ import sqlite3
 import time
 from typing import Callable, List, Tuple
 
-from . import (db, digest, digestprose, faults, issues, notify, observe, prfollow, prmirror, projectsetup, prs, score,
-               selfpick, standing)
+from . import (db, digest, digestprose, faults, issues, notify, notifygoals, observe, prfollow, prmirror,
+               projectsetup, prs, score, selfpick, standing)
 
 log = logging.getLogger("eki.housekeep")
 
@@ -63,6 +64,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("prmirror", prmirror.tick),
     ("digest", _digest),
     ("digestprose", digestprose.tick),
+    ("notifygoals", notifygoals.tick),
     ("notify", notify.tick),
 ]
 

@@ -87,3 +87,39 @@ def test_commit_all_with_an_ignored_dangling_link(repo, tmp_path):
     (wt / "a.txt").write_text("changed\n")
     sha = workspace.commit_all(wt, "with a dangling ignored link")
     assert sha and ".venv" not in workspace.git(wt, "show", "--stat", "--format=", sha)
+
+
+def test_an_unagreed_xcode_license_falls_back_to_the_command_line_tools(repo, tmp_path, monkeypatch):
+    """/usr/bin/git through an Xcode whose license isn't agreed refuses every call;
+    the Command Line Tools' git needs no license, so git goes there instead."""
+    clt = tmp_path / "CommandLineTools"
+    (clt / "usr" / "bin").mkdir(parents=True)
+    (clt / "usr" / "bin" / "git").write_text("")
+    monkeypatch.setattr(workspace, "CLT", clt)
+    monkeypatch.setattr(workspace, "_env", [None])
+    real = subprocess.run
+    seen = []
+
+    def shim(cmd, **kw):
+        env = kw.get("env")
+        seen.append(env and env.get("DEVELOPER_DIR"))
+        if not env or env.get("DEVELOPER_DIR") != str(clt):
+            return subprocess.CompletedProcess(cmd, 69, "", "You have not agreed to the Xcode license "
+                                               "agreements. Please run 'sudo xcodebuild -license'")
+        return real(cmd, **{**kw, "env": None})             # the fake CLT: the real git runs it
+
+    monkeypatch.setattr(workspace.subprocess, "run", shim)
+    assert workspace.git(repo, "rev-parse", "main") == workspace.head(repo)
+    assert seen[0] is None and seen[-1] == str(clt)
+    n = len(seen)
+    workspace.git(repo, "rev-parse", "main")
+    assert len(seen) == n + 1                                  # remembered: no second refusal
+
+
+def test_an_unagreed_xcode_license_without_the_command_line_tools_still_says_so(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(workspace, "CLT", tmp_path / "none")
+    monkeypatch.setattr(workspace, "_env", [None])
+    monkeypatch.setattr(workspace.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 69, "", "You have not agreed to the Xcode license agreements."))
+    with pytest.raises(workspace.WorkspaceError, match="Xcode license"):
+        workspace.git(repo, "rev-parse", "main")

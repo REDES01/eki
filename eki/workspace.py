@@ -28,12 +28,32 @@ QUIET = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
 IDLE_DAYS = 7
 
 
+#: the Command Line Tools: a git that needs no Xcode license
+CLT = Path("/Library/Developer/CommandLineTools")
+#: what /usr/bin/git says when xcode-select points at an Xcode whose license
+#: isn't agreed to yet (after every Xcode update) — it runs nothing
+XCODE_LICENSE = "agreed to the Xcode license"
+#: the environment git runs in: None until the Xcode license blocks it once
+_env: List[Optional[dict]] = [None]
+
+
 class WorkspaceError(RuntimeError):
     pass
 
 
+def _run(where: str | Path, args: tuple) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *QUIET, "-C", str(where), *args], capture_output=True, text=True,
+                          env=_env[0])
+
+
 def git(where: str | Path, *args: str, check: bool = True) -> str:
-    out = subprocess.run(["git", *QUIET, "-C", str(where), *args], capture_output=True, text=True)
+    out = _run(where, args)
+    if (out.returncode != 0 and XCODE_LICENSE in out.stderr and _env[0] is None
+            and (CLT / "usr" / "bin" / "git").exists()):
+        # the Xcode shim refused before git ran: use the Command Line Tools' git
+        # from now on, rather than fail every call until a person agrees
+        _env[0] = {**os.environ, "DEVELOPER_DIR": str(CLT)}
+        out = _run(where, args)
     if check and out.returncode != 0:
         raise WorkspaceError(f"git {' '.join(args[:2])}: {out.stderr.strip() or out.stdout.strip()}")
     return out.stdout.strip()

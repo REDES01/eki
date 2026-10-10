@@ -1,11 +1,11 @@
-"""`eki project <owner>/<repo>`: show it, set the check or branch, retry a setup fault."""
+"""`eki project [key]`: list, show and make projects; on GitHub set the check or branch, retry a fault."""
 import json
 import subprocess
 
 import pytest
 
 from conftest import run_inline
-from eki import projects, projectsetup, store, workspace
+from eki import builds, paths, projectchats, projects, projectsetup, store, workspace
 from eki.cli import main
 
 
@@ -85,3 +85,68 @@ def test_an_unknown_repo_fails(conn, capsys, fake_gh):
     assert "no project me/nothing" in capsys.readouterr().err
     assert main(["project", "nothing"]) == 1
     assert "isn't OWNER/REPO" in capsys.readouterr().err
+
+
+def test_the_listing_shows_eki_a_folder_project_and_a_github_project(conn, capsys, gh):
+    ready(conn)
+    pid = projectchats.create(conn, "notes")
+    assert main(["project"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].split()[:2] == ["eki", projectchats.norm(builds.source())]
+    notes = next(line for line in out if line.startswith("notes "))
+    assert projectchats.folder_of(conn, pid) in notes and "0 chats · 0 goals · 0 PRs" in notes
+    proj = next(line for line in out if "me/proj" in line)
+    assert "no folder" in proj
+
+
+def test_new_makes_a_folder_in_your_home(conn, capsys):
+    assert main(["project", "--new", "tokenbar"]) == 0
+    where = paths.user_home() / "tokenbar"
+    assert (where / ".git").is_dir()
+    out = capsys.readouterr().out
+    assert projectchats.norm(where) in out
+    pid = projectchats.find(conn, "tokenbar")
+    assert projects.get(conn, pid)["folder"] == projectchats.norm(where)
+    assert main(["project", "--new", "eki"]) == 1
+    assert "eki itself" in capsys.readouterr().err
+
+
+def test_new_takes_a_folder(conn, capsys, tmp_path):
+    mine = tmp_path / "elsewhere"
+    mine.mkdir()
+    assert main(["project", "--new", "work", "--folder", str(mine)]) == 0
+    assert projectchats.folder_of(conn, projectchats.find(conn, "work")) == projectchats.norm(mine)
+
+
+def test_folder_sets_it(conn, capsys, gh, tmp_path):
+    p = ready(conn)
+    mine = tmp_path / "user" / "myproj"
+    mine.mkdir()
+    assert main(["project", "me/proj", "--folder", str(mine)]) == 0
+    assert projectchats.folder_of(conn, p["id"]) == projectchats.norm(mine)
+    assert main(["project", "me/proj", "--folder", str(builds.source())]) == 1
+    assert "eki itself" in capsys.readouterr().err
+
+
+def test_a_key_resolves_by_name_and_by_repo(conn, capsys, gh):
+    p = ready(conn)
+    projectchats.create(conn, "notes")
+    capsys.readouterr()
+    assert main(["project", "notes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "notes" and "  background: none" in out
+    assert main(["project", "me/proj"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("me/proj\n") and f"background: eki's clone at {p['path']}" in out
+    assert main(["project", "eki"]) == 0
+    assert "background: eki's own queue" in capsys.readouterr().out
+
+
+def test_github_flags_on_other_rows_say_github_only(conn, capsys):
+    projectchats.create(conn, "notes")
+    capsys.readouterr()
+    for flags in (["--check", "true"], ["--branch", "dev"], ["--retry"]):
+        assert main(["project", "notes", *flags]) == 1
+        assert "GitHub-only" in capsys.readouterr().err
+    assert main(["project", "eki", "--check", "true"]) == 1
+    assert "GitHub-only" in capsys.readouterr().err

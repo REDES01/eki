@@ -6,7 +6,8 @@ on a conflict: a resolve run starts in the item's own worktree, mid-rebase,
 told what the item is for and what the head changed in the conflicted files.
 `tick` moves on every item whose resolve or gate-1 run has ended: eki
 continues the rebase, refuses a result with markers left or not on top of
-the head, runs gate 1 again, and puts the item at the back of the queue.
+the head, runs gate 1 again (a project item: its project's check, or none
+when it has none), and puts the item at the back of the queue.
 
 Everything is rebuilt from the items table and the runs; every git step is
 safe to repeat, so a restart at any point loses nothing.
@@ -17,7 +18,7 @@ import sqlite3
 import subprocess
 from typing import List
 
-from . import db, rebase, selfbrief, selfwork, store
+from . import db, projects, projectwork, rebase, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -144,10 +145,18 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if not _is_ancestor(wt, head, "HEAD"):
         return _leave(conn, it, f"the result is not on top of the head {head[:12]}")
     sha = git(wt, "rev-parse", "HEAD")
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    project = projectwork.project_of(conn, goal)
+    argv = projects.check_argv(project) if project is not None else selfwork.CHECK
     with db.tx(conn):
         if not _still(conn, it, "resolving"):
             return []
-        rid = store.create_run(conn, it["thread_id"], selfwork.CHECK, provider="command",
+        if argv is None:                     # nothing to judge it with: as a green recheck
+            selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=it["head"],
+                          rebased=sha, commit_sha=sha, verdict=projectwork.not_judged(project),
+                          error=None)
+            return [f"item {it['id']}: resolved; not judged; back in the queue"]
+        rid = store.create_run(conn, it["thread_id"], argv, provider="command",
                                priority=run["priority"])
         selfwork._set(conn, it["id"], state="rechecking", run_id=rid, commit_sha=sha, error=None)
     return [f"item {it['id']}: resolved onto {head[:12]}; gate 1 again"]

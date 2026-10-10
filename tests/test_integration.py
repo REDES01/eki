@@ -166,6 +166,9 @@ def test_sync_survives_an_unreachable_origin(src, origin, tmp_path):
 def test_own_repo_is_the_github_origin(src, monkeypatch):
     workspace.git(src, "remote", "set-url", "origin", "https://github.com/me/eki.git")
     monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")  # the fetch from GitHub fails at once, harmlessly
+    assert integration.own_repo() is None             # no integration repo yet: none, and none made
+    assert not (paths.home() / "self" / "repo").exists()
+    integration.repo()
     assert integration.own_repo() == "me/eki"
     assert integration.main() == workspace.head(src)
 

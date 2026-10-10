@@ -61,7 +61,10 @@ def repo() -> Path:
 
 def own_repo() -> Optional[str]:
     """eki's own repo as OWNER/REPO (the integration clone's configured origin), or None
-    when there is no integration repo or its origin isn't on github.com."""
+    when there is no integration repo or its origin isn't on github.com. Never makes
+    the repo: asking whose repo something is must leave an empty home empty."""
+    if not (paths.home() / "self" / "repo" / ".git").exists():
+        return None
     try:
         return github.repo_of(repo())
     except IntegrationError:

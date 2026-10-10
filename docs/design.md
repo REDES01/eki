@@ -102,8 +102,9 @@ eki follow <run>  ◄── events table
 | `api_cardknowledge`, `api_cardmcp` | a knowledge card's files and an mcp card's server and Test on the project page (with `web/cardknowledge.js`, `web/cardmcp.js`, registered in `window.projectCardKinds`) |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
-| `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use) and the library (templates and the pool); the helpers the card leaves share |
+| `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use, an instructions card's summary), the suggestion to add an instructions card, and the library (templates and the pool); the helpers the card leaves share |
 | `api_cardadd`, `api_cardedit`, `api_cardrun`, `api_cardsessions` | a card added (template or pool card) and removed (to the Trash); its settings and prompt edited; run through the engine and its uses; an agent card's sessions |
+| `api_cardinstructions` | an instructions card's file saved, CLAUDE.md linked to it (`@AGENTS.md`), and a "Read first" file read (inside the project folder only) |
 | `cli/*` | one file per command |
 
 **Scheduling.** The engine's spawn step holds each kind of run only by the
@@ -884,10 +885,12 @@ as any other; nothing in `workspace` or the scheduler changes.
   `git merge --ff-only` only when no tracked file the change touches has
   local changes; untracked and ignored files are never touched. A GitHub
   project keeps its PR path.
-- **Instructions are the project's own file.** With no `AGENTS.md` or
-  `CLAUDE.md` in the folder, the page offers a chat that looks at it and
-  writes `AGENTS.md`, plus a `CLAUDE.md` holding only `@AGENTS.md`, so Claude
-  Code and Codex read one copy. eki keeps no copy.
+- **Instructions are the project's own file.** The offer is the Cards
+  area's suggestion to add an `instructions` card (one click) whenever the
+  project has no such card: "This project has AGENTS.md" (or CLAUDE.md)
+  when one exists, else "No AGENTS.md yet". Adding it writes a starter
+  `AGENTS.md` and a `CLAUDE.md` holding only `@AGENTS.md` when missing, so
+  Claude Code and Codex read one copy. eki keeps no copy and never commits.
 
 Not in scope: knowledge-file uploads, per-project memory, per-project
 routing rows.
@@ -922,7 +925,7 @@ called (`components.PASSIVE`: `knowledge`, `mcp`), stay out of the `eki use`
 line of a run's brief.
 
 **The common keys.** `kind` (`service`, `assets`, `agent`, `skills`,
-`serve`, `knowledge`, `mcp`), `about` (one
+`serve`, `knowledge`, `mcp`, `instructions`), `about` (one
 line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
@@ -1018,6 +1021,17 @@ of its own; the CLI is the integration.
   servers, for that run) and Codex's `-c` flags; nothing is written into
   `~/.claude`, `~/.codex` or `~/.eki/mcp.json`. Env values show masked
   (`mcpserver.public`).
+- **`instructions`** — the project's `AGENTS.md` as a card
+  (`eki/components/instructions.py`, `{"file": "AGENTS.md"}`). The card shows
+  the file's first heading and line count; opening it renders the file, and
+  Edit turns it into a text editor (saved on blur / ⌘S). Backticked paths in
+  it that are files inside the project are listed under "Read first", each
+  opened read-only (never `..`, an absolute path or a symlink out). Adding
+  the card to a project without the file writes a starter (title, "Read
+  first", "How to check your work") and a `CLAUDE.md` holding only
+  `@AGENTS.md`; an existing file is only pointed at, never overwritten. A
+  `CLAUDE.md` without `@AGENTS.md` is said on the card, with "Link
+  CLAUDE.md" appending the line. eki writes only those files, never commits.
 
 **The bare-agent rule.** `"bare": true` means no built-in skills, only its
 system prompt, strictly: Claude Code with `prompt.md` as its whole system

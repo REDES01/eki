@@ -54,7 +54,7 @@ def test_listing_for_a_project(conn, proj):
     cards = {c["name"]: c for c in got["cards"]}
     assert list(cards) == ["bad", "helper", "images", "voice"]
     keys = {"name", "kind", "about", "scope", "ref", "card", "folder", "error", "notes", "spec", "prompt",
-            "editable", "state", "last_use", "links", "size"}
+            "instructions", "editable", "state", "last_use", "links", "size"}
     assert all(set(c) == keys for c in cards.values())
     v = cards["voice"]
     assert v["kind"] == "service" and v["scope"] == "project" and v["ref"] == "" and v["editable"]
@@ -145,7 +145,8 @@ def test_a_project_with_no_folder_is_readonly(conn):
                  "('g1','gh','/nowhere','main',0,'me/gh')")
     conn.commit()
     got = get(conn, "/api/projects/g1/cards")
-    assert got == {"project": "g1", "folder": None, "readonly": api_cards.READONLY, "cards": []}
+    assert got == {"project": "g1", "folder": None, "readonly": api_cards.READONLY, "cards": [],
+                   "suggest": None}
     try:
         api_cards.writable_root(conn, "g1")
         raise AssertionError("no ValueError")

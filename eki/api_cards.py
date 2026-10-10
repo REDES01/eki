@@ -90,13 +90,16 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
     out = {"name": c.name, "kind": c.kind, "about": c.spec.get("about", ""), "scope": c.scope,
            "ref": c.name if c.card else "", "card": str(c.card or c.folder), "folder": str(c.folder),
            "error": "", "notes": components._notes(c), "spec": c.spec, "prompt": prompt,
-           "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
+           "instructions": None, "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
            "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c)}
     if c.kind == "skills":
         from .components import skillcard
         good, broken = skillcard.held(c.folder)
         out["skills"] = [{"name": s["name"], "description": s["description"]} for s in good]
         out["broken_skills"] = [{"path": where, "error": why} for where, why in broken]
+    if c.kind == "instructions":
+        from .components import instructions
+        out["instructions"] = instructions.summary(root, c.spec.get("file", "AGENTS.md"))
     return out
 
 
@@ -108,7 +111,7 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
     about = spec.get("about") if spec is not None and isinstance(spec.get("about"), str) else ""
     return {"name": name, "kind": kind, "about": about, "scope": "project", "ref": ref, "card": where,
             "folder": where, "error": why, "notes": [], "spec": spec, "prompt": None,
-            "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
+            "instructions": None, "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
             "last_use": uses.last_use(conn, name, root), "links": [], "size": ""}
 
 
@@ -129,13 +132,25 @@ def card_of(conn: sqlite3.Connection, pid: str, name: str) -> Dict[str, Any]:
     raise KeyError(f"project {pid} has no card {name}")
 
 
+def suggest(root: Path, cards: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """The Cards area's offer of an instructions card; None when the project has one."""
+    if any(c["kind"] == "instructions" for c in cards):
+        return None
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        if (root / name).is_file():
+            return {"template": "instructions", "why": f"This project has {name}: add it as a card to see and edit it"}
+    return {"template": "instructions",
+            "why": "No AGENTS.md yet: add an instructions card to start one (and a CLAUDE.md pointing at it)"}
+
+
 def project_cards(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:
     pid = m.group(1)
     folder = projectchats.folder_of(conn, pid)
     root = components.project_root(folder, conn)
     if root is None:
-        return {"project": pid, "folder": folder, "readonly": READONLY, "cards": []}
-    return {"project": pid, "folder": folder, "readonly": "", "cards": cards_of(conn, root)}
+        return {"project": pid, "folder": folder, "readonly": READONLY, "cards": [], "suggest": None}
+    cards = cards_of(conn, root)
+    return {"project": pid, "folder": folder, "readonly": "", "cards": cards, "suggest": suggest(root, cards)}
 
 
 def templates() -> List[Dict[str, str]]:

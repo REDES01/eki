@@ -223,3 +223,31 @@ def test_drop_falls_back_to_its_own_issues_when_gh_fails(conn, src, tmp_path, gh
 
 def test_drop_never_removes_a_folder_outside_the_projects_home(conn, proj):
     assert projectsetup._remove(proj) is False and proj.exists()
+
+
+def test_ensure_merges_a_chat_project_on_the_same_origin(conn, src, proj, gh_repo):
+    from eki import projectchats
+    chat = projectchats.create(conn, "proj", folder=proj)
+    other = projectchats.create(conn, "notes")                  # ~/notes, git init, no origin
+    tid = store.create_thread(conn, "hi", str(proj))
+    elsewhere = store.create_thread(conn, "jot", str(paths.user_home() / "notes"))
+    projectchats.adopt(conn)
+    said = []
+    p = projectsetup.ensure(conn, "me/proj", said)
+    where = projectchats.norm(proj)
+    assert p["folder"] == where and p["path"] == str(projects.clone_path("me/proj"))
+    assert projects.get(conn, chat)["state"] == "merged"
+    project_of = lambda t: conn.execute("SELECT project FROM threads WHERE id=?", (t,)).fetchone()[0]
+    assert project_of(tid) == p["id"] and project_of(elsewhere) == other
+    assert said == [f"proj: merged into me/proj — chats keep working in {where}"]
+    o = projects.get(conn, other)
+    assert o["state"] in (None, "on") and o["repo"] is None and o["folder"] == projectchats.norm(o["path"])
+    assert [e["id"] for e in projectchats.listing(conn)] == ["eki", other, p["id"]]
+    assert projectsetup.ensure(conn, "me/proj", said)["id"] == p["id"] and len(said) == 1
+
+
+def test_ensure_without_a_chat_project_leaves_the_folder_empty(conn, src, tmp_path, gh):
+    from eki import projectchats
+    projectchats.create(conn, "notes")
+    said = []
+    assert projectsetup.ensure(conn, "me/proj", said)["folder"] is None and said == []

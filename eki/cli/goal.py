@@ -137,7 +137,10 @@ def _add(c, args) -> int:
         if repo is None:
             print(standing.add(c, args.folder, args.text, check=args.check, branch=args.branch))
             return 0
-        p = projectsetup.ensure(c, repo)
+        merged: list = []
+        p = projectsetup.ensure(c, repo, merged)
+        for line in merged:
+            print(line)
         if args.check is not None:
             projectcli.set_check(c, p, args.check)
         if args.branch:

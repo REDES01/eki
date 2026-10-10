@@ -22,7 +22,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Set
 
-from . import checkguess, db, github, paths, projects, selfwork, standing, store, workspace
+from . import checkguess, db, github, paths, projectchats, projects, selfwork, standing, store, workspace
 
 UNFINISHED = ("waiting", "building", "judging", "reviewing")
 PLANNING = ("drafting", "planning")
@@ -31,13 +31,17 @@ SETTLING = ("cloning", "installing")
 
 # ---- in ---------------------------------------------------------------------------------------
 
-def ensure(conn: sqlite3.Connection, repo: str) -> sqlite3.Row:
-    """The project for OWNER/REPO; a new or dropped one is (re)made and its clone started."""
+def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None) -> sqlite3.Row:
+    """The project for OWNER/REPO; a new or dropped one is (re)made and its clone started.
+
+    A chat project on your folder whose origin is `repo` joins it (`_merge`); why goes in `said`.
+    """
     got = projects.by_repo(conn, repo)
     if got is not None and got["state"] != "dropped":
         return got
     dest = projects.clone_path(repo)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    chat = _chat_row(conn, repo)
     with db.tx(conn):
         pid = got["id"] if got is not None else store.new_id()
         if got is None:
@@ -48,7 +52,36 @@ def ensure(conn: sqlite3.Connection, repo: str) -> sqlite3.Row:
                          "check_cmd=NULL, check_from=NULL, install_cmd=NULL WHERE id=?", (repo, str(dest), pid))
         rid = _clone_run(conn, repo, dest)
         conn.execute("UPDATE projects SET setup_run=? WHERE id=?", (rid, pid))
+        line = _merge(conn, pid, repo, *chat) if chat is not None else None
+    if line is not None and said is not None:
+        said.append(line)
     return projects.get(conn, pid)
+
+
+def _chat_row(conn: sqlite3.Connection, repo: str):
+    """The oldest live row with repo NULL whose folder's origin is `repo`, with that folder."""
+    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') "
+                          "NOT IN ('dropped','merged','retired') ORDER BY created_at").fetchall():
+        folder = projectchats.folder_of(conn, p["id"])
+        if folder and Path(folder).is_dir() and github.repo_of(folder) == repo:
+            return p, folder
+    return None
+
+
+def _merge(conn: sqlite3.Connection, pid: str, repo: str, old: sqlite3.Row, folder: str) -> str:
+    """Inside ensure's transaction: the GitHub row takes the folder and the chats. A row with goals
+    isn't marked merged: `_retire` retires it so what it started finishes there."""
+    conn.execute("UPDATE projects SET folder=? WHERE id=?", (folder, pid))
+    conn.execute("UPDATE threads SET project=? WHERE project=?", (pid, old["id"]))
+    if _has_goals(conn, old["id"]):
+        return f"{old['name']}: its chats moved to {repo} and keep working in {folder}; it retires next"
+    conn.execute("UPDATE projects SET state='merged' WHERE id=?", (old["id"],))
+    return f"{old['name']}: merged into {repo} — chats keep working in {folder}"
+
+
+def _has_goals(conn: sqlite3.Connection, pid: str) -> bool:
+    return conn.execute("SELECT 1 FROM goals WHERE project=? UNION ALL SELECT 1 FROM standing "
+                        "WHERE project=? LIMIT 1", (pid, pid)).fetchone() is not None
 
 
 def _clone_run(conn: sqlite3.Connection, repo: str, dest: Path) -> str:
@@ -131,8 +164,7 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
         where = Path(p["path"]).expanduser().resolve()
         if where == home or home in where.parents or not where.is_dir():
             continue
-        if not conn.execute("SELECT 1 FROM goals WHERE project=? UNION ALL SELECT 1 FROM standing "
-                            "WHERE project=? LIMIT 1", (p["id"], p["id"])).fetchone():
+        if not _has_goals(conn, p["id"]):
             continue                                     # a chat-only project: nothing to finish or move
         repo = github.repo_of(where)
         if repo is None:
@@ -155,7 +187,7 @@ def _move(conn: sqlite3.Connection) -> List[str]:
         if target is None or target["state"] == "dropped":
             if r["sstate"] != "on":
                 continue
-            target = ensure(conn, r["repo"])
+            target = ensure(conn, r["repo"], said)
             said.append(f"{r['repo']}: making eki's own clone for standing goal {r['sid']}")
         if target["setup"] != "ready":
             continue

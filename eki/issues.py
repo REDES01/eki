@@ -93,7 +93,7 @@ def _repo(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> L
                         "only the person's words count")
             continue
         if row is None or dropped:
-            row = projectsetup.ensure(conn, repo)
+            row = projectsetup.ensure(conn, repo, said)
             said.append(f"{repo}: {'revived' if dropped else 'new project'} for issue #{n} — "
                         f"cloning into {row['path']}")
         if row["setup"] != "ready":

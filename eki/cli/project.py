@@ -13,9 +13,12 @@ HELP = "list your projects, show or make one, set its folder; on GitHub: its che
 
 
 def add(p) -> None:
-    p.add_argument("key", nargs="?", help="a project's name, id, OWNER/REPO or eki; none lists them all")
+    p.add_argument("key", nargs="?", help="a project's name, id, OWNER/REPO or eki; none lists them all; "
+                                          "`describe <key> TEXT` sets what it's for")
+    p.add_argument("more", nargs="*", metavar="ARG", help="with `describe`: the project and its text ('' clears it)")
     p.add_argument("--new", metavar="NAME", help="make a project (folder ~/NAME unless --folder)")
     p.add_argument("--folder", metavar="PATH", help="the folder the project's chats run in")
+    p.add_argument("--description", metavar="TEXT", help="with --new: what you're trying to achieve")
     p.add_argument("--check", help="the shell command that judges an item ('' for none); replaces the guess")
     p.add_argument("--branch", help="the branch eki works from and opens PRs against")
     p.add_argument("--retry", action="store_true", help="start the failed setup step (clone or install) again")
@@ -64,14 +67,38 @@ def set_branch(c, project, branch: str) -> None:
         c.execute("UPDATE projects SET branch=? WHERE id=?", (branch, project["id"]))
 
 
+def describe(c, key: str, text: str) -> int:
+    pid = projectlist.resolve(c, key)
+    if pid is None:
+        return 1
+    try:
+        got = projectchats.set_description(c, pid, text)
+    except ValueError as e:
+        err(f"eki: {e}")
+        return 1
+    print(f"{key}: {got or 'no description'}")
+    return 0
+
+
 def run(args) -> int:
     c = conn()
+    if args.key == "describe" and args.more:
+        if len(args.more) != 2:
+            err('eki: eki project describe <key> "text"')
+            return 1
+        return describe(c, *args.more)
+    if args.more:
+        err(f"eki: unexpected {' '.join(args.more)}")
+        return 1
     github_only = args.check is not None or args.branch or args.retry
     if args.new is not None:
         if args.key or github_only:
-            err("eki: --new takes a name and maybe --folder, nothing else")
+            err("eki: --new takes a name and maybe --folder and --description, nothing else")
             return 1
-        return projectlist.new(c, args.new, args.folder)
+        return projectlist.new(c, args.new, args.folder, args.description)
+    if args.description is not None:
+        err('eki: --description goes with --new; for a project: eki project describe <key> "text"')
+        return 1
     if not args.key:
         if args.folder or github_only:
             err("eki: say which project: eki project <key> --folder/--check/--branch/--retry")

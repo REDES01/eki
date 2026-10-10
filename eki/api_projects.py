@@ -28,8 +28,13 @@ INSTRUCTIONS_PROMPT = (
 _FILE_EVENTS = 2000
 _ACTIVE = ("queued", "starting", "running")
 
-#: (method, regex, fn) — see eki/apiroutes.py
-ROUTES: List[Tuple[str, str, Callable]] = []
+#: put before INSTRUCTIONS_PROMPT when the project has a description
+DESCRIBED_PROMPT = (
+    "Make the first section of AGENTS.md a heading `# {name}` followed by this description, "
+    "verbatim:\n\n{description}\n\nThen, after it:\n\n")
+
+#: how many folders `folders` offers
+_FOLDERS = 20
 
 
 def projects_list(conn: sqlite3.Connection) -> Dict[str, Any]:
@@ -134,8 +139,39 @@ def _expand(folder: Optional[str]) -> Optional[str]:
 
 
 def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    pid = projectchats.create(conn, str(body.get("name") or ""), _expand(body.get("folder")))
+    pid = projectchats.create(conn, str(body.get("name") or ""), _expand(body.get("folder")),
+                              str(body.get("description") or ""))
     return {"id": pid, "folder": projectchats.folder_of(conn, pid)}
+
+
+def describe(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/projects/<id>/describe {description}: the project as listed after."""
+    pid = projectchats.find(conn, m.group(1))
+    projectchats.set_description(conn, pid, str(body.get("description") or ""))
+    return _entry(conn, pid)
+
+
+def folders(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/folders?prefix=: up to 20 folders under what's typed, written the way it was typed
+    (`~` is `paths.user_home()`; a relative path is under it). Dot-folders only when the last
+    part starts with `.`; nothing outside your home."""
+    typed = q.get("prefix") or ""
+    if typed == "~":
+        typed = "~/"
+    head, part = typed.rsplit("/", 1) if "/" in typed else ("", typed)
+    head = head + "/" if "/" in typed else ""
+    home = os.path.realpath(paths.user_home())
+    base = os.path.realpath(os.path.join(home, _expand(head) or "."))
+    if not (base == home or base.startswith(home.rstrip("/") + "/")) or not os.path.isdir(base):
+        return {"folders": []}
+    try:
+        names = sorted(os.listdir(base), key=str.lower)
+    except OSError:
+        return {"folders": []}
+    out = [head + n for n in names
+           if n.lower().startswith(part.lower()) and (part.startswith(".") or not n.startswith("."))
+           and os.path.isdir(os.path.join(base, n))]
+    return {"folders": out[:_FOLDERS]}
 
 
 def set_folder(conn: sqlite3.Connection, pid: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,7 +202,23 @@ def clone_home(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     return {"thread": tid, "run": rid, "folder": str(dest)}
 
 
+def instructions_prompt(conn: sqlite3.Connection, pid: str) -> str:
+    """INSTRUCTIONS_PROMPT, led by the description as AGENTS.md's first section when there is one.
+    The prompt is the only place eki puts it; the agent writes the file."""
+    row = conn.execute("SELECT name, description FROM projects WHERE id=?", (pid,)).fetchone()
+    if row is None or not row["description"]:
+        return INSTRUCTIONS_PROMPT
+    return DESCRIBED_PROMPT.format(name=row["name"], description=row["description"]) + INSTRUCTIONS_PROMPT
+
+
 def write_instructions(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     """A chat in the project that writes AGENTS.md, and CLAUDE.md pointing at it."""
-    tid, rid = asking.submit(conn, INSTRUCTIONS_PROMPT, project=pid)
+    tid, rid = asking.submit(conn, instructions_prompt(conn, pid), project=pid)
     return {"thread": tid, "run": rid}
+
+
+#: (method, regex, fn) — see eki/apiroutes.py
+ROUTES: List[Tuple[str, str, Callable]] = [
+    ("POST", r"/api/projects/([^/]+)/describe", describe),
+    ("GET", r"/api/folders", folders),
+]

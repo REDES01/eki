@@ -38,6 +38,7 @@ def details(e: dict) -> List[str]:
         folder += " (missing)"
     return [f"  name: {e['name']} ({e['id']}, {e['kind']})",
             f"  folder: {folder}",
+            f"  description: {e.get('description') or '-'}",
             f"  repo: {e['repo'] or '-'}",
             f"  {counts(e)}",
             f"  instructions: {e['instructions'] or 'none'}",
@@ -64,9 +65,9 @@ def resolve(c, key: str) -> Optional[str]:
     return None
 
 
-def new(c, name: str, folder: Optional[str]) -> int:
+def new(c, name: str, folder: Optional[str], description: Optional[str] = None) -> int:
     try:
-        pid = projectchats.create(c, name, folder)
+        pid = projectchats.create(c, name, folder, description)
     except ValueError as e:
         err(f"eki: {e}")
         return 1

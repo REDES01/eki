@@ -24,6 +24,8 @@ SELF = "eki"
 HIDDEN = ("dropped", "merged")
 INSTRUCTIONS = ("AGENTS.md", "CLAUDE.md")
 OVER = ("applied", "dropped", "left", "unfit", "landed", "live", "rolled back")
+#: eki's description, fixed: it can't be edited
+SELF_DESCRIPTION = "eki itself — its own source"
 
 
 def norm(path: str | Path) -> str:
@@ -166,25 +168,35 @@ def _has_work(conn: sqlite3.Connection, pid: str) -> bool:
                              (pid, pid)).fetchone())
 
 
+def _last_active(conn: sqlite3.Connection, pid: str, created: Optional[float]) -> Optional[float]:
+    """The latest of the project's `created_at` and the newest run in its chats."""
+    run = conn.execute("SELECT MAX(r.created_at) FROM runs r JOIN threads t ON t.id=r.thread_id "
+                       "WHERE t.project=?", (pid,)).fetchone()[0]
+    return max((t for t in (created, run) if t is not None), default=None)
+
+
 def _entry(conn: sqlite3.Connection, pid: str, name: str, folder: Optional[str], repo: Optional[str],
-           kind: str, background: Optional[str]) -> dict:
+           kind: str, background: Optional[str], description: Optional[str] = None,
+           created: Optional[float] = None) -> dict:
     ok = bool(folder) and os.path.isdir(folder)
     if repo is None and ok and workspace.repo_of(folder) is not None:
         repo = github.repo_of(folder)
     found = next((f for f in INSTRUCTIONS if ok and os.path.isfile(os.path.join(folder, f))), None)
     return {"id": pid, "name": name, "folder": folder, "folder_ok": ok, "repo": repo, "kind": kind,
-            **_counts(conn, pid), "instructions": found, "background": background}
+            **_counts(conn, pid), "instructions": found, "background": background,
+            "description": description, "last_active": _last_active(conn, pid, created)}
 
 
 def entry(conn: sqlite3.Connection, p: sqlite3.Row) -> dict:
     """One project row as listed."""
     folder = _row_folder(p)
+    more = {"description": p["description"], "created": p["created_at"]}
     if p["repo"] and p["state"] != "retired":
         return _entry(conn, p["id"], p["name"], folder, p["repo"], "github",
-                      f"eki's clone at {p['path']}; changes come as PRs")
+                      f"eki's clone at {p['path']}; changes come as PRs", **more)
     background = (f"worktrees of {folder}; eki/<id> branches you merge"
                   if _has_work(conn, p["id"]) else None)
-    return _entry(conn, p["id"], p["name"], folder, p["repo"], "folder", background)
+    return _entry(conn, p["id"], p["name"], folder, p["repo"], "folder", background, **more)
 
 
 def listing(conn: sqlite3.Connection, scan: bool = False) -> List[dict]:
@@ -193,7 +205,8 @@ def listing(conn: sqlite3.Connection, scan: bool = False) -> List[dict]:
     if scan:
         _scan(conn)
     adopt(conn)
-    out = [_entry(conn, SELF, "eki", norm(builds.source()), None, "eki", "eki's own queue")]
+    out = [_entry(conn, SELF, "eki", norm(builds.source()), None, "eki", "eki's own queue",
+                  SELF_DESCRIPTION)]
     return out + [entry(conn, p) for p in _live(conn)]
 
 
@@ -214,8 +227,14 @@ def _same_folder(conn: sqlite3.Connection, where: str) -> Optional[str]:
     return got["id"] if got else None
 
 
-def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = None) -> str:
-    """A project named `name` on `folder` (default ~/<name>, made and `git init`ed when missing)."""
+def _clean(text: Optional[str]) -> Optional[str]:
+    return (text or "").strip() or None
+
+
+def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = None,
+           description: Optional[str] = None) -> str:
+    """A project named `name` on `folder` (default ~/<name>, made and `git init`ed when missing),
+    and what you're trying to achieve there. Nothing is written in the folder but `git init`."""
     name = (name or "").strip()
     if not name:
         raise ValueError("a project needs a name")
@@ -240,8 +259,8 @@ def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = N
         branch = workspace.git(where, "symbolic-ref", "--short", "-q", "HEAD", check=False)
     pid = store.new_id()
     with db.tx(conn):
-        conn.execute("INSERT INTO projects(id, name, path, folder, branch, created_at) VALUES (?,?,?,?,?,?)",
-                     (pid, name, where, where, branch, db.now()))
+        conn.execute("INSERT INTO projects(id, name, path, folder, branch, created_at, description) "
+                     "VALUES (?,?,?,?,?,?,?)", (pid, name, where, where, branch, db.now(), _clean(description)))
     adopt(conn)
     return pid
 
@@ -260,6 +279,17 @@ def set_folder(conn: sqlite3.Connection, pid: str, folder: str | Path) -> str:
         conn.execute("UPDATE projects SET folder=? WHERE id=?", (where, pid))
     adopt(conn)
     return where
+
+
+def set_description(conn: sqlite3.Connection, pid: str, text: Optional[str]) -> Optional[str]:
+    """What the project is for, from now on (empty clears it); returns it as recorded."""
+    pid = find(conn, pid)
+    if pid == SELF:
+        raise ValueError("eki's description is fixed: it's eki itself")
+    text = _clean(text)
+    with db.tx(conn):
+        conn.execute("UPDATE projects SET description=? WHERE id=?", (text, pid))
+    return text
 
 
 def find(conn: sqlite3.Connection, key: str) -> str:

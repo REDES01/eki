@@ -102,7 +102,7 @@ def test_listing_entries_and_background_lines(conn, src, proj, tmp_path):
     assert by[gh]["background"] == f"eki's clone at {projects.clone_path('me/proj')}; changes come as PRs"
     assert by[gh]["folder"] is None and not by[gh]["folder_ok"] and by[gh]["repo"] == "me/proj"
     assert set(eki) == {"id", "name", "folder", "folder_ok", "repo", "kind", "chats", "goals", "prs",
-                        "instructions", "background"}
+                        "instructions", "background", "description", "last_active"}
 
 
 def test_a_folder_on_github_shows_its_repo(conn, src, tmp_path):

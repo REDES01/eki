@@ -51,3 +51,26 @@ def room() -> Tuple[bool, str]:
     if cpu_busy():
         return False, "CPU busy"
     return True, "room"
+
+
+def free_gb() -> float:
+    """Memory free for a new program, in GB: free + inactive pages (macOS vm_stat).
+    `EKI_FREE_GB` overrides it (tests)."""
+    forced = os.environ.get("EKI_FREE_GB")
+    if forced:
+        return float(forced)
+    out = _run("vm_stat")
+    if out:
+        size = 4096
+        pages = 0
+        for line in out.splitlines():
+            if "page size of" in line:
+                size = int("".join(ch for ch in line.split("page size of")[1] if ch.isdigit()) or 4096)
+            elif line.startswith(("Pages free:", "Pages inactive:")):
+                pages += int(line.split(":")[1].strip().rstrip(".") or 0)
+        if pages:
+            return pages * size / 2 ** 30
+    try:
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2 ** 30
+    except (ValueError, OSError, AttributeError):
+        return float("inf")

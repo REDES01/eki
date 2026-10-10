@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import IO, Optional
 
 from . import builds, checkslots, db, housekeep, machine, models, observe, paths, queue, quota, selfwork, shellbuild, store, train
+from .components import access
 
 log = logging.getLogger("eki.engine")
 
@@ -154,6 +155,8 @@ def spawn_ready(conn) -> int:
             room = room or machine.room()
             if not room[0]:
                 continue
+        if r["provider"] == "component" and not access.admit(conn, r):
+            continue                                # waits for its component (its why says so)
         busy_threads.add(r["thread_id"])
         if folder:
             busy_folders.add(folder)

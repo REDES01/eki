@@ -54,7 +54,7 @@ eki follow <run>  ◄── events table
 | `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`: per model its label, `description`, `resolved` (the pinned model an alias stands for), `efforts`, `default_effort`, whether it is the default, and `floating` (an alias that follows the newest); no suggestions |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
-| `skills`, `mcp` | one store, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`) |
+| `skills`, `mcp` | one store of what every run gets, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`); a project's own skills are its `skills` card |
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
@@ -95,7 +95,7 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
-| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
 | `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use) and the library (templates and the pool); the helpers the card leaves share |
@@ -881,7 +881,7 @@ The project page shows a project's components as cards
 (`eki/web/projectcards.js`, `api_cards`): add from the library, open to set
 up, run, see its uses, remove.
 
-**The common keys.** `kind` (`service`, `assets`, `agent`), `about` (one
+**The common keys.** `kind` (`service`, `assets`, `agent`, `skills`), `about` (one
 line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
@@ -926,6 +926,18 @@ of its own; the CLI is the integration.
   components it may call), `mcp` (the MCP servers it gets) and a `target`
   (provider → model → effort). Each call is a session; it can be called many
   times.
+- **`skills`** — a project's own skills (`eki/components/skillcard.py`): the
+  card folder (`components/skills/` from the template) holds one sub-folder
+  per skill, `<name>/SKILL.md` plus its files, versioned with the project.
+  Claude Code runs in the project folder or its worktrees get it as an extra
+  `--plugin-dir` (a wrapper under `~/.eki/project-plugins/`), Codex runs a
+  per-run folder of links (`~/.eki/run-skills/<run>`); nothing is written
+  into `~/.claude`, `~/.codex` or `~/.agents`. Runs elsewhere and bare agents
+  get none. A broken SKILL.md (missing, no front matter or no description)
+  is shown and skipped. `eki component skills add <project> <folder|git URL>`
+  (never overwrites without `--replace`) and `eki component skills remove
+  <project> <name>`; `eki use <card>` lists what it holds. The rule:
+  project skills live in the project's card; ~/.eki/skills is only for skills every run should have.
 
 **The bare-agent rule.** `"bare": true` means no built-in skills, only its
 system prompt, strictly: Claude Code with `prompt.md` as its whole system

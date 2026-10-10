@@ -90,7 +90,9 @@ def _clone_url(url: str) -> str:
     return f"https://github.com/{url}.git" if _REPO.match(url) else url
 
 
-def _copy(src: Path, fallback: str) -> str:
+def _copy(src: Path, fallback: str, into: Optional[Path] = None, replace: bool = True) -> str:
+    """Copy the skill folder `src` into `into` (the store by default) as `<name>/`; its name.
+    An existing one is overwritten only with `replace`, else ValueError."""
     if src.is_file() and src.name == "SKILL.md":
         src = src.parent
     md = src / "SKILL.md"
@@ -100,15 +102,21 @@ def _copy(src: Path, fallback: str) -> str:
     name = slug(name)
     if not name:
         raise ValueError(f"{src}: can't make a skill name")
-    dest = paths.skills() / name
-    if dest.exists():
-        shutil.rmtree(dest)
+    dest = (into if into is not None else paths.skills()) / name
+    if dest.exists() or dest.is_symlink():
+        if not replace:
+            raise ValueError(f"{name} is already there; use --replace to overwrite it")
+        if dest.is_dir() and not dest.is_symlink():
+            shutil.rmtree(dest)
+        else:
+            dest.unlink()
+    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
     os.utime(dest)                                    # added_at: when it came in, not the source's time
     return name
 
 
-def _from_git(source: str) -> str:
+def _from_git(source: str, into: Optional[Path] = None, replace: bool = True) -> str:
     url, _, sub = source.strip().partition("#")
     sub = sub.strip("/")
     tmp = paths.home() / "tmp"
@@ -129,7 +137,7 @@ def _from_git(source: str) -> str:
         if src != root and root not in src.parents:
             raise ValueError(f"{sub} is outside the repository")
         repo_name = re.sub(r"\.git$", "", url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1])
-        return _copy(src, Path(sub).name if sub else repo_name)
+        return _copy(src, Path(sub).name if sub else repo_name, into, replace)
     finally:
         shutil.rmtree(clone, ignore_errors=True)
 

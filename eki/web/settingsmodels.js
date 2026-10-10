@@ -8,7 +8,7 @@
   const ROLES = ["router", "planner", "reviewer", "chores"];                    // roles.ROLES
   const OFFABLE = ["reviewer", "chores"];                                       // roles.OFFABLE
   const LABELS = { router: "Router", planner: "Planner", reviewer: "Reviewer", chores: "Chores" };
-  const M = { got: null, err: "", rolesOpen: false };
+  const M = { got: null, err: "" };
   const amber = (s) => (s ? `<div class="dim" style="color: var(--amber)">${esc(s)}</div>` : "");
   const field = (label, html) => `<label class="set-field"><span>${label}</span>${html}</label>`;
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "never");
@@ -41,10 +41,8 @@
 
   function roles(d) {
     if (!M.got) return `<div class="dim">${esc(M.err || "Reading the model lists…")}</div>`;
-    const sum = ROLES.map((r) => `${r} ${settingsTarget.key(roleOf(d, r) || M.got.roles[r].default) || "none"}`).join(" · ");
-    return `<div data-roles>${picker(d, "router")}
-      <button type="button" class="ghost small" data-act="roles-open" title="eki's other jobs">${M.rolesOpen ? "▾" : "▸"} ${esc(sum)}</button>
-      ${M.rolesOpen ? `<div class="set-grid">${ROLES.slice(1).map((r) => picker(d, r)).join("")}</div>` : ""}</div>`;
+    // four pickers, always shown: each of eki's jobs is a thing you set, not a detail to unfold
+    return `<div data-roles><div class="set-grid">${ROLES.map((r) => picker(d, r)).join("")}</div></div>`;
   }
 
   // one picker changed: set roles[role], or drop it (and an empty roles) for the default.
@@ -70,7 +68,6 @@
 
   // a button of ours: true when the form should be drawn again
   async function act(a, btn, note) {
-    if (a === "roles-open") return (M.rolesOpen = !M.rolesOpen), true;
     if (a !== "mrefresh") return false;
     btn.disabled = true;
     const r = await fetch("/api/models/refresh", { method: "POST", headers: { "Content-Type": "application/json", "X-Eki": "1" },

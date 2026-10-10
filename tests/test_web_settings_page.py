@@ -30,3 +30,8 @@ def test_the_page_loads_the_target_picker_and_settings_js_stays_small(web):
     assert code == 200 and "window.settingsTarget" in js
     web_dir = Path(__file__).resolve().parent.parent / "eki" / "web"
     assert len((web_dir / "settings.js").read_text().splitlines()) < 400
+
+
+def test_every_role_has_its_own_picker_in_view(web):
+    _, js = get(f"{web}/ui/settingsmodels.js")
+    assert "ROLES.map((r) => picker(d, r))" in js and "roles-open" not in js

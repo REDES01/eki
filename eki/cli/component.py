@@ -1,10 +1,12 @@
-"""`eki component kinds | ls | add | attach | rm | uses | show` — the component folders.
+"""`eki component kinds | ls | add | attach | rm | uses | show | skills` — the component folders.
 
 `add` copies a template into `components/<name>/` of a project folder (the project of the cwd by
 default, of -C folder, or the machine-wide pool with --pool), under the template's name or the
 next free `-2`, `-3`…. `attach` adds a card reaching a pool component; `rm` moves a card to the
 Trash. Nothing is overwritten, deleted, committed or staged: the folder is the person's to keep.
 A template's `mcp_servers` go into eki's MCP registry, switched off, and leave the copy.
+`skills add | remove` puts skills into or takes them out of a project's skills card
+(componentskills.py).
 """
 from __future__ import annotations
 
@@ -16,9 +18,10 @@ from typing import List, Optional
 
 from .. import components, db
 from ..components import cards, uses
+from . import componentskills
 
 NAME = "component"
-HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show"
+HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show, skills"
 
 
 def add(p) -> None:
@@ -43,6 +46,7 @@ def add(p) -> None:
     u.add_argument("-C", dest="folder", help="this folder's project (default: here)")
     s = sub.add_parser("show", help="one component: folder, scope, component.json, notes")
     s.add_argument("name")
+    componentskills.add(sub)
 
 
 def _about(folder: Path) -> str:
@@ -173,6 +177,9 @@ def run(args) -> int:
         return _uses(args)
     if args.action == "show":
         return _show(args.name)
+    if args.action == "skills":
+        return componentskills.run(args)
     print("eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder]"
-          " | attach <pool-name> [-C folder] | rm <name> [-C folder] | uses <name> [-C folder] | show <name>")
+          " | attach <pool-name> [-C folder] | rm <name> [-C folder] | uses <name> [-C folder] | show <name>"
+          " | skills add <project> <folder|git URL> [--replace] | skills remove <project> <name>")
     return 0

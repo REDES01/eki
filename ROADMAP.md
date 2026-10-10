@@ -46,7 +46,7 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 - [x] Image generation as a provider (ComfyUI), routed like any other.
 - [ ] Learned preferences: routing overrides learned from behaviour, with
       a notice and undo.
-- [ ] The Swift shell rebuilt by eki when `mac/` changes.
+- [x] The Swift shell rebuilt by eki when mac/ changes.
 
 ## Not planned
 

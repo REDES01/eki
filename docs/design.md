@@ -476,8 +476,14 @@ are Codex's.
   reaches the shell through `eki/web/shell.js` (`window.ekiShell`):
   `pickFolder()` posts `{pickFolder: id}` and the shell answers with a
   folder panel through `ekiShell.picked(id, path)`; outside the shell
-  `canPickFolder()` is false and the page works without it. A shell
-  change goes live only after `bin/build-mac`.
+  `canPickFolder()` is false and the page works without it. `bin/build-mac`
+  writes the commit the app was built from into Info.plist (`EkiCommit`).
+  Once a healthy live build changes `mac/` or `bin/build-mac` relative to
+  the installed app's `EkiCommit` (`eki/shellbuild.py`), eki rebuilds
+  `Eki.app` as a background `provider='command'` run and swaps it in; an
+  open window offers **Restart** and never restarts by itself
+  (docs/self-build.md, "Replacing the running engine"). In dev mode (no
+  build commit) you still run `bin/build-mac` by hand.
 - **Local models** (`eki/models.py`): a local provider with a `serve`
   command can be started and stopped by eki (`eki models`, or the
   sidebar). With `keep_up`, the engine keeps it running while memory is

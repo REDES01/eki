@@ -592,7 +592,57 @@ make that safe:
   watchdog, no port probing.
 
 The web UI is read from disk on every request, so a swap makes it live on
-refresh. The Swift shell is rebuilt only when `mac/` changed.
+refresh. The Swift shell is rebuilt only when `mac/` changed:
+
+**The Mac shell** (`eki/shellbuild.py`, a step of the engine's tick after
+the train). `bin/build-mac` writes the commit it built from into the app's
+Info.plist as `EkiCommit` (from `EKI_APP_COMMIT`, else the build's
+`.eki-build.json`, else `git rev-parse HEAD`).
+
+- **When.** Once the running build is healthy (`builds.status()`), eki
+  compares the installed app's `EkiCommit` (`shellbuild.app_path()`, i.e.
+  `~/eki/Eki.app`) with the running build's commit:
+  `git diff --name-only <installed> <running> -- mac/ bin/build-mac` in
+  the integration repo. Anything listed queues a rebuild; an app with no
+  `EkiCommit`, or one whose commit isn't in the repo, counts as changed, so
+  a stale app catches up once. A build that touches neither path queues
+  nothing, and a build that rolls back never got healthy, so it never
+  rebuilds. In dev mode (no build commit) nothing happens; run
+  `bin/build-mac` yourself.
+- **The run.** One background `provider='command'` run in thread
+  `shell build: build <id>`, working in the build folder
+  (`~/.eki/builds/<id>/`), whose `why` names the changed files. It runs
+  `bin/build-mac` with `EKI_APP_OUT=~/.eki/shell/<id>/Eki.app`,
+  `EKI_APP_ROOT=~/eki` (so the app's `EkiRoot` stays your checkout) and
+  `EKI_APP_COMMIT=<sha>`.
+- **The swap.** When the run is `done`: `Eki.app` → `Eki.app.old`, the new
+  app into place, `Eki.app.old` deleted, then `lsregister -f` (best
+  effort). If the engine is killed partway, the next tick finds `Eki.app`
+  missing beside `Eki.app.old` and renames it back; the app is never left
+  missing. An open window keeps running its old binary.
+- **The state** is `~/.eki/shell.json`, written atomically:
+  `{"state": "building"|"installed"|"failed", "commit", "build", "run",
+  "error", "at"}`. A restart while building finds the run again, or starts
+  it again if it's gone; the engine keeps nothing in memory.
+- **A failed compile** (`failed` or `cancelled`) writes one journal
+  `fault` with `where: "shell build"`, `exc: "swiftc"`, the last 40 lines
+  of output and `ours: False`, so `faults.tick` opens no fix goal (gate 3's
+  `test_shell_typechecks` guards the Swift). The temp folder goes, the
+  installed app is untouched, and that commit isn't tried again; the next
+  live build whose comparison shows `mac/` changes tries again.
+- **The bar.** `GET /api/shell` returns `shellbuild.view()`:
+  `{installed, app, state, build, run, error}`. The shell reads
+  `EkiCommit` once at launch and gives it to the page as
+  `window.ekiShell = {commit}`. `eki/web/shellbar.js` polls every 60 s and
+  on focus, and only in the Mac window; when the installed commit differs
+  from `ekiShell.commit` and nothing is building it shows **eki's window
+  has an update · Restart**. It never restarts by itself. A click posts
+  `{restart: location.href}`; the shell starts a detached `/bin/sh` that
+  waits for it to exit and runs `open Eki.app --args --eki-url <href>`,
+  then quits, and the new window opens on the same page (frame and zoom
+  are kept already). A closed app does nothing: its next launch is the new
+  app. A window built before `EkiCommit` existed can't show the bar; open
+  it once after this lands and later updates will.
 
 The **train** goes every `self_release_minutes` (5): if the integration ref
 is ahead of the running build and its head is green, build it, run the

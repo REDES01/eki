@@ -92,6 +92,7 @@ eki pictures [--limit N]        # the pictures eki has drawn: path, kind, prompt
 eki skills [add|remove|sync]    # list, add or remove skills (shared by every program)
 eki mcp [add|remove <name>]     # list, add or remove MCP servers (shared by every program)
 eki use [<name> args…]          # call a component; alone, list the components reachable from here
+eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder] | show <name>   # the component folders: add copies a template, never overwrites
 eki open                        # open eki's window
 eki drill                       # prove a restart loses nothing (runs in a throwaway home)
 eki swap <commit> | --back      # make a build of a commit, check it, and put it live

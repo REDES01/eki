@@ -11,14 +11,15 @@ from __future__ import annotations
 import re
 from typing import Callable, List, Optional, Tuple
 
-from . import api_artifacts, api_customize, api_projects, api_schedule
+from . import api_artifacts, api_components, api_customize, api_projects, api_schedule
 
 Route = Tuple[str, str, Callable]
 
 
 def routes() -> List[Route]:
     """Read on every call, so a route added to an `api_*.ROUTES` is live."""
-    return api_projects.ROUTES + api_artifacts.ROUTES + api_schedule.ROUTES + api_customize.ROUTES
+    return (api_projects.ROUTES + api_artifacts.ROUTES + api_schedule.ROUTES + api_customize.ROUTES
+            + api_components.ROUTES)
 
 
 ROUTES: List[Route] = routes()

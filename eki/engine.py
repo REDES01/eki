@@ -2,10 +2,14 @@
 
 Every half second it reaps (a worker whose heartbeat stopped and whose
 process is gone: its run was *interrupted*, and goes back in the queue to
-be resumed) and spawns (queued runs, in order, one at a time per thread,
-background ones only when the Mac has room). It holds no state of its own
-— stop it at any moment, start it again, and it picks up from the
-database. Workers it started keep running while it's gone.
+be resumed) and spawns (queued runs, in order, one at a time per thread
+and per folder, background ones only when the Mac has room). Each kind of
+run is held only by its own limit: checks by check slots (checkslots.py),
+items being built by `self.parallel` before a build run exists
+(scheduler.py); everything else — chats, plans, reviews — starts at once.
+There is no overall cap unless EKI_MAX_PARALLEL is set (`ceiling`).
+It holds no state of its own — stop it at any moment, start it again,
+and it picks up from the database. Workers it started keep running while it's gone.
 """
 from __future__ import annotations
 
@@ -33,7 +37,16 @@ STUCK = 180
 STARTING = 30
 #: interruptions in a row before a run is given up on
 MAX_ATTEMPTS = 4
-MAX_PARALLEL = int(os.environ.get("EKI_MAX_PARALLEL") or 16)   # light agent turns mostly wait on the network; checks have their own slots
+
+
+def ceiling() -> Optional[int]:
+    """EKI_MAX_PARALLEL, read each time: at most this many runs at once, of
+    every kind. Unset, not a number or below 1: no overall cap."""
+    try:
+        n = int(os.environ.get("EKI_MAX_PARALLEL") or "")
+    except ValueError:
+        return None
+    return n if n >= 1 else None
 
 
 def alive(pid: Optional[int]) -> bool:
@@ -118,14 +131,15 @@ def spawn_ready(conn) -> int:
     busy_threads = {r["thread_id"] for r in active}
     # two runs in one folder would overwrite each other: they take turns
     busy_folders = {store.cwd_of(conn, r["thread_id"]) for r in active} - {None}
-    slots = MAX_PARALLEL - len(active)
+    cap = ceiling()
+    slots = None if cap is None else cap - len(active)
     judging, judge_slots = sum(1 for r in active if checkslots.is_judge(r)), checkslots.limit()
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()
     room: Optional[tuple] = None
     for r in queued:
-        if slots <= 0:
+        if slots is not None and slots <= 0:
             break
         folder = store.cwd_of(conn, r["thread_id"])
         if r["thread_id"] in busy_threads or (r["retry_at"] and r["retry_at"] > now) \
@@ -145,7 +159,8 @@ def spawn_ready(conn) -> int:
             busy_folders.add(folder)
         spawn(conn, r["id"])
         judging += judge
-        slots -= 1
+        if slots is not None:
+            slots -= 1
         started += 1
     return started
 

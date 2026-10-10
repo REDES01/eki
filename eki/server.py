@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, api_models, api_projects, api_settings, api_station, db, observe
+from . import api, api_models, api_projects, api_settings, api_station, db, observe, shellbuild
 
 log = logging.getLogger("eki.server")
 
@@ -194,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._call(api_station.station)
         if p == "/api/builds":
             return self._call(api_station.builds_view)
+        if p == "/api/shell":
+            return self._call(lambda _c: shellbuild.view())
         if p == "/api/journal":
             return self._call(api_station.journal, q.get("since"), q.get("kind"))
         if p == "/api/digests":

@@ -11,8 +11,9 @@ tree may do anything) approvals are granted by eki and noted in the thread.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from . import oneshot
 from .base import Emit, Outcome, Turn, find_binary, short, with_history
 from .program import Channel, ProgramProvider
 
@@ -41,6 +42,18 @@ class Codex(ProgramProvider):
         for flag in turn.extra.get("codex_config") or []:
             argv += ["-c", flag]
         return argv + ["app-server"]
+
+    def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
+                 max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
+                 model: Optional[str] = None) -> Dict[str, Any]:
+        """One answer with as few tools as codex exec allows (oneshot): {"text", "tool_calls": []}."""
+        return oneshot.complete("codex", self.bin or "codex", messages, model=model or self.cfg.get("model"),
+                                timeout=timeout, stop=stop, on_text=on_text)
+
+    def take(self, turn: Turn, emit: Emit) -> Outcome:
+        if turn.extra.get("row") == "chore":      # eki's own job: one call, no tools
+            return oneshot.chore(self, turn, emit)
+        return super().take(turn, emit)
 
     # ---- json-rpc ------------------------------------------------------------------------
 

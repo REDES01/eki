@@ -84,9 +84,10 @@ class Local(Provider):
         return self.cfg.get("model") or (self.models() or ["default"])[0]
 
     def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
-                 max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None) -> Dict[str, Any]:
-        """One streamed chat completion: {"text", "tool_calls"}."""
-        body: Dict[str, Any] = {"model": self.model(), "messages": messages, "stream": True,
+                 max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
+                 model: Optional[str] = None) -> Dict[str, Any]:
+        """One streamed chat completion: {"text", "tool_calls"}. `model` over the configured one."""
+        body: Dict[str, Any] = {"model": model or self.model(), "messages": messages, "stream": True,
                                 "max_tokens": max_tokens,
                                 "chat_template_kwargs": {"enable_thinking": bool(self.cfg.get("thinking"))}}
         body.update(self.cfg.get("params") or DEFAULT_PARAMS)

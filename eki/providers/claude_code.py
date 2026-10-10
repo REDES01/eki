@@ -12,8 +12,9 @@ the `control_response`. eki never reads a token; the program runs as you.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from . import oneshot
 from .base import Emit, Outcome, Turn, find_binary, image_block, short, with_history
 from .program import Channel, ProgramProvider
 
@@ -166,7 +167,16 @@ class ClaudeCode(ProgramProvider):
         ch.write({"type": "control_response",
                   "response": {"subtype": "success", "request_id": key["rid"], "response": body}})
 
+    def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
+                 max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
+                 model: Optional[str] = None) -> Dict[str, Any]:
+        """One answer with no tools (oneshot): {"text", "tool_calls": []}."""
+        return oneshot.complete("claude", self.bin or "claude", messages, model=model or self.cfg.get("model"),
+                                timeout=timeout, stop=stop, on_text=on_text)
+
     def take(self, turn: Turn, emit: Emit) -> Outcome:
+        if turn.extra.get("row") == "chore":      # eki's own job: one call, no tools
+            return oneshot.chore(self, turn, emit)
         out = super().take(turn, emit)
         if out.state == "failed" and turn.resume and "no conversation found" in out.error.lower():
             # the session never made it to disk (killed before its first save):

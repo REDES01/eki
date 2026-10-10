@@ -431,7 +431,10 @@ are Codex's.
     `settingsproviders.js`, `settingsnotify.js`, `settingsself.js`) that
     registers with `settings.section(name, {title, file, html, edit,
     act})` and names the one file it edits; Form/Raw JSON, Reset and Save
-    act on that file. There is one draft per file, so edits in Jobs and
+    act on that file. A section file calls `settings.section` only when it
+    is a function, else it pushes onto `window.settingsSections` (drained
+    by `settings.js`), because the sidebar link `#settings` makes
+    `window.settings` an element until `settings.js` loads. There is one draft per file, so edits in Jobs and
     Rows are saved together, and changing section never drops a draft.
     Settings sit in rounded groups of one-line settings — the label (and a
     dim sentence) on the left, the control on the right

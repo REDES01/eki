@@ -190,6 +190,7 @@
   window.settings = {
     show, hide, on: () => S.on, section, render, clone, note,
     draft: (name) => S.draft[name], got: (name) => S.got[name],
+    sections: () => SECTIONS.filter((n) => REG[n]),
   };
   nav.register("settings", { show, hide });
 })();

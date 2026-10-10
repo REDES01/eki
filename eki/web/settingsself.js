@@ -25,6 +25,7 @@
   }
 
   const self = { title: "eki self", file: "routing", html: form, edit };
-  if (window.settings) settings.section("self", self);
+  // The sidebar link #settings is window.settings until settings.js loads.
+  if (window.settings && typeof window.settings.section === "function") settings.section("self", self);
   else (window.settingsSections = window.settingsSections || []).push(["self", self]);
 })();

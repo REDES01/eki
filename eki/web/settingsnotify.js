@@ -40,6 +40,7 @@
 
   window.settingsNotify = { form, edit };
   const notifications = { title: "Notifications", file: "routing", html: (d) => form(d), edit: (el, d) => edit(el, d) };
-  if (window.settings) settings.section("notifications", notifications);
+  // The sidebar link #settings is window.settings until settings.js loads.
+  if (window.settings && typeof window.settings.section === "function") settings.section("notifications", notifications);
   else (window.settingsSections = window.settingsSections || []).push(["notifications", notifications]);
 })();

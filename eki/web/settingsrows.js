@@ -118,6 +118,7 @@
   }
 
   const rows = { title: "Rows", file: "routing", html: form, edit, act };
-  if (window.settings) settings.section("rows", rows);
+  // The sidebar link #settings is window.settings until settings.js loads.
+  if (window.settings && typeof window.settings.section === "function") settings.section("rows", rows);
   else (window.settingsSections = window.settingsSections || []).push(["rows", rows]);
 })();

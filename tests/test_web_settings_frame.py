@@ -113,3 +113,31 @@ def test_the_page_labels_a_target_as_targets_label_does(tmp_path):
     out = subprocess.run(["node", str(stub), str(WEB / "settingstarget.js"), json.dumps([[c[0] for c in cases], models])],
                          capture_output=True, text=True, timeout=30, check=True)
     assert json.loads(out.stdout) == want
+
+
+@pytest.mark.parametrize("link", [True, False], ids=["sidebar-link", "no-link"])
+def test_sections_register_though_window_settings_is_the_sidebar_link(tmp_path, link):
+    """The page's <a id="settings"> is window.settings until settings.js runs; every section still registers."""
+    _node()
+    stub = tmp_path / "page.js"
+    stub.write_text(
+        'const vm = require("vm"), fs = require("fs"), path = require("path");\n'
+        'const [dir, order, link] = [process.argv[2], JSON.parse(process.argv[3]), process.argv[4] === "1"];\n'
+        'const ctx = vm.createContext({});\n'
+        'vm.runInContext("var window = this;", ctx);\n'
+        'if (link) ctx.settings = { tagName: "A", id: "settings" };\n'
+        'Object.assign(ctx, { md: { esc: String }, nav: { register() {} }, document: { getElementById: () => null } });\n'
+        'const errors = [];\n'
+        'for (const n of order) {\n'
+        '  const f = path.join(dir, n + ".js");\n'
+        '  try { vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f }); }\n'
+        '  catch (e) { errors.push(n + ": " + e.message); }\n'
+        '}\n'
+        'let sections = null;\n'
+        'try { sections = vm.runInContext("window.settings.sections()", ctx); } catch (e) { errors.push("sections: " + e.message); }\n'
+        'console.log(JSON.stringify({ errors, sections: sections && Array.from(sections) }));')
+    out = subprocess.run(["node", str(stub), str(WEB), json.dumps(ORDER), "1" if link else "0"],
+                         capture_output=True, text=True, timeout=30, check=True)
+    got = json.loads(out.stdout)
+    assert got["errors"] == []
+    assert got["sections"] == ["jobs", "rows", "providers", "notifications", "self"]

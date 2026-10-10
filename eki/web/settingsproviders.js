@@ -137,6 +137,7 @@
 
   window.settingsProviders = { names };
   const providers = { title: "Providers", file: "providers", html: providersForm, edit: editProviders, act: actProviders };
-  if (window.settings) settings.section("providers", providers);
+  // The sidebar link #settings is window.settings until settings.js loads.
+  if (window.settings && typeof window.settings.section === "function") settings.section("providers", providers);
   else (window.settingsSections = window.settingsSections || []).push(["providers", providers]);
 })();

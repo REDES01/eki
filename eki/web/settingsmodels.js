@@ -91,6 +91,7 @@
     },
     act: () => false,   // Refresh (mrefresh) is settings.js's, from any section
   };
-  if (window.settings) settings.section("jobs", jobs);
+  // The sidebar link #settings is window.settings until settings.js loads.
+  if (window.settings && typeof window.settings.section === "function") settings.section("jobs", jobs);
   else (window.settingsSections = window.settingsSections || []).push(["jobs", jobs]);
 })();

@@ -10,19 +10,22 @@ rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on Gi
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
 local model its patch notes and triage (eki/digestprose.py), queue a notice for each goal
 that ended (eki/notifygoals.py), and push the
-queued notices to the person's phone through ntfy (eki/notify.py). Nothing here is state that matters: the
-hour between prunes lives in memory, and losing it on a restart only means
-an early prune.
+queued notices to the person's phone through ntfy (eki/notify.py), and read a
+program's model list again when it is a day old (eki/modellist.py — on a thread
+of its own with a 20 s limit, so the pass never waits on it). Nothing here is
+state that matters: the hour between prunes and the last list tries live in
+memory, and losing them on a restart only means an early prune or an early try.
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 import time
-from typing import Callable, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
-from . import (db, digest, digestprose, faults, issues, notify, notifygoals, observe, prfollow, prmirror,
-               projectsetup, prs, score, selfpick, standing)
+from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
+               prmirror, projectsetup, prs, score, selfpick, standing)
 
 log = logging.getLogger("eki.housekeep")
 
@@ -51,6 +54,34 @@ def _digest(conn: sqlite3.Connection) -> List[str]:
     return [f"digest written: {page}"] + ([f"digest prose asked of the local model: run {rid}"] if rid else [])
 
 
+#: how long after a try (good or not) a provider's list isn't tried again
+LIST_RETRY = 3600.0
+_list_tried: Dict[str, float] = {}
+
+
+def _read_list(name: str) -> None:
+    c = db.connect()                                     # a thread of its own needs its own connection
+    try:
+        modellist.refresh(c, name, timeout=modellist.TIMEOUT)
+    except Exception as e:                               # noqa: BLE001 — a list is never worth a fault
+        log.info("model list of %s not read: %s", name, e)
+    finally:
+        c.close()
+
+
+def _models(conn: sqlite3.Connection) -> List[str]:
+    """Start a thread for each list that is a day old; never wait for one."""
+    said = []
+    now = time.time()
+    for name in modellist.stale(conn):
+        if now - _list_tried.get(name, 0.0) < LIST_RETRY:
+            continue
+        _list_tried[name] = now
+        threading.Thread(target=_read_list, args=(name,), name=f"eki-models-{name}", daemon=True).start()
+        said.append(f"models: reading {name}'s list")
+    return said
+
+
 STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("prune", _prune),
     ("score", lambda conn: score.settle(conn)),
@@ -64,6 +95,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("prmirror", prmirror.tick),
     ("digest", _digest),
     ("digestprose", digestprose.tick),
+    ("models", _models),
     ("notifygoals", notifygoals.tick),
     ("notify", notify.tick),
 ]

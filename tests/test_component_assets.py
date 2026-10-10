@@ -20,6 +20,7 @@ def use(comp, *args):
 
 def test_worktree_sees_pool_by_symlink(proj):
     put_assets(proj, path="media/assets")
+    (proj / ".gitignore").write_text("media/assets/\n")
     wt = workspace.add(proj, "k1")
     seen = wt / "media" / "assets"
     assert os.path.islink(seen)
@@ -37,13 +38,51 @@ def test_worktree_sees_pool_by_symlink(proj):
 
 def test_existing_path_left_alone(proj):
     put_assets(proj)
-    (proj / "assets").mkdir()
-    (proj / "assets" / "keep.txt").write_text("x")
-    workspace.git(proj, "add", "assets/keep.txt")
-    workspace.git(proj, "commit", "-q", "-m", "tracked assets")
+    (proj / ".gitignore").write_text("assets/\n")
     wt = workspace.add(proj, "k2")
-    assert not os.path.islink(wt / "assets")                    # a real checkout folder: untouched
+    os.unlink(wt / "assets")
+    (wt / "assets").mkdir()                                     # something real in the way
+    assert not os.path.islink(wt / "assets")
     assert "left alone" in assets.link(wt)[0]
+
+
+def test_tracked_pool_reported_and_not_linked(proj):
+    put_assets(proj)
+    (proj / "assets").mkdir()
+    for n in ("a.png", "b.png", "c.png"):
+        (proj / "assets" / n).write_text(n)
+    workspace.git(proj, "add", "assets")
+    workspace.git(proj, "commit", "-q", "-m", "tracked assets")
+    (proj / ".gitignore").write_text("assets/\n")              # ignored now, but still tracked
+    comp = components.get("art", proj)
+    said = "assets/ has 3 tracked files in git (e.g. assets/a.png); not linked into worktrees: untrack them first"
+    assert said in assets.notes(comp)
+    wt = workspace.add(proj, "k4")
+    assert not os.path.islink(wt / "assets")                    # the normal checkout
+    assert sorted(p.name for p in (wt / "assets").iterdir()) == ["a.png", "b.png", "c.png"]
+    assert assets.link(wt) == [f"art: {said}"]
+
+
+def test_not_ignored_pool_not_linked(proj):
+    put_assets(proj)
+    wt = workspace.add(proj, "k5")
+    assert not (wt / "assets").exists() and not os.path.islink(wt / "assets")
+    assert assets.link(wt) == [f"art: assets/ is not git-ignored in {proj.resolve()}; not linked into worktrees"]
+
+
+def test_pool_size_and_writes_through(proj):
+    put_assets(proj)
+    (proj / ".gitignore").write_text("assets/\n")
+    comp = components.get("art", proj)
+    assert assets.pool_size(comp) == 0                          # missing: nothing
+    wt = workspace.add(proj, "k6")
+    assert os.path.islink(wt / "assets")
+    (wt / "assets" / "song.ogg").write_bytes(b"x" * 3000)
+    (wt / "assets" / "sub").mkdir()
+    (wt / "assets" / "sub" / "a.bin").write_bytes(b"y" * 72)
+    assert (proj / "assets" / "song.ogg").stat().st_size == 3000
+    assert assets.pool_size(comp) == 3072
+    assert assets.notes(comp) == ["pool: 3.0 KB"]
 
 
 def test_no_components_untouched(proj):
@@ -89,9 +128,10 @@ def test_escapes_refused(proj, tmp_path):
 def test_not_ignored_note(proj):
     put_assets(proj)
     comp = components.get("art", proj)
-    assert assets.notes(comp) == [f"assets/ is not git-ignored in {proj.resolve()}"]
+    assert assets.notes(comp) == [f"assets/ is not git-ignored in {proj.resolve()}; not linked into worktrees",
+                                  "pool: 0 B"]
     (proj / ".gitignore").write_text("assets/\n")
-    assert assets.notes(comp) == []
+    assert assets.notes(comp) == ["pool: 0 B"]
 
 
 def _raises(fn):
@@ -106,7 +146,7 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     put_assets(plain)
-    assert assets.notes(components.get("art", plain)) == []
+    assert assets.notes(components.get("art", plain)) == ["pool: 0 B"]
     d = components.pool_dir() / "shared"
     d.mkdir(parents=True)
     (d / "component.json").write_text(json.dumps({"kind": "assets", "about": "x", "path": "files"}))
@@ -114,7 +154,7 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
     (plain / "components" / "shared").mkdir()
     (plain / "components" / "shared" / "component.json").write_text(json.dumps({"pool": "shared"}))
     comp = components.get("shared", plain)
-    assert assets.pool(comp) == d / "files" and assets.notes(comp) == []
+    assert assets.pool(comp) == d / "files" and assets.notes(comp) == ["pool: 0 B"]
 
 
 def test_template_is_valid(tmp_path):

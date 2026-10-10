@@ -4,7 +4,8 @@
 folder). That folder in the project itself is the pool: created when missing,
 never versioned like code. Every worktree of the project sees it at the same
 relative path through a symlink — never a copy or hardlink — so anything
-written there lands in the pool at once. Calls: `ls [sub]`, `info <path>`,
+written there lands in the pool at once. Only a pool git-ignored as a whole,
+with nothing inside tracked, is linked; otherwise the card says why. Calls: `ls [sub]`, `info <path>`,
 `rm <path>` (to the Trash, never a real delete).
 """
 from __future__ import annotations
@@ -143,19 +144,45 @@ def stop(comp: Component) -> bool:
     return False
 
 
-def notes(comp: Component) -> List[str]:
+def _git(root: Path, *args: str) -> Optional[subprocess.CompletedProcess]:
+    try:
+        return subprocess.run(['git', '-C', str(root), *args],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def problems(comp: Component) -> List[str]:
+    """Why this project pool can't be linked into worktrees: not git-ignored as a
+    whole, or files inside it tracked by git. Empty when it can (or there's no repo)."""
     if comp.scope != 'project':
         return []
     root = root_of(comp)
+    rel = comp.spec['path'].rstrip('/')
+    out = []
+    ign = _git(root, 'check-ignore', '-q', '--no-index', rel + '/')   # a folder, even before it exists
+    if ign is not None and ign.returncode == 1:         # 0 ignored, 128 no repo: both fine
+        out.append(f'{rel}/ is not git-ignored in {root}; not linked into worktrees')
+    ls = _git(root, 'ls-files', '--', rel)
+    tracked = ls.stdout.splitlines() if ls is not None and ls.returncode == 0 else []
+    if tracked:
+        n = len(tracked)
+        out.append(f'{rel}/ has {n} tracked file{"" if n == 1 else "s"} in git '
+                   f'(e.g. {tracked[0]}); not linked into worktrees: untrack them first')
+    return out
+
+
+def pool_size(comp: Component) -> int:
+    """Bytes in the pool, following no symlinks; 0 when it is missing."""
+    p = root_of(comp) / comp.spec['path']
     try:
-        out = subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', '--no-index',
-                              comp.spec['path'].rstrip('/') + '/'],    # a folder, even before it exists
-                             capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    if out.returncode == 1:          # 0 ignored, 128 no repo: both fine
-        return [f'{comp.spec["path"]}/ is not git-ignored in {root}']
-    return []
+        return _size(p) if p.exists() or p.is_symlink() else 0
+    except OSError:
+        return 0
+
+
+def notes(comp: Component) -> List[str]:
+    return problems(comp) + [f'pool: {_human(pool_size(comp))}']
 
 
 def linked(worktree, conn=None) -> List[str]:
@@ -183,6 +210,10 @@ def link(worktree: Path, conn=None) -> List[str]:
         if comp.kind != 'assets' or comp.scope != 'project':
             continue
         rel = comp.spec['path']
+        why = problems(comp)
+        if why:
+            done += [f'{comp.name}: {w}' for w in why]
+            continue
         src = pool(comp)
         dest = worktree / rel
         if dest.is_symlink() and os.readlink(dest) == str(src):

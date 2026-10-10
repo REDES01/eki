@@ -69,3 +69,15 @@ dialog.sheet input, dialog.sheet textarea, dialog.sheet select {
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 dialog.sheet .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 dialog.sheet .error { color: var(--red); font-size: 13px; margin-top: 8px; }
+
+/* a project's ⋯ menu (projectmenu.js): the button sits top-right of a card or the project page */
+.pm-more { float: right; font: inherit; font-size: 16px; line-height: 1; padding: 2px 8px; margin: -2px -6px 0 6px;
+  background: none; border: 0; border-radius: 6px; color: var(--dim); cursor: pointer; }
+.pm-more:hover { background: var(--panel); color: var(--text); }
+.pj-top { display: flow-root; }
+.pm-menu { position: fixed; z-index: 50; min-width: 170px; padding: 4px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+.pm-item { display: block; width: 100%; text-align: left; font: inherit; font-size: 13.5px; padding: 7px 10px;
+  background: none; border: 0; border-radius: 6px; color: var(--text); cursor: pointer; }
+.pm-item:hover { background: var(--panel); }
+.pm-item.danger { color: var(--red); }

@@ -1,6 +1,6 @@
 // #project/<id>: one project's page — its description (Edit opens a textarea, Enter saves), a box
 // for a new chat in its folder, then Chats, Background, Pictures and Files, each one summary line
-// that opens on click. The list of projects is projectspage.js. Everything comes from
+// that opens on click; the header's ⋯ menu deletes it (projectmenu.js). The list of projects is projectspage.js. Everything comes from
 // /api/projects (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -31,6 +31,7 @@
     el.id = "project-view";
     el.innerHTML = `<div class="pj-col">
       <div id="pj-page">
+        <div id="pj-top" class="pj-top"></div>
         <div id="pj-desc" class="pj-desc"></div>
         <div id="pj-head" class="pj-headline"></div>
         <div id="pj-setup"></div>
@@ -66,6 +67,7 @@
     S.home = p.user_home || S.home;
     $("title").textContent = p.name;
     $("meta").textContent = [p.kind, p.repo, p.instructions].filter(Boolean).join(" · ");
+    put("pj-top", window.projectMenu ? window.projectMenu.button(p) : "");     // ⋯ → Delete project… (projectmenu.js)
     if (!S.editing) put("pj-desc", desc(p));
     put("pj-head", `<div>${p.folder ? `Chats work in <code>${esc(p.folder)}</code> — your real folder.` : "Chats need a folder — none yet."}</div>
       <div class="dim">Background: ${esc(p.background || "none")}</div>`);
@@ -180,6 +182,11 @@
       $(`pj-${k}`).classList.toggle("open", S.open.has(k));
       return;
     }
+    const more = e.target.closest("[data-pm]");
+    if (more && S.data) {
+      e.preventDefault(); e.stopPropagation();
+      return window.projectMenu && window.projectMenu.open(S.data, more, () => nav.go("#projects"));
+    }
     const pic = e.target.closest("[data-pic]");
     if (pic) return picture((((S.data || {}).sections || {}).pictures || {}).items[+pic.dataset.pic]);
     const b = e.target.closest("[data-act]");
@@ -240,7 +247,7 @@
   }
 
   // Until index.html names the Projects page's scripts (the sidebar item), fetch them from here.
-  for (const f of ["shell.js", "newproject.js", "projectspage.js"]) {
+  for (const f of ["shell.js", "newproject.js", "projectmenu.js", "projectspage.js"]) {
     if (!document.querySelector || document.querySelector(`script[src="/ui/${f}"]`)) continue;
     const t = document.createElement("script");
     t.src = "/ui/" + f; t.async = false;

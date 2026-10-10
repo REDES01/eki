@@ -46,6 +46,20 @@ def test_project_js_names_the_api_and_the_page_parts(web):
     assert "#project-view" in css and ".pj-sect.open .pj-fold" in css
 
 
+def test_the_project_page_has_the_delete_menu(web):
+    js = get(web + "/ui/project.js")[1]
+    for name in ('id="pj-top"', "window.projectMenu.button(p)", '"[data-pm]"', "e.stopPropagation()",
+                 'nav.go("#projects")', '"projectmenu.js"'):
+        assert name in js, name
+    code, menu = get(web + "/ui/projectmenu.js")
+    assert code == 200
+    for name in ("⋯", "Delete project…", "Stops its work, archives its ", " chats, removes eki's worktrees. ",
+                 "Your folder ", " is not touched.", '"no folder"', 'p.id === "eki" ? ""', 'method: "DELETE"',
+                 '"X-Eki": "1"', '"/api/projects/" + encodeURIComponent(p.id)', ">Cancel<", ">Delete<", "#pm-err"):
+        assert name in menu, name
+    assert ".pm-more" in get(web + "/ui/pages.css")[1]
+
+
 def test_the_project_api_answers(web):
     got = json.loads(get(web + "/api/projects")[1])
     assert got["projects"][0]["id"] == "eki" and "user_home" in got

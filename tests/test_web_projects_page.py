@@ -1,6 +1,6 @@
 """The Projects page (projectspage.js): cards with a two-line description and a quiet folder line, search, sort;
-and the "Create a project" sheet (newproject.js): the body it posts, the API's error inline, "Choose…" only in the
-Mac shell."""
+the "Create a project" sheet (newproject.js): the body it posts, the API's error inline, "Choose…" only in the
+Mac shell; and a project's ⋯ menu (projectmenu.js): "Delete project…", its confirm, the DELETE it sends."""
 import json
 import shutil
 import subprocess
@@ -31,10 +31,11 @@ global.document = { getElementById: (id) => id === "projects-page" ? null : els[
   body: mk("body"), head: mk("head"), addEventListener() {} };
 global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
 global.setInterval = () => 0; global.clearInterval = () => {};
-const went = [], posted = [];
+const went = [], posted = [], deleted = [];
 global.nav = { register() {}, go: (h) => went.push(h) };
 const input = JSON.parse(process.argv[3]);
 global.fetch = async (url, opts) => {
+  if (opts && opts.method === "DELETE") { deleted.push([url, opts]); return DELETE_ANSWER; }
   if (opts && opts.method === "POST") { posted.push([url, JSON.parse(opts.body)]); return input.answer; }
   return { ok: true, json: async () => ({ projects: input.projects || [], user_home: "/Users/me" }) };
 };
@@ -62,16 +63,43 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     await d.querySelector("form").l.submit({ preventDefault() {} });
     out.posted = posted; out.err = d.querySelector("#np-err").textContent; out.went = went; out.closed = d.closed;
   }
+  if (input.do === "menu") {
+    out.eki = window.projectMenu.button(input.projects[0]); out.ekiItems = window.projectMenu.items(input.projects[0]);
+    out.p1 = window.projectMenu.button(input.projects[1]);
+    out.menu = window.projectMenu.open(input.projects[1], null, () => {}).innerHTML;
+    out.sentences = input.projects.map(window.projectMenu.sentence);
+  }
+  if (input.do === "confirm") {
+    let done = null;
+    const d = window.projectMenu.confirm(input.projects[1], (got) => { done = got; });
+    out.html = d.innerHTML; out.opened = d.opened;
+    if (input.click === "cancel") d.querySelector("#pm-cancel").l.click();
+    else await d.querySelector("#pm-delete").l.click();
+    out.deleted = deleted; out.closed = d.closed; out.err = d.querySelector("#pm-err").textContent; out.done = done;
+  }
+  if (input.do === "card") {
+    const opened = [];
+    window.projectMenu.open = (p, anchor, done) => opened.push([p.id, done]);
+    window.projectsPage.show(); await tick(); await tick();
+    out.html = els["pp-cards"].innerHTML;
+    const ev = { stopped: false, prevented: false, target: { closest: () => ({ dataset: { pm: "p1" } }) },
+      preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
+    els["pp-cards"].l.click(ev);
+    out.prevented = ev.prevented; out.stopped = ev.stopped; out.opened = opened.map((o) => o[0]);
+  }
   process.stdout.write(JSON.stringify(out));
 })();
 """
 
 
-def run(tmp_path, files, data):
+OK_DELETE = "{ ok: true, json: async () => ({ id: 'p1', stopped: 2 }) }"
+
+
+def run(tmp_path, files, data, delete_answer=OK_DELETE):
     if not shutil.which("node"):
         pytest.skip("node is not installed")
     stub = tmp_path / "stub.js"
-    stub.write_text(STUB)
+    stub.write_text(STUB.replace("return DELETE_ANSWER;", f"return ({delete_answer});"))
     out = subprocess.run(["node", str(stub), ",".join(str(WEB / f) for f in files), json.dumps(data)],
                          capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
@@ -168,3 +196,39 @@ def run_sheet(tmp_path, answer_js, fields, shell=False):
                          capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
+
+
+def test_the_menu_offers_delete_but_not_for_eki(tmp_path):
+    got = run(tmp_path, ["projectmenu.js"], {"do": "menu", "projects": PROJECTS})
+    assert got["eki"] == "" and got["ekiItems"] == ""                       # eki's own project: no ⋯, no Delete
+    assert 'data-pm="p1"' in got["p1"] and "⋯" in got["p1"] and "Delete project…" in got["menu"]
+    assert got["sentences"][1] == ("Stops its work, archives its 1 chats, removes eki's worktrees. "
+                                   "Your folder /Users/me/tokenbar is not touched.")
+    assert got["sentences"][2].endswith("archives its 0 chats, removes eki's worktrees. Your folder no folder is not touched.")
+
+
+def test_delete_sends_delete_with_x_eki_and_closes(tmp_path):
+    got = run(tmp_path, ["projectmenu.js"], {"do": "confirm", "projects": PROJECTS})
+    assert got["opened"] and "Your folder /Users/me/tokenbar is not touched." in got["html"]
+    assert 'id="pm-cancel">Cancel' in got["html"] and 'id="pm-delete">Delete' in got["html"]
+    assert got["deleted"] == [["/api/projects/p1", {"method": "DELETE", "headers": {"X-Eki": "1"}}]]
+    assert got["closed"] and got["err"] == "" and got["done"] == {"id": "p1", "stopped": 2}
+
+
+def test_delete_shows_the_apis_error(tmp_path):
+    got = run(tmp_path, ["projectmenu.js"], {"do": "confirm", "projects": PROJECTS},
+              delete_answer="{ ok: false, statusText: 'Bad Request', json: async () => ({ error: 'eki itself can not be deleted' }) }")
+    assert got["err"] == "eki itself can not be deleted" and not got["closed"] and got["done"] is None
+
+
+def test_cancel_sends_nothing(tmp_path):
+    got = run(tmp_path, ["projectmenu.js"], {"do": "confirm", "projects": PROJECTS, "click": "cancel"})
+    assert got["deleted"] == [] and got["closed"] and got["done"] is None
+
+
+def test_a_cards_menu_opens_without_following_the_link(tmp_path):
+    got = run(tmp_path, ["projectmenu.js", "projectspage.js"], {"do": "card", "projects": PROJECTS})
+    assert got["html"].count('class="pm-more"') == 2 and 'data-pm="eki"' not in got["html"]
+    assert got["prevented"] and got["stopped"] and got["opened"] == ["p1"]
+    js = (WEB / "projectspage.js").read_text()
+    assert "window.projectMenu.open(p, b, () => load())" in js                     # a delete reloads the list

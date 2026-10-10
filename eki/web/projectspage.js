@@ -1,5 +1,5 @@
 // #projects: a card per project — name, two lines of description, last activity, and a quiet
-// "~/folder · n chats" — with search (name or description, as you type), a sort switch (Recent
+// "~/folder · n chats" and a ⋯ menu to delete it (projectmenu.js) — with search (name or description, as you type), a sort switch (Recent
 // activity / Name, remembered in localStorage) and "New project" (newproject.js). A card opens
 // #project/<id> (project.js). Everything comes from GET /api/projects; reloads every 5 s while shown.
 (function () {
@@ -32,7 +32,7 @@
     const d = describe(p);
     const where = p.folder ? esc(tilde(p.folder, home)) : "no folder";
     return `<a class="card pp-card" href="#project/${encodeURIComponent(p.id)}" data-id="${esc(p.id)}">
-      <h3>${esc(p.name)}</h3>
+      ${window.projectMenu ? window.projectMenu.button(p) : ""}<h3>${esc(p.name)}</h3>
       <div class="clamp pp-desc">${d ? esc(d) : '<span class="quiet">No description</span>'}</div>
       <div class="quiet pp-when">${p.last_active ? "Active " + esc(day(p.last_active)) : ""}</div>
       <div class="quiet pp-where">${where} · ${plural(p.chats || 0, "chat")}</div></a>`;
@@ -83,6 +83,14 @@
       S.sort = b.dataset.sort;
       try { localStorage.setItem(SORT_KEY, S.sort); } catch (x) { /* private mode: just this time */ }
       render();
+    });
+    // the ⋯ on a card opens its menu, not the card's link; a delete reloads the list
+    $("pp-cards").addEventListener("click", (e) => {
+      const b = e.target.closest && e.target.closest("[data-pm]");
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      const p = S.list.find((x) => x.id === b.dataset.pm);
+      if (p && window.projectMenu) window.projectMenu.open(p, b, () => load());
     });
     $("pp-new").addEventListener("click", () => window.newProject && window.newProject.open());
     return el;

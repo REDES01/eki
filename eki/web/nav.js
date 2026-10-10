@@ -1,33 +1,42 @@
-// The page's addresses. #pictures, #station and #settings are views that take
-// #main's place; any other hash is a thread id, and none is a new thread. The
-// address is the whole state, so a refresh reopens the same view.
+// The page's addresses. #pictures, #station, #settings and #projects are views
+// that take #main's place, and #project/<id> is one project's page; any other
+// hash is a thread id, and none is a new thread. The address is the whole
+// state, so a refresh reopens the same view.
 (function () {
   const $ = (id) => document.getElementById(id);
   if (/EkiMac/.test(navigator.userAgent)) document.documentElement.dataset.shell = "mac";
-  const RESERVED = ["pictures", "station", "settings"];
+  const RESERVED = ["pictures", "station", "settings", "projects"];
   const views = {};
   let openThread = () => {};
   let started = false;
 
   function register(name, v) {
     views[name] = v;
-    if (started && current() === name) dispatch();
+    if (started && route(current())[0] === name) dispatch();
   }
 
   function current() {
     try { return decodeURIComponent(location.hash.slice(1)); } catch (e) { return location.hash.slice(1); }
   }
 
+  // "project/<id>" is the project view with its id; a reserved name is its own view.
+  function route(name) {
+    const m = /^project\/(.+)$/.exec(name);
+    if (m) return ["project", m[1]];
+    return [RESERVED.includes(name) ? name : "chat", null];
+  }
+
   function dispatch() {
     const name = current();
     for (const v of Object.values(views)) v.hide();
-    const view = RESERVED.includes(name) ? name : "chat";
+    const [view, arg] = route(name);
     $("app").dataset.view = view;
-    document.querySelectorAll("#side .side-link").forEach((a) => a.classList.toggle("on", a.id === view && !(view === "chat" && name)));
+    const link = view === "project" ? "projects" : view;   // a project's page lights up Projects
+    document.querySelectorAll("#side .side-link").forEach((a) => a.classList.toggle("on", a.id === link && !(view === "chat" && name)));
     if (view === "chat") openThread(name || null);
-    else if (views[name]) views[name].show();
+    else if (views[view]) views[view].show(arg);
     else {  // a reserved view whose script isn't here: say so rather than show a broken chat
-      $("title").textContent = name[0].toUpperCase() + name.slice(1);
+      $("title").textContent = view[0].toUpperCase() + view.slice(1);
       $("meta").textContent = "Not available in this build.";
     }
     window.dispatchEvent(new CustomEvent("eki:view", { detail: view }));

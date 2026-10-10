@@ -52,9 +52,13 @@ other eki-owned goals skip the draft. Like the plan stage, it resumes from
 the goals table alone.
 
 Draft and plan runs are the thinking, so they go to the strongest model:
-`routing.json` `"self": {"planner": {"provider": "claude", "model": "opus"}}`.
-The provider defaults to the `code` row's first target, the model to the
-provider's default. Both runs are pinned to that provider and carry the
+the `planner` role, `routing.json` `"roles": {"planner": "claude:top"}`
+(`eki roles planner claude:top`; docs/design.md, Runs → Roles). Without it
+the old `"self": {"planner": {"provider": "claude", "model": "opus"}}` is
+still read as `claude:opus`, and without that the role is the `code` row's
+first target with the provider's default model. A planner that can't run
+now (not installed, at a limit, no tools) falls back to that default with
+the why. Both runs are pinned to that provider and carry the
 model on the run (`--model` for Claude Code, `-m` for Codex); build, judge
 and resolve runs are unchanged.
 

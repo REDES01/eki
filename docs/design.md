@@ -46,9 +46,12 @@ eki follow <run>  ◄── events table
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers |
-| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run) |
+| `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run); `oneshot` (one call with no tools through the `claude` or `codex` CLI, for eki's own text jobs) |
 | `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
+| `targets` | one way to name where work goes: `provider`, `provider:tier` (`fast`, `default`, `top`) or `provider:model`; `parse`, `fmt`, `provider_of`, `resolve` (to a model id, with a note when it falls back to the default), `problems`; pure |
+| `roles` | eki's own jobs — `router`, `planner`, `reviewer`, `chores` — and the target each goes to: `get`, `default` (the old settings), `set_role`, `pick` (with the fallback and its why), `record`/`timings` (table `role_calls`) |
+| `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`, and the tier suggestions, only ever shown |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
 | `skills`, `mcp` | one store, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`) |
@@ -59,6 +62,7 @@ eki follow <run>  ◄── events table
 | `costs` | the journal's costly clusters: handoffs on rows that could stay local, corrections by the row they corrected |
 | `roadmap` | ROADMAP.md at integration `main` as open entries, each keyed by a hash of its text |
 | `selfview` | the `eki self` board's words as data (stage, drafting, where, note, the whole board), shared by the CLI and the Station page |
+| `api_models` | the Settings page's Models section: each provider's tiers, suggestions, read list and read time, each role's pick (`GET /api/models`), and a list's refresh (`POST /api/models/refresh`) |
 | `api_station`, `api_settings` | the web's Station and Settings: what the self board, builds, journal and digest show and the self actions, each the CLI's own function; reading, checking and writing `routing.json`/`providers.json` |
 | `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |
 | `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
@@ -68,7 +72,7 @@ eki follow <run>  ◄── events table
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |
 | `attachments` | files sent with a request: made safe at intake (HEIC → JPEG, big pictures scaled down), and uploads from the window |
-| `chores` | jobs for the local model as runs on row `chore`: the review, the digest's patch notes and triage, a fault's first brief, a PR comment's triage |
+| `chores` | eki's own text jobs as runs on row `chore`, on whoever their role picks (the local model by default): the review, the digest's patch notes and triage, a fault's first brief, a PR comment's triage |
 | `patchnotes` | the short digest page's rules: the areas and the path table, the rules-only page, the check of the model's notes; pure |
 | `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's patch notes and the long page's `## Triage` |
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
@@ -90,20 +94,54 @@ States: `queued → running → done | failed | cancelled | handed_off`, and
 A run carries its `attempt`; after 3 interruptions in a row it fails.
 `priority` is `now` (you're waiting) or `background` (gated by the machine).
 
-**Chores** (`eki/chores.py`, table `chores`) are jobs eki gives the local
-model instead of Claude: the review between gate 1 and the queue, the
-digest's patch notes and triage, the first draft of a fault item's spec
-(docs/self-build.md), and whether a comment on a pull request asks for a
-change (`prcomment`, subject `<item id>:<ISO time>`). Each is an ordinary run on row `chore`, in a thread of
-its own (`chore: <kind> <subject>`, no folder), pinned to `self.local` in
-`routing.json` — else the first provider of kind `local`; `"off"` or none
-means a `skipped` chore and the caller goes on without it. A chore never
-reaches Claude: the local model is given no `handoff` tool on this row, and
-a chore run that hands off anyway fails with the reason and makes no
-follow-up. The chore's row (`kind`, `subject`, `run_id`, `state` open → done
-| failed | skipped, the parsed `result`) and its run are all the state there
-is: the caller finds finished chores with `chores.finished` and moves each on
-once under `db.tx`, so a restart mid-chore loses nothing.
+**Chores** (`eki/chores.py`, table `chores`) are text jobs eki gives
+itself: the review between gate 1 and the queue, the digest's patch notes
+and triage, the first draft of a fault item's spec (docs/self-build.md),
+and whether a comment on a pull request asks for a change (`prcomment`,
+subject `<item id>:<ISO time>`). Each is an ordinary run on row `chore`, in
+a thread of its own (`chore: <kind> <subject>`, no folder), pinned to the
+provider and model its role picks — `reviewer` for the review, `chores` for
+the rest — with the pick's why on the run. No provider (the role is `"off"`,
+or neither its target nor its default can run) means a `skipped` chore with
+the why as its result, and the caller goes on without it. A chore reaches
+Claude or Codex only when you set its role there, and then with no tools:
+on row `chore` their `take` makes one call through `providers/oneshot` and
+emits its text as one event — no tools, no session, no handoff. The local
+model is given no `handoff` tool on this row, and a chore run that hands
+off anyway fails with the reason and makes no follow-up. The chore's row
+(`kind`, `subject`, `run_id`, `state` open → done | failed | skipped, the
+parsed `result`) and its run are all the state there is: the caller finds
+finished chores with `chores.finished` and moves each on once under
+`db.tx`, so a restart mid-chore loses nothing.
+
+**Roles** (`eki/roles.py`) say who does each of eki's own jobs: `router`
+(the prompt check and narrow), `planner` (draft and plan runs), `reviewer`
+(the review chore) and `chores` (digest prose, fault briefs, PR-comment
+triage). The setting is `routing.json` `"roles": {"router": "claude:fast",
+…}`, holding only the roles you set, each a target (see Routing). A role
+not set reads the old settings, which are still read and never rewritten
+or deleted: router the top-level `checker`, else `local`; planner
+`self.planner` `{provider, model}` as `provider:model`, else the `code`
+row's first target; reviewer and chores `self.local`, else the first
+provider of kind `local`. So with no `roles` key nothing changes. `"off"`
+is allowed for reviewer and chores. `eki roles` lists each role's target,
+the model it resolves to, whether it's the default and any fallback why;
+`eki roles router claude:fast` checks and sets one, `eki roles router
+default` removes it.
+
+`roles.pick` is recomputed from the settings at every use. A target can
+run when its provider exists, isn't off and is available
+(`capacity.status`); for router, reviewer and chores the provider must also
+answer a one-shot call (`complete()`: kinds `local`, `claude_code`,
+`codex`), for the planner it must have tools, and for a background pick it
+must be within the background budget. A chore or review on a subscription
+over that budget falls back at once rather than waiting. A target that
+can't run falls back to the role's default, and the why says so ("router
+claude:fast can't run (claude: limit) → local"); when the default can't
+run either the pick has no provider — the router then uses `general`, a
+chore is `skipped`. Each call made for the router is timed into
+`role_calls`, and `eki route` shows the median per target, so a fast
+subscription model and a sleeping local one can be compared.
 
 ## Threads
 
@@ -132,8 +170,12 @@ JSON.
 3. **Intent** picks the row. Rules (`eki/routing/rules.py`) take the
    obvious cases — a folder or a path → `code`, a picture → `vision`,
    "draw …" → `image` — logged as "rule: <reason>". Only when no rule
-   fires does a small model classify. `checker_wakes` in `routing.json`
-   (default true) decides whether an off checker is started for that.
+   fires does a small model classify: the `router` role's pick (see
+   Runs → Roles; by default the old `checker`, else `local`), asked with
+   the model its target resolves to. A router target that can't run falls
+   back to the default with its why in the route's why.
+   `checker_wakes` in `routing.json` (default true) decides whether an off
+   on-demand local router is started for that.
    A request that lands on `code` (by rule or check), while a `code-easy`
    row exists, is asked one narrower question with a menu of just `code`
    and `code-easy` ("a small, well-defined change: rename, a flag, a typo,
@@ -146,12 +188,28 @@ JSON.
    its limit moves to the back.
 5. **Failover** down the row.
 
-When the check can't run (no checker, an off checker not woken, no row
+When the check can't run (no router can run, an off one not woken, no row
 given), the `general` row is used, cheapest first: local < subscriptions
 (Claude Code, Codex) < API. The table is `~/.eki/routing.json`, written
 with defaults on first run. Migration: an existing `routing.json` is left
 as the person wrote it; new defaults (row `needs`, the `general` order)
 only reach a fresh file.
+
+**Targets** (`eki/targets.py`). A row's targets, a role and a pin all
+name where work goes the same way: `provider`, `provider:tier` or
+`provider:model`. The tiers are `fast`, `default` and `top`; a part after
+the colon that isn't a tier is a model id, so `claude:fast` and
+`claude:claude-haiku-4-5` both work, and a bare `provider` means the
+provider's own default. Rows may mix them (`answer → ["local",
+"claude:fast"]`, `code → ["claude:top", "codex"]`); needs, capacity and
+`excluded` go by the provider. The decision carries the model the target
+resolves to, and the why names both ("→ answer → claude:fast
+(claude-haiku-4-5)"); the run records it as `runs.model` unless you pinned
+a model of your own, which wins. A tier nobody picked, or a model no
+longer in the provider's read list, resolves to the provider's default and
+the why says so ("claude has no fast model picked; its default").
+`eki route` shows each row target's model and the roles block above the
+table.
 
 **Capabilities.** Each provider declares `can` from {text, tools, web,
 vision, image, image-edit}. Each kind has defaults (Claude Code: text,
@@ -162,6 +220,41 @@ an entry's own `can` in `providers.json` replaces them, and its optional
 (default `text`; `code` needs tools, `web` needs web); a picture attached
 adds `vision`. `eki providers`, `eki route` and the prompt check's menu
 show the same tags and `about` the code enforces.
+
+**Tiers and model lists.** A `providers.json` entry may pick its tiers:
+`"models": {"fast": "…", "default": "…", "top": "…"}`. The old `model` is
+still read as the `default` tier and never rewritten. The choices come
+from what each program itself reports (`eki/modellist.py`): Claude Code's
+`initialize` control response (`models`, over `claude --input-format
+stream-json --output-format stream-json`), Codex's `model/list` over
+`codex app-server`, a local server's `GET /v1/models`. eki never reads a
+token, calls a vendor API of its own or scrapes a page. A list is cached
+in `provider_models` (one provider's rows replaced in one transaction),
+read on demand (`eki providers models --refresh [name]`, Settings'
+Refresh) and by housekeeping when it is over a day old and the program is
+installed — on a thread with a 20 s timeout, never blocking the engine.
+From the list eki suggests tiers (Claude: haiku, sonnet, opus → fast,
+default, top; Codex: its default, a `mini`-sounding one as fast, the first
+other as top; local: none), but a suggestion is only shown: nothing goes
+into `providers.json` until you pick a model or accept it (`eki providers
+tier <name> <tier> <model|suggested>`, which refuses a model the read list
+lacks, or the Settings page).
+
+**One-shot calls** (`eki/providers/oneshot.py`). Claude Code and Codex can
+serve the text-only roles (router, reviewer, chores) with one call and no
+tools, through their official CLIs. `ClaudeCode.complete` and
+`Codex.complete` share `Local.complete`'s signature (`messages`, `model=`
+…): the system message becomes the system prompt and the rest goes on
+stdin. Claude runs `claude -p --output-format json --tools ""
+--strict-mcp-config --no-session-persistence --system-prompt …` (plus
+`--model` when one is named) and answers with the result JSON's `result`.
+Codex runs `codex exec --json --sandbox read-only --skip-git-repo-check
+--ephemeral -c developer_instructions=…` (plus `-m`) in a fresh empty temp
+folder and answers with the last `agent_message`. `codex exec` has no
+switch that removes its shell, so a read-only sandbox in an empty folder
+plus the instruction to answer from the request alone is the closest it
+comes to "no tools". A timeout kills the process, a non-zero exit raises,
+and a limit message raises `Limited`, which the caller turns into a limit.
 
 **Picture rows.** `image` (a quick draft), `image-hq`, `image-anime`
 (need `image`), `image-edit` and `image-upscale` (need `image-edit`) all go
@@ -240,13 +333,19 @@ are Codex's.
     problem listed in a 400), keeps the old file as `<name>.json.bak`,
     writes atomically (tmp + `os.replace`) and refuses a file whose mtime
     changed since it was read with 409. Nothing reloads: the next decision
-    reads the new file.
+    reads the new file. Its Models section (`eki/web/settingsmodels.js`,
+    `eki/api_models.py`) shows each provider's tiers — a select per tier
+    from the read list, the suggestion marked with an Accept button, the
+    read time and a Refresh button — and each role's picker (`provider`,
+    `provider:tier`, each listed model, "default (…)", and "off" where
+    allowed), with any fallback why in amber; it saves through the same
+    settings writes.
   - Endpoints: GET `/api/station`, `/api/builds`,
     `/api/journal?since=&kind=`, `/api/digests`,
-    `/api/settings/(routing|providers)`; POST `/api/self`,
+    `/api/settings/(routing|providers)`, `/api/models`; POST `/api/self`,
     `/api/self/items/<id>/(apply|drop|retry)`, `/api/self/release`,
     `/api/self/autonomy`, `/api/builds/<id>/undo`, `/api/digests/write`,
-    `/api/settings/<name>`. An unknown id is 404, a refused action 400 with
+    `/api/settings/<name>`, `/api/models/refresh`. An unknown id is 404, a refused action 400 with
     the reason. `/api/route` serves the table and a request's explain.
   - The web's JS and CSS files are held to 400 lines too (the size test),
     so the page is split by job: `nav.js`, `side.js`, `app.js`, one file

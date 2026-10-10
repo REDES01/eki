@@ -19,10 +19,13 @@ def new_id() -> str:
 
 # ---- threads ---------------------------------------------------------------------------
 
-def create_thread(conn: sqlite3.Connection, title: str, cwd: Optional[str]) -> str:
+def create_thread(conn: sqlite3.Connection, title: str, cwd: Optional[str],
+                  by: Optional[str] = None) -> str:
+    """`by`: None for a chat of yours, "eki" for a thread eki makes for itself."""
     tid = new_id()
-    conn.execute("INSERT INTO threads(id, title, cwd, created_at) VALUES (?,?,?,?)",
-                 (tid, title[:80], cwd, now()))
+    t = now()
+    conn.execute("INSERT INTO threads(id, title, cwd, created_at, by, title_by, seen_at) "
+                 "VALUES (?,?,?,?,?,'prompt',?)", (tid, title[:80], cwd, t, by, t))
     return tid
 
 

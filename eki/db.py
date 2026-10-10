@@ -205,6 +205,12 @@ CREATE TABLE IF NOT EXISTS role_calls (     -- one call made for one of eki's ow
     at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS role_calls_by ON role_calls(role, target, id);
+CREATE TABLE IF NOT EXISTS chat_groups (    -- your own groups of chats in the sidebar (not `group`: an SQL keyword)
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    ord REAL NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -260,6 +266,14 @@ ADDED = [
     ("provider_models", "efforts", "TEXT"),          # JSON list of levels; NULL: it takes no effort
     ("provider_models", "default_effort", "TEXT"),   # NULL: the program doesn't say
     ("runs", "effort", "TEXT"),         # a per-run effort (the model's default when NULL)
+    ("threads", "by", "TEXT"),          # NULL: a chat of yours; 'eki': a thread eki made for itself
+    ("threads", "title_by", "TEXT DEFAULT 'old'"),   # old (never retitled) | prompt | eki | you
+    ("threads", "pinned_at", "REAL"),   # pinned when not NULL
+    ("threads", "seen_at", "REAL"),     # when you last looked; NULL reads as seen
+    ("threads", "unread", "INTEGER DEFAULT 0"),      # marked unread by hand
+    ("threads", "archived_at", "REAL"),
+    ("threads", "chat_group", "TEXT"),  # chat_groups.id
+    ("threads", "deleted_at", "REAL"),  # hidden at once; the rows go once nothing is active
 ]
 
 

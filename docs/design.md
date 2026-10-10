@@ -85,6 +85,10 @@ eki follow <run>  ◄── events table
 | `prmirror` | eki's own landed items as read-only PRs against `eki/landed` (off by default) |
 | `notify` | pushes to your phone through ntfy: the notices table, the settings, the send and the housekeeping drain |
 | `notifygoals` | which goals ended — self, standing and GitHub — as `goal done` notices |
+| `threadkeep` | the chat list's housekeeping step: `backfill` marks old threads eki made for itself `by='eki'`, then purge, then settle and start title chores |
+| `threadacts` | what you do to a chat: pin, unread, rename, move to a project (cwd follows, sessions dropped), group, archive, delete (cancel, hide; `purge` removes the rows once nothing is active) |
+| `api_threads` | the chat list: eki's threads that need you, then your pinned chats, then the rest; `all`, `archived`; each entry's pin, unread, own, title_by, group, sessions; `groups` |
+| `titles` | a `title` chore per new chat of yours with an answer, once; the cleaned title is written only while the title is still the prompt's |
 | `cli/*` | one file per command |
 
 ## Runs
@@ -155,6 +159,25 @@ text-only model; tools, which the local model asks for with its one
 A provider joining a thread mid-way gets the transcript so far as context.
 Each provider keeps its own session id per thread, so returning to it
 resumes its session.
+
+The chat list shows your chats (`threads.by` NULL). Threads eki makes for
+itself — chores, drafts and plans, gate 2, train checks, clones — carry
+`by='eki'` and show only while they hold an open ask, or with `all`/`--all`;
+`threadkeep` marks the ones from before the column. A pinned chat
+(`pinned_at`) comes first and is kept beyond the limit. A chat is unread when
+you marked it so (`unread=1`) or a run ended after `seen_at`; a NULL
+`seen_at` (an older row) reads as seen. An archived chat leaves the list and
+a new message in it unarchives it. Your groups (`chat_groups`) are sections
+of their own. Delete sets `deleted_at`, which hides the chat everywhere at
+once, and cancels its active runs; `threadacts.purge` removes its rows once
+nothing in it is active. Files, worktrees, branches and attachments are
+never touched, and eki's own threads can't be deleted — drop their work from
+the Station. Moving a chat to a project sets its cwd to the project's folder;
+when the folder changes its sessions are dropped, so the next turn starts
+fresh with the whole transcript, as after a handoff. New chats are titled
+from the prompt (`title_by='prompt'`) and then by a `title` chore, once; a
+title you set (`'you'`) always wins, and chats from before (`'old'`) are
+never retitled.
 
 ## Routing
 

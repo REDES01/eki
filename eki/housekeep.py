@@ -10,7 +10,9 @@ rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on Gi
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
 local model its patch notes and triage (eki/digestprose.py), queue a notice for each goal
 that ended (eki/notifygoals.py), and push the
-queued notices to the person's phone through ntfy (eki/notify.py), and read a
+queued notices to the person's phone through ntfy (eki/notify.py), keep the
+chat list (eki/threadkeep.py: mark eki's own threads, purge deleted ones,
+title new chats), and read a
 program's model list again when it is a day old (eki/modellist.py — on a thread
 of its own with a 20 s limit, so the pass never waits on it). Nothing here is
 state that matters: the hour between prunes and the last list tries live in
@@ -25,7 +27,7 @@ import time
 from typing import Callable, Dict, List, Tuple
 
 from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
-               prmirror, projectsetup, prs, score, selfpick, standing)
+               prmirror, projectsetup, prs, score, selfpick, standing, threadkeep)
 
 log = logging.getLogger("eki.housekeep")
 
@@ -96,6 +98,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("digest", _digest),
     ("digestprose", digestprose.tick),
     ("models", _models),
+    ("threads", threadkeep.tick),
     ("notifygoals", notifygoals.tick),
     ("notify", notify.tick),
 ]

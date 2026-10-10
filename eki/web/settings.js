@@ -91,16 +91,12 @@
   function routingForm() {
     const d = S.draft.routing;
     const me = d.self && typeof d.self === "object" ? d.self : {};
-    const pl = me.planner && typeof me.planner === "object" ? me.planner : {};
-    const names = providerNames();
     const opt = (v, cur, label) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label || v)}</option>`;
-    return `<section class="set-sect"><h3>Routing</h3>
+    return `<section class="set-sect"><h3>Routing</h3>${window.settingsModels ? settingsModels.roles(d) : ""}
         ${check(d.checker_wakes !== false, 'data-f="checker_wakes"', "Wake an on-demand checker model for the prompt check")}</section>
       <section class="set-sect"><h3>eki self</h3><div class="set-grid" data-self>
         ${field("Autonomy", `<select class="set-in" data-f="autonomy">${MODES.map((m) => opt(m, me.autonomy || "propose")).join("")}</select>`)}
         ${field("Parallel", `<input class="set-in" type="number" min="1" data-f="parallel" value="${esc(me.parallel == null ? "" : me.parallel)}" placeholder="3">`)}
-        ${field("Planner", `<select class="set-in" data-f="planner.provider">${opt("", pl.provider || "", "code row's first")}${names.map((n) => opt(n, pl.provider || "")).join("")}</select>`)}
-        ${field("Planner model", text("planner.model", pl.model, "provider's default"))}
       </div></section>${window.settingsNotify ? settingsNotify.form(d) : ""}
       <section class="set-sect"><h3>Rows</h3>
         ${(d.rows || []).map((r, i) => rowCard(r || {}, "d" + i, false)).join("")}
@@ -125,16 +121,11 @@
   function editRouting(el, card) {
     const d = S.draft.routing, f = el.dataset.f;
     if (el.closest("[data-notify]")) return settingsNotify.edit(el, d);   // settingsnotify.js
+    if (el.closest("[data-roles]")) return settingsModels.editRole(el, d);   // settingsmodels.js
     if (el.closest("[data-self]")) {
       if (!d.self || typeof d.self !== "object") d.self = {};
       if (f === "autonomy") d.self.autonomy = el.value;
       else if (f === "parallel") { if (el.value === "") delete d.self.parallel; else d.self.parallel = +el.value; }
-      else {
-        const pl = d.self.planner && typeof d.self.planner === "object" ? d.self.planner : (d.self.planner = {});
-        const k = f.split(".")[1];
-        if (el.value.trim()) pl[k] = el.value.trim(); else delete pl[k];
-        if (!Object.keys(pl).length) delete d.self.planner;
-      }
       return false;
     }
     if (f === "checker_wakes") { d.checker_wakes = el.checked; return false; }
@@ -181,7 +172,7 @@
     const kinds = KINDS.includes(cfg.kind) ? KINDS : KINDS.concat([cfg.kind || ""]);
     const byKind = !Array.isArray(cfg.can);
     const can = byKind ? (eff && eff.can_effective) || [] : cfg.can;
-    const known = ["kind", "label", "about", "can", "off", "base_url", "keep_up", "idle_stop"];
+    const known = ["kind", "label", "about", "can", "off", "base_url", "keep_up", "idle_stop", "models"];
     const other = Object.keys(cfg).filter((k) => !known.includes(k) && !MARKS.includes(k));
     return `<div class="set-card${unwritten ? " added" : ""}" data-prov="${esc(name)}"${unwritten ? " data-unw" : ""}>
       <div class="set-top">${text("name", name, "name")}${unwritten ? memo : ""}<span class="grow"></span>
@@ -198,6 +189,7 @@
         ${ABILITIES.map((a) => check(can.includes(a), `data-can="${a}"`, a, byKind)).join("")}</div>`)}
       ${check(cfg.keep_up, 'data-f="keep_up"', "keep up (start it and keep it running while there's room)")}
       ${other.length ? `<div class="dim set-other">Also: ${other.map((k) => `<code>${esc(k)}</code>`).join(", ")} — edit these in Raw JSON.</div>` : ""}
+      ${window.settingsModels && !unwritten ? settingsModels.tiers(name, cfg) : ""}
     </div>`;
   }
 
@@ -206,7 +198,7 @@
     const eff = S.got.providers.effective.entries;
     const mem = Object.keys(eff).filter((n) => eff[n].unwritten && !(n in d));
     const built = Object.keys(eff).filter((n) => eff[n].builtin);
-    return `<section class="set-sect"><h3>Providers</h3>
+    return `<section class="set-sect"><h3>Providers</h3>${window.settingsModels ? settingsModels.summary(d) : ""}
       ${Object.keys(d).map((n) => provCard(n, d[n] || {}, eff[n], false)).join("")}
       ${mem.map((n) => provCard(n, eff[n], eff[n], true)).join("")}
       <button type="button" class="ghost" data-act="addprov">＋ Add a provider</button></section>
@@ -230,6 +222,7 @@
 
   function editProviders(el, card, ev) {
     if (!card) return false;
+    if (el.closest("[data-tiers]")) return settingsModels.editTier(el, provOf(card));   // settingsmodels.js
     const f = el.dataset.f;
     if (f === "name") {
       if (ev.type !== "change") return false;
@@ -336,13 +329,14 @@
       return reload(S.tab, "Back to what's on disk.");
     }
     const card = b.closest(".set-card");
+    if (window.settingsModels && await settingsModels.act(act, b, () => provOf(card), (h) => note(S.tab, "err", h))) return render();
     const again = S.tab === "routing" ? actRouting(act, b, card) : actProviders(act, b, card);
     if (again) render();
   }
 
   async function reload(name, said) {
     try {
-      await load(name);
+      await Promise.all([load(name), window.settingsModels && settingsModels.load()]);
       note(name, "info", esc(said || ""));
     } catch (e) {
       note(name, "err", "Can't read the settings: " + esc(e.message));
@@ -384,7 +378,7 @@
     [$("title").textContent, $("meta").textContent] = ["Settings", ""];
     render();
     try {
-      await Promise.all(Object.keys(NAMES).map(load));
+      await Promise.all(Object.keys(NAMES).map(load).concat(window.settingsModels ? [settingsModels.load()] : []));
     } catch (e) {
       note(S.tab, "err", "Can't read the settings: " + esc(e.message));
     }

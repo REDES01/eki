@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, api_projects, api_settings, api_station, db, observe
+from . import api, api_models, api_projects, api_settings, api_station, db, observe
 
 log = logging.getLogger("eki.server")
 
@@ -190,6 +190,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/settings/(\w+)", p)
         if m:
             return self._call(api_settings.read, m.group(1))
+        if p == "/api/models":
+            return self._call(api_models.read)
         if p == "/api/station":
             return self._call(api_station.station)
         if p == "/api/builds":
@@ -222,6 +224,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/runs/(\w+)/cancel", p)
         if m:
             return self._call(api.cancel, m.group(1))
+        if p == "/api/models/refresh":
+            return self._call(api_models.refresh, body.get("name"))
         m = re.fullmatch(r"/api/models/(\w+)/(start|stop)", p)
         if m:
             name, action = m.group(1), m.group(2)

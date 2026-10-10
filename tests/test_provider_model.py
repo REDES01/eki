@@ -35,3 +35,14 @@ def test_codex_run_model_in_thread_params():
     assert Codex("codex", {"model": "o3"})._thread_params(turn("gpt-5"))["model"] == "gpt-5"
     assert Codex("codex", {"model": "o3"})._thread_params(turn())["model"] == "o3"
     assert "model" not in Codex("codex", {})._thread_params(turn())
+
+
+def test_claude_model_and_effort_together():
+    argv = ClaudeCode("claude", {}).argv(Turn(prompt="hi", history=[], extra={"model": "opus", "effort": "high"}))
+    assert models(argv) == ["opus"] and argv[argv.index("--effort") + 1] == "high"
+
+
+def test_codex_effort_goes_on_the_turn_not_the_thread():
+    t = Turn(prompt="hi", history=[], extra={"model": "gpt-5", "effort": "low"})
+    assert Codex("codex", {})._turn_params(t, "tid")["effort"] == "low"
+    assert "effort" not in Codex("codex", {})._thread_params(t)

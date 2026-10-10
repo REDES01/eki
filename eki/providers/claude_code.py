@@ -46,6 +46,8 @@ class ClaudeCode(ProgramProvider):
         model = turn.extra.get("model") or self.cfg.get("model")   # a run's own model wins
         if model:
             argv += ["--model", model]
+        if turn.extra.get("effort"):                               # the run's effort; none: the model's own
+            argv += ["--effort", turn.extra["effort"]]
         if turn.resume:
             argv += ["--resume", turn.resume]
         if turn.cwd:
@@ -169,10 +171,10 @@ class ClaudeCode(ProgramProvider):
 
     def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
                  max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
-                 model: Optional[str] = None) -> Dict[str, Any]:
+                 model: Optional[str] = None, effort: Optional[str] = None) -> Dict[str, Any]:
         """One answer with no tools (oneshot): {"text", "tool_calls": []}."""
         return oneshot.complete("claude", self.bin or "claude", messages, model=model or self.cfg.get("model"),
-                                timeout=timeout, stop=stop, on_text=on_text)
+                                effort=effort, timeout=timeout, stop=stop, on_text=on_text)
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         if turn.extra.get("row") == "chore":      # eki's own job: one call, no tools

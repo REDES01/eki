@@ -39,16 +39,17 @@ class Limited(RuntimeError):
     """The program said its plan's limit is reached."""
 
 
-def claude_argv(bin: str, model: Optional[str], system: str) -> List[str]:
+def claude_argv(bin: str, model: Optional[str], system: str, effort: Optional[str] = None) -> List[str]:
     return ([bin, "-p", "--output-format", "json", "--tools", "", "--strict-mcp-config",
              "--no-session-persistence", "--system-prompt", system]
-            + (["--model", model] if model else []))
+            + (["--model", model] if model else []) + (["--effort", effort] if effort else []))
 
 
-def codex_argv(bin: str, model: Optional[str], system: str) -> List[str]:
+def codex_argv(bin: str, model: Optional[str], system: str, effort: Optional[str] = None) -> List[str]:
     return ([bin, "exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
              "-c", f"developer_instructions={toml_string(system)}"]
-            + (["-m", model] if model else []) + ["-"])
+            + (["-m", model] if model else [])
+            + (["-c", f"model_reasoning_effort={toml_string(effort)}"] if effort else []) + ["-"])
 
 
 def toml_string(s: str) -> str:
@@ -170,10 +171,11 @@ def _text(content: Any) -> str:
 
 
 def complete(kind: str, bin: str, messages: List[Dict[str, Any]], *, model: Optional[str] = None,
-             timeout: float = 600, stop: Optional[threading.Event] = None, on_text=None) -> Dict[str, Any]:
+             effort: Optional[str] = None, timeout: float = 600, stop: Optional[threading.Event] = None, on_text=None) -> Dict[str, Any]:
     """One answer from `kind` ("claude" or "codex"): {"text", "tool_calls": []}."""
     system, prompt = fold(messages)
-    argv = claude_argv(bin, model, system) if kind == "claude" else codex_argv(bin, model, system)
+    argv = (claude_argv(bin, model, system, effort) if kind == "claude"
+            else codex_argv(bin, model, system, effort))
     folder = tempfile.mkdtemp(prefix="eki-oneshot-")
     try:
         out = run(argv, prompt, timeout, cwd=folder, stop=stop)
@@ -191,7 +193,8 @@ def chore(provider: Any, turn: Turn, emit: Emit) -> Outcome:
     """A chore run on a program: one call, one `text` event, no tools, no session."""
     messages = [{"role": "system", "content": CHORE}, *turn.history, {"role": "user", "content": turn.prompt}]
     try:
-        got = provider.complete(messages, stop=turn.stop, model=turn.extra.get("model"))
+        got = provider.complete(messages, stop=turn.stop, model=turn.extra.get("model"),
+                                effort=turn.extra.get("effort"))
     except Limited as e:
         emit("note", {"text": f"{provider.name}: limit reached"})
         return Outcome("limited", str(e)[:400])

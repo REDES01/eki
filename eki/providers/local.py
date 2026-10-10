@@ -85,8 +85,9 @@ class Local(Provider):
 
     def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
                  max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
-                 model: Optional[str] = None) -> Dict[str, Any]:
-        """One streamed chat completion: {"text", "tool_calls"}. `model` over the configured one."""
+                 model: Optional[str] = None, effort: Optional[str] = None) -> Dict[str, Any]:
+        """One streamed chat completion: {"text", "tool_calls"}. `model` over the configured one;
+        `effort` is ignored (a local model takes none)."""
         body: Dict[str, Any] = {"model": model or self.model(), "messages": messages, "stream": True,
                                 "max_tokens": max_tokens,
                                 "chat_template_kwargs": {"enable_thinking": bool(self.cfg.get("thinking"))}}

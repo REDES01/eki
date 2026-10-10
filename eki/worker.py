@@ -74,6 +74,8 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
     turn.extra["codex_config"] = mcp.codex_config()
     if r["model"]:
         turn.extra["model"] = r["model"]
+    if r["effort"]:
+        turn.extra["effort"] = r["effort"]
     return turn
 
 
@@ -86,20 +88,23 @@ def route(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
             store.update_run(conn, r["id"], state="queued", why=d.why, row=d.row, pid=None,
                              retry_at=db.now() + 30, attempt=max(0, r["attempt"] - 1))
             return None
-        # a model the run came with is kept; one an earlier route wrote is routing's to change
-        model = r["model"] if r["model"] and r["model"] != _routed_model(conn, r["id"]) else d.model
-        store.update_run(conn, r["id"], provider=d.provider, row=d.row, why=d.why, model=model)
+        # a model or effort the run came with is kept; one an earlier route wrote is routing's to change
+        before = _routed(conn, r["id"])
+        model = r["model"] if r["model"] and r["model"] != before.get("model") else d.model
+        effort = r["effort"] if r["effort"] and r["effort"] != before.get("effort") else d.effort
+        store.update_run(conn, r["id"], provider=d.provider, row=d.row, why=d.why, model=model, effort=effort)
         conn.execute("UPDATE threads SET provider=? WHERE id=?", (d.provider, r["thread_id"]))
     store.add_event(conn, r["id"], r["attempt"], "route",
-                    {"provider": d.provider, "row": d.row, "why": d.why, "model": d.model})
+                    {"provider": d.provider, "row": d.row, "why": d.why, "model": d.model,
+                     "effort": d.effort})
     return d.provider
 
 
-def _routed_model(conn: sqlite3.Connection, rid: str) -> str | None:
-    """The model the run's last route wrote, if it was routed before."""
+def _routed(conn: sqlite3.Connection, rid: str) -> Dict[str, Any]:
+    """What the run's last route wrote ({} if it was never routed)."""
     got = conn.execute("SELECT data FROM events WHERE run_id=? AND kind='route' ORDER BY id DESC LIMIT 1",
                        (rid,)).fetchone()
-    return json.loads(got[0] or "{}").get("model") if got else None
+    return json.loads(got[0] or "{}") if got else {}
 
 
 def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome) -> None:

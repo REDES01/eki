@@ -16,11 +16,14 @@ exists, is asked once more whether it's small and well-defined (check.narrow):
 "rule: has a folder → code; check: easy → code-easy → codex-local". A run
 whose row was set beforehand is never narrowed.
 
-A row's targets may name a tier or a model (eki/targets.py): needs and
-capacity are checked by the target's provider, the decision carries the
-model the target resolves to, and the why names both:
-"→ answer → claude:fast (claude-haiku-4-5)". The check and narrow are asked
-of the router role (eki/roles.py); each call's time goes into role_calls.
+A row's targets may name a tier, a model and an effort (eki/targets.py):
+needs and capacity are checked by the target's provider, the decision
+carries the model and effort the target resolves to (targets.choose, against
+the program's read list), and the why names them with the program's own
+label: "→ answer → claude · Opus 5.5 · high". A model or effort the program
+no longer offers falls back to its default, and the note says so. The check
+and narrow are asked of the router role (eki/roles.py); each call's time
+goes into role_calls.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from .. import capacity, models, providers, roles, store, targets as targeting
+from .. import capacity, modellist, models, providers, roles, store, targets as targeting
 from . import needs, rules
 from .check import check, narrow
 from .table import row as table_row
@@ -42,20 +45,26 @@ class Decision:
     row: str
     why: str
     model: Optional[str] = None  # the model the target names; None: the provider's default
+    effort: Optional[str] = None  # the effort the target names; None: the model's default
 
 
 def checker_name() -> str:
     return roles.get("router")
 
 
-def resolve(conn: sqlite3.Connection, target: str) -> Tuple[Optional[str], str]:
-    """(model, note) for a row target, against providers.json and the read model list."""
+def resolve(conn: sqlite3.Connection, target: Any) -> Tuple[targeting.Choice, str]:
+    """(the choice, its label) for a row target, against providers.json and
+    the read model list: `claude · Opus 5.5 · high`; a bare provider
+    whose list was never read is just its name."""
     name = targeting.provider_of(target)
-    listed = [r[0] for r in conn.execute("SELECT model FROM provider_models WHERE provider=?", (name,))]
+    listed = modellist.listed(conn, name)
     try:
-        return targeting.resolve(target, providers.config().get(name) or {}, listed or None)
+        c = targeting.choose(target, providers.config().get(name) or {}, listed)
     except ValueError as e:                  # a hand-written target settings would refuse
-        return None, str(e)
+        c = targeting.Choice(None, None, str(e))
+    if ":" not in targeting.key(target) and not listed:   # a bare provider, no list read: its name
+        return c, name
+    return c, targeting.label(name, c.model, c.effort, listed)
 
 
 def _record(conn: sqlite3.Connection, spent: List[Tuple]) -> None:
@@ -123,22 +132,23 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
     want = needs.request_needs(entry, atts)
     targets = list(entry["targets"])
     # a subscription near the end of its plan goes last in its row
-    saved = {t: capacity.saving(conn, targeting.provider_of(t)) for t in targets}
-    order = [t for t in targets if not saved[t]] + [t for t in targets if saved[t]]
-    last = "".join(f" ({t} last: {saved[t]})" for t in targets if saved[t]) if len(targets) > 1 else ""
+    saved = {targeting.key(t): capacity.saving(conn, targeting.provider_of(t)) for t in targets}
+    order = ([t for t in targets if not saved[targeting.key(t)]]
+             + [t for t in targets if saved[targeting.key(t)]])
+    last = "".join(f" ({targeting.key(t)} last: {saved[targeting.key(t)]})" for t in targets
+                   if saved[targeting.key(t)]) if len(targets) > 1 else ""
     refused: List[str] = []
     for target in order:
         name = targeting.provider_of(target)
         lack = [] if name in skip else needs.lacking(target, want)
         ok, why = (False, needs.cant(lack)) if lack else can(name)
         if ok:
-            model, said = resolve(conn, target)
+            c, shown = resolve(conn, target)
             tail = f"; skipped {', '.join(refused)}" if refused else ""
-            tail += f"; {said}" if said else ""
-            shown = f"{target} ({model})" if model else target
+            tail += f"; {c.note}" if c.note else ""
             return Decision(name, entry["key"],
-                            f"{note}{reason} → {entry['key']} → {shown}{last}{tail}", model)
-        refused.append(f"{target}: {why}")
+                            f"{note}{reason} → {entry['key']} → {shown}{last}{tail}", c.model, c.effort)
+        refused.append(f"{targeting.key(target)}: {why}")
     return Decision(None, entry["key"], f"{note}{reason} → {entry['key']}: waiting — "
                     + ", ".join(refused))
 
@@ -200,8 +210,9 @@ def explain(conn: sqlite3.Connection, prompt: str, *, cwd: Optional[str] = None,
         lack = needs.lacking(t, want)
         ok, why = (False, needs.cant(lack)) if lack else avail.get(name, (False, "no such provider"))
         cfg = cfgs.get(name)
-        model, said = resolve(conn, t) if cfg is not None else (None, "")
-        targets.append({"name": t, "provider": name, "model": model, "note": said,
+        c, shown = resolve(conn, t) if cfg is not None else (targeting.Choice(None, None, ""), targeting.key(t))
+        targets.append({"name": targeting.key(t), "provider": name, "model": c.model, "effort": c.effort,
+                        "label": shown, "note": c.note,
                         "ok": bool(ok), "why": why,
                         "can": providers.capabilities(name, cfg) if cfg is not None else [],
                         "about": str((cfg or {}).get("about") or "")})

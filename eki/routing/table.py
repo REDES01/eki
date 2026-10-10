@@ -1,8 +1,8 @@
 """The routing table: rows of kinds of request, each with where it goes.
 
 A plain JSON file in EKI_HOME (`routing.json`) you can read and edit.
-Targets are provider names or `provider:tier` / `provider:model`
-(eki/targets.py), first choice first; moving down a row is
+Targets are provider names, `provider:tier` / `provider:model`, or objects
+`{"provider", "model"?, "effort"?}` (eki/targets.py), first choice first; moving down a row is
 failover. Each row says what it `needs` from a provider (see needs.py).
 The `general` row is used when the prompt check can't run; its targets
 go cheapest first: local models, then subscriptions, then the rest.
@@ -27,9 +27,9 @@ from .. import paths, providers, targets as targeting
 KIND_ORDER: Dict[str, int] = {"local": 0, "comfyui": 0, "codex_local": 0, "claude_code": 1, "codex": 1}
 
 
-def cheapest_first(targets: List[str], kinds: Optional[Dict[str, str]] = None) -> List[str]:
-    """`targets` in kind order, stable within a kind. `kinds` maps a provider
-    name to its kind; by default the kinds in providers.json."""
+def cheapest_first(targets: List[Any], kinds: Optional[Dict[str, str]] = None) -> List[Any]:
+    """`targets` (text or objects) in kind order, stable within a kind. `kinds`
+    maps a provider name to its kind; by default the kinds in providers.json."""
     if kinds is None:
         kinds = {n: str(c.get("kind", "")) for n, c in providers.config().items()}
     return sorted(targets, key=lambda t: KIND_ORDER.get(kinds.get(targeting.provider_of(t), ""), 2))

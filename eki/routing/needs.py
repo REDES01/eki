@@ -42,7 +42,7 @@ def request_needs(row: Dict[str, Any], attachments: Optional[List[str]] = None) 
     return list(dict.fromkeys(out))
 
 
-def lacking(target: str, needs: List[str]) -> List[str]:
+def lacking(target: Any, needs: List[str]) -> List[str]:
     """Which of `needs` the target's provider can't do (all of them if there's no such provider)."""
     name = targets.provider_of(target)
     cfg = providers.config().get(name)
@@ -56,10 +56,16 @@ def cant(missing: List[str]) -> str:
     return "can't do " + " or ".join(WORDS.get(m, m) for m in missing)
 
 
-def describe(target: str) -> str:
-    """One line for the prompt-check menu and `eki route`: target [tags] — about."""
+def describe(target: Any) -> str:
+    """One line for the prompt-check menu and `eki route`: target [tags] — about.
+    A target naming a model or effort reads as its label (`claude · opus · high`)."""
     name = targets.provider_of(target)
     cfg = providers.config().get(name, {})
-    line = f"{target} [{', '.join(providers.capabilities(name, cfg))}]"
+    try:
+        t = targets.parse(target)
+        shown = targets.label(name, t.tier or t.model, t.effort, None) if (t.tier or t.model or t.effort) else name
+    except ValueError:
+        shown = str(target)
+    line = f"{shown} [{', '.join(providers.capabilities(name, cfg))}]"
     about = str(cfg.get("about") or "").strip()
     return f"{line} — {about}" if about else line

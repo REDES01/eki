@@ -69,3 +69,16 @@ def test_a_reroute_drops_the_model_the_last_route_wrote(home, conn):
     store.update_run(conn, rid, provider=None, exclude='["claude"]')   # claude hit its limit
     assert worker.route(conn, store.run(conn, rid)) == "fake"
     assert store.run(conn, rid)["model"] is None
+
+
+def test_effort_is_stored_and_survives_a_restart(conn):
+    """Model and effort live in SQLite: a worker started again builds the same turn."""
+    assert "effort" in cols(conn, "runs")
+    tid = store.create_thread(conn, "t", None)
+    rid = store.create_run(conn, tid, "hi", provider="fake", model="opus", effort="high")
+    store.update_run(conn, rid, state="running")
+    again = db.connect()                       # a fresh process: nothing held in memory
+    extra = worker.build_turn(again, store.run(again, rid), "fake").extra
+    assert (extra["model"], extra["effort"]) == ("opus", "high")
+    plain = store.create_run(conn, tid, "hi", provider="fake")
+    assert "effort" not in worker.build_turn(conn, store.run(conn, plain), "fake").extra

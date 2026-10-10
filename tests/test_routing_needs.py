@@ -81,13 +81,14 @@ def test_explain_gives_needs_and_each_target(home, conn):
     e = routing.explain(conn, "fix the failing test")
     assert e["row"] == "code" and e["why"] == "rule: starts with fix" and e["needs"] == ["tools"]
     t = {x["name"]: x for x in e["targets"]}
-    assert t["bare"] == {"name": "bare", "provider": "bare", "model": None, "note": "", "ok": False,
+    assert t["bare"] == {"name": "bare", "provider": "bare", "model": None, "effort": None, "label": "bare",
+                         "note": "", "ok": False,
                          "why": "can't do tools", "can": ["text"], "about": "A plain model."}
     assert t["fake"]["ok"] and t["fake"]["can"] == ["text", "tools"]
     assert not t["gone"]["ok"] and t["gone"]["why"] == "switched off"
     e = routing.explain(conn, "tell me something")
     assert e["row"] == "general" and e["needs"] == []
-    assert e["targets"][0] == {"name": "mlx", "provider": "mlx", "model": None, "note": "", "ok": True,
+    assert e["targets"][0] == {"name": "mlx", "provider": "mlx", "model": None, "effort": None, "label": "mlx", "note": "", "ok": True,
                                "why": "off; starts for the run", "can": ["text"], "about": ""}
     assert api.route(conn, "fix the failing test")["needs"] == ["tools"]
 
@@ -161,7 +162,7 @@ def test_a_row_target_names_a_tier_and_the_why_names_the_model(home, conn):
     _, rid = _run(conn, "a haiku", row="answer")
     d = routing.decide(conn, store.run(conn, rid))
     assert (d.provider, d.row, d.model) == ("claude", "answer", "claude-haiku-4-5")
-    assert d.why == "row answer → answer → claude:fast (claude-haiku-4-5)"
+    assert d.why == "row answer → answer → claude · claude-haiku-4-5"
     e = routing.explain(conn, "fix the failing test")
     assert e["row"] == "general"
 
@@ -172,7 +173,7 @@ def test_a_tier_not_picked_goes_to_the_default_and_says_so(home, conn):
     _, rid = _run(conn, "a haiku", row="general")
     d = routing.decide(conn, store.run(conn, rid))
     assert (d.provider, d.model) == ("claude", None)
-    assert d.why == "row general → general → claude:top; claude has no top model picked; its default"
+    assert d.why == "row general → general → claude · its default; claude has no top model picked; its default"
 
 
 def test_a_model_off_the_read_list_is_not_asked_for(home, conn):

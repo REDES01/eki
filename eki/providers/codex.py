@@ -45,10 +45,10 @@ class Codex(ProgramProvider):
 
     def complete(self, messages: List[Dict[str, Any]], *, tools: Optional[list] = None,
                  max_tokens: int = 8192, timeout: float = 600, stop=None, on_text=None,
-                 model: Optional[str] = None) -> Dict[str, Any]:
+                 model: Optional[str] = None, effort: Optional[str] = None) -> Dict[str, Any]:
         """One answer with as few tools as codex exec allows (oneshot): {"text", "tool_calls": []}."""
         return oneshot.complete("codex", self.bin or "codex", messages, model=model or self.cfg.get("model"),
-                                timeout=timeout, stop=stop, on_text=on_text)
+                                effort=effort, timeout=timeout, stop=stop, on_text=on_text)
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         if turn.extra.get("row") == "chore":      # eki's own job: one call, no tools
@@ -83,6 +83,8 @@ class Codex(ProgramProvider):
         params: Dict[str, Any] = {"threadId": tid, "input": items}
         if turn.cwd:
             params["cwd"] = turn.cwd
+        if turn.extra.get("effort"):        # per turn, so a resumed thread gets it every time
+            params["effort"] = turn.extra["effort"]
         return params
 
     def opening(self, ch: Channel, turn: Turn) -> None:

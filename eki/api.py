@@ -8,7 +8,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, projectchats, projects, providers, quota, routing, store
+from . import (asking, asks, attachments, capacity, digest, engine, gallery, machine, modellist, models, paths,
+               projectchats, projects, providers, quota, routing, store, targets)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -26,7 +27,18 @@ def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) ->
         view["asks"] = [asks.view(a) for a in asks.for_run(conn, r["id"]) if a["state"] != "withdrawn"]
         view["files"] = sorted({e["path"] for e in view["steps"] if e.get("path")})
         view["attachments"] = store.attachments(r)
+    view["model"], view["effort"] = r["model"], r["effort"]
+    view["shown"] = _shown(conn, r["provider"], r["model"], r["effort"])
     return view
+
+
+def _shown(conn: sqlite3.Connection, provider: Optional[str], model: Optional[str],
+           effort: Optional[str]) -> Optional[str]:
+    """`claude · Opus 5.5 · high`; a provider with no model list and nothing picked is just its name."""
+    if not provider:
+        return None
+    listed = modellist.listed(conn, provider)
+    return targets.label(provider, model, effort, listed) if (model or effort or listed) else provider
 
 
 def threads(conn: sqlite3.Connection, limit: int = 60) -> List[Dict[str, Any]]:

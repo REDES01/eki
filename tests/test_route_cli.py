@@ -92,7 +92,7 @@ def test_table_prints_the_roles_with_models_and_router_medians(home, conn, capsy
     assert any(l.startswith("reviewer  lm → its default") for l in lines)
     assert any(l.startswith("chores    lm → its default") for l in lines)
     assert "checker:" not in out
-    assert "fake:top" in next(l for l in lines if "→ fake-big" in l and l.startswith("    "))
+    assert "fake · top" in next(l for l in lines if "→ fake-big" in l and l.startswith("    "))
 
 
 def test_table_role_that_falls_back_says_why(home, capsys):

@@ -32,11 +32,16 @@
     return `<span class="pmark" style="background: hsl(${h} 45% 46%)">${md.esc(name.charAt(0).toUpperCase())}</span>`;
   }
 
+  // targets.choose()'s notes when a model or effort is no longer offered
+  const FELL_BACK = /any more; its default|takes no effort|model picked; its default/;
+
   function runHtml(r) {
     const live = LIVE.includes(r.state);
     const steps = r.steps.length
       ? `<details class="steps" ${live ? "open" : ""}><summary>${r.steps.length} step${r.steps.length > 1 ? "s" : ""}</summary>${r.steps.map(stepLine).join("")}</details>` : "";
-    const who = r.provider ? `${mark(r.provider)}<span class="who">${md.esc(r.provider)}</span>` : "";
+    // what it went to, as the program names it (`claude · Opus 5.5 · high`); amber when routing fell back
+    const fell = FELL_BACK.test(r.why || "");
+    const who = r.provider ? `${mark(r.provider)}<span class="who"${fell ? ' style="color: var(--amber)"' : ""}>${md.esc(r.shown || r.provider)}</span>` : "";
     const why = r.why ? `<button type="button" class="why ${state.whys.has(String(r.id)) ? "open" : ""}" data-why="${r.id}"
                           title="Why this provider">${md.esc(r.why)}</button>` : "";
     let tail = "";
@@ -49,7 +54,7 @@
     const copy = answer && !live ? `<div class="tools"><button type="button" class="copy" data-copy-run="${r.id}" title="Copy the answer">Copy</button></div>` : "";
     return `<div class="turn" id="run-${r.id}">
         ${r.parent ? "" : `<div class="user">${ekiAttach.thumbs(r.attachments)}${r.prompt ? `<div class="bubble">${md.render(r.prompt)}</div>` : ""}</div>`}
-        <div class="bot"><div class="route">${who}${why}</div>${steps}
+        <div class="bot"><div class="route"${fell ? ' style="color: var(--amber)"' : ""}>${who}${why}</div>${steps}
           <div class="answer">${answer}</div>${(r.asks || []).map(cards.render).join("")}${files(r)}${tail}${copy}</div></div>`;
   }
 

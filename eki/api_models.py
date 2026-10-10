@@ -1,9 +1,10 @@
-"""The Settings page's model picture: each provider's read list and tiers, and the roles.
+"""The Settings page's model picture: each provider's read list, and the roles.
 
 GET /api/models is read(); POST /api/models/refresh {"name"} reads one
-provider's list again (eki/modellist.py). Nothing here writes a settings
-file: the page saves a picked tier or role through /api/settings/(routing|
-providers) like any other edit.
+provider's list again (eki/modellist.py). Each list is the program's own,
+floating names (aliases that follow the newest) first, then pinned ids, each
+in the program's order. Nothing here writes a settings file: the page saves
+a picked target or role through /api/settings/routing like any other edit.
 """
 from __future__ import annotations
 
@@ -13,26 +14,22 @@ from typing import Any, Dict
 from . import modellist, providers, roles, targets
 
 
-def _tiers(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """The picked providers.json models, with the old `model` as default."""
-    got = cfg.get("models") if isinstance(cfg.get("models"), dict) else {}
-    out = {t: str(got[t]) for t in targets.TIERS if got.get(t)}
-    if "default" not in out and cfg.get("model"):
-        out["default"] = str(cfg["model"])
-    return out
-
-
 def _provider(conn: sqlite3.Connection, name: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     kind = str(cfg.get("kind") or "")
     listed = modellist.listed(conn, name)
-    return {"kind": kind, "tiers": _tiers(cfg), "listed": listed,
+    if listed is not None:
+        listed = [m for m in listed if m["floating"]] + [m for m in listed if not m["floating"]]
+    return {"kind": kind, "listed": listed,
             "read_at": modellist.read_at(conn, name), "lists": kind in modellist.KINDS}
 
 
 def _role(conn: sqlite3.Connection, role: str) -> Dict[str, Any]:
     p = roles.pick(role, conn)
-    return {"target": roles.get(role), "provider": p.provider, "model": p.model, "why": p.why,
-            "default": roles.default(role), "set": roles.get(role) != roles.default(role)}
+    effort = getattr(p, "effort", None)
+    shown = targets.label(p.provider, p.model, effort, modellist.listed(conn, p.provider)) if p.provider else ""
+    return {"target": roles.get(role), "provider": p.provider, "model": p.model, "effort": effort,
+            "shown": shown, "why": p.why, "default": roles.default(role),
+            "set": roles.get(role) != roles.default(role)}
 
 
 def read(conn: sqlite3.Connection) -> Dict[str, Any]:

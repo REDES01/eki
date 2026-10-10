@@ -118,3 +118,30 @@ def test_routing_targets_roles_and_provider_tiers_are_checked(home):
                                                       "models": {"quick": "x", "top": 4}}})
     assert got == ["'claude': models: 'quick' is not a tier (one of fast, default, top)",
                    "'claude': models.top must be a model name"]
+
+
+def test_object_targets_in_rows_and_roles_save_and_a_bad_one_is_refused(web, home):
+    got = _read(web, "routing")
+    rows = [dict(r) for r in got["data"]["rows"]]
+    general = next(r for r in rows if r["key"] == "general")
+    general["targets"] = [{"provider": "fake", "model": "m1", "effort": "high"}, "fake:m2", "fake2",
+                          {"provider": "fake", "effort": "low"}, {"provider": "fake", "model": "fast"}]
+    roles = {"planner": {"provider": "fake", "model": "m1", "effort": "high"}, "reviewer": "off"}
+    data = {**got["data"], "rows": rows, "roles": roles}
+    code, out = post(web + "/api/settings/routing", {"data": data, "mtime": got["mtime"]})
+    assert code == 200 and out["ok"] is True
+    again = _read(web, "routing")
+    assert again["data"]["roles"]["planner"] == roles["planner"]
+    assert next(r for r in again["data"]["rows"] if r["key"] == "general")["targets"] == general["targets"]
+
+    before = (home / "routing.json").read_text()
+    general["targets"] = [{"provider": "fake", "effort": 3}, {"provider": "fake", "speed": "x"},
+                          {"provider": ""}, {"provider": "nope"}, 7]
+    bad = {**data, "rows": rows, "roles": {"router": {"provider": "fake", "model": ["m"]}}}
+    code, out = post(web + "/api/settings/routing", {"data": bad, "mtime": again["mtime"]})
+    assert code == 400
+    problems = "\n".join(out["problems"])
+    for want in ("effort 3", "unknown keys: speed", "names no provider", "unknown provider 'nope'",
+                 "7 is not text or an object", "roles.router: model ['m']"):
+        assert want in problems
+    assert (home / "routing.json").read_text() == before

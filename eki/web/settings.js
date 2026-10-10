@@ -70,9 +70,8 @@
   const field = (label, html) => `<label class="set-field"><span>${label}</span>${html}</label>`;
 
   function rowCard(r, id, added) {
-    const targets = Array.isArray(r.targets) ? r.targets : [];
-    const needs = Array.isArray(r.needs) ? r.needs : [];
-    const more = providerNames().filter((n) => !targets.includes(n));
+    const [targets, needs] = [r.targets, r.needs].map((x) => (Array.isArray(x) ? x : []));
+    const names = providerNames(), models = window.settingsModels ? settingsModels.models() : null;
     const last = targets.length - 1;
     return `<div class="set-card${added ? " added" : ""}" data-row="${esc(id)}">
       <div class="set-top">${text("key", r.key, "key")}${added ? memo : ""}<span class="grow"></span>
@@ -80,17 +79,16 @@
       ${field("Title", text("title", r.title, "what this row is for"))}
       ${field("Needs", `<div class="set-checks">${ABILITIES.map((a) => check(needs.includes(a), `data-need="${a}"`, a)).join("")}</div>`)}
       ${field("Examples <i class=\"dim\">one per line</i>", `<textarea class="set-in" data-f="examples" rows="${Math.max(2, (r.examples || []).length)}">${esc((r.examples || []).join("\n"))}</textarea>`)}
-      ${field("Targets <i class=\"dim\">first that can answer wins</i>", `<ol class="set-targets">${targets.map((t, i) => `<li><b>${esc(t)}</b><span class="grow"></span>
+      ${field("Targets <i class=\"dim\">first that can answer wins</i>", `<ol class="set-targets">${targets.map((t, i) => `<li>${settingsTarget.html(t, { names, models, attrs: `data-t="${i}"` })}<span class="grow"></span>
         <button type="button" class="ghost small" data-act="up" data-t="${i}" ${i ? "" : "disabled"} title="Earlier">↑</button>
         <button type="button" class="ghost small" data-act="down" data-t="${i}" ${i < last ? "" : "disabled"} title="Later">↓</button>
         <button type="button" class="ghost small" data-act="rmt" data-t="${i}" title="Remove">✕</button></li>`).join("")}</ol>
-        <select class="set-in" data-f="addt"><option value="">＋ add a provider…</option>${more.map((n) => `<option>${esc(n)}</option>`).join("")}</select>`)}
+        <select class="set-in" data-f="addt"><option value="">＋ add a target…</option>${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select>`)}
     </div>`;
   }
 
   function routingForm() {
-    const d = S.draft.routing;
-    const me = d.self && typeof d.self === "object" ? d.self : {};
+    const d = S.draft.routing, me = d.self && typeof d.self === "object" ? d.self : {};
     const opt = (v, cur, label) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label || v)}</option>`;
     return `<section class="set-sect"><h3>Routing</h3>${window.settingsModels ? settingsModels.roles(d) : ""}
         ${check(d.checker_wakes !== false, 'data-f="checker_wakes"', "Wake an on-demand checker model for the prompt check")}</section>
@@ -130,7 +128,8 @@
     }
     if (f === "checker_wakes") { d.checker_wakes = el.checked; return false; }
     if (!card) return false;
-    const r = rowOf(card);
+    const r = rowOf(card), w = el.closest("[data-tgt]");
+    if (w) { r.targets[+w.dataset.t] = settingsTarget.value(w, el); return el.tagName === "SELECT"; }   // settingstarget.js
     if (el.dataset.need) {
       const needs = new Set(Array.isArray(r.needs) ? r.needs : []);
       el.checked ? needs.add(el.dataset.need) : needs.delete(el.dataset.need);
@@ -189,16 +188,15 @@
         ${ABILITIES.map((a) => check(can.includes(a), `data-can="${a}"`, a, byKind)).join("")}</div>`)}
       ${check(cfg.keep_up, 'data-f="keep_up"', "keep up (start it and keep it running while there's room)")}
       ${other.length ? `<div class="dim set-other">Also: ${other.map((k) => `<code>${esc(k)}</code>`).join(", ")} — edit these in Raw JSON.</div>` : ""}
-      ${window.settingsModels && !unwritten ? settingsModels.tiers(name, cfg) : ""}
+      ${window.settingsModels && !unwritten ? settingsModels.line(name) : ""}
     </div>`;
   }
 
   function providersForm() {
-    const d = S.draft.providers;
-    const eff = S.got.providers.effective.entries;
+    const d = S.draft.providers, eff = S.got.providers.effective.entries;
     const mem = Object.keys(eff).filter((n) => eff[n].unwritten && !(n in d));
     const built = Object.keys(eff).filter((n) => eff[n].builtin);
-    return `<section class="set-sect"><h3>Providers</h3>${window.settingsModels ? settingsModels.summary(d) : ""}
+    return `<section class="set-sect"><h3>Providers</h3>
       ${Object.keys(d).map((n) => provCard(n, d[n] || {}, eff[n], false)).join("")}
       ${mem.map((n) => provCard(n, eff[n], eff[n], true)).join("")}
       <button type="button" class="ghost" data-act="addprov">＋ Add a provider</button></section>
@@ -207,8 +205,7 @@
   }
 
   function provOf(card) {
-    const d = S.draft.providers;
-    const name = card.dataset.prov;
+    const d = S.draft.providers, name = card.dataset.prov;
     if (card.hasAttribute("data-unw")) {
       const cfg = clone(S.got.providers.effective.entries[name]);
       MARKS.forEach((k) => delete cfg[k]);
@@ -222,7 +219,6 @@
 
   function editProviders(el, card, ev) {
     if (!card) return false;
-    if (el.closest("[data-tiers]")) return settingsModels.editTier(el, provOf(card));   // settingsmodels.js
     const f = el.dataset.f;
     if (f === "name") {
       if (ev.type !== "change") return false;
@@ -329,7 +325,7 @@
       return reload(S.tab, "Back to what's on disk.");
     }
     const card = b.closest(".set-card");
-    if (window.settingsModels && await settingsModels.act(act, b, () => provOf(card), (h) => note(S.tab, "err", h))) return render();
+    if (window.settingsModels && await settingsModels.act(act, b, (h) => note(S.tab, "err", h))) return render();
     const again = S.tab === "routing" ? actRouting(act, b, card) : actProviders(act, b, card);
     if (again) render();
   }

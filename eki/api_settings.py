@@ -112,8 +112,9 @@ def _check_routing(data: Any, known: set) -> List[str]:
             out.append(f"row key {key!r} is used twice")
         seen.add(key)
         aims = r.get("targets")
-        if not _strings(aims):
-            out.append(f"{label}: targets must be a list of provider names or provider:tier")
+        if not isinstance(aims, list):
+            out.append(f"{label}: targets must be a list of provider, provider:model or"
+                       " {\"provider\", \"model\", \"effort\"}")
         else:
             out += [f"{label}: {p}" for t in aims for p in targets.problems(t, known)]
         needs = r.get("needs", [])

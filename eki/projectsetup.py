@@ -12,6 +12,10 @@ it again, and every state lives in the projects row.
 The same pass retires a person's own folder rows whose origin is on GitHub:
 what they started finishes there, nothing new starts, and their standing
 goals move to eki's clone once it is ready.
+
+eki's own repo is the built-in eki: a row made for it before that rule (`_own`)
+retires once its work ends — its clone removed, its standing goals moved to
+eki's own queue — so the list shows eki once.
 """
 from __future__ import annotations
 
@@ -111,6 +115,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     for p in conn.execute(f"SELECT * FROM projects WHERE setup IN ({marks}) AND COALESCE(state,'on')='on' "
                           "ORDER BY created_at", SETTLING).fetchall():
         said += _settle(conn, p)
+    said += _own(conn)
     said += _retire(conn)
     said += _move(conn)
     return said
@@ -160,6 +165,39 @@ def _ready(conn: sqlite3.Connection, p: sqlite3.Row, how: str) -> List[str]:
     return [f"{p['repo']}: ready ({how})"]
 
 
+def _own(conn: sqlite3.Connection) -> List[str]:
+    """A row for eki's own repo retires once its work ends; a kill midway is finished next pass."""
+    own = integration.own_repo()
+    if own is None:
+        return []
+    said: List[str] = []
+    for p in conn.execute("SELECT * FROM projects WHERE repo=? AND COALESCE(state,'on') NOT IN "
+                          "('retired','dropped') ORDER BY created_at", (own,)).fetchall():
+        if _busy(conn, p["id"]):
+            said.append(f"{own}: eki's own repo — retires once its work ends")
+            continue
+        run = store.run(conn, p["setup_run"]) if p["setup_run"] else None
+        if run is not None and run["state"] not in store.ENDED:
+            store.cancel(conn, run["id"])
+        removed = _remove(Path(p["path"]))
+        with db.tx(conn):
+            conn.execute("UPDATE projects SET state='retired' WHERE id=?", (p["id"],))
+        said.append(f"{own}: retired — eki's own repo is the built-in eki; "
+                    f"clone {'removed' if removed else 'not removed'}")
+    return said
+
+
+def _busy(conn: sqlite3.Connection, pid: str) -> bool:
+    """Work still going on a project: a goal planning, an item unfinished, or a PR open.
+    Its standing goals don't hold it: once it retires, `_move` takes them."""
+    plan, items = ",".join("?" * len(PLANNING)), ",".join("?" * len(UNFINISHED))
+    return conn.execute(
+        f"SELECT 1 FROM goals WHERE project=? AND state IN ({plan}) UNION ALL "
+        f"SELECT 1 FROM items i JOIN goals g ON g.id=i.goal_id WHERE g.project=? "
+        f"AND (i.state IN ({items}) OR i.pr_state='open') LIMIT 1",
+        (pid, *PLANNING, pid, *UNFINISHED)).fetchone() is not None
+
+
 def _retire(conn: sqlite3.Connection) -> List[str]:
     """Folder rows whose origin is on GitHub: retired, so their work finishes and nothing new starts."""
     said: List[str] = []
@@ -181,12 +219,19 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
 
 
 def _move(conn: sqlite3.Connection) -> List[str]:
-    """Standing goals on retired rows: their repo's clone made, then repointed to it once ready."""
+    """Standing goals on retired rows: their repo's clone made, then repointed to it once ready.
+    On eki's own repo they go to eki's own queue at once (project NULL); no clone is made."""
     said: List[str] = []
+    own = integration.own_repo()
     rows = conn.execute("SELECT s.id AS sid, s.state AS sstate, p.repo FROM standing s JOIN projects p "
                         "ON p.id=s.project WHERE p.state='retired' AND s.state!='dropped' "
                         "ORDER BY s.created_at").fetchall()
     for r in rows:
+        if own is not None and r["repo"] == own:
+            with db.tx(conn):
+                conn.execute("UPDATE standing SET project=NULL, why=NULL WHERE id=?", (r["sid"],))
+            said.append(f"standing {r['sid']}: moved to eki's own queue ({own} is eki's own repo)")
+            continue
         target = projects.by_repo(conn, r["repo"])
         if target is None or target["state"] == "dropped":
             if r["sstate"] != "on":

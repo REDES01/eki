@@ -268,3 +268,96 @@ def test_ensure_without_a_chat_project_leaves_the_folder_empty(conn, src, tmp_pa
     projectchats.create(conn, "notes")
     said = []
     assert projectsetup.ensure(conn, "me/proj", said)["folder"] is None and said == []
+
+
+def own_row(conn, monkeypatch, setup_run=None):
+    """A row made for eki's own repo before it had one name: ready, its clone under the projects home."""
+    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
+    dest = projects.clone_path("me/eki")
+    dest.mkdir(parents=True)
+    (dest / "README.md").write_text("# eki\n")
+    workspace.git(dest, "init", "-q", "-b", "main")
+    workspace.git(dest, "add", "-A")
+    workspace.git(dest, "commit", "-q", "-m", "first")
+    pid = store.new_id()
+    conn.execute("INSERT INTO projects(id, name, path, branch, created_at, repo, state, setup, setup_run) "
+                 "VALUES (?,?,?,'main',?,'me/eki','on','ready',?)", (pid, "me/eki", str(dest), db.now(), setup_run))
+    return pid, dest
+
+
+RETIRED = "me/eki: retired — eki's own repo is the built-in eki; clone removed"
+WAITS = "me/eki: eki's own repo — retires once its work ends"
+
+
+def test_the_row_for_eki_s_own_repo_retires_and_its_clone_goes(conn, src, monkeypatch):
+    pid, dest = own_row(conn, monkeypatch)
+    (dest.parent / "eki.part").mkdir()
+    assert projectsetup.tick(conn) == [RETIRED]
+    assert projects.get(conn, pid)["state"] == "retired"
+    assert not dest.exists() and not (dest.parent / "eki.part").exists()
+    assert projectsetup.tick(conn) == []
+
+
+def test_a_kill_before_the_row_is_marked_is_finished_next_pass(conn, src, monkeypatch):
+    pid, dest = own_row(conn, monkeypatch)
+    projectsetup._remove(dest)                           # step 2 done, then killed
+    assert projectsetup.tick(conn) == ["me/eki: retired — eki's own repo is the built-in eki; clone removed"]
+    assert projects.get(conn, pid)["state"] == "retired"
+
+
+def test_the_row_for_eki_s_own_repo_waits_for_its_work(conn, src, monkeypatch):
+    pid, dest = own_row(conn, monkeypatch)
+    gid = selfwork.submit(conn, "greet", plan=True, draft=False, owner="eki", source_kind="issue",
+                          project=pid, issue=7)
+    conn.execute("UPDATE goals SET state='planned' WHERE id=?", (gid,))
+    iid = selfwork.new_item(conn, gid, "greet", "make greet.py", ["greet.py"], [], False)
+    assert projectsetup.tick(conn) == [WAITS] and projectsetup.tick(conn) == [WAITS]
+    assert projects.get(conn, pid)["state"] == "on" and dest.exists()
+
+    conn.execute("UPDATE items SET state='proposed', pr_state='open' WHERE id=?", (iid,))
+    assert projectsetup.tick(conn) == [WAITS]
+    conn.execute("UPDATE items SET pr_state='merged', state='applied' WHERE id=?", (iid,))
+    conn.execute("UPDATE goals SET state='drafting' WHERE id=?", (gid,))
+    assert projectsetup.tick(conn) == [WAITS]
+    conn.execute("UPDATE goals SET state='done' WHERE id=?", (gid,))
+    assert projectsetup.tick(conn) == [RETIRED] and projects.get(conn, pid)["state"] == "retired"
+
+
+def test_a_running_setup_run_is_cancelled_before_retiring(conn, src, monkeypatch):
+    tid = store.create_thread(conn, "clone me/eki", str(paths.projects()))
+    rid = store.create_run(conn, tid, json.dumps(["/bin/sh", "-c", "sleep 60"]), provider="command")
+    pid, _ = own_row(conn, monkeypatch, setup_run=rid)
+    conn.execute("UPDATE projects SET setup='cloning' WHERE id=?", (pid,))
+    assert projectsetup.tick(conn) == [RETIRED]
+    assert store.run(conn, rid)["state"] == "cancelled"
+    assert projects.get(conn, pid)["state"] == "retired"
+
+
+def test_standing_goals_on_eki_s_own_repo_move_to_eki_s_own_queue(conn, src, monkeypatch):
+    pid, _ = own_row(conn, monkeypatch)
+    sid = standing.add(conn, "", "keep it tidy", project=pid)
+    said = projectsetup.tick(conn)
+    assert said == [RETIRED, f"standing {sid}: moved to eki's own queue (me/eki is eki's own repo)"]
+    assert conn.execute("SELECT project FROM standing WHERE id=?", (sid,)).fetchone()[0] is None
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
+    assert projectsetup.tick(conn) == []
+
+
+def test_a_retired_folder_row_on_eki_s_own_repo_moves_its_standing_goal_without_a_clone(conn, src, proj,
+                                                                                         monkeypatch):
+    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
+    old = projects.add(conn, proj)
+    conn.execute("UPDATE projects SET repo='me/eki', state='retired' WHERE id=?", (old,))
+    sid = standing.add(conn, str(proj), "keep it tidy")
+    said = projectsetup.tick(conn)
+    assert said == [f"standing {sid}: moved to eki's own queue (me/eki is eki's own repo)"]
+    assert conn.execute("SELECT project FROM standing WHERE id=?", (sid,)).fetchone()[0] is None
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
+    assert not paths.projects().exists() or not any(paths.projects().iterdir())
+
+
+def test_without_an_own_repo_a_me_eki_row_is_left_alone(conn, src, monkeypatch):
+    pid, dest = own_row(conn, monkeypatch)
+    monkeypatch.setattr(integration, "own_repo", lambda: None)
+    assert projectsetup.tick(conn) == []
+    assert projects.get(conn, pid)["state"] == "on" and dest.exists()

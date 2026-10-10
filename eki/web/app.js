@@ -3,7 +3,7 @@
 // that the engine doesn't have, so a refresh or an engine restart loses nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { thread: null, after: 0, polling: false, answers: {}, whys: new Set(), live: null };   // answers/whys: what the page shows, not keeps
+  const state = { thread: null, project: null, after: 0, polling: false, answers: {}, whys: new Set(), live: null };   // answers/whys: what the page shows, not keeps
 
   const LIVE = ["queued", "starting", "running"];
 
@@ -102,7 +102,9 @@
     if (state.thread !== tid) return;   // the page moved on while this was loading
     $("title").textContent = t.title || "(untitled)";
     $("meta").textContent = [t.provider && "with " + t.provider, t.cwd].filter(Boolean).join(" · ");
-    if (t.cwd && !$("cwd").value) { $("cwd").value = t.cwd; chip(); }
+    state.project = t.project || null;   // a project's chat works in its folder; nothing to pick
+    if (t.cwd && !$("cwd").value && !state.project) $("cwd").value = t.cwd;
+    chip();
     const last = t.runs[t.runs.length - 1];
     sendMode(last && LIVE.includes(last.state) ? last.id : null);
     $("main").classList.toggle("blank", !t.runs.length);
@@ -143,6 +145,7 @@
 
   function open(id) {
     state.thread = id || null;
+    state.project = null;
     state.after = 0;
     state.whys.clear();
     $("log").innerHTML = "";
@@ -170,10 +173,13 @@
   }
 
   // Who answers, folder and background live in the options menu; the chip says what's chosen.
+  // A chat in a project has no folder field: it works in the project's folder, and the chip names the project.
   function chip() {
-    const to = $("to"), cwd = $("cwd").value.trim();
+    const to = $("to"), cwd = state.project ? "" : $("cwd").value.trim();
+    $("cwd").closest(".mrow").hidden = !!state.project;
     const parts = [to.value ? to.options[to.selectedIndex].text : "Auto"];
-    if (cwd) parts.push("📁 " + (cwd.replace(/\/+$/, "").split("/").pop() || cwd));
+    if (state.project) parts.push("📁 " + (state.project.name || state.project.id));
+    else if (cwd) parts.push("📁 " + (cwd.replace(/\/+$/, "").split("/").pop() || cwd));
     if ($("bg").checked) parts.push("background");
     $("chip").textContent = parts.join(" · ") + " ▾";
   }
@@ -199,7 +205,7 @@
     $("send").disabled = true;
     try {
       const got = await call("/api/ask", {
-        prompt, thread: state.thread, to: $("to").value, cwd: $("cwd").value.trim(),
+        prompt, thread: state.thread, to: $("to").value, cwd: state.project ? "" : $("cwd").value.trim(),
         background: $("bg").checked, attachments: ekiAttach.paths(),
       });
       $("prompt").value = "";

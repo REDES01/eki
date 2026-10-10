@@ -138,3 +138,17 @@
   #log { padding: 14px 16px 30px; }
   .bubble { max-width: 92%; }
 }
+
+/* ---- the sidebar's project groups (side.js): a header, its chats when open ---- */
+.pgroup { margin: 2px 0; }
+.phead { display: flex; align-items: center; gap: 4px; padding: 4px 10px 4px 6px; border-radius: 8px; min-width: 0; }
+.phead:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.ptoggle { background: none; border: 0; padding: 0 4px; color: var(--dim); font-size: 11px; width: 18px; flex: none; }
+.phead .pname { flex: 1; min-width: 0; font-weight: 600; color: var(--text); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phead .pname:hover { text-decoration: underline; }
+.pcount { background: none; border: 0; padding: 0; font-size: 12px; flex: none; }
+.pchats .thread { padding-left: 28px; }
+#menu .mrow[hidden] { display: none; }
+.phead .dot { position: static; flex: none; }
+.pchats .thread .dot { left: 17px; }

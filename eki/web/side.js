@@ -1,4 +1,4 @@
-// The sidebar: threads grouped by when they last moved, and at the bottom the
+// The sidebar: chats in a project under its header, the rest grouped by when they last moved, and at the bottom the
 // providers, the machine and the latest digest. All of it from the API.
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -34,21 +34,54 @@
     return "Older";
   }
 
-  async function loadThreads() {
-    const list = await call("/api/threads");
-    const cur = nav.current();
-    let last = null, html = "";
-    for (const t of list) {
-      const g = group(t.updated);
-      if (g !== last) { html += `<div class="tgroup">${g}</div>`; last = g; }
-      html += `
+  function threadLink(t, cur) {
+    return `
       <a href="#${t.id}" class="thread ${t.id === cur ? "on" : ""}" data-id="${t.id}">
         ${t.needs_you ? '<span class="dot you" title="needs you"></span>' : t.working ? '<span class="dot" title="working"></span>' : ""}
         <span class="t">${md.esc(t.title || "(untitled)")}</span>
         <span class="when dim">${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
       </a>`;
+  }
+
+  // Project groups you opened or closed: what the page shows, not keeps. Unset, the current thread's is open.
+  const opened = new Map();
+
+  // Chats in a project under its header (projects by their latest chat), then the rest by date.
+  function render(list, cur) {
+    const byProject = new Map(), loose = [];
+    for (const t of list) {
+      if (!t.project) { loose.push(t); continue; }
+      if (!byProject.has(t.project.id)) byProject.set(t.project.id, { p: t.project, chats: [] });
+      byProject.get(t.project.id).chats.push(t);
     }
-    $("threads").innerHTML = html || '<div class="dim pad">No threads yet.</div>';
+    let html = "";
+    const groups = [...byProject.values()];
+    groups.forEach((g) => g.chats.sort((a, b) => b.updated - a.updated));
+    groups.sort((a, b) => b.chats[0].updated - a.chats[0].updated);
+    for (const { p, chats } of groups) {
+      const open = opened.has(p.id) ? opened.get(p.id) : chats.some((t) => t.id === cur);
+      const busy = chats.some((t) => t.needs_you) ? '<span class="dot you" title="needs you"></span>'
+        : chats.some((t) => t.working) ? '<span class="dot" title="working"></span>' : "";
+      html += `<div class="pgroup ${open ? "open" : ""}">
+        <div class="phead"><button type="button" class="ptoggle" data-pgroup="${md.esc(p.id)}" aria-expanded="${open}"
+            title="Show its chats">${open ? "▾" : "▸"}</button>
+          <a href="#project/${encodeURIComponent(p.id)}" class="pname">${md.esc(p.name || p.id)}</a>${busy}
+          <button type="button" class="pcount dim" data-pgroup="${md.esc(p.id)}">${chats.length} chat${chats.length === 1 ? "" : "s"}</button></div>
+        ${open ? `<div class="pchats">${chats.map((t) => threadLink(t, cur)).join("")}</div>` : ""}</div>`;
+    }
+    let last = null;
+    for (const t of loose) {
+      const g = group(t.updated);
+      if (g !== last) { html += `<div class="tgroup">${g}</div>`; last = g; }
+      html += threadLink(t, cur);
+    }
+    return html || '<div class="dim pad">No threads yet.</div>';
+  }
+
+  let lastList = [];
+  async function loadThreads() {
+    lastList = await call("/api/threads");
+    $("threads").innerHTML = render(lastList, nav.current());
   }
 
   // ---- providers and the machine ---------------------------------------------------------
@@ -108,6 +141,13 @@
   }
 
   document.addEventListener("click", async (e) => {
+    const pg = e.target.closest("[data-pgroup]");
+    if (pg) {   // a project header opens to its chats, or closes
+      const id = pg.dataset.pgroup;
+      opened.set(id, !pg.closest(".pgroup").classList.contains("open"));
+      $("threads").innerHTML = render(lastList, nav.current());
+      return;
+    }
     const m = e.target.closest("[data-model]");
     if (!m) return;
     m.disabled = true;
@@ -119,5 +159,5 @@
   loadProviders();
   setInterval(loadProviders, 5000);
   setInterval(() => loadThreads().catch(() => {}), 4000);
-  window.side = { loadThreads, loadProviders };
+  window.side = { loadThreads, loadProviders, render };
 })();

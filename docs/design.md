@@ -95,6 +95,9 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `journal` (a playtester session's notes, emotions, review, screenshots) |
+| `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
+| `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
 | `cli/*` | one file per command |
 
 **Scheduling.** The engine's spawn step holds each kind of run only by the
@@ -841,6 +844,91 @@ as any other; nothing in `workspace` or the scheduler changes.
 
 Not in scope: knowledge-file uploads, per-project memory, per-project
 routing rows.
+
+### Components
+
+**Concrete pieces any agent can use, before any project framework**
+(`eki/components/`). A component is a folder: `components/<name>/component.json`
+plus the files its kind needs, inside a project folder, or in the
+machine-wide pool `~/.eki/components/<name>/` that every project shares. A
+project's own component with the same name wins over the pool's. eki finds
+the components of the folder a run works in; a worktree reads its project's
+from the project folder, never from the worktree. A broken component (bad
+JSON, unknown kind, a missing file) is reported with its error and skipped;
+it never breaks the engine. A folder with no `components/` behaves as before.
+
+**The common keys.** `kind` (`service`, `assets`, `agent`), `about` (one
+line, shown wherever the component is listed), and how it is shared:
+
+- `access`: `"queue"` — calls served in order, `slots` at a time (image
+  generation); `"exclusive"` — one agent run holds it from its first use to
+  the end of that run (a TTS model, an Ableton session); `"shared"`.
+- `memory_gb`: started only when `machine.room` has that much, else wait.
+- `conflicts`: `[names]` never up or in use together (memory or file
+  pressure); an idle conflicting one is stopped first, else wait.
+- `idle_stop`: minutes a server stays up unused, on demand like the local
+  model.
+
+These rules are enforced machine-wide — across projects and eki's own runs —
+by the engine's spawn step. Queues and holds are derived from the runs table
+and the active runs, so they survive a restart. A wait shows on the
+caller's run, with its why: "waits for voice: held by <run>".
+
+**Using one.** `eki use <name> [args…]`, from any run (an agent in a project
+chat, a goal item, eki's own runs) or by hand. A call is a run with
+provider `component`, its parent the caller's run, on a thread with no cwd,
+so it goes through the engine like everything else. It prints the result
+text or the output paths; a failure exits non-zero with the reason (a
+missing component says so). `eki use` alone lists what is reachable from
+here, each with its `about` line. Agent runs get one line in their brief:
+which components are reachable and how to call them. eki runs no MCP server
+of its own; the CLI is the integration.
+
+**The kinds.**
+
+- **`service`** — `"run"`: a command per call, the args appended, cwd the
+  caller's folder, env `EKI_CALLER_DIR`. Or `"serve"` + `"health"` +
+  `"call"`: a server kept up while used and stopped after `idle_stop`. Or
+  `"provider"`: a call handed to one of eki's providers — the pool template
+  `images` runs on eki's ComfyUI provider, so routing's picture runs and
+  component calls share one queue. The pool template `voice` is exclusive,
+  with a TTS command to fill in.
+- **`assets`** — a folder eki manages outside git (`"path"`): managed, never
+  versioned like code. Every worktree of the project sees it at its relative
+  path by symlink (never a copy or a hardlink), so anything written there
+  lands in the pool at once. `eki use <name> ls|info|rm <path>`; `rm` moves
+  to the macOS Trash. eki says so when the path isn't git-ignored.
+- **`agent`** — a persona: `prompt.md`, optional `skills/`, `uses` (the
+  components it may call), `mcp` (the MCP servers it gets) and a `target`
+  (provider → model → effort). Each call is a session; it can be called many
+  times.
+
+**The bare-agent rule.** `"bare": true` means no built-in skills, only its
+system prompt, strictly: Claude Code with `prompt.md` as its whole system
+prompt (replacing the default), no setting sources, no CLAUDE.md or
+AGENTS.md, no skills or slash commands, no file tools, no MCP servers but
+the ones listed, and cwd an empty scratch folder outside any project.
+
+**The playtester template** is a bare agent that knows nothing about the
+game and can't see its code or assets. Its one tool is a browser it sees
+through screenshots and drives with mouse and keys — Playwright MCP in
+vision mode, with page snapshots, script evaluation, console and network
+tools off — opened at the component's `"url"`. It plays, takes notes as it
+goes, records how it feels at each moment (emotion + why, timestamped), and
+ends with an honest review. `eki use playtester ["what to play / focus
+on"]`. Each session's notes, emotion log, review and screenshots are kept
+under `~/.eki/components/sessions/<name>/<session>/`, one folder per call,
+and the call prints the review and that path.
+
+**CLI and window.** `eki component kinds | ls [folder] | add <kind|template>
+[--name N] [--pool | -C folder] | show <name>`. `add` writes the folder from
+the template and never overwrites; a template's `mcp_servers` are added to
+eki's MCP registry switched off, so only the agent that lists them gets
+them. eki never commits to a project's branches. The Settings page has one
+folded, read-only "Components" section — the pool and each project's, one
+line each, details on click. Nothing else in the window.
+
+Not in scope yet: a project page of components, a project-level router.
 
 ## Notifications
 

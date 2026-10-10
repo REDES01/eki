@@ -47,6 +47,7 @@ ticks them as they land. Items marked *(for a person)* are never taken.
 - [ ] Learned preferences: routing overrides learned from behaviour, with
       a notice and undo.
 - [x] The Swift shell rebuilt by eki when mac/ changes.
+- [ ] Projects as blank pages of components, found by the router — designed from how the game uses components.
 
 ## Not planned
 

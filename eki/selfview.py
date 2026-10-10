@@ -107,9 +107,12 @@ def stage(c, it) -> str:
 
 def _batch_of(c, it) -> str:
     """For an item without a check of its own: in the batch a check above it covers,
-    or waiting for the next batch (it joined after that check started)."""
-    lined = c.execute("SELECT * FROM items WHERE state='queued' "
-                      "ORDER BY COALESCE(queued_at, created_at), created_at").fetchall()
+    or waiting for the next batch (it joined after that check started). Only the items
+    of its own project (NULL: eki) count: batches never mix projects."""
+    lined = c.execute("SELECT i.* FROM items i LEFT JOIN goals g ON g.id=i.goal_id "
+                      "WHERE i.state='queued' AND g.project IS ? "
+                      "ORDER BY COALESCE(i.queued_at, i.created_at), i.created_at",
+                      (_project_id(c, it),)).fetchall()
     ids = [x["id"] for x in lined]
     for x in lined:
         run = store.run(c, x["gate2_run"]) if x["gate2_run"] and x["gate2_on"] == x["rebased"] else None
@@ -145,12 +148,25 @@ def note(c, it) -> str:
         run = store.run(c, it["run_id"])
         if run is not None and checkslots.waiting(c, run):
             marks.append("waiting for a check slot")
-    n = said(it)
+    n = said(it, c=c)
     return " · ".join(marks + [n] if n else marks)
 
 
-def said(it) -> str:
+def _project_id(c, it) -> Optional[str]:
+    g = c.execute("SELECT project FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    return g["project"] if g else None
+
+
+def _project(c, it) -> Optional[sqlite3.Row]:
+    """The project an item's goal works on; None for eki's own items (or with no connection)."""
+    pid = _project_id(c, it) if c is not None else None
+    return c.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone() if pid else None
+
+
+def said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
     state = it["state"]
+    if state == "queued" and (it["why"] or "").startswith("waits: "):
+        return it["why"]
     if state in ("left", "unfit", "rolled back") and it["error"]:
         return f"! {it['error'].splitlines()[0][:150]}"
     if state == "reviewing":
@@ -166,7 +182,11 @@ def said(it) -> str:
             return (f"! the review says no: {got[3:].strip()[:120]}"
                     f" — `eki self apply {it['id']}` if you agree")
         seen = f" · review {got[:80]}" if got else ""
-        if selfwork.settings().get("autonomy") == "apply":
+        project = _project(c, it)
+        if project is not None:
+            if projects.autonomy(project) == "apply":
+                return f"✓ {len(files)} files; joins {project['name']}'s queue{seen}"
+        elif selfwork.settings().get("autonomy") == "apply":
             return f"✓ {len(files)} files; joins the queue{seen}"
         return f"✓ {len(files)} files; `eki self apply {it['id']}` queues it{seen}"
     if state == "waiting" and (it["review"] or "").startswith("no:"):
@@ -178,6 +198,8 @@ def said(it) -> str:
         return f"✓ in integration main ({(it['rebased'] or it['commit_sha'] or '')[:12]})"
     if state == "live":
         return f"✓ live in build {it['build'] or '?'}"
+    if state == "applied" and it["landed_on"]:
+        return f"✓ landed on {it['landed_on']} ({(it['rebased'] or it['commit_sha'] or '')[:12]})"
     if state == "applied":
         return f"✓ in main ({(it['commit_sha'] or '')[:12]})"
     return ""

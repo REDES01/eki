@@ -142,7 +142,8 @@ def test_verdicts_from_build_scores(conn):
 
 def test_open_prs_on_the_board_and_the_item(conn):
     with db.tx(conn):
-        conn.execute("INSERT INTO projects(id, name, path, branch, created_at) VALUES ('p1','proj','/p','main',?)", (T,))
+        conn.execute("INSERT INTO projects(id, name, path, branch, created_at, repo) "
+                     "VALUES ('p1','proj','/p','main',?,'me/proj')", (T,))
         conn.execute("INSERT INTO goals(id, text, source, owner, state, project, created_at) "
                      "VALUES ('g1','x','ask','you','planned','p1',?)", (T,))
     url = "https://github.com/me/proj/pull/7"

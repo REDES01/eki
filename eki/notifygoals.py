@@ -51,9 +51,16 @@ def title_of(conn: sqlite3.Connection, g: sqlite3.Row) -> str:
     return f"eki · goal ended, {left} left" if left else "eki · goal done"
 
 
-def body_of(g: sqlite3.Row) -> str:
+def body_of(g: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) -> str:
+    """The goal's first line, then one line per item eki landed on a project's branch."""
     line = next((ln.strip() for ln in (g["text"] or "").splitlines() if ln.strip()), "")
-    return (line or f"goal {g['id']}")[:120]
+    lines = [(line or f"goal {g['id']}")[:120]]
+    if conn is not None:
+        landed = conn.execute("SELECT title, landed_on FROM items WHERE goal_id=? AND state!='dropped' "
+                              "AND COALESCE(landed_on, '')!='' ORDER BY created_at, rowid",
+                              (g["id"],)).fetchall()
+        lines += [f"✓ {(i['title'] or '')[:60]} — landed on {i['landed_on']}" for i in landed]
+    return "\n".join(lines)
 
 
 def click_of(conn: sqlite3.Connection, g: sqlite3.Row) -> Optional[str]:
@@ -80,6 +87,6 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         key = f"goal:{g['id']}:done"
         if conn.execute("SELECT 1 FROM notices WHERE key=?", (key,)).fetchone():
             continue                                     # queued already: skip the lookups
-        if notify.queue(conn, key, "goal_done", title_of(conn, g), body_of(g), click_of(conn, g)):
+        if notify.queue(conn, key, "goal_done", title_of(conn, g), body_of(g, conn), click_of(conn, g)):
             said.append(f"notify: goal {g['id']} done")
     return said

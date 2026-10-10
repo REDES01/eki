@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .. import capacity, paths, routing
+from .. import capacity, paths, providers, roles, routing, targets
 from ..routing import needs
 from ..routing.table import rows
 from .common import conn
+from .roles import line as role_line, listed
 
 NAME = "route"
 HELP = "show the routing table, or explain where a request would go"
@@ -35,10 +36,26 @@ def run(args) -> int:
             print(target_line(t))
         return 0
     avail = capacity.status(c)
-    print(f"table: {paths.config('routing')}   checker: {routing.checker_name()}\n")
+    print(f"table: {paths.config('routing')}\n")
+    for role in roles.ROLES:
+        print(role_line(c, role, timed=role == "router"))
+    print()
     for r in rows():
         print(f"{r['key']:<8} {r['title']}   needs: [{', '.join(needs.row_needs(r))}]")
         for t in r["targets"]:
-            ok, why = avail.get(t, (False, "no such provider"))
-            print(f"    {'✓' if ok else '✗'} {needs.describe(t)}" + (f"  ({why})" if why else ""))
+            ok, why = avail.get(targets.provider_of(t), (False, "no such provider"))
+            print(f"    {'✓' if ok else '✗'} {needs.describe(t)}{_model(c, t)}"
+                  + (f"  ({why})" if why else ""))
     return 0
+
+
+def _model(c, t: str) -> str:
+    """` → model` for a target naming a tier or model (with the note when it can't), else ""."""
+    if ":" not in t:
+        return ""
+    name = targets.provider_of(t)
+    try:
+        model, note = targets.resolve(t, providers.config().get(name) or {}, listed(c, name))
+    except ValueError as e:
+        return f"  ({e})"
+    return f" → {model or 'its default'}" + (f" ({note})" if note else "")

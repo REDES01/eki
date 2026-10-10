@@ -9,7 +9,7 @@ import importlib
 import sys
 from typing import List, Optional
 
-COMMANDS = ["ask", "answer", "follow", "runs", "show", "cancel", "threads", "engine", "route",
+COMMANDS = ["ask", "answer", "follow", "runs", "show", "cancel", "threads", "engine", "route", "roles",
             "providers", "models", "skills", "mcp", "open", "drill", "swap", "builds", "self", "observe",
             "pictures", "goal", "project", "notify"]
 

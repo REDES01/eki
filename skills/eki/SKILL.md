@@ -86,6 +86,7 @@ eki project <owner>/<repo> [--check "<cmd>"] [--branch <name>] [--retry]   # sho
 eki threads [<thread>]          # list threads, or print one as a conversation
 eki engine status|start|stop    # start, stop or check the engine; install it as a login agent
 eki providers                   # list providers and whether each can take work now
+eki roles [<role> <target>|default]   # eki's own jobs (router, planner, reviewer, chores): who does each, set or clear one
 eki models [start|stop <name>]  # list local models; start or stop one
 eki pictures [--limit N]        # the pictures eki has drawn: path, kind, prompt
 eki skills [add|remove|sync]    # list, add or remove skills (shared by every program)

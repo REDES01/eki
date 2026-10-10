@@ -62,3 +62,44 @@ def test_table_shows_needs_tags_about_and_unavailable(home, capsys):
     assert "general  all   needs: []" in out
     assert "✓ bare [text] — A plain text model, quick and free." in out
     assert "✗ gone [image]  (switched off)" in out
+
+
+def _calls(conn, target, ms, n, model=None):
+    from eki import roles
+    for _ in range(n):
+        roles.record(conn, "router", target, model, ms, True)
+    conn.commit()
+
+
+def test_table_prints_the_roles_with_models_and_router_medians(home, conn, capsys, monkeypatch):
+    from eki import providers
+    monkeypatch.setattr(providers.KINDS["fake"], "complete", lambda self, *a, **k: {}, raising=False)
+    provs = dict(PROVS, fake={"kind": "fake",
+                              "models": {"fast": "fake-small", "top": "fake-big"}})
+    (home / "providers.json").write_text(json.dumps(provs))
+    (home / "routing.json").write_text(json.dumps({
+        "rows": ROWS + [{"key": "code", "title": "tools", "targets": ["fake:top", "fake"]}],
+        "checker": "lm", "roles": {"router": "fake:fast", "planner": "fake:top"}}))
+    _calls(conn, "fake:fast", 2400, 20, "fake-small")
+    _calls(conn, "lm", 13100, 20)
+    assert cli.main(["route"]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    router = next(l for l in lines if l.startswith("router "))
+    assert router.startswith("router    fake:fast → fake-small   median 2.4 s over 20")
+    assert "(lm: 13.1 s over 20)" in router
+    assert any(l.startswith("planner   fake:top → fake-big") for l in lines)
+    assert any(l.startswith("reviewer  lm → its default") for l in lines)
+    assert any(l.startswith("chores    lm → its default") for l in lines)
+    assert "checker:" not in out
+    assert "fake:top" in next(l for l in lines if "→ fake-big" in l and l.startswith("    "))
+
+
+def test_table_role_that_falls_back_says_why(home, capsys):
+    (home / "providers.json").write_text(json.dumps(PROVS))
+    (home / "routing.json").write_text(json.dumps({"checker": "lm", "rows": ROWS,
+                                                       "roles": {"router": "gone:fast"}}))
+    assert cli.main(["route"]) == 0
+    router = next(l for l in capsys.readouterr().out.splitlines() if l.startswith("router "))
+    assert router.startswith("router    gone:fast → lm → its default")
+    assert "router gone:fast can't run (gone: switched off) → lm" in router

@@ -8,7 +8,7 @@ let root = Bundle.main.object(forInfoDictionaryKey: "EkiRoot") as? String ?? NSS
 let port = ProcessInfo.processInfo.environment["EKI_PORT"] ?? (Bundle.main.object(forInfoDictionaryKey: "EkiPort") as? String ?? "7788")
 let home = URL(string: "http://127.0.0.1:\(port)/")!
 
-final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSMenuItemValidation {
     var window: NSWindow!
     var web: WKWebView!
     var status: NSStatusItem!
@@ -19,6 +19,9 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     // can't be moved by its title area unless the shell does it.
     var dragRects: [NSRect] = []
     var noDragRects: [NSRect] = []
+    // View → Zoom: the web view's pageZoom, one of these steps, remembered across launches.
+    let zoomSteps: [Double] = [0.75, 0.85, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+    let zoomKey = "eki.zoom"
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
@@ -31,6 +34,8 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         web.navigationDelegate = self
         web.uiDelegate = self
         web.allowsBackForwardNavigationGestures = false
+        UserDefaults.standard.register(defaults: [zoomKey: 1.0])
+        web.pageZoom = CGFloat(UserDefaults.standard.double(forKey: zoomKey))
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
@@ -84,7 +89,10 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     func inDragArea(_ e: NSEvent) -> Bool {
         if onWindowButton(e) { return false }     // close, minimize, zoom: never a drag
         let p = web.convert(e.locationInWindow, from: nil)
-        let q = web.isFlipped ? p : NSPoint(x: p.x, y: web.bounds.height - p.y)
+        let v = web.isFlipped ? p : NSPoint(x: p.x, y: web.bounds.height - p.y)
+        // the page's rects are in CSS px; at a zoom, one CSS px is pageZoom points
+        let z = web.pageZoom > 0 ? web.pageZoom : 1
+        let q = NSPoint(x: v.x / z, y: v.y / z)
         return dragRects.contains { $0.contains(q) } && !noDragRects.contains { $0.contains(q) }
     }
 
@@ -177,9 +185,34 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     @objc func reload() { web.reload() }
     func load() { web.load(URLRequest(url: home, cachePolicy: .reloadIgnoringLocalCacheData)) }
 
+    // Zoom: pageZoom stays on the web view across reloads and new pages; the page
+    // gets --eki-zoom so it can keep the window buttons' room the same on screen.
+    let eps = 0.001
+    @objc func zoomIn() { if let z = zoomSteps.first(where: { $0 > Double(web.pageZoom) + eps }) { setZoom(z) } }
+    @objc func zoomOut() { if let z = zoomSteps.last(where: { $0 < Double(web.pageZoom) - eps }) { setZoom(z) } }
+    @objc func actualSize() { setZoom(1.0) }
+    func setZoom(_ z: Double) {
+        web.pageZoom = CGFloat(z)
+        UserDefaults.standard.set(z, forKey: zoomKey)
+        pushZoom(web)
+    }
+    func pushZoom(_ w: WKWebView) {
+        w.evaluateJavaScript("document.documentElement.style.setProperty('--eki-zoom', '\(Double(w.pageZoom))')")
+    }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let z = Double(web?.pageZoom ?? 1)
+        switch item.action {
+        case #selector(zoomIn): return z < zoomSteps.last! - eps
+        case #selector(zoomOut): return z > zoomSteps.first! + eps
+        case #selector(actualSize): return abs(z - 1.0) > eps
+        default: return true
+        }
+    }
+
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
         let full = window.styleMask.contains(.fullScreen)
         w.evaluateJavaScript("document.documentElement.dataset.fullscreen = '\(full ? "1" : "")'")
+        pushZoom(w)
     }
 
     // The engine isn't up: start it once, then keep trying.
@@ -227,7 +260,12 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         sub("Edit", [item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "z", [.command, .shift]),
                      .separator(), item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
                      item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a")])
+        // ⌘= is zoom in too, as on a US keyboard: a hidden item that still answers its key
+        let equals = item("Zoom In", #selector(zoomIn), "=")
+        equals.isHidden = true; equals.allowsKeyEquivalentWhenHidden = true
         sub("View", [item("Reload", #selector(reload), "r"), item("New thread", #selector(newThread), "n"), .separator(),
+                     item("Actual Size", #selector(actualSize), "0"), item("Zoom In", #selector(zoomIn), "+"), equals,
+                     item("Zoom Out", #selector(zoomOut), "-"), .separator(),
                      item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.control, .command])])
         sub("Window", [item("Minimize", #selector(NSWindow.miniaturize(_:)), "m"), item("Zoom", #selector(NSWindow.performZoom(_:)), ""),
                        item("Close", #selector(NSWindow.performClose(_:)), "w")])

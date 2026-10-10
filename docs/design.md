@@ -385,7 +385,11 @@ are Codex's.
     per view, `style.css` + `chat.css` + one stylesheet per view.
 - **A thin Mac shell** (`mac/main.swift`, built by `bin/build-mac`): a
   window and a menu bar item around the web UI; it starts the engine if
-  it isn't up. It rarely needs to change.
+  it isn't up. It rarely needs to change. View → Zoom In/Out/Actual Size
+  (⌘+ ⌘− ⌘0, and ⌘= too) sets the web view's `pageZoom`, saved as
+  `eki.zoom` in UserDefaults; the shell sets `--eki-zoom` on the page so
+  the room for the window buttons stays the same on screen. A shell
+  change goes live only after `bin/build-mac`.
 - **Local models** (`eki/models.py`): a local provider with a `serve`
   command can be started and stopped by eki (`eki models`, or the
   sidebar). With `keep_up`, the engine keeps it running while memory is

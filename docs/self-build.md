@@ -302,7 +302,7 @@ never holds an item it couldn't judge.
 
 Docs-only items are reviewed too. A project item gets the same parallel
 review; one with no check is still proposed directly. The board names both
-runs of a `judging` item ("gate 1 run X · review run Y"), still says
+runs of a `judging` item (e.g. "gate 1 run X · review run Y"), still says
 "waiting for a check slot" while gate 1 is held, and shows the verdict
 under a proposed item. Items left in the old `reviewing` state from before
 this change still conclude the old way (`review.conclude`). Like every

@@ -93,6 +93,23 @@ def test_the_window_button_room_scales_back_with_the_shell_zoom():
     assert "14px" in full and "--eki-zoom" not in full
 
 
+
+def test_long_titles_fade_into_the_divider_not_an_ellipsis():
+    css = (WEB / "style.css").read_text() + "\n" + (WEB / "chat.css").read_text()
+
+    def rule(sel):                                                        # from "<sel> {" through its "}"
+        start = next(i for i, l in enumerate(css.splitlines(keepends=True)) if l.startswith(sel + " {"))
+        text = "".join(css.splitlines(keepends=True)[start:])
+        return text[:text.index("}") + 1]
+
+    title = rule(".thread .t")
+    assert "ellipsis" not in title and "margin-right: -18px" in title
+    assert "-webkit-mask-image: linear-gradient(to right" in title and "\n  mask-image: linear-gradient(to right" in title
+    assert "overflow-x: hidden" in rule("#threads")
+    archived = rule(".archived .t")
+    assert "ellipsis" not in archived and "mask-image" in archived
+    assert "mask-image: none" in rule(".thread .t.editing")
+
 def test_eki_needing_you_then_pinned_then_groups_then_projects_then_dates(tmp_path):
     tok = {"id": "p1", "name": "tokenbar"}
     work = {"id": "g1", "name": "Writing"}

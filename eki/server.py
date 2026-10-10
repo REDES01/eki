@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import (api, api_models, api_projects, api_settings, api_station, api_threads, db, observe,
-               shellbuild, threadacts)
+from . import api, api_models, api_projects, api_settings, api_station, db, observe, shellbuild
 
 log = logging.getLogger("eki.server")
 
@@ -167,9 +166,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/status":
             return self._call(api.status)
         if p == "/api/threads":
-            return self._call(api_threads.threads, 60, q.get("all") == "1", q.get("archived") == "1")
-        if p == "/api/groups":
-            return self._call(api_threads.groups)
+            return self._call(api.threads)
         m = re.fullmatch(r"/api/threads/(\w+)", p)
         if m:
             return self._call(api.thread, m.group(1))
@@ -221,11 +218,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._responses(body)
         if p == "/api/ask":
             return self._call(api.ask, body)
-        m = re.fullmatch(r"/api/threads/(\w+)", p)
-        if m:
-            return self._call(_update_thread, m.group(1), body)
-        if p == "/api/groups":
-            return self._call(threadacts.create_group, body.get("name"))
         m = re.fullmatch(r"/api/asks/(\w+)/answer", p)
         if m:
             return self._call(api.answer, m.group(1), body)
@@ -242,15 +234,6 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             return self._call(api_settings.write, m.group(1), body)
         return self._station_post(p, body)
-
-    def do_DELETE(self) -> None:
-        if self.headers.get("X-Eki") != "1":
-            return self._json({"error": "missing X-Eki header"}, 403)
-        m = re.fullmatch(r"/api/threads/(\w+)", urlparse(self.path).path)
-        if m:
-            return self._call(lambda c, tid: {"deleted": True, "stopping": threadacts.delete(c, tid)},
-                              m.group(1))
-        self._json({"error": "not found"}, 404)
 
     def _station_post(self, p: str, body: dict) -> None:
         if p == "/api/self":
@@ -281,11 +264,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._call(api_projects.clone_home, pid)
             return self._call(api_projects.write_instructions, pid)
         self._json({"error": "not found"}, 404)
-
-
-def _update_thread(conn: Any, tid: str, body: dict) -> dict:
-    threadacts.update(conn, tid, body)
-    return api_threads.entry(conn, tid)
 
 
 def _num(value: Optional[str], default: Any, kind: Callable[[str], Any]) -> Any:

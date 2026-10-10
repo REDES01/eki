@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import signal
 import sqlite3
 import sys
@@ -21,6 +22,7 @@ import traceback
 from typing import Any, Dict
 
 from . import asks, capacity, components, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store, transient
+from .components import skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
 
@@ -69,7 +71,15 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         else:
             seen = store.run(conn, sess["seen_run"]) if sess["seen_run"] else None
             turn.history = store.transcript_since(conn, r["thread_id"], seen["seq"] if seen else 0, r["seq"])
-    turn.extra["claude_plugin"] = skills.claude_plugin()
+    turn.extra["claude_plugin"] = [p for p in (skills.claude_plugin(),) if p]   # eki's store first
+    if r["row"] != "chore":                     # the project's own skills card, for this run only
+        cards = skillcard.cards_for(turn.cwd, conn)
+        mine = skillcard.claude_plugin(cards)
+        if mine:
+            turn.extra["claude_plugin"].append(mine)
+        linked = skillcard.codex_dir(cards, r["id"])
+        if linked:
+            turn.extra["codex_skills"] = linked
     turn.extra["claude_mcp"] = mcp.claude_config()
     turn.extra["codex_config"] = mcp.codex_config()
     if r["model"]:
@@ -159,6 +169,17 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
         observe.record(conn, noted[0], run_id=rid, thread_id=r["thread_id"], provider=provider,
                        data=noted[1])
     observe.run_ended(conn, rid)                # a run still queued (a limit, a retry) isn't written down
+    drop_run_skills(rid)
+
+
+def drop_run_skills(rid: str) -> None:
+    """Remove the run's folder of project skill links (rebuilt if it runs again); never raises."""
+    if not rid or "/" in rid or rid.startswith("."):
+        return
+    try:
+        shutil.rmtree(paths.home() / "run-skills" / rid, ignore_errors=True)
+    except Exception:                                   # noqa: BLE001 — cleanup is best effort
+        pass
 
 
 def main(rid: str) -> int:
@@ -232,6 +253,7 @@ def main(rid: str) -> int:
             store.update_run(conn, rid, state="failed", ended_at=db.now(), error=err[-1000:])
         observe.fault(conn, "worker", err, run_id=rid, thread_id=r["thread_id"])
         observe.run_ended(conn, rid)
+        drop_run_skills(rid)
     finally:
         done.set()
     return 0

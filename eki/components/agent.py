@@ -139,7 +139,7 @@ def turn_for(comp: Component, c: Call, session: Path):
     if comp.spec.get('bare'):
         scratch = session / 'scratch'
         scratch.mkdir(parents=True, exist_ok=True)
-        for k in ('claude_plugin', 'claude_mcp', 'codex_config'):
+        for k in ('claude_plugin', 'claude_mcp', 'codex_config', 'codex_skills'):
             extra.pop(k, None)              # nothing of eki's own: only what the agent lists
         extra.update(bare=True, system_prompt=prompt_text(comp), deny_tools=list(comp.spec.get('deny_tools') or []))
         extra.update(tool_rules(comp.spec))
@@ -150,7 +150,10 @@ def turn_for(comp: Component, c: Call, session: Path):
         extra['note'] = prompt_text(comp)
         if comp.spec.get('deny_tools'):
             extra['deny_tools'] = list(comp.spec['deny_tools'])
-        plugins = [p for p in (skills.claude_plugin(), _skills_plugin(comp, session)) if p]   # eki's store first
+        from . import skillcard
+        project = skillcard.claude_plugin(skillcard.cards_for(c.caller_dir))
+        # eki's store first, then the project's card, then the agent's own skills/
+        plugins = [p for p in (skills.claude_plugin(), project, _skills_plugin(comp, session)) if p]
         if plugins:
             extra['claude_plugin'] = plugins
         if comp.spec.get('mcp'):

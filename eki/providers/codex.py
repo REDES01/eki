@@ -7,10 +7,14 @@ asks you something (`item/tool/requestUserInput`) or asks for approval, a
 request arrives with an id; it becomes an ask, and the answer goes back as
 the reply. With permissions on "auto" (the default: the top of the run
 tree may do anything) approvals are granted by eki and noted in the thread.
+A project's skills card (`codex_skills`, a folder of links for this run) is
+added with `skills/extraRoots/set`, which lives only in this app-server; a
+Codex without it is told where the skills are instead. ~/.codex is untouched.
 """
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import oneshot
@@ -73,8 +77,9 @@ class Codex(ProgramProvider):
         model = turn.extra.get("model") or self.cfg.get("model")   # a run's own model wins
         if model:
             params["model"] = model
-        if turn.extra.get("note"):
-            params["developerInstructions"] = turn.extra["note"]
+        note = "\n\n".join(x for x in (turn.extra.get("note"), turn.extra.get("skills_note")) if x)
+        if note:
+            params["developerInstructions"] = note
         return params
 
     def _turn_params(self, turn: Turn, tid: str) -> Dict[str, Any]:
@@ -113,20 +118,32 @@ class Codex(ProgramProvider):
                 turn.resume, turn.history = None, turn.extra.get("full_history", turn.history)
                 self._call(ch, "thread/start", self._thread_params(turn), "thread")
                 return
+            if purpose == "roots":            # an older Codex: tell it where the skills are
+                turn.extra["skills_note"] = skills_note(turn.extra["codex_skills"])
+                self._thread(ch, turn)
+                return
             out.error, out.finished = short(msg, 400), True
             return
         result = event.get("result") or {}
         if purpose == "init":
             ch.write({"jsonrpc": "2.0", "method": "initialized", "params": {}})
-            if turn.resume:
-                self._call(ch, "thread/resume", {"threadId": turn.resume, **self._thread_params(turn)}, "thread")
+            if turn.extra.get("codex_skills"):   # this app-server only: the run's project skills
+                self._call(ch, "skills/extraRoots/set", {"extraRoots": [turn.extra["codex_skills"]]}, "roots")
             else:
-                self._call(ch, "thread/start", self._thread_params(turn), "thread")
+                self._thread(ch, turn)
+        elif purpose == "roots":
+            self._thread(ch, turn)
         elif purpose == "thread":
             tid = (result.get("thread") or {}).get("id") or result.get("threadId") or turn.resume
             ch.state["thread"] = tid
             emit("session", {"id": tid})
             self._call(ch, "turn/start", self._turn_params(turn, tid), "turn")
+
+    def _thread(self, ch: Channel, turn: Turn) -> None:
+        if turn.resume:
+            self._call(ch, "thread/resume", {"threadId": turn.resume, **self._thread_params(turn)}, "thread")
+        else:
+            self._call(ch, "thread/start", self._thread_params(turn), "thread")
 
     def _notified(self, method: str, params: Dict[str, Any], emit: Emit, out: Outcome, ch: Channel) -> None:
         if method == "item/agentMessage/delta":
@@ -214,6 +231,18 @@ class Codex(ProgramProvider):
         else:
             result = {"decision": ("acceptForSession" if response.get("always") else "accept") if allow else "decline"}
         ch.write({"jsonrpc": "2.0", "id": key["rid"], "result": result})
+
+
+def skills_note(folder: str) -> str:
+    """The project's skills named for a Codex that can't be handed the folder."""
+    from ..components import skillcard
+    good = skillcard.held(Path(folder))[0]
+    if not good:
+        return ""
+    lines = [f"This project's skills are in {folder}:"]
+    lines += [f"- {s['name']} — {s['description']}" for s in good]
+    lines.append(f"Read {folder}/<name>/SKILL.md before using one.")
+    return "\n".join(lines)
 
 
 def _title(method: str) -> str:

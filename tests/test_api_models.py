@@ -165,10 +165,9 @@ def test_one_picker_for_roles_and_row_targets(tmp_path):
         {"provider": "claude", "model": "claude-haiku-4-5", "effort": "low"},
         "local:qwen3:32b", "claude:fast"])
     r = html["roles"]
-    assert "Router" in r and 'data-role="router"' in r and 'data-role="planner"' not in r
+    assert "Router" in r and all(f'data-role="{x}"' in r for x in ("router", "planner", "reviewer", "chores"))
     assert '<option value="claude" selected>' in r and '<option value="claude-haiku-4-5" selected' in r
     assert "var(--amber)" in r and "can't run" in r and "now local · its default" in r
-    assert "router claude:claude-haiku-4-5 · planner claude:opus@high" in r
     assert html["draft"]["roles"]["planner"] == {"provider": "claude", "model": "opus", "effort": "high"}
     assert "3 models" in html["line"] and 'data-act="mrefresh"' in html["line"]
 

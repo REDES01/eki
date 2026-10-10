@@ -165,11 +165,15 @@
   const target = (t) => `<div class="st-target ${t.ok ? "ok" : "no"}">${t.ok ? "✓" : "✗"} <b>${esc(t.name)}</b>
       ${t.can ? `<span class="dim">[${esc(t.can.join(", "))}]</span>` : ""}${t.why ? ` <span class="dim">(${esc(t.why)})</span>` : ""}</div>`;
 
+  // a row target as targets.key() writes it: `claude`, `claude:opus`, `claude:opus@high`
+  const targetName = (t) => typeof t === "string" ? t
+    : `${t.provider || "?"}${t.model ? `:${t.model}` : ""}${t.effort ? `@${t.effort}` : ""}`;
+
   function table(r) {
     sum("route", `${r.rows.length} rows · checker ${r.checker}`);
     return `<div class="st-line dim">checker: ${esc(r.checker)}</div>` + r.rows.map((row) => `<div class="st-rrow">
         <div><b>${esc(row.key)}</b> ${esc(row.title || "")} <span class="dim">needs: [${esc((row.needs || []).join(", "))}]</span></div>
-        <div class="st-targets">${(row.targets || []).map((t) => `<span class="st-chip">${esc(t)}</span>`).join("")}</div></div>`).join("");
+        <div class="st-targets">${(row.targets || []).map((t) => `<span class="st-chip">${esc(targetName(t))}</span>`).join("")}</div></div>`).join("");
   }
 
   function entry(e, i) {

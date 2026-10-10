@@ -49,9 +49,9 @@ eki follow <run>  ◄── events table
 | `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run); `oneshot` (one call with no tools through the `claude` or `codex` CLI, for eki's own text jobs) |
 | `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
-| `targets` | one way to name where work goes: `provider`, `provider:tier` (`fast`, `default`, `top`) or `provider:model`; `parse`, `fmt`, `provider_of`, `resolve` (to a model id, with a note when it falls back to the default), `problems`; pure |
+| `targets` | one way to name where work goes, as a string (`provider`, `provider:model`, the old `provider:tier`) or an object `{provider, model?, effort?}`: `parse`, `fmt` (the shortest written form), `key` (a stable one-line dict key, `claude:opus@high`), `provider_of`, `label` (`claude · Opus 5.5 · high`), `choose` (model and effort against the read list, with a note when either falls back to the default), `resolve` (the old `(model, note)`), `problems`; pure |
 | `roles` | eki's own jobs — `router`, `planner`, `reviewer`, `chores` — and the target each goes to: `get`, `default` (the old settings), `set_role`, `pick` (with the fallback and its why), `record`/`timings` (table `role_calls`) |
-| `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`, and the tier suggestions, only ever shown |
+| `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`: per model its label, `description`, `resolved` (the pinned model an alias stands for), `efforts`, `default_effort`, whether it is the default, and `floating` (an alias that follows the newest); no suggestions |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
 | `skills`, `mcp` | one store, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`) |
@@ -62,7 +62,7 @@ eki follow <run>  ◄── events table
 | `costs` | the journal's costly clusters: handoffs on rows that could stay local, corrections by the row they corrected |
 | `roadmap` | ROADMAP.md at integration `main` as open entries, each keyed by a hash of its text |
 | `selfview` | the `eki self` board's words as data (stage, drafting, where, note, the whole board), shared by the CLI and the Station page |
-| `api_models` | the Settings page's Models section: each provider's tiers, suggestions, read list and read time, each role's pick (`GET /api/models`), and a list's refresh (`POST /api/models/refresh`) |
+| `api_models` | the Settings page's Models section: each provider's read list with the new fields (floating names first, then pinned ids, each in the program's order) and read time, each role's pick (`GET /api/models`), and a list's refresh (`POST /api/models/refresh`); no tiers or suggestions |
 | `api_station`, `api_settings` | the web's Station and Settings: what the self board, builds, journal and digest show and the self actions, each the CLI's own function; reading, checking and writing `routing.json`/`providers.json` |
 | `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |
 | `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
@@ -124,10 +124,13 @@ or deleted: router the top-level `checker`, else `local`; planner
 `self.planner` `{provider, model}` as `provider:model`, else the `code`
 row's first target; reviewer and chores `self.local`, else the first
 provider of kind `local`. So with no `roles` key nothing changes. `"off"`
-is allowed for reviewer and chores. `eki roles` lists each role's target,
-the model it resolves to, whether it's the default and any fallback why;
-`eki roles router claude:fast` checks and sets one, `eki roles router
-default` removes it.
+is allowed for reviewer and chores. `eki roles` lists each role's target
+and what it comes to (`router claude:haiku → claude · Haiku 4.5 · low`),
+whether it's the default and any fallback why; `eki roles router claude
+haiku`, `eki roles planner claude opus --effort high` or `eki roles router
+claude:fast` checks and sets one (written in `fmt`'s shortest form), `eki
+roles router default` removes it. A pick carries the effort too, and the
+runs a role starts (chores, reviews, plans) record it.
 
 `roles.pick` is recomputed from the settings at every use. A target can
 run when its provider exists, isn't off and is available
@@ -196,20 +199,37 @@ as the person wrote it; new defaults (row `needs`, the `general` order)
 only reach a fresh file.
 
 **Targets** (`eki/targets.py`). A row's targets, a role and a pin all
-name where work goes the same way: `provider`, `provider:tier` or
-`provider:model`. The tiers are `fast`, `default` and `top`; a part after
-the colon that isn't a tier is a model id, so `claude:fast` and
-`claude:claude-haiku-4-5` both work, and a bare `provider` means the
-provider's own default. Rows may mix them (`answer → ["local",
-"claude:fast"]`, `code → ["claude:top", "codex"]`); needs, capacity and
-`excluded` go by the provider. The decision carries the model the target
-resolves to, and the why names both ("→ answer → claude:fast
-(claude-haiku-4-5)"); the run records it as `runs.model` unless you pinned
-a model of your own, which wins. A tier nobody picked, or a model no
-longer in the provider's read list, resolves to the provider's default and
-the why says so ("claude has no fast model picked; its default").
-`eki route` shows each row target's model and the roles block above the
-table.
+name where work goes the same way: `provider`, `provider:model`, or an
+object `{"provider", "model"?, "effort"?}` when it carries an effort.
+`claude:opus` and `claude:claude-opus-4-8` both work; everything after the
+first colon is the model (`local:qwen3:32b`), and a bare `provider` means
+the provider's own default. `fmt` writes the shortest form: a string when
+there is no effort (`"claude"`, `"claude:opus"`), an object with only the
+keys that are set when there is (`{"provider": "claude", "model": "opus",
+"effort": "high"}`). `key` (`claude:opus@high`) is only a dict key and the
+`role_calls.target` column; it is never parsed back. Rows may mix targets
+(`answer → ["local", "claude:haiku"]`, the same provider twice with
+different models); needs, capacity and `excluded` go by the provider.
+
+`choose` turns a target into a model and an effort against the provider's
+read list (`modellist.listed()`); a list never read is trusted as written.
+Anything the program no longer offers falls back to its default, and the
+note says so in one of three ways: "<m> isn't in <p>'s list any more; its
+default", "<p> <model> doesn't offer effort <e> any more; its default", or
+"<model> takes no effort" (a model whose `efforts` is NULL). The decision
+carries both, the why names the target with `label` and appends the note
+("→ code → claude · Opus 5.5 · high"); the run records them as
+`runs.model` and `runs.effort` unless you pinned your own, which win. An
+effort written by an earlier route is routing's to change. The run's
+effort travels as `turn.extra["effort"]` and reaches each program its own
+way: Claude Code `--effort <level>` (sessions and one-shot calls alike),
+Codex `effort` on every `turn/start` (per turn, so a resumed thread gets it
+each time), one-shot `codex exec` `-c model_reasoning_effort="<level>"`;
+local and codex_local ignore it. The run page's route line shows the
+label, amber when the why carries a fallback note. `eki route` shows each
+row target's label, effort and note, and the roles block above the table;
+`eki roles ROLE PROVIDER [MODEL] [--effort LEVEL]` sets a role and, when
+the list was read, refuses a model or an effort the program doesn't offer.
 
 **Capabilities.** Each provider declares `can` from {text, tools, web,
 vision, image, image-edit}. Each kind has defaults (Claude Code: text,
@@ -221,24 +241,37 @@ an entry's own `can` in `providers.json` replaces them, and its optional
 adds `vision`. `eki providers`, `eki route` and the prompt check's menu
 show the same tags and `about` the code enforces.
 
-**Tiers and model lists.** A `providers.json` entry may pick its tiers:
-`"models": {"fast": "…", "default": "…", "top": "…"}`. The old `model` is
-still read as the `default` tier and never rewritten. The choices come
-from what each program itself reports (`eki/modellist.py`): Claude Code's
-`initialize` control response (`models`, over `claude --input-format
-stream-json --output-format stream-json`), Codex's `model/list` over
-`codex app-server`, a local server's `GET /v1/models`. eki never reads a
-token, calls a vendor API of its own or scrapes a page. A list is cached
-in `provider_models` (one provider's rows replaced in one transaction),
-read on demand (`eki providers models --refresh [name]`, Settings'
-Refresh) and by housekeeping when it is over a day old and the program is
-installed — on a thread with a 20 s timeout, never blocking the engine.
-From the list eki suggests tiers (Claude: haiku, sonnet, opus → fast,
-default, top; Codex: its default, a `mini`-sounding one as fast, the first
-other as top; local: none), but a suggestion is only shown: nothing goes
-into `providers.json` until you pick a model or accept it (`eki providers
-tier <name> <tier> <model|suggested>`, which refuses a model the read list
-lacks, or the Settings page).
+**Model lists, and the old tiers.** The choices come from what each
+program itself reports (`eki/modellist.py`): Claude Code's `initialize`
+control response (`models`, over `claude --input-format stream-json
+--output-format stream-json`: `value`, `displayName`, `description`,
+`resolvedModel`, `supportedEffortLevels` when `supportsEffort`), Codex's
+`model/list` over `codex app-server` (`id`, `displayName`, `description`,
+`supportedReasoningEfforts`, `defaultReasoningEffort`, `isDefault`), a
+local server's `GET /v1/models` (ids only, no efforts). eki never reads a
+token, calls a vendor API of its own, scrapes a page, or sends a model any
+text to learn this. A list is cached in `provider_models` (one provider's
+rows replaced in one transaction), read on demand (`eki providers models
+--refresh [name]`, Settings' Refresh) and by housekeeping when it is over a
+day old and the program is installed — on a thread with a 20 s timeout,
+never blocking the engine. A model is `floating` when it is an alias whose
+`resolved` model differs from it, or is `default`: it follows the newest.
+`eki providers models` lists each model's label, description, efforts (the
+default marked) and "follows the newest" for floating ones. Settings has
+one picker (`eki/web/settingstarget.js`) for every row target and role:
+provider, then model ("its default", floating names, pinned ids, each with
+the program's description), then effort when the model offers any; a saved
+choice no longer offered shows in amber with `choose`'s wording. It writes
+`fmt`'s shortest form, saved through `/api/settings/routing`.
+
+Tiers (`fast`, `default`, `top`) are still read, never set. A
+`providers.json` entry's `"models": {"fast": "…", "default": "…", "top":
+"…"}` (and the old `model`, read as `default`) still resolves a
+`provider:tier` string, or an object whose `model` is a tier name; a tier
+nobody picked resolves to the provider's default ("claude has no fast
+model picked; its default"). Nothing writes tiers any more: the `eki
+providers tier` command, the suggestions and the Settings tier editor are
+gone.
 
 **One-shot calls** (`eki/providers/oneshot.py`). Claude Code and Codex can
 serve the text-only roles (router, reviewer, chores) with one call and no
@@ -334,11 +367,11 @@ are Codex's.
     writes atomically (tmp + `os.replace`) and refuses a file whose mtime
     changed since it was read with 409. Nothing reloads: the next decision
     reads the new file. Its Models section (`eki/web/settingsmodels.js`,
-    `eki/api_models.py`) shows each provider's tiers — a select per tier
-    from the read list, the suggestion marked with an Accept button, the
-    read time and a Refresh button — and each role's picker (`provider`,
-    `provider:tier`, each listed model, "default (…)", and "off" where
-    allowed), with any fallback why in amber; it saves through the same
+    `eki/api_models.py`) shows one line per provider ("N models, read
+    <when> · Refresh") and each role's picker; every row target and role
+    uses the same provider → model → effort picker
+    (`eki/web/settingstarget.js`, see Routing), plus "default" and "off"
+    where allowed, with any fallback in amber; it saves through the same
     settings writes.
   - Endpoints: GET `/api/station`, `/api/builds`,
     `/api/journal?since=&kind=`, `/api/digests`,

@@ -50,12 +50,30 @@ class ClaudeCode(ProgramProvider):
             argv += ["--effort", turn.extra["effort"]]
         if turn.resume:
             argv += ["--resume", turn.resume]
+        if turn.extra.get("bare"):
+            return argv + self._bare(turn)
         if turn.cwd:
             argv += ["--add-dir", turn.cwd]
         for flag, key in (("--plugin-dir", "claude_plugin"), ("--mcp-config", "claude_mcp"),
                           ("--append-system-prompt", "note")):
-            if turn.extra.get(key):
-                argv += [flag, turn.extra[key]]
+            value = turn.extra.get(key)
+            for v in (value if isinstance(value, list) else [value] if value else []):
+                argv += [flag, v]
+        if turn.extra.get("deny_tools"):
+            argv += ["--disallowedTools", ",".join(turn.extra["deny_tools"])]
+        return argv
+
+    @staticmethod
+    def _bare(turn: Turn) -> List[str]:
+        """A bare agent (docs/design.md, Components): its own system prompt and nothing else —
+        no setting sources, skills, slash commands or built-in tools; only its listed MCP servers."""
+        argv = ["--system-prompt", turn.extra.get("system_prompt") or "",
+                "--setting-sources", "", "--strict-mcp-config", "--tools", "",
+                "--disable-slash-commands"]
+        if turn.extra.get("claude_mcp"):
+            argv += ["--mcp-config", turn.extra["claude_mcp"]]
+        if turn.extra.get("deny_tools"):
+            argv += ["--disallowedTools", ",".join(turn.extra["deny_tools"])]
         return argv
 
     # ---- the conversation ----------------------------------------------------------------

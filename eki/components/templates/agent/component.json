@@ -1,0 +1,7 @@
+{
+  "kind": "agent",
+  "about": "a persona that answers in its own voice (edit prompt.md)",
+  "target": "claude",
+  "bare": false,
+  "uses": []
+}

@@ -1,22 +1,169 @@
-"""The `agent` kind: a persona with prompt.md, called as a session (stub)."""
+"""The `agent` kind: a persona with prompt.md, called as a session.
+
+An agent folder holds prompt.md, optional skills/, and in component.json a
+`target` (provider → model → effort, e.g. "claude:opus@high"), `bare`,
+`uses` (components it may call), `mcp` (servers from eki's registry),
+`deny_tools` and an optional `url` ("{url}" in prompt.md becomes it).
+
+Each call is a new session under ~/.eki/components/sessions/<name>/. A bare
+agent is strict and Claude Code only: prompt.md is its entire system prompt,
+no setting sources, no skills, no built-in tools, only the listed MCP
+servers, cwd an empty scratch folder outside any project. A non-bare agent
+gets prompt.md as its note and its skills/ beside eki's, in the caller's folder.
+"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
-from . import Call, Component, Result
+from . import Call, Component, Result, NAME, journal
 
 ABOUT = "a persona with its own prompt.md, skills and target, called as a session"
 
 
+def _names(spec: dict, key: str) -> List[str]:
+    v = spec.get(key, [])
+    return v if isinstance(v, list) and all(isinstance(n, str) and n for n in v) else None
+
+
 def validate(spec: dict, folder: Path) -> List[str]:
+    errs = []
     if not (folder / 'prompt.md').is_file():
-        return ['an agent needs prompt.md']
-    return []
+        errs.append('an agent needs prompt.md')
+    try:
+        t = target(spec)
+    except ValueError as e:
+        errs.append(f'target: {e}')
+        t = None
+    if not isinstance(spec.get('bare', False), bool):
+        errs.append('bare must be true or false')
+    for key in ('uses', 'mcp', 'deny_tools'):
+        if _names(spec, key) is None:
+            errs.append(f'{key} must be a list of names')
+    if _names(spec, 'uses') and not all(NAME.match(n) for n in spec['uses']):
+        errs.append('uses must name components')
+    if 'url' in spec and not isinstance(spec['url'], str):
+        errs.append('url must be text')
+    if spec.get('bare') and t is not None:
+        kind = _kind(t.provider)
+        if kind != 'claude_code':
+            errs.append(f'a bare agent runs on Claude Code only (target {t.provider!r} is {kind or "unknown"})')
+    return errs
+
+
+def target(spec: dict):
+    """The agent's Target; text may carry an effort after '@' ('claude:opus@high')."""
+    from .. import targets
+    x = spec.get('target', 'claude')
+    if isinstance(x, str) and '@' in x:
+        head, _, effort = x.rpartition('@')
+        provider, _, model = head.partition(':')
+        x = {'provider': provider, 'effort': effort, **({'model': model} if model else {})}
+    return targets.parse(x)
+
+
+def _kind(provider: str) -> str:
+    from .. import providers
+    try:
+        return str((providers.config().get(provider) or {}).get('kind') or '')
+    except Exception:
+        return ''
+
+
+def prompt_text(comp: Component) -> str:
+    text = (comp.folder / 'prompt.md').read_text()
+    return text.replace('{url}', str(comp.spec.get('url') or ''))
+
+
+def mcp_file(comp: Component, session: Path) -> Path:
+    """session/mcp.json holding only the servers the agent lists, on or off in the registry."""
+    from .. import mcp
+    known = {**mcp.off(), **mcp.servers()}
+    chosen: Dict[str, Any] = {}
+    for name in comp.spec.get('mcp') or []:
+        if name not in known:
+            raise KeyError(f'no MCP server {name!r} in eki\'s registry')
+        spec = json.loads(json.dumps(known[name]))
+        spec['args'] = [str(a).replace('{session}', str(session)) for a in spec.get('args') or []]
+        if not spec['args'] and 'url' in spec:
+            spec.pop('args')
+        chosen[name] = spec
+    f = session / 'mcp.json'
+    f.write_text(json.dumps({'mcpServers': chosen}, indent=2) + '\n')
+    return f
+
+
+def _skills_plugin(comp: Component, session: Path):
+    """A plugin folder for the agent's own skills/ (None when it has none)."""
+    skills = comp.folder / 'skills'
+    if not skills.is_dir():
+        return None
+    root = session / 'plugin'
+    (root / '.claude-plugin').mkdir(parents=True, exist_ok=True)
+    (root / '.claude-plugin' / 'plugin.json').write_text(json.dumps(
+        {'name': f'eki-{comp.name}', 'version': '1.0.0', 'description': f'Skills of the {comp.name} agent'}))
+    (root / 'skills').symlink_to(skills.resolve(), target_is_directory=True)
+    return str(root)
+
+
+def turn_for(comp: Component, c: Call, session: Path):
+    """(provider name, the Turn) for one call of `comp`."""
+    from .. import providers, skills, targets
+    from ..providers.base import Turn
+    t = target(comp.spec)
+    cfg = providers.config().get(t.provider) or {}
+    choice = targets.choose(t, cfg, None)
+    extra = {k: v for k, v in (c.extra or {}).items()
+             if k not in ('bare', 'system_prompt', 'deny_tools', 'model', 'effort', 'note', 'row', 'full_history')}
+    if choice.model:
+        extra['model'] = choice.model
+    if choice.effort:
+        extra['effort'] = choice.effort
+    prompt = ' '.join(c.args) or 'Begin.'
+    if comp.spec.get('bare'):
+        scratch = session / 'scratch'
+        scratch.mkdir(parents=True, exist_ok=True)
+        for k in ('claude_plugin', 'claude_mcp', 'codex_config'):
+            extra.pop(k, None)              # nothing of eki's own: only what the agent lists
+        extra.update(bare=True, system_prompt=prompt_text(comp), deny_tools=list(comp.spec.get('deny_tools') or []))
+        if comp.spec.get('mcp'):
+            extra['claude_mcp'] = str(mcp_file(comp, session))
+        cwd = str(scratch)
+    else:
+        extra['note'] = prompt_text(comp)
+        if comp.spec.get('deny_tools'):
+            extra['deny_tools'] = list(comp.spec['deny_tools'])
+        plugins = [p for p in (skills.claude_plugin(), _skills_plugin(comp, session)) if p]   # eki's store first
+        if plugins:
+            extra['claude_plugin'] = plugins
+        if comp.spec.get('mcp'):
+            extra['claude_mcp'] = str(mcp_file(comp, session))
+        cwd = c.caller_dir
+    return t.provider, Turn(prompt=prompt, history=[], cwd=cwd, run_id=c.run_id, extra=extra)
 
 
 def call(comp: Component, c: Call) -> Result:
-    return Result(error='agent calls are not built yet')
+    from .. import providers
+    session = journal.new_session(comp.name)
+    try:
+        name, turn = turn_for(comp, c, session)
+        provider = providers.get(name)
+    except (KeyError, ValueError, OSError) as e:
+        return Result(text='', paths=[str(session)], error=str(e))
+    texts: List[str] = []
+
+    def emit(kind: str, data: dict) -> None:
+        if kind == 'text' and data.get('text'):
+            texts.append(data['text'])
+        if c.emit:
+            c.emit(kind, data)
+
+    out = provider.take(turn, emit)
+    kept = journal.keep(session, texts)
+    if out.state != 'done' or out.error:
+        kept.error = out.error or out.reason or f'{comp.name} ended {out.state}'
+    return kept
 
 
 def is_up(comp: Component) -> bool:
@@ -28,4 +175,15 @@ def stop(comp: Component) -> bool:
 
 
 def notes(comp: Component) -> List[str]:
-    return []
+    from .. import targets
+    try:
+        out = [f'target {targets.key(target(comp.spec))}']
+    except ValueError as e:
+        out = [f'target: {e}']
+    if comp.spec.get('bare'):
+        out.append('bare: only its own prompt')
+    if comp.spec.get('uses'):
+        out.append('uses ' + ', '.join(comp.spec['uses']))
+    if comp.spec.get('mcp'):
+        out.append('mcp ' + ', '.join(comp.spec['mcp']))
+    return out

@@ -171,9 +171,10 @@ Three gates, each answering a different question; a fourth for later.
 Judge runs share a few check slots.
 
 **Gate 1 — on its own.** In the change's worktree, on the commit it made,
-before it may join the queue: `bin/check` — the tests, the file-size test,
-the restart drill — run by a command worker. The agent was told to run the
-tests itself; eki doesn't take its word. Red goes back to the change's
+before it may join the queue: `bin/check` with `EKI_CHECK_FAST=1` — the
+tests and the file-size test, not the drills — run by a command worker. The
+drills run once, at release, on the build that goes live (gate 3). The agent
+runs only the tests for what it touched; this is the first full run. Red goes back to the change's
 thread with the failure; one retry with the failure in the brief, then it's
 left for you. Cheap, parallel, keeps junk out of the predicted futures. A
 **docs-only** item — every touched file is `*.md` (any folder) or under

@@ -39,7 +39,7 @@ FIT = {"propose": ("landed", "live", "applied"),
 #: an item in one of these has a run going and holds its write-set
 LIVE = ("building", "judging", "reviewing")
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
-CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python exec bin/check -q"]'
+CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_FAST=1 exec bin/check -q"]'   # drills run once, at release (traincheck)
 
 
 def settings() -> Dict[str, Any]:

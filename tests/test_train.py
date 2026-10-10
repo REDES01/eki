@@ -160,5 +160,6 @@ def test_an_item_whose_build_was_replaced_goes_live_with_the_build_that_carries_
     it = item(conn, a)
     assert it["state"] == "live" and it["build"] == first, it["error"]
     assert any(a in s and later.name in s for s in said)
-    assert item(conn, b)["state"] == "landed"                 # b never rode a train: the next one takes it
+    # b never rode a train, and none will come: main is what runs. The running build carries it.
+    assert item(conn, b)["state"] == "live" and any(b in s and later.name in s for s in said)
     assert train.settle(conn) == []

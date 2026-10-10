@@ -110,8 +110,9 @@ def _commit_of(folder: Path) -> Optional[str]:
 # ---- afterwards -------------------------------------------------------------------------
 
 def settle(conn: sqlite3.Connection) -> List[str]:
-    """Landed items whose build went live or was rolled back say so."""
-    items = conn.execute("SELECT * FROM items WHERE state='landed' AND build IS NOT NULL").fetchall()
+    """Landed items whose build went live or was rolled back say so. An item no train took
+    (a swap by hand carried it first) is live once the healthy running build carries it."""
+    items = conn.execute("SELECT * FROM items WHERE state='landed'").fetchall()
     if not items:
         return []
     st = builds.status()
@@ -119,6 +120,12 @@ def settle(conn: sqlite3.Connection) -> List[str]:
     healthy = {Path(b["path"]).name for b in st["builds"] if b.get("healthy")}
     said, went_live = [], {}
     for it in items:
+        if not it["build"]:
+            if _carried_by_a_later_build(it, st, healthy):
+                name = Path(st["current"]).name
+                _mark(conn, it, "live", f"live in build {name}")
+                said.append(f"item {it['id']}: live in build {name}")
+            continue
         path = _resolved(builds.root() / it["build"])
         if back and _resolved(back.get("from")) == path and _at(back) >= int(_at(swap)):
             why = f"rolled back from build {it['build']}: exit {back.get('exit')} after {back.get('after')}s"

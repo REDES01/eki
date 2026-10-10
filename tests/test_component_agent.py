@@ -1,10 +1,11 @@
 """The agent kind: a persona called as a session; bare means its own prompt and nothing else."""
 import json
+import shutil
 from pathlib import Path
 
 from eki import components, mcp
 from eki.components import Call, agent
-from eki.providers.base import Turn
+from eki.providers.base import Outcome, Turn
 from eki.providers.claude_code import ClaudeCode
 
 
@@ -143,3 +144,72 @@ def test_bare_on_default_claude_is_valid_without_providers_entry(proj, home):
     (d / "prompt.md").write_text("x")
     assert agent.validate({"kind": "agent", "target": "claude:opus@high", "bare": True}, d) == []
     assert agent.validate({"kind": "agent", "target": "local", "bare": True}, d)
+
+
+def playtester(proj, home):
+    with_claude(home)
+    src = components.templates_dir() / "playtester"
+    shutil.copytree(src, proj / "components" / "playtester")
+    mcp.save(json.loads((src / "component.json").read_text())["mcp_servers"])
+    return components.get("playtester", proj)
+
+
+def test_allow_list_is_all_that_reaches_claude(proj, home):
+    comp = playtester(proj, home)
+    s = home / "s"
+    s.mkdir()
+    _, turn = agent.turn_for(comp, call_of(proj, extra={"allowed_tools": ["Bash"]}), s)
+    argv = argv_of(turn)
+    assert argv[argv.index("--allowedTools") + 1].split(",") == comp.spec["allow_tools"]
+    assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
+    assert "bypassPermissions" not in argv and "--allow-dangerously-skip-permissions" not in argv
+    assert argv[argv.index("--tools") + 1] == "" and "--strict-mcp-config" in argv
+    assert "mcp__playwright__browser_evaluate" in argv[argv.index("--disallowedTools") + 1].split(",")
+    args = json.loads(Path(argv[argv.index("--mcp-config") + 1]).read_text())["mcpServers"]["playwright"]["args"]
+    assert ("--snapshot-mode", "none") in list(zip(args, args[1:]))
+
+
+def test_without_allow_list_permissions_are_as_before(proj, home):
+    with_claude(home)
+    comp = put(proj, "plain", {"bare": True})
+    s = home / "s"
+    s.mkdir()
+    _, turn = agent.turn_for(comp, call_of(proj), s)
+    argv = argv_of(turn)
+    assert "--allowedTools" not in argv and argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
+
+
+def test_allow_tools_is_checked(proj):
+    d = components.templates_dir() / "playtester"
+    for bad in ({"target": "claude", "bare": True, "mcp": ["pw"], "allow_tools": ["mcp__other__a"]},
+                {"target": "claude", "bare": True, "mcp": ["pw"], "allow_tools": "mcp__pw__a"},
+                {"target": "claude", "mcp": ["pw"], "allow_tools": ["mcp__pw__a"]}):
+        assert any("allow_tools" in e for e in agent.validate(bad, d))
+    assert agent.tool_rules({"mcp": ["pw"], "allow_tools": ["mcp__pw__a"]}) == {}   # not bare: no allow-list
+    assert agent.tool_rules({"bare": True, "mcp": ["pw"], "allow_tools": ["mcp__pw__a"]}) == \
+        {"allowed_tools": ["mcp__pw__a"]}
+
+
+class Player:
+    def __init__(self, urls):
+        self.urls = urls
+
+    def take(self, turn, emit):
+        for u in self.urls:
+            emit("tool", {"name": "mcp__playwright__browser_navigate", "detail": "…", "url": u})
+        emit("text", {"text": "REVIEW: fine"})
+        return Outcome()
+
+
+def test_a_call_reads_its_navigates(proj, home, monkeypatch):
+    from eki import providers
+    comp = playtester(proj, home)
+    url = comp.spec["url"]
+    monkeypatch.setattr(providers, "get", lambda name: Player([url, url + "next.html"]))
+    r = agent.call(comp, call_of(proj))
+    assert not r.error and not r.text.startswith("tainted")
+    away = url.split("/chapter1/")[0] + "/src/game.js"
+    monkeypatch.setattr(providers, "get", lambda name: Player([url, away]))
+    r = agent.call(comp, call_of(proj))
+    assert r.text.startswith(f"tainted: opened {away}")
+    assert json.loads((Path(r.paths[0]) / "session.json").read_text())["tainted"] == f"opened {away}"

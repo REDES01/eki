@@ -37,7 +37,10 @@ class ClaudeCode(ProgramProvider):
     def argv(self, turn: Turn) -> List[str]:
         argv = [self.bin or "claude", "--output-format", "stream-json", "--verbose",
                 "--input-format", "stream-json", "--permission-prompt-tool", "stdio"]
-        if self.cfg.get("permissions", "auto") == "auto":
+        if turn.extra.get("allowed_tools"):
+            # an allow-list (a bare component agent): those tools and nothing else, no asking
+            argv += ["--permission-mode", "dontAsk", "--allowedTools", ",".join(turn.extra["allowed_tools"])]
+        elif self.cfg.get("permissions", "auto") == "auto":
             # the top of the run tree may do anything (docs/design.md); questions
             # for you still come through the prompt tool
             argv += ["--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"]
@@ -123,6 +126,8 @@ class ClaudeCode(ProgramProvider):
                     path = inp.get("file_path") or inp.get("notebook_path")
                     if path and block.get("name") in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
                         tool["path"] = path       # a file it made or changed (M3: shown in the thread)
+                    if isinstance(inp.get("url"), str):
+                        tool["url"] = inp["url"]  # whole, for the journal's check of where it went
                     emit("tool", tool)
         elif kind == "rate_limit_event":
             info = event.get("rate_limit_info") or {}

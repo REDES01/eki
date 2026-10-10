@@ -912,8 +912,13 @@ the ones listed, and cwd an empty scratch folder outside any project.
 **The playtester template** is a bare agent that knows nothing about the
 game and can't see its code or assets. Its one tool is a browser it sees
 through screenshots and drives with mouse and keys — Playwright MCP in
-vision mode, with page snapshots, script evaluation, console and network
-tools off — opened at the component's `"url"`. It plays, takes notes as it
+vision mode with `--snapshot-mode none` (no accessibility tree in any
+response), and an `allow_tools` list (screenshot, the `_xy` mouse tools,
+keys, type, wait, navigate, back, resize, close): a bare agent with one runs
+Claude Code in `dontAsk` mode, so every other tool is refused — opened at the
+component's `"url"`. A navigate anywhere outside that url (same origin, under
+its path) marks the session `tainted: opened <url>` in its `session.json`
+and on the printed result. It plays, takes notes as it
 goes, records how it feels at each moment (emotion + why, timestamped), and
 ends with an honest review. `eki use playtester ["what to play / focus
 on"]`. Each session's notes, emotion log, review and screenshots are kept

@@ -3,7 +3,7 @@
 An agent folder holds prompt.md, optional skills/, and in component.json a
 `target` (provider → model → effort, e.g. "claude:opus@high"), `bare`,
 `uses` (components it may call), `mcp` (servers from eki's registry),
-`deny_tools` and an optional `url` ("{url}" in prompt.md becomes it).
+`deny_tools`, `allow_tools` (a bare agent's whole tool list) and an optional `url` ("{url}" in prompt.md becomes it).
 
 Each call is a new session under ~/.eki/components/sessions/<name>/. A bare
 agent is strict and Claude Code only: prompt.md is its entire system prompt,
@@ -27,6 +27,16 @@ def _names(spec: dict, key: str) -> List[str]:
     return v if isinstance(v, list) and all(isinstance(n, str) and n for n in v) else None
 
 
+def _tool_list(spec: dict, key: str) -> List[str]:
+    """The `mcp__<server>__<tool>` names of a listed server; empty when the list is broken."""
+    tools = spec.get(key, [])
+    servers = spec.get('mcp') or []
+    ok = isinstance(tools, list) and all(
+        isinstance(t, str) and t.startswith('mcp__') and t.split('__')[1] in servers and len(t.split('__')) == 3
+        for t in tools)
+    return list(tools) if ok else []
+
+
 def validate(spec: dict, folder: Path) -> List[str]:
     errs = []
     if not (folder / 'prompt.md').is_file():
@@ -45,6 +55,10 @@ def validate(spec: dict, folder: Path) -> List[str]:
         errs.append('uses must name components')
     if 'url' in spec and not isinstance(spec['url'], str):
         errs.append('url must be text')
+    if 'allow_tools' in spec and not _tool_list(spec, 'allow_tools'):
+        errs.append('allow_tools must be a list of mcp__<server>__<tool> names of servers in "mcp"')
+    if 'allow_tools' in spec and not spec.get('bare'):
+        errs.append('allow_tools needs "bare": true')
     if spec.get('bare') and t is not None:
         kind = _kind(t.provider)
         if kind and kind != 'claude_code':   # a provider this Mac doesn't have fails at call time
@@ -116,7 +130,7 @@ def turn_for(comp: Component, c: Call, session: Path):
     cfg = providers.config().get(t.provider) or {}
     choice = targets.choose(t, cfg, None)
     extra = {k: v for k, v in (c.extra or {}).items()
-             if k not in ('bare', 'system_prompt', 'deny_tools', 'model', 'effort', 'note', 'row', 'full_history')}
+             if k not in ('bare', 'system_prompt', 'deny_tools', 'allowed_tools', 'model', 'effort', 'note', 'row', 'full_history')}
     if choice.model:
         extra['model'] = choice.model
     if choice.effort:
@@ -128,6 +142,7 @@ def turn_for(comp: Component, c: Call, session: Path):
         for k in ('claude_plugin', 'claude_mcp', 'codex_config'):
             extra.pop(k, None)              # nothing of eki's own: only what the agent lists
         extra.update(bare=True, system_prompt=prompt_text(comp), deny_tools=list(comp.spec.get('deny_tools') or []))
+        extra.update(tool_rules(comp.spec))
         if comp.spec.get('mcp'):
             extra['claude_mcp'] = str(mcp_file(comp, session))
         cwd = str(scratch)
@@ -144,6 +159,14 @@ def turn_for(comp: Component, c: Call, session: Path):
     return t.provider, Turn(prompt=prompt, history=[], cwd=cwd, run_id=c.run_id, extra=extra)
 
 
+def tool_rules(spec: dict) -> Dict[str, Any]:
+    """With `allow_tools` a bare agent gets exactly those tools: Claude Code runs in
+    dontAsk mode, so everything not on the list — the rest of its servers, tools a
+    server adds later — is refused, never asked about."""
+    allow = _tool_list(spec, 'allow_tools') if spec.get('bare') else []
+    return {'allowed_tools': allow} if allow else {}
+
+
 def call(comp: Component, c: Call) -> Result:
     from .. import providers
     session = journal.new_session(comp.name)
@@ -153,15 +176,18 @@ def call(comp: Component, c: Call) -> Result:
     except (KeyError, ValueError, OSError) as e:
         return Result(text='', paths=[str(session)], error=str(e))
     texts: List[str] = []
+    calls: List[dict] = []
 
     def emit(kind: str, data: dict) -> None:
         if kind == 'text' and data.get('text'):
             texts.append(data['text'])
+        if kind == 'tool':
+            calls.append(data)
         if c.emit:
             c.emit(kind, data)
 
     out = provider.take(turn, emit)
-    kept = journal.keep(session, texts)
+    kept = journal.keep(session, texts, calls, str(comp.spec.get('url') or ''))
     if out.state != 'done' or out.error:
         kept.error = out.error or out.reason or f'{comp.name} ended {out.state}'
     return kept

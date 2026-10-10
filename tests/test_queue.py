@@ -99,7 +99,7 @@ def test_a_locked_file_needs_a_person(conn, src):
     assert get(conn, a)["state"] == "queued"
 
 
-def test_three_in_a_row_are_judged_at_once_and_land(conn, src, origin):
+def test_three_in_a_row_land_on_one_check(conn, src, origin):
     autonomy("apply")
     m = integration.main()
     a, b, c = item(conn, "A", "a.txt"), item(conn, "B", "b.txt"), item(conn, "C", "c.txt")
@@ -108,13 +108,13 @@ def test_three_in_a_row_are_judged_at_once_and_land(conn, src, origin):
     assert [x["state"] for x in (A, B, C)] == ["queued"] * 3, said
     assert [x["id"] for x in queue.order(conn)] == [a, b, c]
     assert A["head"] == m and B["head"] == A["rebased"] and C["head"] == B["rebased"]
-    runs = [store.run(conn, x["gate2_run"]) for x in (A, B, C)]
-    assert all(r["state"] == "queued" and r["provider"] == "command" and r["prompt"] == STUB for r in runs)
-    assert all(x["gate2_on"] == x["rebased"] for x in (A, B, C))
-    assert queue.tick(conn) == []                                 # nothing new while they run
-    assert [get(conn, x)["gate2_run"] for x in (a, b, c)] == [x["gate2_run"] for x in (A, B, C)]
-    for r in runs:
-        run_inline(conn, r["id"])
+    assert A["gate2_run"] is None and B["gate2_run"] is None          # only the tip is checked
+    run = store.run(conn, C["gate2_run"])
+    assert run["state"] == "queued" and run["provider"] == "command" and run["prompt"] == STUB
+    assert C["gate2_on"] == C["rebased"] and any("a batch of 3" in s for s in said), said
+    assert store.thread(conn, run["thread_id"])["title"] == "gate 2: batch of 3, up to C"
+    assert queue.tick(conn) == []                                 # nothing new while it runs
+    run_inline(conn, run["id"])
     said = queue.tick(conn)
     A, B, C = get(conn, a), get(conn, b), get(conn, c)
     assert [x["state"] for x in (A, B, C)] == ["landed"] * 3, said
@@ -122,8 +122,57 @@ def test_three_in_a_row_are_judged_at_once_and_land(conn, src, origin):
     assert integration.main() == C["rebased"]
     assert git(origin, "rev-parse", "main") == C["rebased"]
     assert workspace.head(src) == C["rebased"]                   # clean and on main: fast-forwarded
-    assert not (paths.work() / f"gate2-{a}").exists()
+    assert not (paths.work() / f"gate2-{c}").exists()
     assert queue.tick(conn) == []
+
+
+def test_one_joining_during_a_check_waits_for_the_next_batch(conn, src):
+    autonomy("apply")
+    a, b = item(conn, "A", "a.txt"), item(conn, "B", "b.txt")
+    queue.tick(conn)
+    first = get(conn, b)["gate2_run"]
+    c = item(conn, "C", "c.txt")
+    queue.tick(conn)
+    assert get(conn, b)["gate2_run"] == first                       # not restarted
+    assert get(conn, c)["state"] == "queued" and get(conn, c)["gate2_run"] is None
+    run_inline(conn, first)
+    queue.tick(conn)
+    assert [get(conn, x)["state"] for x in (a, b)] == ["landed"] * 2
+    C = get(conn, c)
+    assert C["state"] == "queued" and C["gate2_run"]                 # the next batch: just C
+    run_inline(conn, C["gate2_run"])
+    queue.tick(conn)
+    assert get(conn, c)["state"] == "landed"
+
+
+def test_a_red_batch_bisects_to_the_bad_one_and_lands_the_rest(conn, src, monkeypatch):
+    autonomy("apply")
+    ids = [item(conn, n, f"{n.lower()}.txt") for n in "ABCD"]
+    bad = ids[2]
+    checks = []
+
+    def finish(rid):
+        prompt_tree = store.cwd_of(conn, store.run(conn, rid)["thread_id"])
+        has_bad = (Path(prompt_tree) / "c.txt").exists()
+        monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "1" if has_bad else "0")
+        checks.append(has_bad)
+        run_inline(conn, rid)
+
+    queue.tick(conn)
+    for _ in range(12):
+        running = [get(conn, x)["gate2_run"] for x in ids if get(conn, x)["state"] == "queued"
+                   and get(conn, x)["gate2_run"]
+                   and store.run(conn, get(conn, x)["gate2_run"])["state"] in store.ACTIVE]
+        if not running:
+            break
+        for rid in running:
+            finish(rid)
+        queue.tick(conn)
+    states = [get(conn, x)["state"] for x in ids]
+    assert states == ["landed", "landed", "unfit", "landed"], (states, checks)
+    assert get(conn, bad)["gate2"] == "red" and get(conn, bad)["error"] == "gate 2 failed"
+    assert len(checks) == 4                                         # D, then B, then C, then D again
+    assert not integration.contains(get(conn, bad)["rebased"], "main")
 
 
 def test_a_conflict_goes_aside_and_the_rest_go_on(conn, src):
@@ -140,21 +189,22 @@ def test_a_conflict_goes_aside_and_the_rest_go_on(conn, src):
     assert [x["id"] for x in queue.order(conn)] == [a, c]
 
 
-def test_a_red_gate_two_rejudges_those_behind(conn, src, monkeypatch):
+def test_a_red_front_is_unfit_and_those_behind_are_judged_again(conn, src, monkeypatch):
     autonomy("apply")
     m = integration.main()
     a, b = item(conn, "A", "a.txt"), item(conn, "B", "b.txt")
     queue.tick(conn)
-    A, B = get(conn, a), get(conn, b)
-    old = B["gate2_run"]
     monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "1")
-    run_inline(conn, A["gate2_run"])
+    run_inline(conn, get(conn, b)["gate2_run"])                # the batch is red
+    queue.tick(conn)
+    A = get(conn, a)
+    assert A["gate2_run"] and get(conn, a)["state"] == "queued"     # bisect: A alone next
+    run_inline(conn, A["gate2_run"])                           # A alone is red too
     monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "0")
-    run_inline(conn, old)                                      # green, but on a head with A: thrown away
     said = queue.tick(conn)
     A, B = get(conn, a), get(conn, b)
     assert A["state"] == "unfit" and A["error"] == "gate 2 failed" and A["gate2"] == "red", said
-    assert B["state"] == "queued" and B["head"] == m and B["gate2_run"] != old and B["gate2"] is None
+    assert B["state"] == "queued" and B["head"] == m and B["gate2"] is None
     assert not (Path(B["worktree"]) / "a.txt").exists()          # A's commit left behind
     assert git(B["worktree"], "rev-parse", "HEAD^") == m
     run_inline(conn, B["gate2_run"])

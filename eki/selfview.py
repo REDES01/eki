@@ -79,9 +79,9 @@ def stage(c, it) -> str:
         return "rebasing"
     if it["gate2"] == "green":
         return "gate 2 green — waiting for the ones ahead"
-    run = store.run(c, it["gate2_run"]) if it["gate2_run"] else None
+    run = store.run(c, it["gate2_run"]) if it["gate2_run"] and it["gate2_on"] == it["rebased"] else None
     if run is None:
-        return "gate 2 starting"
+        return "in the batch — checked with one above it"
     if checkslots.waiting(c, run):
         return f"waiting for a check slot (run {run['id']})"
     if run["state"] in store.ACTIVE:

@@ -3,12 +3,17 @@
 
 Queued items stand in order (queued_at, then created_at). Each one's
 predicted head is integration main plus the rebased commits of the items
-ahead of it, so every rebase and every gate-2 run starts at once, not when
-the ones ahead have landed. A conflict sends the item to the side path
-(resolve.py) and the items behind it are rebased without it; a red gate 2
-makes it unfit and the items behind it are judged again on new heads. The
-front of the queue lands — a fast-forward of integration main — once its
-gate 2 is green on the head main is at.
+ahead of it — a stack. A conflict sends the item to the side path
+(resolve.py) and the items behind it are rebased without it.
+
+Gate 2 checks the stack as one batch: one run on the tip, which carries every
+item under it. Green lands the whole batch. Red bisects: the middle of the
+unjudged part is checked next, so one bad item is found in log2(n) runs and
+the good ones before it land; the bad one is unfit and the items behind it
+are rebased without it and checked again. One check at a time: items that
+join while it runs wait for the next batch, they don't restart it. The front
+lands — a fast-forward of integration main — once gate 2 is green on it or
+on an item above it in the stack.
 
 Gate 2 is the fast tests only (bin/check with EKI_CHECK_FAST=1: no drills);
 the drills and the candidate checks run on the train, before the swap. A
@@ -152,7 +157,7 @@ def _needs_rebase(items: List[sqlite3.Row], main: str) -> bool:
     return False
 
 
-def _walk(conn: sqlite3.Connection) -> List[str]:
+def _walk(conn: sqlite3.Connection, again: bool = True) -> List[str]:
     items = order(conn)
     if not items:
         return []
@@ -160,6 +165,7 @@ def _walk(conn: sqlite3.Connection) -> List[str]:
         integration.sync()                         # eki fetches before every rebase
     head = integration.main()
     said: List[str] = []
+    stack: List[sqlite3.Row] = []
     for it in order(conn):
         if it["head"] != head or not it["rebased"]:
             moved = _rebase(conn, it, head)
@@ -167,17 +173,47 @@ def _walk(conn: sqlite3.Connection) -> List[str]:
             if moved[0] is None:
                 continue                           # out of the queue: head doesn't advance past it
             it = selfwork.store_item(conn, it["id"])
-        run = store.run(conn, it["gate2_run"]) if it["gate2_run"] else None
-        if it["gate2_on"] != it["rebased"] or run is None:
-            said += _start_gate2(conn, it)
-        elif run["state"] == "done":
-            if it["gate2"] != "green" and _set_if(conn, it, "queued", gate2="green"):
-                said.append(f"item {it['id']}: gate 2 green")
-        elif run["state"] not in store.ACTIVE:
-            said += _unfit(conn, it, run)
-            continue
+        stack.append(it)
         head = it["rebased"]
+    said += _judge(conn, stack)
+    if again and len(order(conn)) < len(stack):
+        said += _walk(conn, again=False)           # one went unfit: those behind it move up now
     return said
+
+
+def _result(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[str]:
+    """'green', 'red', 'running' or None: gate 2 on this item's current rebased commit."""
+    if not it["gate2_run"] or it["gate2_on"] != it["rebased"]:
+        return None
+    run = store.run(conn, it["gate2_run"])
+    if run is None:
+        return None
+    if run["state"] in store.ACTIVE:
+        return "running"
+    return "green" if run["state"] == "done" else "red"
+
+
+def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row]) -> List[str]:
+    """Gate 2 for the stack as a batch: green on an item clears it and all under it;
+    red on an item means one of the unjudged ones up to it is bad — check the middle."""
+    said: List[str] = []
+    results = [_result(conn, it) for it in stack]
+    green = max((i for i, r in enumerate(results) if r == "green"), default=-1)
+    for it in stack[:green + 1]:
+        if it["gate2"] != "green" and _set_if(conn, it, "queued", gate2="green"):
+            said.append(f"item {it['id']}: gate 2 green"
+                        + ("" if it["id"] == stack[green]["id"] else f" (in the batch checked on {stack[green]['id']})"))
+    if "running" in results:
+        return said                                # one check at a time: the rest wait for the next batch
+    lo = green + 1
+    if lo >= len(stack):
+        return said
+    red = next((i for i in range(lo, len(stack)) if results[i] == "red"), None)
+    if red is None:
+        return said + _start_gate2(conn, stack, lo, len(stack) - 1)
+    if red == lo:
+        return said + _unfit(conn, stack[lo], store.run(conn, stack[lo]["gate2_run"]))
+    return said + _start_gate2(conn, stack, lo, (lo + red - 1) // 2)
 
 
 def _rebase(conn: sqlite3.Connection, it: sqlite3.Row, head: str) -> tuple:
@@ -209,20 +245,27 @@ def _cancel(conn: sqlite3.Connection, rid: str) -> None:
         store.cancel(conn, rid)
 
 
-def _start_gate2(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
+def _start_gate2(conn: sqlite3.Connection, stack: List[sqlite3.Row], lo: int, top: int) -> List[str]:
+    """One gate-2 run on stack[top], judging stack[lo..top] together."""
+    batch = stack[lo:top + 1]
+    it = stack[top]
     tree = rebase.gate_tree(integration.repo(), f"gate2-{it['id']}", it["rebased"])
-    goal = conn.execute("SELECT owner FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    goals = {b["goal_id"] for b in batch}
+    owners = {r["owner"] for r in conn.execute(
+        f"SELECT owner FROM goals WHERE id IN ({','.join('?' * len(goals))})", tuple(goals))}
+    docs = all(doccheck.of_item(b) for b in batch)
     with db.tx(conn):
         row = conn.execute("SELECT state, rebased FROM items WHERE id=?", (it["id"],)).fetchone()
         if row["state"] != "queued" or row["rebased"] != it["rebased"]:
             return []
-        tid = store.create_thread(conn, f"gate 2: {it['title']}", str(tree), by="eki")
-        docs = doccheck.of_item(it)
-        judge = doccheck.command(it["head"], it["rebased"]) if docs else GATE2
+        title = it["title"] if len(batch) == 1 else f"batch of {len(batch)}, up to {it['title']}"
+        tid = store.create_thread(conn, f"gate 2: {title}", str(tree), by="eki")
+        judge = doccheck.command(batch[0]["head"], it["rebased"]) if docs else GATE2
         rid = store.create_run(conn, tid, judge, provider="command",
-                               priority="now" if goal and goal["owner"] == "you" else "background")
+                               priority="now" if "you" in owners else "background")
         selfwork._set(conn, it["id"], gate2_run=rid, gate2_on=it["rebased"], gate2=None)
-    return [f"item {it['id']}: gate 2 on {it['rebased'][:12]} ({rid[:8]}){', docs only' if docs else ''}"]
+    what = f"item {it['id']}" if len(batch) == 1 else f"a batch of {len(batch)} ({batch[0]['id']}..{it['id']})"
+    return [f"gate 2 on {what} at {it['rebased'][:12]} ({rid[:8]}){', docs only' if docs else ''}"]
 
 
 def _unfit(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:

@@ -138,11 +138,21 @@ moment those exist — not when the changes ahead have *landed*.
 Say `main` is at M and A, B, C join the queue in that order, each green on
 its own (gate 1). The queue predicts the future: A on M, B on M+A, C on
 M+A+B. Those bases are known at once, because A's and B's content is final
-the moment they're queued. The three rebases start together; when they're
-clean (milliseconds) the three test runs — the fast tests of M+A, M+A+B,
-M+A+B+C; the drills and the candidate checks wait for the train — start
-together too. A minute later all three are green and landing is three
-fast-forwards and a push. One judge's duration for three changes, not three.
+the moment they're queued. The three rebases start together (milliseconds),
+and then **one** test run checks the batch: the fast tests of M+A+B+C, the
+tip, which carries all three (the drills and the candidate checks wait for
+the train). Green lands all three — three fast-forwards and a push. One run
+for three changes, not three. (Each change running its own gate 2 on its own
+predicted head, as before, ran the suite once per queued change and again
+whenever the head under it moved: 56 runs in four hours, none red.)
+
+Red **bisects**. If M+A+B+C fails, M+A (the middle of the unjudged part) is
+checked next; green there clears A and B and they land, and the search goes
+on above them; red goes on below. One bad change among n is found in about
+log2(n) more runs, the good ones before it land, it is marked unfit, and the
+changes behind it are rebased without it and checked as the next batch.
+One check runs at a time: changes that join while it runs stack on top and
+wait for the next batch rather than restart it.
 
 A change that can't be rebased *mechanically* isn't in the queue. If C's
 rebase onto M+A+B conflicts, C is pulled out of line; the changes behind it
@@ -156,9 +166,9 @@ each beside the queue; a conflict never holds anyone else up. `git rerere`
 records every resolution so a change that must rebase twice doesn't ask
 twice for the same hunk.
 
-A change judged on a predicted head that included a change which then
-failed has its result thrown away and is judged again. That's the price of
-speculating, and it's paid only on failures.
+A change behind one that failed is rebased without it and judged again in
+the next batch. That's the price of speculating, and it's paid only on
+failures.
 
 When several queued changes conflict on the same files, pairing them up
 before resolving (the first eki's tree merge, `~/eki-2026-09-26/eki/treemerge.py`)
@@ -182,12 +192,12 @@ left for you. Cheap, parallel, keeps junk out of the predicted futures. A
 (`eki/doccheck.py`), which checks that every changed file is UTF-8 text and
 that nothing outside the lane changed. Its board line says "docs only".
 
-**Gate 2 — in company.** On the predicted head, in a fresh detached
-worktree: the fast tests only, `EKI_CHECK_FAST=1 bin/check` — the suite
-minus the tests marked `drill` (the ones that start a real engine or
-launcher). A docs-only item gets the doccheck again instead. Green: it may
-land once everything ahead has. Red: it's dropped, the changes behind it get
-new heads and are judged again.
+**Gate 2 — in company, as a batch.** On the tip of the stack, in a fresh
+detached worktree: the fast tests only, `EKI_CHECK_FAST=1 bin/check` — the
+suite minus the tests marked `drill` (the ones that start a real engine or
+launcher). A batch of only docs-only items gets the doccheck over its range
+instead. Green: the batch lands. Red: bisect, as above; the bad change is
+unfit and the changes behind it are judged again in the next batch.
 
 **Gate 3 — before the swap, then live.** The train (`eki/train.py`,
 `eki/traincheck.py`) runs one command run on the very build it is about to

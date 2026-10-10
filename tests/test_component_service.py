@@ -70,9 +70,10 @@ def test_images_template_is_the_comfyui_queue():
         ("comfyui", "queue", 1, 20, 5)
 
 
-def test_validate_rejects_mixed_and_incomplete_forms(tmp_path):
-    assert service.validate({"run": ["a"], "provider": "x"}, tmp_path)
-    assert "missing url, health" in service.validate({"serve": ["a"], "call": ["b"]}, tmp_path)[0]
+def test_validate_picks_one_form_and_rejects_incomplete_ones(tmp_path):
+    assert service.validate({"run": ["a"], "provider": "x"}, tmp_path) == []      # the provider form wins
+    assert "missing health" in service.validate({"serve": ["a"], "call": ["b"]}, tmp_path)[0]
+    assert service.validate({"serve": "x", "health": "http://127.0.0.1:9/ok", "call": "z"}, tmp_path) == []
     assert service.validate({"run": []}, tmp_path)
     assert service.validate({"run": "echo hi"}, tmp_path) == []
 

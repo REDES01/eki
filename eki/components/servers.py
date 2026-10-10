@@ -84,8 +84,18 @@ def alive(pid: Optional[int]) -> bool:
         return True
 
 
+def health_url(spec: dict) -> str:
+    """`health` as a full URL, or as a path under `url`."""
+    h = str(spec.get("health", ""))
+    if "://" in h or not spec.get("url"):
+        return h
+    return str(spec["url"]).rstrip("/") + "/" + h.lstrip("/")
+
+
 def healthy(spec: dict, timeout: float = 2.0) -> bool:
-    url = str(spec.get("url", "")).rstrip("/") + "/" + str(spec.get("health", "")).lstrip("/")
+    url = health_url(spec)
+    if "://" not in url:
+        return False
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return r.status == 200

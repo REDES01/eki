@@ -6,6 +6,7 @@
         existing files are the output paths; a non-zero exit is an error.
     {"kind": "service", "about": "…", "serve": [argv], "cwd": "…", "env": {…},
      "url": "http://127.0.0.1:9000", "health": "/health", "start_timeout": 120,
+     (`health` is a path under `url`, or a full URL when there is no `url`)
      "call": [argv]}
         a server started on the first call (servers.py), the call argv run as
         above with EKI_COMPONENT_URL set; stopped after `idle_stop` minutes.
@@ -37,9 +38,7 @@ def validate(spec: dict, folder: Path) -> List[str]:
     forms = [k for k in ("run", "serve", "provider") if k in spec]
     if not forms:
         return ['a service needs "run", or "serve" + "health" + "call", or "provider"']
-    if len(forms) > 1:
-        return [f'a service takes one of "run", "serve" or "provider" (has {", ".join(forms)})']
-    form = forms[0]
+    form = "provider" if "provider" in forms else forms[0]     # the form a call takes: provider, run, serve
     if form == "provider":
         return [] if isinstance(spec["provider"], str) and spec["provider"].strip() else \
             ['"provider" must name one of eki\'s providers']
@@ -48,9 +47,10 @@ def validate(spec: dict, folder: Path) -> List[str]:
         if not _argv(spec.get(k)):
             errs.append(f'"{k}" must be a command: a list of words')
     if form == "serve":
-        missing = [k for k in ("url", "health") if not isinstance(spec.get(k), str) or not spec.get(k)]
-        if missing:
-            errs.append(f'a served component needs serve, url, health and call (missing {", ".join(missing)})')
+        if not isinstance(spec.get("health"), str) or not spec.get("health"):
+            errs.append('a served component needs serve, health and call (missing health)')
+        if "url" in spec and not isinstance(spec["url"], str):
+            errs.append('"url" must be a string')
         if "env" in spec and not isinstance(spec["env"], dict):
             errs.append('"env" must be an object')
     return errs
@@ -133,7 +133,7 @@ def call(comp: Component, c: Call) -> Result:
         return Result(error=got["why"])
     if servers.ours(comp):
         servers.used(comp, c.run_id)
-    return _command(comp, argv, c, {"EKI_COMPONENT_URL": str(spec["url"])})
+    return _command(comp, argv, c, {"EKI_COMPONENT_URL": str(spec.get("url") or "")})
 
 
 def _managed(comp: Component) -> str:
@@ -180,6 +180,6 @@ def notes(comp: Component) -> List[str]:
     if "provider" in spec:
         out.append(f"runs on eki's {spec['provider']} provider")
     if "serve" in spec:
-        out.append(f"server at {spec.get('url')}, up" if servers.is_up(comp) else
-                   f"server at {spec.get('url')}, started on the first call")
+        out.append(f"server at {spec.get('url') or servers.health_url(spec)}, up" if servers.is_up(comp) else
+                   f"server at {spec.get('url') or servers.health_url(spec)}, started on the first call")
     return out

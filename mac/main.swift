@@ -300,6 +300,34 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         return nil
     }
 
+    // The page's alert / confirm / prompt as sheets on the window. Without these WKWebView answers
+    // every confirm() with false, so nothing that asks first (remove a card, delete a project) happens.
+    func webView(_ w: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "OK")
+        guard let win = w.window else { a.runModal(); completionHandler(); return }
+        a.beginSheetModal(for: win) { _ in completionHandler() }
+    }
+    func webView(_ w: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert(); a.messageText = message
+        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        guard let win = w.window else { completionHandler(a.runModal() == .alertFirstButtonReturn); return }
+        a.beginSheetModal(for: win) { r in completionHandler(r == .alertFirstButtonReturn) }
+    }
+    func webView(_ w: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let a = NSAlert(); a.messageText = prompt
+        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.stringValue = defaultText ?? ""; a.accessoryView = field
+        guard let win = w.window else {
+            completionHandler(a.runModal() == .alertFirstButtonReturn ? field.stringValue : nil); return
+        }
+        a.beginSheetModal(for: win) { r in completionHandler(r == .alertFirstButtonReturn ? field.stringValue : nil) }
+        win.makeFirstResponder(field)
+    }
+
     func buildMenu() {
         let bar = NSMenu()
         func sub(_ title: String, _ items: [NSMenuItem]) {

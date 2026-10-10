@@ -26,7 +26,6 @@ def _comp(proj, name):
 
 
 def test_always_and_when_relevant_with_about_lines(proj):
-    root = proj.resolve()
     _write(proj, "design/DECISIONS.md")
     _write(proj, "story/core.md")
     _write(proj, "story/voices/ana.md")
@@ -37,10 +36,10 @@ def test_always_and_when_relevant_with_about_lines(proj):
     _card(proj, "notes", ["notes/*.md"], read="when-relevant", about="playtest notes")
     out = knowledge.brief(str(proj))
     assert out.splitlines() == [
-        "Shared knowledge of this project (knowledge cards in its components/):",
-        f"- read first: {root}/design/DECISIONS.md — owner-approved decisions, newest first",
-        f"- look here when relevant: {root}/notes/a.md, {root}/notes/b.md — playtest notes",
-        f"- look here when relevant: {root}/story/core.md, {root}/story/voices/ — writing dialogue",
+        "Shared knowledge of this project (knowledge cards in its components/; paths are relative to this folder):",
+        "- read first: design/DECISIONS.md — owner-approved decisions, newest first",
+        "- look here when relevant: notes/a.md, notes/b.md — playtest notes",
+        "- look here when relevant: story/core.md, story/voices/ — writing dialogue",
     ]
 
 
@@ -52,7 +51,7 @@ def test_missing_files_are_skipped_but_shown(proj):
     (proj / "components" / "broken" / "component.json").write_text('{"kind": "knowledge"}')
     out = knowledge.brief(str(proj))
     assert "GONE" not in out and "never there" not in out
-    assert f"{proj.resolve()}/design/DECISIONS.md — what it is for" in out
+    assert "- read first: design/DECISIONS.md — what it is for" in out
     fs = knowledge.files(_comp(proj, "decisions"))
     assert [(f["path"], f["missing"]) for f in fs] == [("design/DECISIONS.md", False), ("design/GONE.md", True)]
     assert knowledge.notes(_comp(proj, "decisions")) == ["1 file, 1 missing: design/GONE.md"]
@@ -87,12 +86,23 @@ def test_author_from_git_log(proj):
     assert got == {"design/DECISIONS.md": "Ada Writer", "design/new.md": ""}
 
 
-def test_worktree_runs_see_the_project_copy(proj, tmp_path):
+def test_worktree_runs_are_named_their_own_copy(proj, tmp_path):
     _write(proj, "design/DECISIONS.md")
+    _write(proj, "story/voices/ana.md")
+    _write(proj, "notes/a.md")
+    workspace.git(proj, "add", "design", "story", "notes")
+    workspace.git(proj, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "-m", "k")
+    _write(proj, "notes/only-in-main.md")
     _card(proj, "decisions", ["design/DECISIONS.md"])
+    _card(proj, "story", ["story/voices", "notes/*.md"], read="when-relevant")
     wt = tmp_path / "wt"
     workspace.git(proj, "worktree", "add", "-q", str(wt))
-    assert f"{proj.resolve()}/design/DECISIONS.md" in knowledge.brief(str(wt))
+    out = knowledge.brief(str(wt))
+    assert str(proj.resolve()) not in out and str(wt.resolve()) not in out
+    named = [p.strip().rstrip("/") for ln in out.splitlines()[1:]
+             for p in ln.split(": ", 1)[1].rsplit(" — ", 1)[0].split(",")]
+    assert named == ["design/DECISIONS.md", "story/voices", "notes/a.md"]
+    assert all((wt / p).exists() for p in named)
 
 
 def test_build_turn_carries_the_block_and_a_chore_doesnt(conn, proj):

@@ -117,8 +117,8 @@ def notes(comp: Component) -> List[str]:
 
 
 def _brief_paths(root: Path, pattern: str) -> List[str]:
-    """What the brief names for one pattern: a folder as itself with a trailing /, a glob as its
-    existing matches, a file as itself; nothing when it is missing or empty."""
+    """What the brief names for one pattern, relative to `root`: a folder as itself with a trailing
+    /, a glob as its existing matches, a file as itself; nothing when it is missing or empty."""
     if _bad_pattern(pattern) or not _expand(root, pattern):
         return []
     hits = sorted(glob.glob(str(root / pattern), recursive=True)) if glob.has_magic(pattern) else [str(root / pattern)]
@@ -127,7 +127,8 @@ def _brief_paths(root: Path, pattern: str) -> List[str]:
         r = _inside(root, Path(h))
         if r is None or not (r.is_file() or (r.is_dir() and _expand(root, str(r.relative_to(root))))):
             continue
-        name = str(r) + '/' if r.is_dir() else str(r)
+        rel = str(r.relative_to(root))
+        name = rel + '/' if r.is_dir() else rel
         if name not in out:
             out.append(name)
     return out
@@ -143,8 +144,22 @@ def _line(comp: Component, root: Path) -> str:
     return f'- {how}: {", ".join(found)} — {comp.spec.get("about", "")}'
 
 
+def _own_top(folder, root: Path) -> Path:
+    """The run's own checkout: the git top of `folder` (a worktree's, not the main one's), else
+    `root`. Its copies are the ones the run reads and edits."""
+    try:
+        out = subprocess.run(['git', '-C', str(Path(folder).expanduser()), 'rev-parse', '--show-toplevel'],
+                             capture_output=True, text=True, timeout=10)
+        top = out.stdout.strip() if out.returncode == 0 else ''
+    except (OSError, subprocess.SubprocessError, ValueError):
+        top = ''
+    return Path(top).resolve() if top else root.resolve()
+
+
 def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
-    """What a run in `folder` is told of the project's knowledge cards ('' when none)."""
+    """What a run in `folder` is told of the project's knowledge cards ('' when none). The cards
+    come from the project; their files are named relative to the run's own checkout and kept
+    only when they exist there."""
     try:
         root = components.project_root(folder, conn)
         if root is None or not components.is_project(root, conn):
@@ -152,12 +167,14 @@ def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
         found, _ = components.own(root)
         cards = sorted((c for c in found.values() if c.kind == 'knowledge'),
                        key=lambda c: (c.spec.get('read') != 'always', c.name))
-        lines = [ln for ln in (_line(c, root.resolve()) for c in cards) if ln]
+        top = _own_top(folder, root)
+        lines = [ln for ln in (_line(c, top) for c in cards) if ln]
     except Exception:  # a brief never breaks a run
         return ''
     if not lines:
         return ''
-    return '\n'.join(['Shared knowledge of this project (knowledge cards in its components/):'] + lines)
+    return '\n'.join(['Shared knowledge of this project (knowledge cards in its components/; '
+                      'paths are relative to this folder):'] + lines)
 
 
 def call(comp: Component, c: Call) -> Result:

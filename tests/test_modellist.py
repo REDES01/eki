@@ -182,6 +182,17 @@ def test_housekeep_skips_a_fresh_list_and_reads_a_stale_one(conn, progs, monkeyp
     assert housekeep._models(conn) == []                                   # fresh again
 
 
+def test_a_list_read_before_efforts_is_read_again(conn, progs, monkeypatch):
+    monkeypatch.setattr(Local, "models", lambda self, timeout=1.5: ["q"])
+    for name in ("claude", "codex", "local"):
+        modellist.refresh(conn, name)
+    assert modellist.stale(conn) == []
+    conn.execute("UPDATE provider_models SET efforts=NULL WHERE provider='codex'")
+    assert modellist.stale(conn) == ["codex"]          # fresh by time, but read by older code
+    conn.execute("UPDATE provider_models SET efforts=NULL WHERE provider='local'")
+    assert "local" not in modellist.stale(conn)        # a local model has no effort to miss
+
+
 def test_housekeep_skips_a_program_not_installed(conn, progs):
     cfg = json.loads(progs.read_text())
     cfg["claude"]["binary"] = "/nowhere/claude"

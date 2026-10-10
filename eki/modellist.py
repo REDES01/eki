@@ -276,6 +276,13 @@ def stale(conn: sqlite3.Connection, now: Optional[float] = None) -> List[str]:
                                                                           else "codex"))):
             continue
         t = read_at(conn, name)
-        if t is None or now - t > STALE:
+        if t is None or now - t > STALE or (kind != "local" and _before_efforts(conn, name)):
             out.append(name)
     return out
+
+
+def _before_efforts(conn: sqlite3.Connection, name: str) -> bool:
+    """A program's list with no effort levels at all was read before eki kept them: read it again."""
+    got = conn.execute("SELECT COUNT(*) AS n, COUNT(efforts) AS e FROM provider_models WHERE provider=?",
+                       (name,)).fetchone()
+    return bool(got["n"]) and not got["e"]

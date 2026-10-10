@@ -101,7 +101,7 @@ def test_a_pick_resolves_the_tier_against_the_read_list(home, conn, monkeypatch)
                                                                 "top": "claude-opus-4-1"}})
     _routing(home, roles={"router": "claude:fast", "planner": "claude:top"})
     assert roles.pick("router", conn) == roles.Pick("claude", "claude-haiku-4-5", "claude:fast", "")
-    conn.execute("INSERT INTO provider_models VALUES ('claude','claude-haiku-4-5','Haiku',0,?)", (time.time(),))
+    conn.execute("INSERT INTO provider_models(provider, model, label, is_default, read_at) VALUES ('claude','claude-haiku-4-5','Haiku',0,?)", (time.time(),))
     got = roles.pick("planner", conn)
     assert (got.provider, got.model) == ("claude", None)
     assert "claude-opus-4-1 isn't in claude's list any more" in got.why

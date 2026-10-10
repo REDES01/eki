@@ -178,7 +178,7 @@ def test_a_tier_not_picked_goes_to_the_default_and_says_so(home, conn):
 def test_a_model_off_the_read_list_is_not_asked_for(home, conn):
     _setup(home, {"claude": {"kind": "fake"}},
            [{"key": "general", "title": "all", "targets": ["claude:claude-opus-4-1"]}])
-    conn.execute("INSERT INTO provider_models VALUES ('claude', 'claude-opus-4-5', 'Opus', 0, 0)")
+    conn.execute("INSERT INTO provider_models(provider, model, label, is_default, read_at) VALUES ('claude', 'claude-opus-4-5', 'Opus', 0, 0)")
     _, rid = _run(conn, "a haiku", row="general")
     d = routing.decide(conn, store.run(conn, rid))
     assert (d.provider, d.model) == ("claude", None)

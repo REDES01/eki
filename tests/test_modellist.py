@@ -66,7 +66,8 @@ def test_claude_list_from_the_initialize_reply(conn, progs):
     rows = modellist.refresh(conn, "claude")
     assert [r["model"] for r in rows] == ["default", "claude-sonnet-4-5", "claude-opus-4-1", "haiku"]
     got = modellist.listed(conn, "claude")
-    assert got[0] == {"model": "default", "label": "Default (recommended)", "is_default": True}
+    assert {k: got[0][k] for k in ("model", "label", "is_default", "floating")} == \
+        {"model": "default", "label": "Default (recommended)", "is_default": True, "floating": True}
     assert modellist.read_at(conn, "claude") is not None
     assert modellist.suggest("claude", "claude_code", got) == {
         "fast": "haiku", "default": "claude-sonnet-4-5", "top": "claude-opus-4-1"}

@@ -255,6 +255,11 @@ ADDED = [
     ("items", "judged_by", "TEXT"),     # the check that judged it, and where it came from
     ("projects", "folder", "TEXT"),     # your real folder, where its chats run (eki/projectchats.py)
     ("threads", "project", "TEXT"),     # projects.id or "eki"; NULL: a chat outside any project
+    ("provider_models", "description", "TEXT"),      # the program's own text
+    ("provider_models", "resolved", "TEXT"),         # the pinned model an alias stands for
+    ("provider_models", "efforts", "TEXT"),          # JSON list of levels; NULL: it takes no effort
+    ("provider_models", "default_effort", "TEXT"),   # NULL: the program doesn't say
+    ("runs", "effort", "TEXT"),         # a per-run effort (the model's default when NULL)
 ]
 
 

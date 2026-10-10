@@ -208,13 +208,24 @@ def refresh(conn: sqlite3.Connection, name: str, timeout: float = TIMEOUT) -> Li
 
 
 def listed(conn: sqlite3.Connection, name: str) -> Optional[List[Dict[str, Any]]]:
-    """`name`'s read list in the program's order, or None when it was never read."""
-    got = conn.execute("SELECT model, label, is_default FROM provider_models WHERE provider=? ORDER BY rowid",
-                       (name,)).fetchall()
+    """`name`'s read list in the program's order, or None when it was never read.
+    A model is `floating` when it is an alias for a pinned one, or "default"."""
+    got = conn.execute("SELECT model, label, description, resolved, efforts, default_effort, is_default"
+                       " FROM provider_models WHERE provider=? ORDER BY rowid", (name,)).fetchall()
     if not got:
         return None
-    return [{"model": r["model"], "label": r["label"] or r["model"], "is_default": bool(r["is_default"])}
-            for r in got]
+    out = []
+    for r in got:
+        try:
+            efforts = json.loads(r["efforts"]) if r["efforts"] else None
+        except ValueError:
+            efforts = None
+        out.append({"model": r["model"], "label": r["label"] or r["model"],
+                    "description": r["description"], "resolved": r["resolved"],
+                    "efforts": efforts if isinstance(efforts, list) else None,
+                    "default_effort": r["default_effort"], "is_default": bool(r["is_default"]),
+                    "floating": bool(r["resolved"] and r["resolved"] != r["model"]) or r["model"] == "default"})
+    return out
 
 
 def read_at(conn: sqlite3.Connection, name: str) -> Optional[float]:

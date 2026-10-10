@@ -52,15 +52,16 @@ def save_session(conn: sqlite3.Connection, tid: str, provider: str, sid: str, ru
 def create_run(conn: sqlite3.Connection, tid: str, prompt: str, *, provider: Optional[str] = None,
                priority: str = "now", parent: Optional[str] = None,
                exclude: Optional[List[str]] = None, row: Optional[str] = None,
-               attachments: Optional[List[str]] = None, model: Optional[str] = None) -> str:
+               attachments: Optional[List[str]] = None, model: Optional[str] = None,
+               effort: Optional[str] = None) -> str:
     rid = new_id()
     seq = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM runs WHERE thread_id=?",
                        (tid,)).fetchone()[0]
     conn.execute(
         "INSERT INTO runs(id, thread_id, seq, prompt, provider, pinned, priority, parent, exclude,"
-        " row, attachments, model, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " row, attachments, model, effort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, tid, seq, prompt, provider, 1 if provider else 0, priority, parent,
-         dumps(exclude or []), row, dumps(attachments or []), model, now()))
+         dumps(exclude or []), row, dumps(attachments or []), model, effort, now()))
     return rid
 
 

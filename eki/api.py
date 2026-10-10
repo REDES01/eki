@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, projects, providers, quota, routing, store
+from . import asking, asks, attachments, capacity, digest, engine, gallery, machine, models, paths, projectchats, projects, providers, quota, routing, store
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -38,7 +38,17 @@ def threads(conn: sqlite3.Connection, limit: int = 60) -> List[Dict[str, Any]]:
         "GROUP BY t.id ORDER BY waiting > 0 DESC, active > 0 DESC, updated DESC LIMIT ?", (limit,)).fetchall()
     return [{"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
              "updated": t["updated"] or t["created_at"], "working": bool(t["active"]),
-             "needs_you": bool(t["waiting"])} for t in rows]
+             "needs_you": bool(t["waiting"]), "project": _project(conn, t["project"])} for t in rows]
+
+
+def _project(conn: sqlite3.Connection, pid: Optional[str]) -> Optional[Dict[str, str]]:
+    """A thread's project as {id, name}, or None for a chat outside any project."""
+    if not pid:
+        return None
+    if pid == projectchats.SELF:
+        return {"id": pid, "name": "eki"}
+    row = conn.execute("SELECT name FROM projects WHERE id=?", (pid,)).fetchone()
+    return {"id": pid, "name": row["name"] if row else pid}
 
 
 def thread(conn: sqlite3.Connection, tid: str) -> Dict[str, Any]:
@@ -46,6 +56,7 @@ def thread(conn: sqlite3.Connection, tid: str) -> Dict[str, Any]:
     if t is None:
         raise KeyError(f"no thread {tid}")
     return {"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
+            "project": _project(conn, t["project"]),
             "runs": [_run_view(conn, r) for r in store.thread_runs(conn, t["id"])]}
 
 
@@ -68,7 +79,8 @@ def events(conn: sqlite3.Connection, tid: str, after: int, wait: float = 20) -> 
 
 
 def ask(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    tid, rid = asking.submit(conn, str(body.get("prompt") or ""), thread=body.get("thread") or None,
+    tid, rid = asking.submit(conn, str(body.get("prompt") or ""), project=body.get("project") or None,
+                             thread=body.get("thread") or None,
                              to=body.get("to") or None, cwd=body.get("cwd") or None,
                              background=bool(body.get("background")),
                              attachments=_paths(body.get("attachments")))

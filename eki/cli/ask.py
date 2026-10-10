@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from .. import asking, store
+from .. import asking, projectchats, store
 from .common import conn, ensure_engine, err, follow
 
 NAME = "ask"
@@ -15,6 +15,8 @@ def add(p) -> None:
     p.add_argument("-t", "--thread", help="continue this thread")
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="continue the last thread")
     p.add_argument("--to", help="send it to this provider (claude, codex, local …)")
+    p.add_argument("-p", "--project", metavar="NAME",
+                   help="start the chat in this project (a name, OWNER/REPO or eki); it runs in its folder")
     p.add_argument("-C", "--cwd", help="work in this folder")
     p.add_argument("--image", action="append", metavar="PATH",
                    help="send this picture with the request (repeat for more)")
@@ -29,7 +31,14 @@ def run(args) -> int:
     if prompt == "-":
         prompt = sys.stdin.read()
     c = conn()
-    tid, rid = asking.submit(c, prompt, thread=args.thread, continue_last=args.cont, to=args.to,
+    pid = None
+    if args.project:
+        try:
+            pid = projectchats.find(c, args.project)
+        except (KeyError, ValueError) as e:
+            err(f"eki: {e.args[0] if e.args else e} (eki project lists them)")
+            return 1
+    tid, rid = asking.submit(c, prompt, project=pid, thread=args.thread, continue_last=args.cont, to=args.to,
                              cwd=args.cwd, background=args.background,
                              attachments=args.image)
     ensure_engine(quiet=args.bg)

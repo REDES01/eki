@@ -93,7 +93,7 @@ def test_plan_and_draft_carry_the_width_rules():
     p = selfbrief.plan("a goal with {braces}", BASE)
     assert selfbrief.SPLIT_RULES in p and "{braces}" in p
     for words in ("don't depend on each other", "tests can't pass without",
-                  "function signature", "one small first item", "two levels deep",
+                  "function signature", "one small first item", "no dependency chain is longer than two",
                   "share a file only if one depends on the other"):
         assert words in selfbrief.SPLIT_RULES
     d = selfbrief.draft("wish", BASE)

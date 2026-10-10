@@ -15,7 +15,7 @@ SPLIT_RULES = """\
   they agree without talking;
 - when several items need the same new names, one small first item adds them
   (with working minimal bodies and their tests) and the rest depend only on it:
-  two levels deep, unless the goal truly can't be;
+  one root plus a few leaves, and no dependency chain is longer than two;
 - two items may share a file only if one depends on the other; otherwise they
   become one item.
 """
@@ -33,10 +33,13 @@ Read docs/self-build.md, docs/design.md, ROADMAP.md and CLAUDE.md first, then
 the code the goal touches. Then split the goal into items that separate agents
 will build at the same time, each in a worktree of its own:
 
-- an item is small: one to three files, under an hour of work, with its tests;
+- make the fewest items that keep each agent turn short: about 15 minutes of
+  agent work or less, with its tests. Usually that is one item; at most it is
+  one root plus a few leaves that depend only on the root;
+- never a multi-hour run: when the work is big, split it into parallel parts
+  that are merged after, never one long turn;
 - each item declares the files it will touch (its write-set, as paths or globs);
-{split}- a spec says what to build and how to tell it works — not how to code it;
-- one item is fine when the goal is small.
+{split}- a spec says what to build and how to tell it works — not how to code it.
 
 End your answer with a line `ITEMS:` followed by one JSON list, nothing after it:
 
@@ -60,9 +63,12 @@ Your item: **{title}**
 Files you are expected to touch: {files}.
 {others}
 Rules: read CLAUDE.md and docs/design.md first and keep the invariants; no
-module over 400 lines; add or change tests for what you change; run
-`bin/check` before you finish and leave it green; do not commit — eki commits
-what you leave here; do not ask questions — decide, and say what you decided.
+module over 400 lines; add or change tests for what you change; don't run the
+whole suite (plain `bin/check`) — run the tests for the files you touched,
+e.g. `bin/check tests/test_x.py` (bin/check passes its arguments to pytest);
+eki runs the whole check right after your turn and sends any failure back; do
+not commit — eki commits what you leave here; do not ask questions — decide,
+and say what you decided.
 {retry}
 End your answer with a `SUMMARY:` paragraph in plain words (what is new, how
 to use it, what to check) and then one last line:
@@ -94,7 +100,10 @@ What the head changed in those files:
 
 Resolve the conflicts so both intents survive: what the change is for, and
 what the head did. Leave no conflict markers (<<<<<<<, =======, >>>>>>>) in
-any file. Then run `bin/check` and leave it green.
+any file. Then run the tests for the files you touched, e.g. `bin/check
+tests/test_x.py` (bin/check passes its arguments to pytest) — don't run the
+whole suite (plain `bin/check`): eki runs the whole check right after your
+turn and sends any failure back.
 
 Do not commit, do not run `git rebase --continue`, `--skip` or `--abort`, do
 not `git add` or reset — eki carries the rebase on once you're done. Do not
@@ -130,9 +139,12 @@ Tests (bin/check green)
 
 Make it specific enough that a planner can split it without guessing: name real
 paths and modules that exist here, the functions and tables it changes, and the
-files items will share. For "Item shape": items that don't depend on each other,
-shared interfaces written into every spec that uses them, and one small root
-item first when several items need the same new names. Where the wish leaves a real choice open, ask the person
+files items will share. For "Item shape": the fewest items that keep each agent
+turn to about 15 minutes of agent work or less — usually one item; at most
+one small root item (when several items need the same new names) plus a few
+leaves that depend only on it, no dependency chain longer than two, never a multi-hour
+run (big work splits into parallel parts merged after); items that
+don't depend on each other; shared interfaces written into every spec that uses them. Where the wish leaves a real choice open, ask the person
 with the AskUserQuestion tool — 2 to 4 options per question, at most three
 questions — and fold the answers into the goal. Where it doesn't, don't ask:
 decide, and say what you decided in the goal.
@@ -172,7 +184,11 @@ Tests (bin/check green)
 
 Make it specific enough that a planner can split it without guessing: name real
 paths and modules that exist here, the functions and tables it changes, and the
-files items will share.
+files items will share. For "Item shape": the fewest items that keep each agent
+turn to about 15 minutes of agent work or less — usually one item; at most one
+small root plus a few leaves that depend only on it, no dependency chain longer
+than two, never a multi-hour run (big work splits into parallel parts merged
+after).
 
 Answer in this shape, the last lines of your answer:
 

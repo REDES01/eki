@@ -24,10 +24,13 @@ Read the project's README, its docs and any CLAUDE.md or AGENTS.md first, then
 the code the goal touches. Then split the goal into items that separate agents
 will build at the same time, each in a worktree of its own:
 
-- an item is small: one to three files, under an hour of work, with its tests;
+- make the fewest items that keep each agent turn short: about 15 minutes of
+  agent work or less, with its tests. Usually that is one item; at most it is
+  one root plus a few leaves that depend only on the root;
+- never a multi-hour run: when the work is big, split it into parallel parts
+  that are merged after, never one long turn;
 - each item declares the files it will touch (its write-set, as paths or globs);
-{split}- a spec says what to build and how to tell it works — not how to code it;
-- one item is fine when the goal is small.
+{split}- a spec says what to build and how to tell it works — not how to code it.
 {rest}
 """
 

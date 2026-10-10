@@ -11,6 +11,7 @@ Nothing here is specific to eki's own source: any repo, any base, any key.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import paths
+
+log = logging.getLogger("eki.workspace")
 
 #: ignored folders a checkout needs to run, linked from the source repo
 LINKED = (".venv", "venv", "node_modules")
@@ -98,8 +101,27 @@ def add(repo: str | Path, key: str, *, base: str = "HEAD", branch: Optional[str]
         src = Path(repo) / name
         if src.is_dir() and not (dest / name).exists():
             os.symlink(src, dest / name)
+    _link_assets(dest)
     _mark(key).write_text(f"{time.time()}\n")
     return dest
+
+
+def _link_assets(dest: Path) -> None:
+    """The project's asset pools, seen in the worktree by symlink (eki/components/assets.py)."""
+    try:
+        from .components import assets
+        for line in assets.link(dest):
+            log.info("assets: %s", line)
+    except Exception as e:                 # never breaks making a worktree
+        log.warning("assets: linking into %s failed: %s", dest, e)
+
+
+def _asset_links(where: str | Path) -> List[str]:
+    try:
+        from .components import assets
+        return assets.linked(where)
+    except Exception:
+        return []
 
 
 def remove(repo: str | Path, key: str, *, delete_branch: bool = False) -> bool:
@@ -128,8 +150,9 @@ NOT_LINKED = [f":!{name}" for name in LINKED]
 
 def changed(where: str | Path, since: str) -> List[str]:
     """Files different from `since` — committed or not."""
-    files = set(git(where, "diff", "--name-only", since, "--", ".", *NOT_LINKED).splitlines())
-    files |= set(git(where, "ls-files", "--others", "--exclude-standard", "--", ".", *NOT_LINKED).splitlines())
+    skip = NOT_LINKED + [f":!{p}" for p in _asset_links(where)]
+    files = set(git(where, "diff", "--name-only", since, "--", ".", *skip).splitlines())
+    files |= set(git(where, "ls-files", "--others", "--exclude-standard", "--", ".", *skip).splitlines())
     return sorted(f for f in files if f)
 
 
@@ -138,7 +161,7 @@ def stage_all(where: str | Path) -> List[str]:
     the add: one that matches an ignored path (a linked .venv, ignored or
     dangling) makes git refuse the whole add."""
     git(where, "add", "-A")
-    for name in LINKED:                    # a link (or one an agent added): never part of a change
+    for name in [*LINKED, *_asset_links(where)]:   # a link (or one an agent added): never part of a change
         if git(where, "ls-files", "--", name):
             git(where, "rm", "-q", "--cached", "--", name)
     return [f for f in git(where, "diff", "--cached", "--name-only").splitlines() if f]

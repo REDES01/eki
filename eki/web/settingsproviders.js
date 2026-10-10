@@ -19,26 +19,25 @@
     return out;
   }
 
-  // the editor behind a provider's summary line
+  // the editor behind a provider's summary line: runs of one-line settings, Delete in red last
   function provBody(name, cfg, can, byKind, unwritten) {
-    const { check, text, field } = settingsForm;
+    const { check, text, line, lines, danger } = settingsForm;
     const kinds = KINDS.includes(cfg.kind) ? KINDS : KINDS.concat([cfg.kind || ""]);
     const known = ["kind", "label", "about", "can", "off", "base_url", "keep_up", "idle_stop", "models"];
     const other = Object.keys(cfg).filter((k) => !known.includes(k) && !MARKS.includes(k));
-    return `<div class="set-top">${text("name", name, "name")}<span class="grow"></span>
-        ${check(cfg.off, 'data-f="off"', "off")}
-        ${unwritten ? "" : '<button type="button" class="ghost small" data-act="delprov" title="Delete this entry">Delete</button>'}</div>
-      <div class="set-grid">
-        ${field("Kind", `<select class="set-in" data-f="kind">${kinds.map((k) => `<option${k === cfg.kind ? " selected" : ""}>${esc(k)}</option>`).join("")}</select>`)}
-        ${field("Label", text("label", cfg.label))}
-        ${field("Base URL", text("base_url", cfg.base_url, "—"))}
-        ${field("Idle stop <i class=\"dim\">minutes</i>", `<input class="set-in" type="number" min="0" data-f="idle_stop" value="${esc(cfg.idle_stop == null ? "" : cfg.idle_stop)}" placeholder="—">`)}
-      </div>
-      ${field("About", text("about", cfg.about, "what it's good for"))}
-      ${field("Can", `<div class="set-checks">${check(byKind, 'data-f="bykind"', "kind default")}
-        ${ABILITIES.map((a) => check(can.includes(a), `data-can="${a}"`, a, byKind)).join("")}</div>`)}
-      ${check(cfg.keep_up, 'data-f="keep_up"', "keep up (start it and keep it running while there's room)")}
-      ${other.length ? `<div class="dim set-other">Also: ${other.map((k) => `<code>${esc(k)}</code>`).join(", ")} — edit these in Raw JSON.</div>` : ""}`;
+    const kind = `<select class="set-in" data-f="kind">${kinds.map((k) => `<option${k === cfg.kind ? " selected" : ""}>${esc(k)}</option>`).join("")}</select>`;
+    const idle = `<input class="set-in" type="number" min="0" data-f="idle_stop" value="${esc(cfg.idle_stop == null ? "" : cfg.idle_stop)}" placeholder="—">`;
+    const abilities = `<div class="set-checks">${check(byKind, 'data-f="bykind"', "kind default")}
+      ${ABILITIES.map((a) => check(can.includes(a), `data-can="${a}"`, a, byKind)).join("")}</div>`;
+    return lines("", line("Name", text("name", name, "name")) + line("Kind", kind)
+        + line("Label", text("label", cfg.label)) + line("About", text("about", cfg.about), "what it's good for"))
+      + lines("Abilities", line("Can", abilities, "kind default: what its kind can do"))
+      + lines("Running", line("Off", check(cfg.off, 'data-f="off"', "off"), "eki never routes to it")
+        + line("Keep up", check(cfg.keep_up, 'data-f="keep_up"', "keep up"), "keep up: start it and keep it running while there's room")
+        + line("Base URL", text("base_url", cfg.base_url, "—"))
+        + line("Idle stop", idle, "minutes; empty is never"))
+      + (other.length || !unwritten ? lines("", (other.length ? line(`<span class="dim set-other">Also: ${other.map((k) => `<code>${esc(k)}</code>`).join(", ")} — edit these in Raw JSON.</span>`, "") : "")
+        + (unwritten ? "" : danger("Delete this provider", "delprov"))) : "");
   }
 
   // one provider folded to a line: name, kind · label, what it can do, off, its model list

@@ -68,8 +68,16 @@ def test_one_entry_opens_at_a_time_and_edits_write_the_draft(tmp_path):
     one = out["one"]
     assert one.count("set-fold open") == 1 and 'data-f="base_url"' in one and "kind default" in one
     assert "<code>extra</code>" in one
+    body = one.split('data-fold="claude"', 1)[1].split('data-fold="pics"', 1)[0]   # the open editor
+    assert 'class="set-flines"' in body and 'class="set-ftitle">Abilities<' in body and 'class="set-ftitle">Running<' in body
+    assert 'data-act="delprov"' in body and "set-danger" in body
+    assert 'class="set-line"' in body and "eki never routes to it" in body
+    for gone in ("set-field", "set-grid", "set-top"):
+        assert gone not in body, gone
     other = out["other"]
     assert other.count(" open\" data-fold") == 1 and 'set-fold added open" data-fold="pics"' in other
+    pics = other.split('data-fold="pics"', 1)[1]
+    assert 'data-f="kind"' in pics and "delprov" not in pics                 # no Delete for an unwritten one
     assert out["draft"]["pics"] == {"kind": "comfyui", "label": "Pictures"}   # joins the draft, marks dropped
     assert out["added"].count("set-fold open") == 1 and 'data-fold="provider-1"' in out["added"]
     assert out["names"] == ["claude", "pics", "provider-1"]

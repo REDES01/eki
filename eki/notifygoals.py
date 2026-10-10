@@ -36,7 +36,7 @@ _ENDED = (
 )
 
 
-def _finished(state: str, pr: Optional[str]) -> bool:
+def finished(state: str, pr: Optional[str]) -> bool:
     return state in FINISHED or (state == "proposed" and bool(pr))
 
 
@@ -45,7 +45,7 @@ def title_of(conn: sqlite3.Connection, g: sqlite3.Row) -> str:
                          (g["id"],)).fetchall()
     if not items:
         return "eki · goal ended"
-    left = sum(1 for i in items if not _finished(i["state"], i["pr"]))
+    left = sum(1 for i in items if not finished(i["state"], i["pr"]))
     return f"eki · goal ended, {left} left" if left else "eki · goal done"
 
 

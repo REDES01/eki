@@ -116,7 +116,7 @@
     const open = busy || S.open.has("goal:" + g.id);
     const n = g.items.length, live = g.items.filter((it) => ["live", "applied"].includes(it.state)).length;
     return `<div class="st-goal${open ? "" : " folded"}" data-goal="${esc(g.id)}"><div class="st-ghead${busy ? "" : " can-open"}"><code>${esc(g.id)}</code>
-        <span class="st-state s-${esc(g.state.replace(/\s/g, "-"))}">${esc(g.state)}</span>
+        <span class="st-state s-${esc(g.stands.replace(/\s/g, "-"))}">${esc(g.stands)}</span>
         <span class="dim">${ago(g.created_at)}</span><span class="st-t" title="${esc(g.text)}">${esc(g.wish)}</span>
         ${busy ? "" : `<span class="dim">${live}/${n} live</span>`}${tlink(g.thread)}</div>
       ${open ? `${g.drafting ? `<div class="st-note">${esc(g.drafting).replace(/\n\s*/g, "<br>")}</div>` : ""}

@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, checkslots, doccheck, projects, queue, selfwork, store
+from . import asks, checkslots, doccheck, notifygoals, projects, queue, selfwork, store
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
@@ -39,12 +39,28 @@ def _lined(c, n: int, it) -> Dict[str, Any]:
 
 def _goal(c, g) -> Dict[str, Any]:
     text = g["text"] or ""
-    return {"id": g["id"], "state": g["state"], "text": text,
+    return {"id": g["id"], "state": g["state"], "stands": stands(c, g), "text": text,
             "wish": (text.splitlines() or [""])[0], "error": g["error"],
             "drafting": drafting(c, g) if g["state"] == "drafting" else None,
             "created_at": g["created_at"], "draft_run": g["draft_run"], "plan_run": g["plan_run"],
             "thread": _thread(c, g["draft_run"]) or _thread(c, g["plan_run"]),
             "items": [_item(c, it) for it in items(c, g["id"])]}
+
+
+def stands(c, g) -> str:
+    """Where a goal stands: its state, or for a planned goal what its items say
+    (for you, in flight, done; planned while it has none)."""
+    if g["state"] != "planned":
+        return g["state"]
+    its = [it for it in items(c, g["id"]) if it["state"] != "dropped"]
+    if any(it["state"] in ("locked", "left", "unfit", "rolled back")
+           or (it["state"] == "proposed" and not it["pr"]) for it in its):
+        return "for you"
+    if any(it["state"] in notifygoals.OPEN for it in its):
+        return "in flight"
+    if not its:
+        return "planned"
+    return "done" if all(notifygoals.finished(it["state"], it["pr"]) for it in its) else "planned"
 
 
 def _item(c, it) -> Dict[str, Any]:

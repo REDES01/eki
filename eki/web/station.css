@@ -63,11 +63,11 @@
 .st-targets { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 6px; }
 .st-link { font-size: 12px; color: var(--teal); }
 .st-state { font-size: 11px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--text) 8%, transparent); }
-.s-proposed, .s-locked, .s-drafting { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-.s-building, .s-judging, .s-queued, .s-resolving, .s-rechecking, .s-planning { background: color-mix(in srgb, var(--teal) 16%, transparent); }
+.s-proposed, .s-locked, .s-drafting, .s-for-you { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+.s-building, .s-judging, .s-queued, .s-resolving, .s-rechecking, .s-planning, .s-in-flight { background: color-mix(in srgb, var(--teal) 16%, transparent); }
 .s-landed, .s-live, .s-applied, .s-done { color: var(--teal); }
 .s-left, .s-unfit, .s-rolled-back, .s-failed { color: var(--red); }
-.s-dropped { color: var(--dim); }
+.s-dropped, .s-planned { color: var(--dim); }
 
 .st-table { border-collapse: collapse; font-size: 13px; width: 100%; }
 .st-table td { padding: 3px 8px 3px 0; white-space: nowrap; }

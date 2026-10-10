@@ -96,6 +96,7 @@ def test_board_as_data_has_the_same_words_and_order(conn):
     assert g2["id"] == "g2" and g2["thread"] == tid and g2["error"] == "it went wrong"
     assert g2["drafting"] == f"drafting  (run {rid})\n           asked you: which one? — eki answer {aid}"
     assert g1["drafting"] is None and g1["wish"] == "make it better" and g1["thread"] is None
+    assert g1["stands"] == "for you" and g1["state"] == "planned" and g2["stands"] == "drafting"
     its = {it["id"]: it for it in g1["items"]}
     assert list(its) == ["i1", "i2", "i3", "i4", "i5", "i6", "i7"]
     assert its["i1"]["where"] == "self/i1" and its["i1"]["note"] == "✓ 2 files; `eki self apply i1` queues it"
@@ -105,6 +106,26 @@ def test_board_as_data_has_the_same_words_and_order(conn):
     assert its["i5"]["where"] == "after i3"
     assert its["i6"]["note"] == "✓ in integration main (eeeeeeeeeeee)" and its["i6"]["thread"] == tid
     assert its["i7"]["where"] == "run r9" and its["i7"]["branch"] is None
+
+
+def test_a_planned_goal_stands_where_its_items_are(conn):
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
+                     ("g1", "a wish", "ask", "you", "planned", T))
+    g = lambda: conn.execute("SELECT * FROM goals WHERE id='g1'").fetchone()
+    assert selfview.stands(conn, g()) == "planned"
+    item(conn, "i1", "g1", 1, "queued")
+    item(conn, "i2", "g1", 2, "building")
+    assert selfview.stands(conn, g()) == "in flight"
+    selfwork._set(conn, "i1", state="live")
+    selfwork._set(conn, "i2", state="landed")
+    item(conn, "i3", "g1", 3, "dropped")
+    assert selfview.stands(conn, g()) == "done"
+    selfwork._set(conn, "i2", state="proposed", pr="https://github.com/me/x/pull/1")
+    assert selfview.stands(conn, g()) == "done"
+    assert selfview.board(conn)["goals"][0]["stands"] == "done"
+    item(conn, "i4", "g1", 4, "left")
+    assert selfview.stands(conn, g()) == "for you"
 
 
 def test_an_empty_board(conn):

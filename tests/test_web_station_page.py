@@ -30,6 +30,13 @@ def test_station_files_are_served(web):
         assert name in js, name
 
 
+def test_the_goal_pill_shows_where_the_goal_stands(web):
+    js = get(web + "/ui/station.js")[1]
+    body = js[js.index("function goal(g)"):js.index("function item(it)")]
+    assert 'st-state s-${esc(g.stands.replace(' in body and "${esc(g.stands)}</span>" in body
+    assert "g.state.replace" not in body
+
+
 def test_digest_summary_shows_the_headline_and_links_long(web):
     js = get(web + "/ui/station.js")[1]
     body = js[js.index("function digests(d)"):js.index("async function part(")]

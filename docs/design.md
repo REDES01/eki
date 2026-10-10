@@ -121,7 +121,10 @@ what your chats made; the old `#pictures` is Artifacts showing pictures),
 **Scheduled** (`#scheduled`, standing goals and prompts on a clock) and
 **Customize** (`#customize/<tab>`, skills and connectors). They share one
 look (`eki/web/pages.css`), and each folds detail: a card or a row shows a
-line or two, the rest opens on click.
+line or two, the rest opens on click. Below the chat list a small row holds
+**Station · Settings** and a status dot (green when every provider is ok,
+amber otherwise, and `n running`); a click opens the providers, quota
+meters, engine line, PRs and digest in a popover (`sidestatus.js`).
 
 ## Runs
 

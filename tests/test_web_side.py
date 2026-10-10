@@ -1,6 +1,7 @@
 """The sidebar: eki's threads that need you, Pinned, your groups, then chats in a project under its header and the
 rest by date, as before; an Archived line at the bottom."""
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -155,5 +156,84 @@ def test_the_chat_marks_itself_seen_only_when_you_can_see_it():
 
 
 def test_the_web_files_stay_small():
-    for f in ("sidelist.js", "side.js", "app.js"):
+    for f in ("sidelist.js", "side.js", "sidestatus.js", "app.js"):
         assert len((WEB / f).read_text().splitlines()) <= 400, f
+
+
+def test_the_sidebar_top_links_then_the_list_then_station_settings_and_status():
+    html = (WEB / "index.html").read_text()
+    side = html[html.index('<aside id="side">'):html.index("</aside>")]
+    views = side[side.index('<nav id="views">'):side.index("</nav>")]
+    assert re.findall(r'<a id="(\w+)" href="(#\w*)" class="side-link"[^>]*>([^<]+)</a>', views) == [
+        ("new", "#", "New"), ("projects", "#projects", "Projects"), ("artifacts", "#artifacts", "Artifacts"),
+        ("scheduled", "#scheduled", "Scheduled"), ("customize", "#customize", "Customize")]
+    foot = side[side.index('<div id="side-foot">'):]
+    assert side.index('<nav id="threads">') < side.index('<div id="side-foot">')
+    assert foot.index('id="station"') < foot.index('id="settings"') < foot.index('id="status"')
+    assert 'id="status-pop" hidden' in foot and foot.index('id="status-pop"') < foot.index('id="machine"')
+    for i in ("providers", "engine", "prs"):
+        assert f'id="{i}"' in foot
+    assert 'id="chat"' not in html and 'id="pictures"' not in html and "＋ New" not in html
+    assert "gallery.js" not in html and not (WEB / "gallery.js").exists()
+    assert html.index("/ui/side.js") < html.index("/ui/sidestatus.js") < html.index("/ui/app.js")
+    assert '<link rel="stylesheet" href="/ui/pages.css">' in html
+
+
+# sidestatus.js on a page of plain objects: draw the providers, then click the dot, Esc, click outside.
+STATUS_STUB = """
+const els = {};
+const el = (id) => els[id] || (els[id] = { id, innerHTML: "", textContent: "", className: "", value: "", hidden: id === "status-pop",
+  dataset: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, appendChild() {}, remove() {} });
+const on = {};
+global.window = { addEventListener() {}, dispatchEvent() {} };
+global.document = { getElementById: el, createElement: () => el("digest"), addEventListener: (k, f) => { on[k] = f; } };
+global.fetch = () => new Promise(() => {});
+global.setInterval = () => 0;
+global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;") };
+global.prs = { lines: () => "", total: () => 0 };
+require(process.argv[2]);
+const [ps, st] = JSON.parse(process.argv[3]);
+const target = (inside) => ({ closest: (sel) => (inside.some((s) => sel.includes(s)) ? {} : null) });
+const out = {};
+window.sidestatus.draw(ps, st);
+out.dot = els["status-dot"].className; out.text = els["status-text"].textContent;
+out.providers = els.providers.innerHTML; out.engine = els.engine.textContent;
+out.closed = el("status-pop").hidden;
+on.click({ target: target(["#status"]) }); out.opened = !els["status-pop"].hidden; out.expanded = els.status.attrs["aria-expanded"];
+on.click({ target: target(["#status-pop"]) }); out.staysInside = !els["status-pop"].hidden;
+on.keydown({ key: "Escape" }); out.esc = els["status-pop"].hidden;
+on.click({ target: target(["#status"]) }); on.click({ target: target([]) }); out.outside = els["status-pop"].hidden;
+out.amber = window.sidestatus.dot([{ ok: true }, { ok: false }]);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def status(tmp_path, ps, st):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "status.js"
+    stub.write_text(STATUS_STUB)
+    out = subprocess.run(["node", str(stub), str(WEB / "sidestatus.js"), json.dumps([ps, st])],
+                         capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_the_status_dot_opens_the_provider_block_and_esc_or_outside_closes_it(tmp_path):
+    ps = [{"name": "claude", "label": "Claude", "ok": True, "quota": {"plan": "max", "windows": {"five_hour": {"used": .4}}}},
+          {"name": "local", "label": "Local", "ok": True, "model": {"startable": True, "up": True}}]
+    st = {"running": 2, "queued": 1, "room": True, "prs": {}, "digest": None}
+    got = status(tmp_path, ps, st)
+    assert got["dot"] == "led ok" and got["text"] == "2 running" and got["amber"] == "warn"
+    assert 'class="pname">claude<' in got["providers"] and 'class="meter"' in got["providers"]
+    assert 'data-model="local" data-act="stop">Stop<' in got["providers"]
+    assert got["engine"] == "2 running · 1 queued · room for background work"
+    assert got["closed"] and got["opened"] and got["expanded"] == "true" and got["staysInside"]
+    assert got["esc"] and got["outside"]
+
+
+def test_side_js_leaves_the_machine_to_sidestatus_js():
+    side = (WEB / "side.js").read_text()
+    assert "/api/providers" not in side and "data-model" not in side and "loadProviders" not in side
+    css = (WEB / "style.css").read_text()
+    assert "#side-foot" in css and "#status-pop" in css and ".led.warn" in css and "#gallery" not in css

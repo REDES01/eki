@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/ui/chat.css">
 <link rel="stylesheet" href="/ui/station.css">
 <link rel="stylesheet" href="/ui/settings.css">
+<link rel="stylesheet" href="/ui/pages.css">
 <link rel="icon" href="/ui/mark.svg" type="image/svg+xml">
 </head>
 <body>
@@ -15,22 +16,27 @@
   <aside id="side">
     <div class="side-head" data-drag>
       <img class="mark" src="/ui/mark.svg" alt="" aria-hidden="true"><span class="brand">eki</span>
-      <button id="new" class="ghost" title="New thread (⌘K)">＋ New</button>
     </div>
     <nav id="views">
-      <a id="chat" href="#" class="side-link">Chat</a>
+      <a id="new" href="#" class="side-link" title="New chat (⌘K)">New</a>
       <a id="projects" href="#projects" class="side-link">Projects</a>
-      <a id="pictures" href="#pictures" class="side-link">Pictures</a>
-      <a id="station" href="#station" class="side-link">Station</a>
-      <a id="settings" href="#settings" class="side-link">Settings</a>
+      <a id="artifacts" href="#artifacts" class="side-link">Artifacts</a>
+      <a id="scheduled" href="#scheduled" class="side-link">Scheduled</a>
+      <a id="customize" href="#customize" class="side-link">Customize</a>
     </nav>
     <nav id="threads"></nav>
-    <section id="machine">
-      <div class="sect">Providers</div>
-      <div id="providers"></div>
-      <div id="engine" class="dim"></div>
-      <div id="prs" hidden></div>
-    </section>
+    <div id="side-foot">
+      <a id="station" href="#station" class="side-link">Station</a><span class="dim">·</span><a id="settings" href="#settings" class="side-link">Settings</a>
+      <button id="status" type="button" title="Providers and the machine" aria-haspopup="true" aria-expanded="false"><span id="status-dot" class="led"></span><span id="status-text" class="dim"></span></button>
+      <div id="status-pop" hidden>
+        <section id="machine">
+          <div class="sect">Providers</div>
+          <div id="providers"></div>
+          <div id="engine" class="dim"></div>
+          <div id="prs" hidden></div>
+        </section>
+      </div>
+    </div>
     <div id="side-grip" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize · double-click to reset"></div>
   </aside>
   <main id="main">
@@ -74,8 +80,16 @@
 <script src="/ui/nav.js"></script>
 <script src="/ui/shellbar.js"></script>
 <script src="/ui/split.js"></script>
-<script src="/ui/gallery.js"></script>
+<script src="/ui/shell.js"></script>
+<script src="/ui/projectspage.js"></script>
 <script src="/ui/project.js"></script>
+<script src="/ui/newproject.js"></script>
+<script src="/ui/artifacts.js"></script>
+<script src="/ui/scheduled.js"></script>
+<script src="/ui/scheduleform.js"></script>
+<script src="/ui/customize.js"></script>
+<script src="/ui/customizeskills.js"></script>
+<script src="/ui/customizeconnectors.js"></script>
 <script src="/ui/prs.js"></script>
 <script src="/ui/station.js"></script>
 <script src="/ui/settingsform.js"></script>
@@ -89,6 +103,7 @@
 <script src="/ui/sidelist.js"></script>
 <script src="/ui/threadmenu.js"></script>
 <script src="/ui/side.js"></script>
+<script src="/ui/sidestatus.js"></script>
 <script src="/ui/app.js"></script>
 </body>
 </html>

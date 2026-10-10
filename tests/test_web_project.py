@@ -30,7 +30,7 @@ def get(url):
 def test_the_page_links_projects_and_loads_its_script(web):
     page = get(web + "/")[1]
     assert '<a id="projects" href="#projects" class="side-link">Projects</a>' in page
-    assert page.index("/ui/nav.js") < page.index("/ui/project.js") < page.index("/ui/app.js")
+    assert page.index("/ui/nav.js") < page.index("/ui/projectspage.js") < page.index("/ui/project.js") < page.index("/ui/app.js")
 
 
 def test_project_js_names_the_api_and_the_page_parts(web):
@@ -66,7 +66,7 @@ global.requestAnimationFrame = () => 0;
 global.document = { documentElement: { dataset: {} }, getElementById: el, addEventListener() {}, querySelectorAll: () => [] };
 require(process.argv[2]);
 const seen = [];
-for (const v of ["projects", "project", "pictures"]) window.nav.register(v, { show: (a) => seen.push([v, a == null ? null : a]), hide() {} });
+for (const v of ["projects", "project", "artifacts"]) window.nav.register(v, { show: (a) => seen.push([v, a == null ? null : a]), hide() {} });
 window.nav.thread((id) => seen.push(["chat", id]));
 window.nav.start();
 process.stdout.write(JSON.stringify({ seen, view: els.app.dataset.view }));
@@ -87,7 +87,7 @@ def dispatch(tmp_path, hash_):
     ("#projects", {"seen": [["projects", None]], "view": "projects"}),
     ("#project/ab12cd", {"seen": [["project", "ab12cd"]], "view": "project"}),
     ("#project/eki", {"seen": [["project", "eki"]], "view": "project"}),
-    ("#pictures", {"seen": [["pictures", "picture"]], "view": "pictures"}),   # the gallery until Artifacts
+    ("#pictures", {"seen": [["artifacts", "picture"]], "view": "artifacts"}),   # the old address: Artifacts, Pictures
     ("#f00dfeed", {"seen": [["chat", "f00dfeed"]], "view": "chat"}),
     ("", {"seen": [["chat", None]], "view": "chat"}),
 ])

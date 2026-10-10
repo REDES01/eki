@@ -27,20 +27,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
 body.resizing iframe { pointer-events: none; }
 .side-head { user-select: none; -webkit-user-select: none; display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
-.side-head button { margin-left: auto; }
 .mark { width: 20px; height: 20px; border-radius: 5px; display: block; }
 .brand { font-weight: 650; letter-spacing: .02em; }
 /* In the Mac shell the window's close/minimize/zoom buttons (centred 16px from
-   the top, ending at x≈70) share this row: the brand and the New button sit on
-   the same line as them, and New loses its box so the row reads as one strip.
+   the top, ending at x≈70) share this row: the brand sits on the same line as
+   them, so the row reads as one strip.
    The left room is divided by --eki-zoom (set by the shell when it zooms the
    page) so it stays the same size on screen. */
 [data-shell="mac"] .side-head { padding: 0 10px 0 calc(78px / var(--eki-zoom, 1)); height: 32px; min-height: 0; border-bottom: 1px solid var(--line); }
 [data-shell="mac"] #views { border-bottom: 0; }
 [data-shell="mac"] .side-head .mark { width: 18px; height: 18px; }
 [data-shell="mac"] .side-head .brand { font-size: 14px; }
-[data-shell="mac"] .side-head .ghost { border-color: transparent; padding: 2px 8px; font-size: 13px; color: var(--dim); }
-[data-shell="mac"] .side-head .ghost:hover { color: var(--text); border-color: var(--line); }
 [data-shell="mac"] #views { padding-top: 6px; }
 [data-shell="mac"] #head { padding: 5px 28px 5px; min-height: 32px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
 /* full screen: the window's buttons are gone, so the strip starts at the edge
@@ -63,13 +60,23 @@ body.resizing iframe { pointer-events: none; }
   animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 .dot.you { background: var(--amber); }
-#machine { border-top: 1px solid var(--line); padding: 8px 14px 10px; font-size: 12px; max-height: 40vh; overflow-y: auto; }
+/* the bottom row: Station · Settings, and the status dot that opens the machine's popover (sidestatus.js) */
+#side-foot { position: relative; display: flex; align-items: center; gap: 2px; padding: 6px 8px 8px; border-top: 1px solid var(--line); font-size: 12px; }
+#side-foot .side-link { display: inline-block; margin: 0; padding: 3px 8px; font-weight: 500; color: var(--dim); }
+#side-foot .side-link.on, #side-foot .side-link:hover { color: var(--text); }
+#status { margin-left: auto; display: flex; align-items: center; gap: 6px; background: transparent; padding: 3px 8px; font-size: 12px; }
+#status:hover, #status[aria-expanded="true"] { background: color-mix(in srgb, var(--text) 6%, transparent); }
+#status-pop { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 4px); z-index: 20; background: var(--card);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 24px color-mix(in srgb, #000 22%, transparent); }
+#status-pop[hidden] { display: none; }
+#machine { padding: 10px 14px 12px; font-size: 12px; max-height: 60vh; overflow-y: auto; }
 .sect { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin-bottom: 6px; }
 .prov { display: flex; align-items: center; gap: 7px; padding: 1px 0; }
 .pname { font-weight: 550; }
 .pwhy { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
 .led.ok { background: var(--teal); }
+.led.warn { background: var(--amber); }
 .led.wait { background: var(--amber); animation: pulse 1.2s infinite; }
 #engine { margin-top: 6px; font-size: 11px; }
 #digest { margin-top: 6px; }
@@ -122,17 +129,12 @@ button { cursor: pointer; border-radius: 9px; border: 1px solid transparent; }
 /* ---- views (nav.js): any view but the chat takes #main's place ---- */
 #app:not([data-view="chat"]) #scroll, #app:not([data-view="chat"]) #composer { display: none; }
 
-/* ---- gallery ---- */
-#gallery { flex: 1; overflow-y: auto; padding: 18px 28px 40px; }
-#gallery[hidden] { display: none; }
-#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+/* ---- picture tiles and their detail in the panel (artifacts.js, project.js) ---- */
 .gpic { position: relative; padding: 0; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
 .gpic:hover { border-color: var(--teal); }
 .gpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gtag { position: absolute; left: 6px; bottom: 6px; font-size: 11px; padding: 0 7px; border-radius: 6px;
   background: color-mix(in srgb, var(--bg) 80%, transparent); color: var(--dim); }
-.gmore { text-align: center; margin: 16px 0; }
-#gallery-empty { text-align: center; margin-top: 30vh; }
 .pinfo { font-size: 13px; border-top: 1px solid var(--line); }
 .pinfo div { margin: 2px 0; }
 .pinfo a { color: var(--teal); }

@@ -44,24 +44,27 @@ def test_ui_files_are_served(web):
         get(web + "/ui/../server.py")
 
 
-def test_the_window_has_a_pictures_view(web):
+def test_the_window_has_artifacts_where_pictures_were(web):
     _, body = get(web + "/")
-    assert '<script src="/ui/gallery.js"></script>' in body and 'id="pictures"' in body and ">Pictures<" in body
-    assert body.index("/ui/nav.js") < body.index("/ui/gallery.js") < body.index("/ui/app.js")   # gallery registers with nav
-    code, js = get(web + "/ui/gallery.js")
-    assert code == 200 and "/api/pictures" in js and "window.gallery" in js
-    assert json.loads(get(web + "/api/pictures?limit=5")[1]) == {"pictures": [], "more": False}
+    assert '<script src="/ui/artifacts.js"></script>' in body and 'id="artifacts"' in body and ">Artifacts<" in body
+    assert "gallery.js" not in body and 'id="pictures"' not in body and ">Pictures<" not in body
+    assert body.index("/ui/nav.js") < body.index("/ui/artifacts.js") < body.index("/ui/app.js")   # registers with nav
+    with pytest.raises(urllib.error.HTTPError):
+        get(web + "/ui/gallery.js")
+    assert json.loads(get(web + "/api/pictures?limit=5")[1]) == {"pictures": [], "more": False}   # eki pictures
 
 
 def test_the_page_has_its_views_and_scripts_in_order(web):
     _, body = get(web + "/")
-    for view in ("chat", "pictures", "station", "settings"):
+    for view in ("new", "projects", "artifacts", "scheduled", "customize", "station", "settings", "status"):
         assert f'id="{view}"' in body
     assert ">Station<" in body and ">Settings<" in body
-    scripts = ["md", "cards", "panel", "attach", "nav", "gallery", "prs", "station", "settings", "side", "app"]
+    scripts = ["md", "cards", "panel", "attach", "nav", "shell", "projectspage", "project", "newproject", "artifacts",
+               "scheduled", "scheduleform", "customize", "customizeskills", "customizeconnectors", "prs", "station",
+               "settings", "sidelist", "threadmenu", "side", "sidestatus", "app"]
     at = [body.index(f'<script src="/ui/{s}.js"></script>') for s in scripts]
     assert at == sorted(at)
-    css = ["style", "chat", "station", "settings"]
+    css = ["style", "chat", "station", "settings", "pages"]
     at = [body.index(f'<link rel="stylesheet" href="/ui/{c}.css">') for c in css]
     assert at == sorted(at) and at[-1] < body.index("</head>")
     for i in ("strip", "attach", "to", "cwd", "bg", "prompt", "send", "log", "scroll", "empty", "head", "title", "meta", "panel"):
@@ -73,7 +76,9 @@ def test_the_shell_files_are_served(web):
     code, nav = get(web + "/ui/nav.js")
     assert code == 200 and "window.nav" in nav and "hashchange" in nav and "messageHandlers.eki" in nav
     code, side = get(web + "/ui/side.js")
-    assert code == 200 and "/api/threads" in side and "/api/providers" in side and "window.side" in side
+    assert code == 200 and "/api/threads" in side and "window.side" in side
+    code, status = get(web + "/ui/sidestatus.js")
+    assert code == 200 and "/api/providers" in status and "/api/status" in status and "window.sidestatus" in status
     assert get(web + "/ui/chat.css")[0] == 200
     _, app = get(web + "/ui/app.js")
     assert "nav.thread(" in app and "nav.start()" in app
@@ -158,7 +163,7 @@ def test_open_prs_are_shown_from_the_db(web, conn):
     assert code == 200 and "PR #" in js and "target=\"_blank\"" in js and "PRs open" in js
     _, station = get(web + "/ui/station.js")
     assert "prs.link(it.pr)" in station and "prs.summary(s.prs)" in station
-    _, side = get(web + "/ui/side.js")
+    _, side = get(web + "/ui/sidestatus.js")
     assert "prs.lines(st.prs)" in side
 
 

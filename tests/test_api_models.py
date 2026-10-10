@@ -91,14 +91,16 @@ def test_the_routes_answer_and_the_post_needs_x_eki(web, home, monkeypatch):
 
 
 def test_settings_js_shrank_and_the_models_block_loads_before_it(web):
-    assert len((WEB / "settings.js").read_text().splitlines()) < 392
+    assert len((WEB / "settings.js").read_text().splitlines()) < 300
     _, page = get(web + "/")
     assert page.index("/ui/settingstarget.js") < page.index("/ui/settingsmodels.js") < page.index("/ui/settings.js")
     assert get(web + "/ui/settingsmodels.js")[0] == 200 and get(web + "/ui/settingstarget.js")[0] == 200
     js = (WEB / "settings.js").read_text()
     assert "planner.provider" not in js and "Planner model" not in js
-    assert "settingsModels.roles(d)" in js and "settingsModels.line(name)" in js and "settingsTarget.html(" in js
     models = (WEB / "settingsmodels.js").read_text()
+    assert "settingsModels.roles(d)" in models
+    assert "settingsModels.line(name)" in (WEB / "settingsproviders.js").read_text()
+    assert "settingsTarget.html(" in (WEB / "settingsrows.js").read_text()
     for gone in ("tiers(", "summary(", "editTier", "accept", "TIERS"):
         assert gone not in js and gone not in models
 
@@ -167,7 +169,7 @@ def test_one_picker_for_roles_and_row_targets(tmp_path):
     r = html["roles"]
     assert "Router" in r and all(f'data-role="{x}"' in r for x in ("router", "planner", "reviewer", "chores"))
     assert '<option value="claude" selected>' in r and '<option value="claude-haiku-4-5" selected' in r
-    assert "var(--amber)" in r and "can't run" in r and "now local · its default" in r
+    assert "set-amber" in r and "can't run" in r and "now local · its default" in r
     assert html["draft"]["roles"]["planner"] == {"provider": "claude", "model": "opus", "effort": "high"}
     assert "3 models" in html["line"] and 'data-act="mrefresh"' in html["line"]
 
@@ -177,12 +179,12 @@ def test_one_picker_for_roles_and_row_targets(tmp_path):
     assert 'title="The newest Opus"' in opus and 'data-efforts="low,high,max"' in opus
     # the effort step: exactly the model's levels, the default marked, and its default
     assert '<option value="high" selected>high</option>' in opus and '<option value="max">' in opus
-    assert "var(--amber)" not in opus
+    assert "set-amber" not in opus
     assert "claude-opus-4-1 isn't in claude's list any more; its default" in gone
     assert "claude opus doesn't offer effort medium any more; its default" in dropped
     assert "claude-haiku-4-5 takes no effort" in none
     assert 'data-tm value="qwen3:32b"' in local                    # a never-read list: free text
-    assert "fast — tier from providers.json" in tier and "var(--amber)" not in tier
+    assert "fast — tier from providers.json" in tier and "set-amber" not in tier
     assert html["values"] == [
         {"provider": "claude", "model": "opus", "effort": "high"},
         "claude:opus",

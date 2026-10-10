@@ -67,5 +67,5 @@ def test_the_notifications_section_and_its_script_are_served(web):
         assert want in js
     _, page = get(web + "/")
     assert page.index("/ui/settingsnotify.js") < page.index("/ui/settings.js")
-    _, main = get(f"{web}/ui/settings.js")
-    assert "settingsNotify.form(d)" in main and "settingsNotify.edit(el, d)" in main
+    assert 'settings.section("notifications"' in js
+    assert "html: (d) => form(d)" in js and "edit: (el, d) => edit(el, d)" in js

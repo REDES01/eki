@@ -3,11 +3,12 @@
 // and settingsmodels.js for each role. html() draws it inside a [data-tgt] wrapper; value() reads
 // the wrapper back as targets.fmt()'s shortest form: "claude", "claude:opus", or
 // {"provider", "model"?, "effort"?} when an effort is set. A saved model or effort the program no
-// longer offers is shown in amber with choose()'s words (eki/targets.py).
+// longer offers is shown in amber (.set-amber) with choose()'s words (eki/targets.py). label()
+// is targets.label(): one line, "claude · Opus 5.5 · high".
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const TIERS = ["fast", "default", "top"];                                     // targets.TIERS
-  const amber = (s) => (s ? `<div class="dim" style="color: var(--amber)">${esc(s)}</div>` : "");
+  const amber = (s) => (s ? `<div class="dim set-amber">${esc(s)}</div>` : "");
   const opt = (v, cur, label, more) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}${more || ""}>${esc(label)}</option>`;
 
   // targets.parse, without the errors: {provider, model, effort}; a tier is kept as the model
@@ -109,5 +110,16 @@
     return fmt(provider, model, effort);
   }
 
-  window.settingsTarget = { html, value, parse, fmt, key, notes };
+  // targets.label: the provider, the listed model's label (else its id, else "its default"), the effort.
+  // models: /api/models' providers (or null); a model is looked up like targets._row.
+  function label(cur, models) {
+    const t = parse(cur);
+    const p = models && models[t.provider];
+    const row = rowOf(p && p.listed, t.model);
+    const parts = [t.provider, (row && (row.label || row.model)) || t.model || "its default"];
+    if (t.effort) parts.push(t.effort);
+    return parts.join(" · ");
+  }
+
+  window.settingsTarget = { html, value, parse, fmt, key, notes, label };
 })();

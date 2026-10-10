@@ -346,7 +346,7 @@ are Codex's.
   view; a refresh reopens it): **Chat** (`#<thread>`, a centered column,
   replies with the provider's mark and the route's why, a floating
   composer with Send/Stop), **Pictures** (`#pictures`), **Station**
-  (`#station`) and **Settings** (`#settings`).
+  (`#station`) and **Settings** (`#settings`, `#settings/<section>`).
   - *Station* (`eki/web/station.js`, `eki/api_station.py`) shows what
     `eki self`, `eki builds`, `eki route`, `eki observe` and the digest
     show, reloading every 5 s, and acts through the same functions the CLI
@@ -358,7 +358,28 @@ are Codex's.
     answered in place. The board's words come from `eki/selfview.py`, so the
     page and `eki self` say the same thing.
   - *Settings* (`eki/web/settings.js`, `eki/api_settings.py`) edits
-    `routing.json` and `providers.json` with forms or raw JSON. Rows and
+    `routing.json` and `providers.json` with forms or raw JSON, laid out
+    like a Mac settings window: a list of sections down the left next to
+    one body, each section at its own address — **Jobs**
+    (`#settings/jobs`, the four role pickers and the on-demand checker
+    switch; plain `#settings` opens it), **Rows** (`#settings/rows`),
+    **Providers** (`#settings/providers`, the entries and the built-in
+    list), **Notifications** (`#settings/notifications`) and **eki self**
+    (`#settings/self`, autonomy and parallel); a refresh reopens the same
+    section. `settings.js` is only the frame: each section is a file of
+    its own (`settingsmodels.js`, `settingsrows.js`,
+    `settingsproviders.js`, `settingsnotify.js`, `settingsself.js`) that
+    registers with `settings.section(name, {title, file, html, edit,
+    act})` and names the one file it edits; Form/Raw JSON, Reset and Save
+    act on that file. There is one draft per file, so edits in Jobs and
+    Rows are saved together, and changing section never drops a draft.
+    Settings sit in rounded groups of one-line settings — the label (and a
+    dim sentence) on the left, the control on the right
+    (`settingsform.js`). Rows and providers fold to one summary line each
+    (a row's key, title and target chain as labels joined by " → ", from
+    `settingsTarget.label`, which is `targets.label`); clicking one opens
+    its editor and closes any other, so one is open at a time, and which
+    one is page state, not in the address. Rows and
     the ComfyUI entry that eki only adds in memory are shown as such and
     written only when edited. The server checks the data before writing
     (unique row keys, known targets, needs and `can` within the abilities,

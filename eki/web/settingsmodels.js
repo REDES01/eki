@@ -1,15 +1,15 @@
 // Settings: who eki's own jobs go to (routing.json "roles") and each provider's read model list,
-// over GET /api/models (eki/api_models.py). settings.js puts roles(d) at the top of the Routing
-// section and line(name) under each provider card, and hands edits inside [data-roles] here.
-// Each role is one target picker (settingstarget.js). Only the draft changes; Save writes
-// through /api/settings/ as ever.
+// over GET /api/models (eki/api_models.py). It registers the "jobs" section with settings.js —
+// roles(d) and the on-demand checker switch — and settingsproviders.js puts line(name) under
+// each provider card. Each role is one target picker (settingstarget.js). Only the draft
+// changes; Save writes through /api/settings/ as ever.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const ROLES = ["router", "planner", "reviewer", "chores"];                    // roles.ROLES
   const OFFABLE = ["reviewer", "chores"];                                       // roles.OFFABLE
   const LABELS = { router: "Router", planner: "Planner", reviewer: "Reviewer", chores: "Chores" };
   const M = { got: null, err: "" };
-  const amber = (s) => (s ? `<div class="dim" style="color: var(--amber)">${esc(s)}</div>` : "");
+  const amber = (s) => (s ? `<div class="dim set-amber">${esc(s)}</div>` : "");
   const field = (label, html) => `<label class="set-field"><span>${label}</span>${html}</label>`;
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "never");
 
@@ -27,7 +27,7 @@
   // /api/models' providers, or null before they are read: the row pickers in settings.js use it
   const models = () => (M.got ? M.got.providers : null);
 
-  // ---- roles, in the Routing tab -----------------------------------------------------------
+  // ---- roles, in the Jobs section ---------------------------------------------------------
 
   const roleOf = (d, r) => (d.roles && typeof d.roles === "object" && d.roles[r]) || "";
 
@@ -57,7 +57,7 @@
     return el.tagName === "SELECT";
   }
 
-  // ---- each provider's list, in the Providers tab ------------------------------------------
+  // ---- each provider's list, in the Providers section---------------------------------------
 
   function line(name) {
     const p = M.got && M.got.providers[name];
@@ -78,4 +78,18 @@
   }
 
   window.settingsModels = { load, models, roles, editRole, line, act };
+
+  // the Jobs section: who each of eki's jobs goes to, and whether the prompt check may wake a model
+  const jobs = {
+    title: "Jobs", file: "routing",
+    html: (d) => `<section class="set-sect"><h3>Jobs</h3>${settingsModels.roles(d)}
+      ${settingsForm.check(d.checker_wakes !== false, 'data-f="checker_wakes"', "Wake an on-demand checker model for the prompt check")}</section>`,
+    edit(el, d) {
+      if (el.dataset.f === "checker_wakes") { d.checker_wakes = el.checked; return false; }
+      return el.closest("[data-roles]") ? editRole(el, d) : false;
+    },
+    act: () => false,   // Refresh (mrefresh) is settings.js's, from any section
+  };
+  if (window.settings) settings.section("jobs", jobs);
+  else (window.settingsSections = window.settingsSections || []).push(["jobs", jobs]);
 })();

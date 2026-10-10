@@ -29,9 +29,15 @@ def test_the_page_loads_the_target_picker_and_settings_js_stays_small(web):
     code, js = get(f"{web}/ui/settingstarget.js")
     assert code == 200 and "window.settingsTarget" in js
     web_dir = Path(__file__).resolve().parent.parent / "eki" / "web"
-    assert len((web_dir / "settings.js").read_text().splitlines()) < 400
+    assert len((web_dir / "settings.js").read_text().splitlines()) < 300
 
 
 def test_every_role_has_its_own_picker_in_view(web):
     _, js = get(f"{web}/ui/settingsmodels.js")
     assert "ROLES.map((r) => picker(d, r))" in js and "roles-open" not in js
+
+
+def test_the_jobs_section_holds_the_roles_and_the_checker_switch(web):
+    _, js = get(f"{web}/ui/settingsmodels.js")
+    assert 'settings.section("jobs"' in js and 'file: "routing"' in js
+    assert "settingsModels.roles(d)" in js and 'data-f="checker_wakes"' in js

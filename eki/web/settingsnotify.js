@@ -1,5 +1,5 @@
 // Settings: the "notify" block of routing.json — pushes to the phone through ntfy (eki/notify.py).
-// settings.js puts form(d) into the routing form and hands edits inside [data-notify] to edit().
+// It registers the "notifications" section with settings.js: form(d) is its form, edit() its edits.
 // A field left at its default is dropped, and a block left all default drops the notify key.
 // The topic is a secret: it is shown in a password field, never in plain view.
 (function () {
@@ -42,4 +42,7 @@
   }
 
   window.settingsNotify = { form, edit };
+  const notifications = { title: "Notifications", file: "routing", html: (d) => form(d), edit: (el, d) => edit(el, d) };
+  if (window.settings) settings.section("notifications", notifications);
+  else (window.settingsSections = window.settingsSections || []).push(["notifications", notifications]);
 })();

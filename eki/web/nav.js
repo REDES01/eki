@@ -1,6 +1,7 @@
 // The page's addresses. #pictures, #station, #settings and #projects are views
 // that take #main's place, and #project/<id> is one project's page; any other
-// hash is a thread id, and none is a new thread. The address is the whole
+// hash is a thread id, and none is a new thread. #settings/<section> is one
+// section of Settings. The address is the whole
 // state, so a refresh reopens the same view.
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -19,10 +20,13 @@
     try { return decodeURIComponent(location.hash.slice(1)); } catch (e) { return location.hash.slice(1); }
   }
 
-  // "project/<id>" is the project view with its id; a reserved name is its own view.
+  // "project/<id>" is the project view with its id, "settings/<section>" one section of
+  // Settings; a reserved name is its own view.
   function route(name) {
     const m = /^project\/(.+)$/.exec(name);
     if (m) return ["project", m[1]];
+    const s = /^settings\/(.+)$/.exec(name);
+    if (s) return ["settings", s[1]];
     return [RESERVED.includes(name) ? name : "chat", null];
   }
 

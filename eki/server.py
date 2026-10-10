@@ -38,27 +38,31 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- plumbing ------------------------------------------------------------------------
 
+    def _send(self, code: int, ctype: str, body: bytes, *extra: tuple) -> None:
+        """Answer in one go. A page that hung up first (a reload, a closed tab,
+        a fetch let go) isn't a fault of eki's: drop the answer quietly."""
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in extra:
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+            log.debug("client hung up before %s was answered", self.path)
+
     def _json(self, data: Any, code: int = 200) -> None:
-        body = json.dumps(data, ensure_ascii=False).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(code, "application/json; charset=utf-8", json.dumps(data, ensure_ascii=False).encode())
 
     def _file(self, rel: str) -> None:
         path = (WEB / rel).resolve()
         if WEB not in path.parents or not path.is_file():
             self._json({"error": "not found"}, 404)
             return
-        body = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(200, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
 
     def _served_file(self, path: str) -> None:
         from . import files
@@ -70,14 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         if got is None:
             return self._json({"error": "not a file a run made"}, 404)
         body, ctype = got
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
         # whatever an agent wrote runs with no rights of eki's own
-        self.send_header("Content-Security-Policy", "sandbox allow-scripts allow-popups")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(200, ctype, body, ("Content-Security-Policy", "sandbox allow-scripts allow-popups"))
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> None:
         conn = db.connect()

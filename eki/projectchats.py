@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 from . import builds, db, github, integration, paths, store, workspace
 
 SELF = "eki"
-HIDDEN = ("dropped", "merged")
+HIDDEN = ("dropped", "merged", "deleting", "deleted")
 INSTRUCTIONS = ("AGENTS.md", "CLAUDE.md")
 OVER = ("applied", "dropped", "left", "unfit", "landed", "live", "rolled back")
 #: eki's description, fixed: it can't be edited
@@ -58,7 +58,7 @@ def folder_of(conn: sqlite3.Connection, pid: str) -> Optional[str]:
 
 
 def _live(conn: sqlite3.Connection) -> List[sqlite3.Row]:
-    """Rows not dropped or merged, oldest first, without retired rows a live row's folder shadows,
+    """Rows not dropped, merged or deleted, oldest first, without retired rows a live row's folder shadows,
     and never a row on eki's own repo, whatever its state: that is the built-in eki."""
     marks = ",".join("?" * len(HIDDEN))
     own = integration.own_repo()
@@ -71,8 +71,9 @@ def _live(conn: sqlite3.Connection) -> List[sqlite3.Row]:
 
 def _shadowed(conn: sqlite3.Connection) -> Dict[str, str]:
     """Retired row id -> the live row id whose folder it shares."""
-    rows = conn.execute("SELECT * FROM projects WHERE COALESCE(state,'on') NOT IN ('dropped','merged') "
-                        "ORDER BY created_at").fetchall()
+    marks = ",".join("?" * len(HIDDEN))
+    rows = conn.execute(f"SELECT * FROM projects WHERE COALESCE(state,'on') NOT IN ({marks}) "
+                        "ORDER BY created_at", HIDDEN).fetchall()
     live: Dict[str, str] = {}
     for p in rows:
         f = _row_folder(p)
@@ -97,8 +98,8 @@ def _folders(conn: sqlite3.Connection) -> Dict[str, str]:
 def adopt(conn: sqlite3.Connection) -> int:
     """Put chats with no project into the project whose folder they run in; returns how many moved.
 
-    A thread that has a project keeps it — except one on a retired row a live row shadows, whose
-    chats belong to the live row. Engine threads (under EKI_HOME) never match."""
+    A thread that has a project keeps it — except one on a retired row a live row shadows, or on a
+    deleted row whose folder a live row has, whose chats belong to the live row. Engine threads (under EKI_HOME) never match."""
     folders = _folders(conn)
     moves: List[tuple] = []
     for r in conn.execute("SELECT DISTINCT cwd FROM threads WHERE project IS NULL AND cwd IS NOT NULL "
@@ -111,6 +112,10 @@ def adopt(conn: sqlite3.Connection) -> int:
             moves.append(("UPDATE threads SET project=? WHERE project IS NULL AND cwd=?", (pid, r["cwd"])))
     for old, new in _shadowed(conn).items():
         moves.append(("UPDATE threads SET project=? WHERE project=?", (new, old)))
+    for p in conn.execute("SELECT * FROM projects WHERE state='deleted' AND folder IS NOT NULL").fetchall():
+        pid = folders.get(norm(p["folder"]))
+        if pid is not None and pid != SELF:              # a deleted row's chats join its folder, still archived
+            moves.append(("UPDATE threads SET project=? WHERE project=?", (pid, p["id"])))
     if not moves:
         return 0
     n = 0
@@ -137,7 +142,7 @@ def home_clone(repo: str) -> Optional[str]:
 
 def _scan(conn: sqlite3.Connection) -> None:
     rows = conn.execute("SELECT * FROM projects WHERE repo IS NOT NULL AND folder IS NULL "
-                        "AND COALESCE(state,'on') NOT IN ('dropped','merged','retired') "
+                        "AND COALESCE(state,'on') NOT IN ('dropped','merged','retired','deleting','deleted') "
                         "ORDER BY created_at").fetchall()
     for p in rows:
         hit = home_clone(p["repo"])
@@ -200,7 +205,7 @@ def entry(conn: sqlite3.Connection, p: sqlite3.Row) -> dict:
 
 
 def listing(conn: sqlite3.Connection, scan: bool = False) -> List[dict]:
-    """eki first, then every project not dropped or merged. `scan` looks in your home for the
+    """eki first, then every project not dropped, merged or deleted. `scan` looks in your home for the
     folders of GitHub rows that have none (never from the sidebar poll)."""
     if scan:
         _scan(conn)
@@ -223,7 +228,9 @@ def _same_folder(conn: sqlite3.Connection, where: str) -> Optional[str]:
     for p in _live(conn):
         if _row_folder(p) == where:
             return p["id"]
-    got = conn.execute("SELECT id FROM projects WHERE path=?", (where,)).fetchone()
+    got = conn.execute("SELECT id, state FROM projects WHERE path=?", (where,)).fetchone()
+    if got is not None and got["state"] == "deleting":
+        raise ValueError(f"{where} is being deleted from eki: add it again in a moment")
     return got["id"] if got else None
 
 
@@ -298,7 +305,10 @@ def find(conn: sqlite3.Connection, key: str) -> str:
     key = (key or "").strip()
     if key == SELF:
         return SELF
-    if conn.execute("SELECT 1 FROM projects WHERE id=?", (key,)).fetchone():
+    got = conn.execute("SELECT state FROM projects WHERE id=?", (key,)).fetchone()
+    if got is not None and got["state"] in ("deleting", "deleted"):
+        raise KeyError(f"no project {key}: it was deleted")
+    if got is not None:
         return key
     live = _live(conn)
     named = [p for p in live if p["name"] == key]

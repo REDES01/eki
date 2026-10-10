@@ -106,7 +106,7 @@ def lines(c, t: Optional[float] = None) -> List[str]:
             out.append(f"  round {g['id']} planning")
         out.extend(_items(c, "g.standing_id=?", st["id"], project))
     for project in projects.all(c):
-        if project["id"] in shown or project["state"] == "dropped":
+        if project["id"] in shown or project["state"] in ("dropped", "deleting", "deleted"):
             continue
         if project["repo"]:
             out.extend(projectcli.block(c, project))

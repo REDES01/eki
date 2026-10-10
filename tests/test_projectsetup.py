@@ -361,3 +361,12 @@ def test_without_an_own_repo_a_me_eki_row_is_left_alone(conn, src, monkeypatch):
     monkeypatch.setattr(integration, "own_repo", lambda: None)
     assert projectsetup.tick(conn) == []
     assert projects.get(conn, pid)["state"] == "on" and dest.exists()
+
+
+def test_a_deleted_row_is_never_found_by_repo_nor_retired(conn, src, proj):
+    from eki import projectdelete
+    pid = projects.add(conn, proj)
+    projectdelete.delete(conn, pid)
+    workspace.git(proj, "config", "remote.origin.url", "https://github.com/me/proj.git")
+    assert projectsetup.tick(conn) == [] and projects.get(conn, pid)["state"] == "deleted"
+    assert projects.by_repo(conn, "me/proj") is None

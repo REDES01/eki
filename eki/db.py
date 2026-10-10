@@ -265,7 +265,7 @@ ADDED = [
     ("items", "pr_seen", "TEXT"),       # ISO-8601 UTC time of the newest PR comment looked at
     ("items", "followups", "INTEGER DEFAULT 0"),   # changes made for comments on the PR
     ("projects", "repo", "TEXT"),       # OWNER/REPO; NULL on the local path
-    ("projects", "state", "TEXT DEFAULT 'on'"),    # on | retired | dropped
+    ("projects", "state", "TEXT DEFAULT 'on'"),    # on | retired | dropped | merged | deleting | deleted
     ("projects", "setup", "TEXT"),      # NULL (local) | cloning | installing | ready | fault
     ("projects", "setup_run", "TEXT"),  # the clone or install command run
     ("projects", "fault", "TEXT"),      # "<clone|install> failed: <why>"

@@ -93,7 +93,8 @@ def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[
         root = Path(common).parent.resolve()
     if conn is not None:
         try:
-            row = conn.execute('SELECT folder FROM projects WHERE path=? AND COALESCE(folder, "")!=""',
+            row = conn.execute('SELECT folder FROM projects WHERE path=? AND COALESCE(folder, "")!="" '
+                               'AND COALESCE(state, "on") NOT IN ("deleting", "deleted")',
                                (str(root),)).fetchone()
         except sqlite3.Error:
             row = None

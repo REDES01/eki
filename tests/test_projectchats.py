@@ -274,3 +274,15 @@ def test_own_rows_folder_never_adopts_chats(conn, src, own, tmp_path):
     tid = thread(conn, mine)
     projectchats.adopt(conn)
     assert project_of(conn, tid) is None
+
+
+def test_deleting_and_deleted_rows_are_hidden_and_never_found(conn, src, proj):
+    from eki import projectdelete
+    pid = projectchats.create(conn, "proj", folder=proj)
+    projectdelete.begin(conn, pid)
+    assert {"deleting", "deleted"} <= set(projectchats.HIDDEN)
+    assert pid not in [e["id"] for e in projectchats.listing(conn)]
+    with pytest.raises(KeyError):
+        projectchats.find(conn, pid)
+    projectdelete.finish(conn, pid)
+    assert projectchats.create(conn, "proj", folder=proj) != pid

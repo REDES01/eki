@@ -3,7 +3,7 @@
 A goal has no 'done' state; like standing._settle, its end is worked out
 from the goals and items tables on every pass, and nothing is held in
 memory. A planned goal has ended when it has a live item and none still
-open; a failed goal has ended as it is. Only ends within the last day
+open; a failed goal has ended as it is. A deleted project's goals never notify. Only ends within the last day
 count, so switching notify on never floods the phone with old goals, and a
 restart inside a day loses none. notify.queue's key makes it one notice
 per goal, however often this runs.
@@ -29,7 +29,9 @@ _END = ("MAX(g.created_at, COALESCE((SELECT r.ended_at FROM runs r WHERE r.id=g.
         "COALESCE((SELECT MAX(i.updated_at) FROM items i WHERE i.goal_id=g.id), 0))")
 
 _ENDED = (
-    f"SELECT g.*, {_END} AS ended FROM goals g WHERE {_END} >= ? AND (g.state='failed' OR ("
+    f"SELECT g.*, {_END} AS ended FROM goals g WHERE {_END} >= ? "
+    f"AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id=g.project AND p.state IN ('deleting','deleted')) "
+    f"AND (g.state='failed' OR ("
     f"g.state='planned' AND EXISTS (SELECT 1 FROM items i WHERE i.goal_id=g.id AND i.state!='dropped') "
     f"AND NOT EXISTS (SELECT 1 FROM items i WHERE i.goal_id=g.id AND (i.state IN ({_IN_OPEN}) "
     f"OR (i.state='proposed' AND COALESCE(i.pr, '')='')))))"

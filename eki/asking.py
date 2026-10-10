@@ -75,6 +75,9 @@ def _name(conn: sqlite3.Connection, pid: str) -> str:
 def _project_folder(conn: sqlite3.Connection, pid: str) -> str:
     """The folder a new chat in this project runs in, or why there isn't one."""
     name = _name(conn, pid)
+    if pid != projectchats.SELF and conn.execute(
+            "SELECT 1 FROM projects WHERE id=? AND state IN ('deleting','deleted')", (pid,)).fetchone():
+        raise KeyError(f"no project {name}: it was deleted")
     folder = projectchats.folder_of(conn, pid)
     if not folder or not os.path.isdir(folder):
         raise ValueError(f"{name} has no folder yet: set one on its page or "

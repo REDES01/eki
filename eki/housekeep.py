@@ -4,7 +4,8 @@ Each step runs on its own — one that raises is written down as a fault and
 the others still run: forget journal rows past 90 days (at most once an
 hour), settle the build scores, turn repeated faults into items, let the
 loop pick eki's next self-work when it is on and eki is idle
-(eki/selfpick.py), open the next round of each standing goal (eki/standing.py), settle eki's own
+(eki/selfpick.py), open the next round of each standing goal (eki/standing.py), finish a project
+delete a restart interrupted (eki/projectdelete.py), settle eki's own
 clones of GitHub repos — clone, guessed check, install once, retired folder
 rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on GitHub (eki/issues.py, prs.py, prfollow.py,
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
@@ -30,7 +31,7 @@ import time
 from typing import Callable, Dict, List, Tuple
 
 from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
-               prmirror, projectsetup, prs, schedule, score, selfpick, standing, threadkeep)
+               prmirror, projectdelete, projectsetup, prs, schedule, score, selfpick, standing, threadkeep)
 from .components import servers
 
 log = logging.getLogger("eki.housekeep")
@@ -94,6 +95,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("faults", lambda conn: faults.tick(conn)),
     ("pick", lambda conn: selfpick.tick(conn)),
     ("standing", lambda conn: standing.tick(conn)),
+    ("projectdelete", projectdelete.tick),
     ("projects", projectsetup.tick),
     ("issues", issues.tick),
     ("prs", prs.tick),

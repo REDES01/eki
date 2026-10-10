@@ -48,6 +48,8 @@ def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None
     if got is not None and got["state"] != "dropped":
         return got
     dest = projects.clone_path(repo)
+    if conn.execute("SELECT 1 FROM projects WHERE path=? AND state='deleting'", (str(dest),)).fetchone():
+        raise ValueError(f"{repo} is being deleted from eki: add it again in a moment")
     dest.parent.mkdir(parents=True, exist_ok=True)
     chat = _chat_row(conn, repo)
     with db.tx(conn):
@@ -69,7 +71,7 @@ def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None
 def _chat_row(conn: sqlite3.Connection, repo: str):
     """The oldest live row with repo NULL whose folder's origin is `repo`, with that folder."""
     for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') "
-                          "NOT IN ('dropped','merged','retired') ORDER BY created_at").fetchall():
+                          "NOT IN ('dropped','merged','retired','deleting','deleted') ORDER BY created_at").fetchall():
         folder = projectchats.folder_of(conn, p["id"])
         if folder and Path(folder).is_dir() and github.repo_of(folder) == repo:
             return p, folder
@@ -172,7 +174,7 @@ def _own(conn: sqlite3.Connection) -> List[str]:
         return []
     said: List[str] = []
     for p in conn.execute("SELECT * FROM projects WHERE repo=? AND COALESCE(state,'on') NOT IN "
-                          "('retired','dropped') ORDER BY created_at", (own,)).fetchall():
+                          "('retired','dropped','deleting','deleted') ORDER BY created_at", (own,)).fetchall():
         if _busy(conn, p["id"]):
             said.append(f"{own}: eki's own repo — retires once its work ends")
             continue
@@ -202,7 +204,8 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
     """Folder rows whose origin is on GitHub: retired, so their work finishes and nothing new starts."""
     said: List[str] = []
     home = paths.projects().resolve()
-    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL ORDER BY created_at").fetchall():
+    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') NOT IN "
+                          "('deleting','deleted') ORDER BY created_at").fetchall():
         where = Path(p["path"]).expanduser().resolve()
         if where == home or home in where.parents or not where.is_dir():
             continue
@@ -253,7 +256,8 @@ def drop(conn: sqlite3.Connection, repo: str) -> str:
     p = projects.by_repo(conn, repo)
     if p is None:
         raise KeyError(f"no project {repo}")
-    pids = [r["id"] for r in conn.execute("SELECT id FROM projects WHERE repo=?", (repo,)).fetchall()]
+    pids = [r["id"] for r in conn.execute("SELECT id FROM projects WHERE repo=? AND COALESCE(state,'on') "
+                                          "NOT IN ('deleting','deleted')", (repo,)).fetchall()]
     marks = ",".join("?" * len(pids))
     dropped, failed = 0, []
     for g in conn.execute(f"SELECT * FROM goals WHERE project IN ({marks}) AND state NOT IN ('left','failed')",
@@ -267,7 +271,7 @@ def drop(conn: sqlite3.Connection, repo: str) -> str:
     if p["setup_run"]:
         store.cancel(conn, p["setup_run"])
     removed = _remove(Path(p["path"]))
-    ignored, note = _open_numbers(conn, repo, marks, pids)
+    ignored, note = open_numbers(conn, repo, marks, pids)
     with db.tx(conn):
         conn.execute("UPDATE projects SET state='dropped', check_cmd=NULL, check_from=NULL, install_cmd=NULL, "
                      "fault=NULL, ignored=? WHERE id=?", (json.dumps(ignored), p["id"]))
@@ -308,7 +312,7 @@ def _remove(clone: Path) -> bool:
     return not where.exists()
 
 
-def _open_numbers(conn: sqlite3.Connection, repo: str, marks: str, pids: List[str]):
+def open_numbers(conn: sqlite3.Connection, repo: str, marks: str, pids: List[str]):
     try:
         found = github.search_issues(github.whoami())
         return sorted({int(i["number"]) for i in found

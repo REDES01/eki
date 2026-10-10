@@ -112,3 +112,8 @@ def test_engine_tick_calls_housekeeping_on_its_duty_pass(conn, monkeypatch):
     assert called == [conn]
     engine.tick(conn)
     assert len(called) == 1
+
+
+def test_an_interrupted_project_delete_is_finished_before_the_projects_step():
+    names = [name for name, _ in housekeep.STEPS]
+    assert names.index("projectdelete") < names.index("projects")

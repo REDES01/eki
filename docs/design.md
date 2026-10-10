@@ -833,6 +833,20 @@ as any other; nothing in `workspace` or the scheduler changes.
   is the same project. `eki goal add <folder>` on a chat-only row fills its
   branch and starts background work on that same row; housekeeping never
   retires a row with no goals.
+- **A project can be deleted** (`eki/projectdelete.py`; never `eki`, which
+  is refused with the reason). The row turns `deleting` first, in one
+  transaction, and every listing hides it; then `finish` cancels the active
+  runs of its goals, items, setup and chats, leaves its goals, drops its
+  items, standing goals and schedules, withdraws open asks, removes eki's
+  worktrees of its items (branches kept) and, for a GitHub row, eki's own
+  clone under `~/.eki/projects`, archives its chats (they keep
+  `threads.project`), and last marks the row `deleted` with `path` suffixed
+  `#deleted-<id>` so the same folder or repo can be added again as a fresh
+  project — whose `adopt` takes the deleted row's chats back, still
+  archived. Housekeeping finishes a delete a restart interrupted. The
+  person's folder is never touched: only `git worktree remove` of eki's own
+  worktrees runs there. A deleted GitHub row ignores the issues open when it
+  went, as a drop does.
 - **A chat row joins its GitHub row.** When `projectsetup.ensure` makes or
   brings back a GitHub row and a live row with `repo` NULL has a folder
   whose origin is that repo, the GitHub row takes the folder, the chats

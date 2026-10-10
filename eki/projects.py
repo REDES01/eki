@@ -28,7 +28,9 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
         raise ValueError(f"{where} is not a git repo")
     if not workspace.git(where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
         raise ValueError(f"{where} has no commit yet")
-    got = conn.execute("SELECT id, branch, repo FROM projects WHERE path=?", (str(where),)).fetchone()
+    got = conn.execute("SELECT id, branch, repo, state FROM projects WHERE path=?", (str(where),)).fetchone()
+    if got and got["state"] == "deleting":
+        raise ValueError(f"{where} is being deleted from eki: add it again in a moment")
     if got and (got["branch"] or got["repo"]):
         return got["id"]
     branch = branch or workspace.git(where, "symbolic-ref", "--short", "-q", "HEAD", check=False)
@@ -53,8 +55,9 @@ def clone_path(repo: str) -> Path:
 
 
 def by_repo(conn: sqlite3.Connection, repo: str) -> Optional[sqlite3.Row]:
-    """The project row for OWNER/REPO that isn't retired (a dropped one counts), or None."""
-    return conn.execute("SELECT * FROM projects WHERE repo=? AND COALESCE(state, 'on')!='retired' "
+    """The project row for OWNER/REPO that isn't retired or deleted (a dropped one counts), or None."""
+    return conn.execute("SELECT * FROM projects WHERE repo=? AND COALESCE(state, 'on') NOT IN "
+                        "('retired','deleting','deleted') "
                         "ORDER BY created_at DESC LIMIT 1", (repo,)).fetchone()
 
 

@@ -9,8 +9,9 @@ that turns it ready calls github.soon, so the next pass takes them. An issue
 by the person, not yet taken on any row of its repo (retired ones included),
 becomes a background goal owned by eki — or, labelled `standing`, a standing
 goal. Only the person's words count: an issue by anyone else is skipped, and
-the log line says so. A dropped project ignores the issues open when it was
-dropped; a newer one revives it. An edit to an issue already taken is not
+the log line says so. A dropped or deleted project ignores the issues open
+when it was dropped or deleted; a newer one revives it (a deleted one as a
+fresh project). An edit to an issue already taken is not
 followed. An issue closed on GitHub drops the unfinished work it started;
 what is already proposed is left for the person.
 
@@ -49,7 +50,8 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     for repo, listed in by_repo.items():
         said += _self(conn, repo, listed, me) if repo == own else _repo(conn, repo, listed, me)
     for project in conn.execute("SELECT * FROM projects WHERE repo IS NOT NULL "
-                                "AND COALESCE(state,'on')!='dropped' ORDER BY created_at").fetchall():
+                                "AND COALESCE(state,'on') NOT IN ('dropped','deleting','deleted') "
+                                "ORDER BY created_at").fetchall():
         open_numbers = {int(i["number"]) for i in by_repo.get(project["repo"], [])}
         try:
             said += _closed(conn, project["name"], project["id"], project["repo"], open_numbers)
@@ -69,7 +71,7 @@ def text_of(issue: dict, repo: str) -> str:
 
 
 def _taken(conn: sqlite3.Connection, repo: str, n: int) -> bool:
-    """Taken by any row of the repo, retired and dropped ones included: a moved project never takes it twice."""
+    """Taken by any row of the repo, retired, dropped and deleted ones included: a moved project never takes it twice."""
     return bool(conn.execute("SELECT 1 FROM goals g JOIN projects p ON p.id=g.project WHERE p.repo=? AND g.issue=? "
                              "UNION ALL SELECT 1 FROM standing s JOIN projects p ON p.id=s.project "
                              "WHERE p.repo=? AND s.issue=?", (repo, n, repo, n)).fetchone())
@@ -100,6 +102,12 @@ def _ignored(row: sqlite3.Row) -> Set[int]:
         return set()
 
 
+def _deleted(conn: sqlite3.Connection, repo: str) -> Optional[sqlite3.Row]:
+    """The newest deleted row of `repo`: the issues open when it was deleted stay ignored."""
+    return conn.execute("SELECT * FROM projects WHERE repo=? AND state='deleted' "
+                        "ORDER BY created_at DESC LIMIT 1", (repo,)).fetchone()
+
+
 def _waits(row: sqlite3.Row) -> str:
     if row["setup"] == "fault":
         return f"fault: {row['fault'] or 'unknown'}"
@@ -109,12 +117,13 @@ def _waits(row: sqlite3.Row) -> str:
 def _repo(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> List[str]:
     said: List[str] = []
     row = projects.by_repo(conn, repo)
+    gone = _deleted(conn, repo) if row is None else None
     for issue in listed:
         n = int(issue["number"])
         if _taken(conn, repo, n):
             continue
         dropped = row is not None and row["state"] == "dropped"
-        if dropped and n in _ignored(row):
+        if (dropped and n in _ignored(row)) or (row is None and gone is not None and n in _ignored(gone)):
             continue
         skip = _stranger(issue, repo, me)
         if skip:

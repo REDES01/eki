@@ -120,6 +120,13 @@ def issue_state(repo: str, n: int) -> str:
     return _gh(["issue", "view", str(n), "--repo", repo, "--json", "state", "--jq", ".state"]).strip()
 
 
+def contents(repo: str, path: str) -> List[dict]:
+    """`gh api repos/<repo>/contents/<path>`: a folder's entries, or a file as one entry."""
+    out = _gh(["api", f"repos/{repo}/contents/{path.strip('/')}"])
+    got = json.loads(out) if out.strip() else []
+    return got if isinstance(got, list) else [got]
+
+
 # ---- pull requests -------------------------------------------------------------------------
 
 def pr_find(repo: str, branch: str) -> Optional[dict]:

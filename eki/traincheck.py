@@ -53,14 +53,29 @@ def needed(carried: List[sqlite3.Row]) -> bool:
 
 
 def pending(conn: sqlite3.Connection) -> Optional[Path]:
-    """A build whose check is still running: the train waits for it rather than
-    start another check each time main moves under it."""
+    """A build whose check is running, or has ended and isn't judged yet: the train
+    finishes that one rather than start another check each time main moves under it.
+    (Only waiting for *running* checks threw away every finished one whenever main
+    had moved meanwhile, and with main moving every few minutes nothing shipped.)
+    A build the running one already carries is stale and is left alone."""
+    from . import integration
+    running = train_running()
+    found = []
     for info in builds.root().glob(f"*/{CHECKED}"):
         rec = status(info.parent) or {}
         run = store.run(conn, rec["run"]) if rec.get("state") == "running" and rec.get("run") else None
-        if run is not None and run["state"] in store.ACTIVE:
-            return info.parent
-    return None
+        if run is None:
+            continue
+        sha = _commit(info.parent)
+        if running and integration.carries(sha, running):
+            continue
+        found.append((run["created_at"], info.parent))
+    return max(found)[1] if found else None
+
+
+def train_running() -> Optional[str]:
+    from . import train
+    return train.running_commit()
 
 
 def _python() -> str:

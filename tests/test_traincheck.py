@@ -148,6 +148,17 @@ def test_while_a_check_runs_a_newer_main_waits_for_it(conn, src):
     assert not (builds.root() / integration.main()[:12]).exists()
 
 
+def test_a_check_that_ended_while_main_moved_still_ships(conn, src):
+    a = land(conn, "a")
+    train.release(conn)
+    first = builds.root() / integration.main()[:12]
+    land(conn, "b")                                   # main moves while the check runs
+    run_inline(conn, check_run(conn, first)["id"])
+    said = train.release(conn)
+    assert builds.current() == first and item(conn, a)["build"] == first.name
+    assert any("going live" in s for s in said)
+
+
 def test_needed_and_command(conn, src):
     a, d = land(conn, "a"), land(conn, "d", touched="notes.md")
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM items")}

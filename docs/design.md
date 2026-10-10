@@ -73,6 +73,7 @@ eki follow <run>  ◄── events table
 | `review`, `digestprose` | the second reader between gate 1 and the queue; the digest's patch notes and the long page's `## Triage` |
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
+| `projectchats` | projects you work inside: a `projects` row or the built-in `eki` (`SELF`, no row); `folder_of`, `listing`, `adopt`, `create`, `set_folder`, `find`, `home_clone` |
 | `github` | the only way to GitHub: one function per `gh` call (a subprocess, 60 s), plain `git push`/`git fetch` against origin, which path a project is on, the in-memory interval of the GitHub steps |
 | `issues` | issues labelled `eki` in: a new one becomes a goal or a standing goal, a closed one drops the unfinished work |
 | `prs` | pull requests out: push `eki/<id>`, open or reuse its PR, poll it — merged is applied, closed is dropped; close the PR of an item you drop |
@@ -530,6 +531,61 @@ background=True)` asks for every window, not only the fullest, and says why
 background run with no provider under budget stays queued with that why; a
 run already going is never stopped. Work you wait for (`now`) ignores the
 budget.
+
+### Projects you work inside
+
+**One project = a name + your folder (+ a GitHub repo), with chats inside
+it** (`eki/projectchats.py`). Two folders, two meanings: `projects.folder`
+is your real folder, where the project's chats run; `projects.path` keeps
+its meaning above, where background work is based — the same folder for a
+row with `repo` NULL, eki's own clone for a GitHub row. `folder_of` gives
+`folder`, else `path` for a local row, else nothing (a GitHub row with no
+folder yet); folders are always compared by realpath, no trailing slash.
+A chat belongs to a project through `threads.project` (a `projects.id` or
+`eki`); NULL is a chat outside any project and works exactly as before.
+A new chat in a project (`eki ask -p <name|OWNER/REPO|eki>`, `body.project`,
+the page's "New chat here") runs with the project's folder as its cwd, and
+continuing it in another folder is refused. Runs in your folder take turns
+as any other; nothing in `workspace` or the scheduler changes.
+
+- **eki is built in.** `projectchats.SELF = "eki"`, named `eki`, its folder
+  `builds.source()`, its background work the self goals (`goals.project IS
+  NULL`). It has no row, so nothing that loops over `projects` sees it.
+- **Old chats join by folder.** `adopt` (at the start of every listing,
+  and after `create`/`set_folder`) sets `threads.project` on threads with
+  none whose realpath(cwd) is a project's folder. It never moves a thread
+  that has a project, and runs again harmlessly. Engine threads (clones,
+  installs under `~/.eki/projects`, builds under `~/.eki/work`) never match,
+  and no folder under `EKI_HOME` can be a project's.
+- **Your clone is found, not made.** A GitHub row with no folder gets one
+  from `home_clone`, only when asked (`listing(scan=True)`: the project
+  page and `eki project`, never the sidebar poll): the first folder directly
+  in your home (`paths.user_home()`, `EKI_USER_HOME` in tests) that is a git
+  repo whose `remote.origin.url` is that repo. It reads only the config.
+  Failing that, the page offers to pick a folder, or to clone to
+  `~/<repo name>`: a `command` run of `gh repo clone <repo> <dest>` (a full
+  clone), on a thread titled `clone <repo> to <dest>`, refused if `dest`
+  exists. The folder is set at once and the page says `cloning…` while
+  `dest/.git` is missing and the run is active, so a restart loses nothing.
+- **New projects live in your home.** `eki project --new NAME [--folder
+  PATH]` (or the `#projects` form) uses `~/<name>` by default, `git init`ing
+  it when new and taking an existing folder as it is; the same folder again
+  is the same project. `eki goal add <folder>` on a chat-only row fills its
+  branch and starts background work on that same row; housekeeping never
+  retires a row with no goals.
+- **A chat row joins its GitHub row.** When `projectsetup.ensure` makes or
+  brings back a GitHub row and a live row with `repo` NULL has a folder
+  whose origin is that repo, the GitHub row takes the folder, the chats
+  move to it, and the old row becomes `state='merged'` (or retires as above
+  when it has goals of its own), said in the pass's lines. `listing` hides
+  dropped and merged rows, and a retired row whose folder a live row has.
+- **Instructions are the project's own file.** With no `AGENTS.md` or
+  `CLAUDE.md` in the folder, the page offers a chat that looks at it and
+  writes `AGENTS.md`, plus a `CLAUDE.md` holding only `@AGENTS.md`, so Claude
+  Code and Codex read one copy. eki keeps no copy.
+
+Not in scope: knowledge-file uploads, per-project memory, per-project
+routing rows.
 
 ## Notifications
 

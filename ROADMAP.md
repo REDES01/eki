@@ -5,6 +5,15 @@ invariants; this file says what comes next, in order. An item is a `- [ ]`
 line; eki's own loop takes open items from here (docs/self-build.md) and
 ticks them as they land. Items marked *(for a person)* are never taken.
 
+## What doesn't change
+
+- Everything a project's agents share is a card in the project: all the
+  public knowledge, interfaces and assets shared between the agents of a
+  project (instructions, knowledge, skills, assets, services, servers, MCP
+  interfaces, agents like the playtester) live in that project as cards.
+  eki's own global stores (`~/.eki/skills`, `~/.eki/mcp.json`, the pool)
+  hold only what every run everywhere needs.
+
 ## eki builds eki — `docs/self-build.md`
 
 - [x] **Groundwork.** Worktrees on demand (`eki/workspace.py`); runs in one

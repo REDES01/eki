@@ -1,0 +1,9 @@
+{
+  "kind": "mcp",
+  "about": "an MCP server only this project's runs get — replace with what it gives them",
+  "server": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-everything"],
+    "env": {}
+  }
+}

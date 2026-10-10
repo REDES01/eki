@@ -98,6 +98,8 @@ eki follow <run>  ◄── events table
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
 | `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
+| `components/knowledge`, `components/mcpserver` | the passive kinds: a project's shared files (`files`, `brief`) and its own MCP servers (`public`, `servers_of`, `run_config`, which `worker.build_turn` hands each run) |
+| `api_cardknowledge`, `api_cardmcp` | a knowledge card's files and an mcp card's server and Test on the project page (with `web/cardknowledge.js`, `web/cardmcp.js`, registered in `window.projectCardKinds`) |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
 | `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use) and the library (templates and the pool); the helpers the card leaves share |
@@ -910,7 +912,17 @@ The project page shows a project's components as cards
 (`eki/web/projectcards.js`, `api_cards`): add from the library, open to set
 up, run, see its uses, remove.
 
-**The common keys.** `kind` (`service`, `assets`, `agent`, `skills`, `serve`), `about` (one
+**Everything a project's agents share is a card in the project.** All the
+public knowledge, interfaces and assets shared between the agents of a
+project live in that project as cards — instructions, knowledge, skills,
+assets, services, servers, MCP interfaces, agents like the playtester.
+eki's own global stores (`~/.eki/skills`, `~/.eki/mcp.json`, the pool) hold
+only what every run everywhere needs. Kinds that are read or attached, never
+called (`components.PASSIVE`: `knowledge`, `mcp`), stay out of the `eki use`
+line of a run's brief.
+
+**The common keys.** `kind` (`service`, `assets`, `agent`, `skills`,
+`serve`, `knowledge`, `mcp`), `about` (one
 line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
@@ -993,6 +1005,19 @@ of its own; the CLI is the integration.
   (never overwrites without `--replace`) and `eki component skills remove
   <project> <name>`; `eki use <card>` lists what it holds. The rule:
   project skills live in the project's card; ~/.eki/skills is only for skills every run should have.
+- **`knowledge`** — files every agent of the project reads: `"files"` (paths
+  relative to the project root; globs and folders allowed, no absolute path,
+  no `..`) and `"read"`: `"always"` (the brief says "read first: <files> —
+  <about>") or `"when-relevant"` ("look here when …"). A project has as many
+  as it needs (decisions, design rules, contracts, owner memory, playtest
+  notes). `knowledge.files` lists each file with its size, last change and
+  last author; a missing one shows on the card and is left out of the brief.
+- **`mcp`** — an MCP server only this project's runs get: `"server"` is
+  `{"command", "args", "env"}` or `{"url"}`. `mcpserver.run_config` gives a
+  run its `--mcp-config` file (eki's registry merged with the project's
+  servers, for that run) and Codex's `-c` flags; nothing is written into
+  `~/.claude`, `~/.codex` or `~/.eki/mcp.json`. Env values show masked
+  (`mcpserver.public`).
 
 **The bare-agent rule.** `"bare": true` means no built-in skills, only its
 system prompt, strictly: Claude Code with `prompt.md` as its whole system

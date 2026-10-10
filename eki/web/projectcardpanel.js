@@ -3,7 +3,18 @@
 // the saved value comes back), an agent's prompt.md and its bare switch, Run (eki use <name> <args>
 // through the engine, polled every second), its last 20 uses, and an agent's sessions. A card from
 // the pool shows its settings read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
+// A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro), close()},
+// from cardknowledge.js, cardmcp.js) gets a section under its title; passive kinds have no Run or Uses.
 (function () {
+  window.projectCardKinds = window.projectCardKinds || {};
+  const PASSIVE = ["knowledge", "mcp"];                    // eki/components PASSIVE: read or attached, never called
+  for (const f of ["cardknowledge.js", "cardmcp.js"]) {
+    if (document.querySelector && !document.querySelector(`script[src="/ui/${f}"]`)) {
+      const t = document.createElement("script");
+      t.src = "/ui/" + f; t.async = false;
+      document.head.appendChild(t);
+    }
+  }
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const P = { el: null, pid: null, card: null, ro: "", ctx: null, last: {}, problems: {}, err: {},
               run: null, uses: null, use: null, useData: null, sessions: null, sess: null, sessData: null, shots: {} };
@@ -17,6 +28,8 @@
   const ago = (t) => P.ctx ? P.ctx.ago(t) : "";
   const editable = () => !P.ro && P.card.editable && !P.card.ref;
   const isAgent = () => P.card.kind === "agent";
+  const passive = () => PASSIVE.includes(P.card.kind);
+  const kindPart = () => window.projectCardKinds[P.card.kind] || null;
   const secs = (s) => s == null || s === "" ? "" : `${Math.round(Number(s) * 10) / 10} s`;
 
   // ---- settings -------------------------------------------------------------------------------
@@ -260,23 +273,28 @@
   }
 
   function frame() {
-    const agent = isAgent();
+    const agent = isAgent(), part = kindPart();
+    P.framed = part;
     P.el.innerHTML = `<div class="pj-card pp">
       <div class="pp-head"></div>
+      ${part ? `<h4 class="pp-h">${esc(part.title)}</h4><div class="pp-kind"></div>` : ""}
       <h4 class="pp-h">Settings</h4><div class="pp-settings"></div>
       ${agent ? '<h4 class="pp-h">Prompt</h4><div class="pp-prompt"></div><div class="pp-prompt-err"></div>' : ""}
       ${P.card.kind === "skills" ? '<h4 class="pp-h">Skills</h4><div class="pp-skills"></div>' : ""}
-      <h4 class="pp-h">Run</h4>
+      ${passive() ? "" : `<h4 class="pp-h">Run</h4>
       <form class="pj-row pp-runform" autocomplete="off"><input class="grow pp-args" placeholder="args or focus for eki use ${esc(P.card.name)}" spellcheck="false"${P.ro ? " disabled" : ""}>
         <button type="submit" class="pj-btn primary"${P.ro ? " disabled" : ""}>Run</button></form>
       <div class="pp-runout"></div>
-      <h4 class="pp-h">Uses <span class="dim">last 20</span></h4><div class="pp-uses"></div>
+      <h4 class="pp-h">Uses <span class="dim">last 20</span></h4><div class="pp-uses"></div>`}
       ${agent ? '<h4 class="pp-h">Sessions</h4><div class="pp-sessions"></div>' : ""}</div>`;
     P.last = {};
   }
 
   function draw() {
+    if (kindPart() !== P.framed) frame();         // a kind's part registered after the card opened
     put(".pp-head", head());
+    const part = kindPart(), box = q(".pp-kind");
+    if (part && box) part.draw(box, P.card, P.pid, P.ro);
     const a = document.activeElement;
     const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea");
     if (!(typing && a.closest(".pp-settings"))) put(".pp-settings", settings());
@@ -319,7 +337,7 @@
     }
     frame();
     draw();
-    loadUses();
+    if (!passive()) loadUses();
     loadSessions();
   }
 
@@ -329,16 +347,21 @@
     if (!P.card || !P.el || card.name !== P.card.name) return;
     P.card = card; P.ro = ro;
     draw();
-    loadUses();
+    if (!passive()) loadUses();
     if (P.sessions && !P.sess) loadSessions();
   }
 
   function close() {
     window.projectInstructions && projectInstructions.close();
+    const part = P.card && kindPart();
+    if (part && part.close) part.close();
     if (P.run) clearTimeout(P.run.timer);
     if (P.el) P.el.innerHTML = "";
-    Object.assign(P, { card: null, run: null, last: {} });
+    Object.assign(P, { card: null, run: null, last: {}, framed: null });
   }
 
-  window.projectCardPanel = { open, update, close };
+  // a kind's part arrived: the open card drawn again with it
+  function redraw() { if (P.card && P.el) draw(); }
+
+  window.projectCardPanel = { open, update, close, redraw };
 })();

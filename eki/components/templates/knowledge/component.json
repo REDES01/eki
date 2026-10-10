@@ -1,0 +1,6 @@
+{
+  "kind": "knowledge",
+  "about": "owner-approved decisions, newest first; supersedes older docs",
+  "files": ["design/DECISIONS.md"],
+  "read": "always"
+}

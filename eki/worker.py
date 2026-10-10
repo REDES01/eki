@@ -21,8 +21,8 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import asks, capacity, components, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store, transient
-from .components import skillcard
+from . import asks, capacity, components, files, db, models, observe, paths, providers, quota, routing, skills, store, transient
+from .components import knowledge, mcpserver, skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
 
@@ -80,16 +80,15 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         linked = skillcard.codex_dir(cards, r["id"])
         if linked:
             turn.extra["codex_skills"] = linked
-    turn.extra["claude_mcp"] = mcp.claude_config()
-    turn.extra["codex_config"] = mcp.codex_config()
+    turn.extra["claude_mcp"], turn.extra["codex_config"] = mcpserver.run_config(turn.cwd, r["id"], conn)
     if r["model"]:
         turn.extra["model"] = r["model"]
     if r["effort"]:
         turn.extra["effort"] = r["effort"]
     if r["row"] != "chore":                     # which components it can reach, and how to call them
-        line = components.brief(turn.cwd, conn)
-        if line:
-            turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
+        for line in (components.brief(turn.cwd, conn), knowledge.brief(turn.cwd, conn)):
+            if line:
+                turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
     return turn
 
 

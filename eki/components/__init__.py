@@ -50,7 +50,10 @@ class Result:
 
 KINDS = {'service': 'eki.components.service', 'assets': 'eki.components.assets', 'agent': 'eki.components.agent',
          'skills': 'eki.components.skillcard', 'instructions': 'eki.components.instructions',
-         'serve': 'eki.components.serve'}
+         'serve': 'eki.components.serve', 'knowledge': 'eki.components.knowledge',
+         'mcp': 'eki.components.mcpserver'}
+#: kinds that are read or attached, never called with `eki use`
+PASSIVE = ('knowledge', 'mcp')
 ACCESS = ('queue', 'exclusive', 'shared')
 NAME = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 RESERVED = {'sessions'}
@@ -283,7 +286,8 @@ def entries(found: Dict[str, Component], errors: List[Tuple[str, str]]) -> List[
 
 def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
     found, _ = find(folder, conn)
-    if not found:
+    callable_ = [c for c in found.values() if c.kind not in PASSIVE]
+    if not callable_:
         return ''
-    each = '; '.join(f'{c.name} — {c.spec.get("about", "")}' for c in found.values())
+    each = '; '.join(f'{c.name} — {c.spec.get("about", "")}' for c in callable_)
     return f'Components you can call with `eki use <name> [args…]` (`eki use` lists them): {each}'

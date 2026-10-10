@@ -19,20 +19,22 @@ _BATCH = 200
 
 
 def pictures(conn: sqlite3.Connection, limit: int = 60,
-             before: Optional[float] = None) -> List[Dict[str, Any]]:
+             before: Optional[float] = None, project: Optional[str] = None) -> List[Dict[str, Any]]:
     """Up to `limit` pictures still on disk, newest first; `before` (an event
-    time) pages back past the ones already shown."""
+    time) pages back past the ones already shown; `project` keeps the ones
+    drawn in that project's chats (`threads.project`)."""
     out: List[Dict[str, Any]] = []
     where, args = "", []                     # type: str, List[Any]
     if before is not None:
         where, args = " AND e.t < ?", [float(before)]
+    own, mine = ("", []) if project is None else (" AND t.project = ?", [project])  # type: str, List[Any]
     while len(out) < limit:
         rows = conn.execute(
             "SELECT e.id, e.t, e.data, r.id AS run, r.thread_id, r.prompt, r.row, r.provider, "
             " t.title FROM events e JOIN runs r ON r.id = e.run_id "
             "LEFT JOIN threads t ON t.id = r.thread_id "
-            "WHERE e.kind = 'tool' AND json_extract(e.data, '$.name') = 'image'" + where +
-            " ORDER BY e.t DESC, e.id DESC LIMIT ?", (*args, _BATCH)).fetchall()
+            "WHERE e.kind = 'tool' AND json_extract(e.data, '$.name') = 'image'" + own + where +
+            " ORDER BY e.t DESC, e.id DESC LIMIT ?", (*mine, *args, _BATCH)).fetchall()
         for e in rows:
             path = json.loads(e["data"]).get("path")
             if path and os.path.isfile(path):

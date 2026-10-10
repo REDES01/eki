@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import api, api_settings, api_station, db, observe
+from . import api, api_projects, api_settings, api_station, db, observe
 
 log = logging.getLogger("eki.server")
 
@@ -198,6 +198,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._call(api_station.journal, q.get("since"), q.get("kind"))
         if p == "/api/digests":
             return self._call(api_station.digests)
+        if p == "/api/projects":
+            return self._call(api_projects.projects_list)
+        m = re.fullmatch(r"/api/projects/([\w.-]+)", p)
+        if m:
+            return self._call(api_projects.show, m.group(1))
         self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
@@ -241,6 +246,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._call(api_station.undo, m.group(1))
         if p == "/api/digests/write":
             return self._call(api_station.write_digest)
+        return self._projects_post(p, body)
+
+    def _projects_post(self, p: str, body: dict) -> None:
+        if p == "/api/projects":
+            return self._call(api_projects.create, body)
+        m = re.fullmatch(r"/api/projects/([\w.-]+)/(folder|clone|instructions)", p)
+        if m:
+            pid, action = m.group(1), m.group(2)
+            if action == "folder":
+                return self._call(api_projects.set_folder, pid, body)
+            if action == "clone":
+                return self._call(api_projects.clone_home, pid)
+            return self._call(api_projects.write_instructions, pid)
         self._json({"error": "not found"}, 404)
 
 

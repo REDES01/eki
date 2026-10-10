@@ -15,6 +15,11 @@ def home() -> Path:
     return root
 
 
+def user_home() -> Path:
+    """The person's own home, where their project folders live (`~/<name>`)."""
+    return Path(os.environ.get("EKI_USER_HOME") or Path.home())
+
+
 def db() -> Path:
     return home() / "eki.db"
 

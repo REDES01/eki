@@ -235,6 +235,8 @@ ADDED = [
     ("projects", "install_cmd", "TEXT"),   # run once in the clone before the first goal
     ("projects", "ignored", "TEXT"),    # JSON list of issue numbers open when it was dropped
     ("items", "judged_by", "TEXT"),     # the check that judged it, and where it came from
+    ("projects", "folder", "TEXT"),     # your real folder, where its chats run (eki/projectchats.py)
+    ("threads", "project", "TEXT"),     # projects.id or "eki"; NULL: a chat outside any project
 ]
 
 

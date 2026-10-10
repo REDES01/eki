@@ -28,12 +28,17 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
         raise ValueError(f"{where} is not a git repo")
     if not workspace.git(where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
         raise ValueError(f"{where} has no commit yet")
-    got = conn.execute("SELECT id FROM projects WHERE path=?", (str(where),)).fetchone()
-    if got:
+    got = conn.execute("SELECT id, branch, repo FROM projects WHERE path=?", (str(where),)).fetchone()
+    if got and (got["branch"] or got["repo"]):
         return got["id"]
     branch = branch or workspace.git(where, "symbolic-ref", "--short", "-q", "HEAD", check=False)
     if not branch:
         raise ValueError(f"{where} is on no branch: say which with --branch")
+    if got:                                              # a chat-only project: its background work starts here
+        with db.tx(conn):
+            conn.execute("UPDATE projects SET branch=?, check_cmd=COALESCE(?, check_cmd) WHERE id=?",
+                         (branch, check, got["id"]))
+        return got["id"]
     pid = store.new_id()
     with db.tx(conn):
         conn.execute("INSERT INTO projects(id, name, path, branch, check_cmd, created_at) VALUES (?,?,?,?,?,?)",

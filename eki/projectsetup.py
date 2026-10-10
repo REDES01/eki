@@ -131,6 +131,9 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
         where = Path(p["path"]).expanduser().resolve()
         if where == home or home in where.parents or not where.is_dir():
             continue
+        if not conn.execute("SELECT 1 FROM goals WHERE project=? UNION ALL SELECT 1 FROM standing "
+                            "WHERE project=? LIMIT 1", (p["id"], p["id"])).fetchone():
+            continue                                     # a chat-only project: nothing to finish or move
         repo = github.repo_of(where)
         if repo is None:
             continue

@@ -1,7 +1,7 @@
 // Settings: who eki's own jobs go to (routing.json "roles") and each provider's read model list,
 // over GET /api/models (eki/api_models.py). It registers the "jobs" section with settings.js —
-// roles(d) and the on-demand checker switch — and settingsproviders.js puts line(name) under
-// each provider card. Each role is one target picker (settingstarget.js). Only the draft
+// roles(d), one grouped line per role, and the on-demand checker switch — and settingsproviders.js puts line(name) under
+// each provider card. Each role's control is one target picker (settingstarget.js). Only the draft
 // changes; Save writes through /api/settings/ as ever.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
@@ -9,8 +9,7 @@
   const OFFABLE = ["reviewer", "chores"];                                       // roles.OFFABLE
   const LABELS = { router: "Router", planner: "Planner", reviewer: "Reviewer", chores: "Chores" };
   const M = { got: null, err: "" };
-  const amber = (s) => (s ? `<div class="dim set-amber">${esc(s)}</div>` : "");
-  const field = (label, html) => `<label class="set-field"><span>${label}</span>${html}</label>`;
+  const amber = (s) => (s ? `<div class="set-amber">${esc(s)}</div>` : "");
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "never");
 
   async function load() {
@@ -31,18 +30,19 @@
 
   const roleOf = (d, r) => (d.roles && typeof d.roles === "object" && d.roles[r]) || "";
 
+  // one line per role: its name, who has it now (and why, when that's a fallback), its picker
   function picker(d, r) {
     const got = M.got.roles[r];
     const extra = [["", `default (${settingsTarget.key(got.default) || "none"})`]].concat(OFFABLE.includes(r) ? [["off", "off"]] : []);
     const tgt = settingsTarget.html(roleOf(d, r), { names: Object.keys(M.got.providers), models: M.got.providers, extra, attrs: `data-role="${r}"` });
-    const now = got.provider ? got.shown || `${got.provider} → ${got.model || "its default"}` : "nobody";
-    return field(esc(LABELS[r]), `${tgt}<div class="dim">now ${esc(now)}</div>${amber(got.why && got.why !== "off" ? got.why : "")}`);
+    const now = got.provider ? "now " + (got.shown || `${got.provider} · ${got.model || "its default"}`) : "nobody";
+    return settingsForm.line(esc(LABELS[r]), tgt, esc(now) + amber(got.why && got.why !== "off" ? got.why : ""));
   }
 
   function roles(d) {
     if (!M.got) return `<div class="dim">${esc(M.err || "Reading the model lists…")}</div>`;
-    // four pickers, always shown: each of eki's jobs is a thing you set, not a detail to unfold
-    return `<div data-roles><div class="set-grid">${ROLES.map((r) => picker(d, r)).join("")}</div></div>`;
+    // four lines, always shown: each of eki's jobs is a thing you set, not a detail to unfold
+    return `<div data-roles>${settingsForm.group("Who does eki's jobs", ROLES.map((r) => picker(d, r)).join(""))}</div>`;
   }
 
   // one picker changed: set roles[role], or drop it (and an empty roles) for the default.
@@ -82,8 +82,9 @@
   // the Jobs section: who each of eki's jobs goes to, and whether the prompt check may wake a model
   const jobs = {
     title: "Jobs", file: "routing",
-    html: (d) => `<section class="set-sect"><h3>Jobs</h3>${settingsModels.roles(d)}
-      ${settingsForm.check(d.checker_wakes !== false, 'data-f="checker_wakes"', "Wake an on-demand checker model for the prompt check")}</section>`,
+    html: (d) => `<section class="set-sect">${settingsModels.roles(d)}${settingsForm.group("The prompt check",
+      settingsForm.line("Wake an on-demand checker model for the prompt check",
+        settingsForm.check(d.checker_wakes !== false, 'data-f="checker_wakes"', "")))}</section>`,
     edit(el, d) {
       if (el.dataset.f === "checker_wakes") { d.checker_wakes = el.checked; return false; }
       return el.closest("[data-roles]") ? editRole(el, d) : false;

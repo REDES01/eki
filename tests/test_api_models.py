@@ -107,7 +107,7 @@ def test_settings_js_shrank_and_the_models_block_loads_before_it(web):
 
 STUB = """
 global.window = global; global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
-require(process.argv[2]); require(process.argv[3]);
+require(process.argv[2]); require(process.argv[3]); require(process.argv[5]);   // settingsform.js: roles() draws lines with it
 const [got, draft, rows] = JSON.parse(process.argv[4]);
 global.fetch = async () => ({ ok: true, json: async () => got });
 // a fake wrapper: value() reads [data-tp]/[data-tm]/[data-te] and the changed element
@@ -148,7 +148,7 @@ def _node(tmp_path, got, draft, rows):
     stub = tmp_path / "stub.js"
     stub.write_text(STUB)
     out = subprocess.run(["node", str(stub), str(WEB / "settingstarget.js"), str(WEB / "settingsmodels.js"),
-                         json.dumps([got, draft, rows])], capture_output=True, text=True, timeout=30, check=True)
+                         json.dumps([got, draft, rows]), str(WEB / "settingsform.js")], capture_output=True, text=True, timeout=30, check=True)
     return json.loads(out.stdout)
 
 

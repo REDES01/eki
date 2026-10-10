@@ -34,7 +34,7 @@ def test_the_page_loads_the_target_picker_and_settings_js_stays_small(web):
 
 def test_every_role_has_its_own_picker_in_view(web):
     _, js = get(f"{web}/ui/settingsmodels.js")
-    assert "ROLES.map((r) => picker(d, r))" in js and "roles-open" not in js
+    assert "ROLES.map((r) => picker(d, r))" in js and "settingsForm.line(" in js and "roles-open" not in js
 
 
 def test_the_jobs_section_holds_the_roles_and_the_checker_switch(web):

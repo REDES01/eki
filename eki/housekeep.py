@@ -9,7 +9,8 @@ clones of GitHub repos — clone, guessed check, install once, retired folder
 rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on GitHub (eki/issues.py, prs.py, prfollow.py,
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
 local model its patch notes and triage (eki/digestprose.py), queue a notice for each goal
-that ended (eki/notifygoals.py), and push the
+that ended (eki/notifygoals.py), fire the scheduled prompts that are due and
+queue a notice when one's chat ends (eki/schedule.py), and push the
 queued notices to the person's phone through ntfy (eki/notify.py), keep the
 chat list (eki/threadkeep.py: mark eki's own threads, purge deleted ones,
 title new chats), and read a
@@ -27,7 +28,7 @@ import time
 from typing import Callable, Dict, List, Tuple
 
 from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
-               prmirror, projectsetup, prs, score, selfpick, standing, threadkeep)
+               prmirror, projectsetup, prs, schedule, score, selfpick, standing, threadkeep)
 
 log = logging.getLogger("eki.housekeep")
 
@@ -99,6 +100,8 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("digestprose", digestprose.tick),
     ("models", _models),
     ("threads", threadkeep.tick),
+    ("schedule", schedule.tick),
+    ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),
     ("notify", notify.tick),
 ]

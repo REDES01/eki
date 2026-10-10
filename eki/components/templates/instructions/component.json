@@ -1,0 +1,5 @@
+{
+  "kind": "instructions",
+  "about": "the project's agent instructions (AGENTS.md), read by Claude Code and Codex",
+  "file": "AGENTS.md"
+}

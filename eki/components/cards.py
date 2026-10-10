@@ -2,7 +2,8 @@
 
 A card is a folder `components/<name>/`: a copy of a template, or a pool reference card holding
 exactly `{"pool": "<name>"}`. Adding never overwrites; removing moves the folder to the macOS
-Trash, never deletes. Nothing here commits or stages anything: the folder is the person's.
+Trash, never deletes. An `instructions` card writes the project's starter AGENTS.md and CLAUDE.md
+when they are missing. Nothing here commits or stages anything: the folder is the person's.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from .. import components, mcp, paths
-from . import NAME, RESERVED
+from . import NAME, RESERVED, instructions
 
 
 def templates() -> List[Path]:
@@ -83,6 +84,11 @@ def add_template(base: Path, template: str, name: Optional[str] = None) -> Tuple
     if isinstance(spec, dict) and "mcp_servers" in spec:
         said = register_mcp(spec)
         f.write_text(json.dumps(spec, indent=2) + "\n")
+    if isinstance(spec, dict) and spec.get("kind") == "instructions":
+        if base.resolve() == components.pool_dir().resolve():
+            said.append("a pool instructions card writes no files: attach it to a project")
+        else:
+            said += instructions.ensure_files(base.parent, spec.get("file", "AGENTS.md"))
     return out, said
 
 

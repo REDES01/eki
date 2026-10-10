@@ -6,12 +6,13 @@
   const block = (d) => (d.self && typeof d.self === "object" ? d.self : {});
 
   function form(d) {
-    const me = block(d), { field } = settingsForm;
+    const me = block(d), group = settingsForm.group, line = settingsForm.line;
     const opt = (v, cur, label) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label || v)}</option>`;
-    return `<section class="set-sect"><h3>eki self</h3><div class="set-grid" data-self>
-        ${field("Autonomy", `<select class="set-in" data-f="autonomy">${MODES.map((m) => opt(m, me.autonomy || "propose")).join("")}</select>`)}
-        ${field("Parallel", `<input class="set-in" type="number" min="1" data-f="parallel" value="${esc(me.parallel == null ? "" : me.parallel)}" placeholder="3">`)}
-      </div></section>`;
+    return `<div data-self>${group("eki self",
+        line("Autonomy", `<select class="set-in" data-f="autonomy">${MODES.map((m) => opt(m, me.autonomy || "propose")).join("")}</select>`,
+          "propose waits for you; apply queues fit items by itself") +
+        line("Parallel", `<input class="set-in" type="number" min="1" data-f="parallel" value="${esc(me.parallel == null ? "" : me.parallel)}" placeholder="3">`,
+          "how many items build at once; empty is eki's default"))}</div>`;
   }
 
   function edit(el, d) {

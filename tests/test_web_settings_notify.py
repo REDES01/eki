@@ -63,9 +63,27 @@ def test_the_notifications_section_and_its_script_are_served(web):
     code, js = get(f"{web}/ui/settingsnotify.js")
     assert code == 200
     for want in ("Notifications", 'type="password"', "data-notify", "goal_done", "needs_you",
-                 "delete d.notify", "window.settingsNotify"):
+                 "delete d.notify", "window.settingsNotify", "settingsForm.line",
+                 'settings.section("notifications"'):
         assert want in js
+    assert "settingsForm.group" in js
     _, page = get(web + "/")
     assert page.index("/ui/settingsnotify.js") < page.index("/ui/settings.js")
-    assert 'settings.section("notifications"' in js
     assert "html: (d) => form(d)" in js and "edit: (el, d) => edit(el, d)" in js
+
+
+def test_the_eki_self_section_is_served_as_grouped_lines(web):
+    code, js = get(f"{web}/ui/settingsself.js")
+    assert code == 200
+    for want in ('settings.section("self"', "autonomy", "parallel", 'file: "routing"', 'min="1"',
+                 'placeholder="3"', "delete d.self.parallel", "settingsForm.group", "settingsForm.line"):
+        assert want in js
+    _, page = get(web + "/")
+    assert page.index("/ui/settingsself.js") < page.index("/ui/settings.js")
+
+
+def test_both_section_files_stay_small():
+    from pathlib import Path
+    web_dir = Path(__file__).resolve().parent.parent / "eki" / "web"
+    for name in ("settingsnotify.js", "settingsself.js"):
+        assert len((web_dir / name).read_text().splitlines()) < 400, name

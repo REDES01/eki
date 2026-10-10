@@ -9,19 +9,16 @@
   const SERVER = "https://ntfy.sh";                                              // notify.DEFAULTS
   const block = (d) => (d.notify && typeof d.notify === "object" ? d.notify : {});
 
+  // a group of lines: where to send, the secret topic, then one switch per event
   function form(d) {
-    const n = block(d);
+    const n = block(d), group = settingsForm.group, line = settingsForm.line;
     const events = Array.isArray(n.events) ? n.events : KINDS;
-    const box = (k) => `<label class="set-check"><input type="checkbox" data-event="${k}"${events.includes(k) ? " checked" : ""}> ${esc(LABELS[k])}</label>`;
-    const field = (label, html) => `<label class="set-field"><span>${label}</span>${html}</label>`;
-    return `<section class="set-sect"><h3>Notifications</h3><div data-notify>
-      <div class="set-grid">
-        ${field("Server", `<input class="set-in" data-f="server" value="${esc(n.server)}" placeholder="${SERVER}" spellcheck="false">`)}
-        ${field("Topic <i class=\"dim\">empty is off; a secret</i>", `<input class="set-in" type="password" data-f="topic" value="${esc(n.topic)}" placeholder="off" autocomplete="off" spellcheck="false">`)}
-      </div>
-      ${field("Send", `<div class="set-checks">${KINDS.map(box).join("")}</div>`)}
-      <div class="dim">Subscribe to the topic in the ntfy app on the iPhone; the Watch mirrors it. <code>eki notify test</code> sends one.</div>
-    </div></section>`;
+    const sw = (k) => line(esc(LABELS[k]), `<label class="set-check"><input type="checkbox" data-event="${k}"${events.includes(k) ? " checked" : ""} aria-label="${esc(LABELS[k])}"></label>`, `<code>${k}</code>`);
+    return `<div data-notify>${group("Notifications",
+        line("Server", `<input class="set-in" data-f="server" value="${esc(n.server)}" placeholder="${SERVER}" spellcheck="false">`, "the ntfy server") +
+        line("Topic", `<input class="set-in" type="password" data-f="topic" value="${esc(n.topic)}" placeholder="off" autocomplete="off" spellcheck="false">`, "empty is off; a secret. Subscribe to it in the ntfy app on the iPhone (the Watch mirrors it); <code>eki notify test</code> sends one"))}
+      ${group("Send when", KINDS.map(sw).join(""))}
+    </div>`;
   }
 
   // one input changed: put it in d.notify, or take it out when it is back to its default

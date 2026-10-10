@@ -39,8 +39,8 @@ def spawned(monkeypatch):
 def comp(name, **spec):
     d = components.pool_dir() / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "component.json").write_text(json.dumps({"kind": "service", "about": name, "serve": "x",
-                                                  "health": "y", "call": "z", **spec}))
+    served = {} if "provider" in spec else {"serve": "x", "url": "http://127.0.0.1:1", "health": "y", "call": "z"}
+    (d / "component.json").write_text(json.dumps({"kind": "service", "about": name, **served, **spec}))
 
 
 def caller(conn):

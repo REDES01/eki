@@ -255,7 +255,7 @@
         <button type="button" class="pj-btn" data-pp="close">Close</button></div>
       ${c.about ? `<div class="pj-sub">${esc(c.about)}</div>` : ""}
       ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}
-      ${(c.notes || []).map((n) => `<div class="dim">${esc(n)}</div>`).join("")}
+      ${(c.kind === "skills" ? [] : c.notes || []).map((n) => `<div class="dim">${esc(n)}</div>`).join("")}
       <div class="dim pp-path"><code>${esc(c.card || c.folder || "")}</code></div>`;
   }
 
@@ -265,6 +265,7 @@
       <div class="pp-head"></div>
       <h4 class="pp-h">Settings</h4><div class="pp-settings"></div>
       ${agent ? '<h4 class="pp-h">Prompt</h4><div class="pp-prompt"></div><div class="pp-prompt-err"></div>' : ""}
+      ${P.card.kind === "skills" ? '<h4 class="pp-h">Skills</h4><div class="pp-skills"></div>' : ""}
       <h4 class="pp-h">Run</h4>
       <form class="pj-row pp-runform" autocomplete="off"><input class="grow pp-args" placeholder="args or focus for eki use ${esc(P.card.name)}" spellcheck="false"${P.ro ? " disabled" : ""}>
         <button type="submit" class="pj-btn primary"${P.ro ? " disabled" : ""}>Run</button></form>
@@ -283,6 +284,10 @@
     put(".pp-runout", runPart());
     put(".pp-uses", usesPart());
     put(".pp-sessions", sessionsPart());
+    if (P.card.kind === "skills" && window.projectCardSkills) {   // projectcardskills.js: its list and Add skill
+      projectCardSkills.draw(q(".pp-skills"), P.card, { api: P.ctx.api, url, ro: !editable(),
+        done: (card) => { if (card) { P.card = card; draw(); } P.ctx.reload(); } });
+    }
   }
 
   function onEvent(e) {

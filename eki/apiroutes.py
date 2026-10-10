@@ -12,6 +12,7 @@ import re
 from typing import Callable, List, Optional, Tuple
 
 from . import (api_artifacts, api_cardadd, api_cardedit, api_cardrun, api_cards, api_cardsessions,
+               api_cardskills,
                api_components, api_customize, api_projects, api_schedule)
 
 Route = Tuple[str, str, Callable]
@@ -21,7 +22,7 @@ def routes() -> List[Route]:
     """Read on every call, so a route added to an `api_*.ROUTES` is live."""
     return (api_projects.ROUTES + api_artifacts.ROUTES + api_schedule.ROUTES + api_customize.ROUTES
             + api_components.ROUTES + api_cards.ROUTES + api_cardadd.ROUTES + api_cardedit.ROUTES
-            + api_cardrun.ROUTES + api_cardsessions.ROUTES)
+            + api_cardrun.ROUTES + api_cardsessions.ROUTES + api_cardskills.ROUTES)
 
 
 ROUTES: List[Route] = routes()

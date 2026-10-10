@@ -64,11 +64,17 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
             prompt = agent.prompt_text(c)
         except OSError:
             prompt = ""
-    return {"name": c.name, "kind": c.kind, "about": c.spec.get("about", ""), "scope": c.scope,
-            "ref": c.name if c.card else "", "card": str(c.card or c.folder), "folder": str(c.folder),
-            "error": "", "notes": components._notes(c), "spec": c.spec, "prompt": prompt,
-            "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
-            "last_use": uses.last_use(conn, c.name, root)}
+    out = {"name": c.name, "kind": c.kind, "about": c.spec.get("about", ""), "scope": c.scope,
+           "ref": c.name if c.card else "", "card": str(c.card or c.folder), "folder": str(c.folder),
+           "error": "", "notes": components._notes(c), "spec": c.spec, "prompt": prompt,
+           "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
+           "last_use": uses.last_use(conn, c.name, root)}
+    if c.kind == "skills":
+        from .components import skillcard
+        good, broken = skillcard.held(c.folder)
+        out["skills"] = [{"name": s["name"], "description": s["description"]} for s in good]
+        out["broken_skills"] = [{"path": where, "error": why} for where, why in broken]
+    return out
 
 
 def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[str, Any]:

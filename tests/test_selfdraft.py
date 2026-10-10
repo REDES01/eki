@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from eki import paths, selfdraft, selfwork, store, workspace
+from eki import paths, roles, selfdraft, selfwork, store, workspace
 from conftest import run_inline
 from test_self import src, says  # noqa: F401 — the source fixture and what the fake says
 
@@ -94,6 +94,18 @@ def test_a_failed_draft_run_fails_the_goal(conn, src):
 def test_planner_defaults(home):
     assert selfdraft.planner() == ("fake", None)
     set_planner(model="opus")
+    assert selfdraft.planner() == ("fake", "opus")
+    set_planner(provider="fake2")
+    assert selfdraft.planner() == ("fake2", None)
+
+
+def test_the_planner_role_wins_over_self_planner(home):
+    set_planner(provider="fake", model="opus")
+    roles.set_role("planner", "fake2:top-model")
+    assert selfdraft.planner() == ("fake2", "top-model")
+    roles.set_role("planner", "bare")                    # a planner needs tools: back to self.planner
+    assert selfdraft.planner() == ("fake", "opus")
+    roles.set_role("planner", "default")
     assert selfdraft.planner() == ("fake", "opus")
 
 

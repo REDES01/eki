@@ -1,8 +1,13 @@
 """The digest's patch notes and triage from the local model (eki/digestprose.py)."""
 import json
+
+import pytest
 import re
 
 from eki import chores, db, digest, digestprose, housekeep, observe, patchnotes, store
+
+#: the fake stands in for the local model on chores
+pytestmark = pytest.mark.usefixtures("text_fake")
 
 NOTES = """Pieces now merge on their own, and the Station reads at a glance.
 

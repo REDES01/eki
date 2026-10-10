@@ -157,3 +157,11 @@ def gh_repo(proj, fake_gh, tmp_path):
     fake_gh.answer(["api", "user"], "me")
     fake_gh.bare = bare
     return fake_gh
+
+
+@pytest.fixture
+def text_fake(monkeypatch):
+    """The fake program stands in for the local model on chores: count its kind
+    among those that answer a text role (eki/roles.py)."""
+    from eki import roles
+    monkeypatch.setattr(roles, "TEXT_KINDS", roles.TEXT_KINDS + ("fake",))

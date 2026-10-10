@@ -1,10 +1,15 @@
 """First drafts of fault items' specs: the `brief` chore (eki/faults.py)."""
 import json
 
+import pytest
+
 from eki import chores, db, faults, paths, selfwork, store
 from conftest import run_inline
 from test_faults import fault, goals, items_of, src  # noqa: F401 — the source fixture
 from test_self import says
+
+#: the fake stands in for the local model on chores
+pytestmark = pytest.mark.usefixtures("text_fake")
 
 
 def settle(**kw):

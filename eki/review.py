@@ -2,12 +2,13 @@
 "Judging").
 
 When gate 1 is green the item goes to `reviewing` and a `review` chore asks
-the local model (eki/chores.py) whether the diff does what the spec and the
+the reviewer (routing.json `roles.reviewer`, by default the local model;
+eki/chores.py) whether the diff does what the spec and the
 builder's summary say. Its last `REVIEW:` line decides: `ok` proposes the
 item; a first `no` sends it back to be built once more with the objection in
 its brief; a second `no` proposes it with the objection kept, and the queue
-never takes it by itself. A review that can't judge — no local model, the
-setting off, a failed run or an answer without the line — proposes the item
+never takes it by itself. A review that can't judge — no reviewer that can run,
+the setting off, a failed run or an answer without the line — proposes the item
 with `none: <why>`: the reviewer never holds an item it couldn't judge.
 
 Nothing is held in memory: `conclude` reads the item, its review run and the
@@ -20,7 +21,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import chores, db, integration, selfwork, store, workspace
+from . import chores, db, integration, roles, selfwork, store, workspace
 
 GOAL_MAX = 2000
 DIFF_MAX = 40000
@@ -67,13 +68,14 @@ def start(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     """Called under db.tx when gate 1 is green: review the item, or propose it as it is."""
     if not selfwork.settings().get("review", True):
         return _settle(conn, it, "self.review is off")
-    if chores.local() is None:
-        return _settle(conn, it, "no local model")
     goal = conn.execute("SELECT text, owner FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     priority = "now" if goal is None or goal["owner"] == "you" else "background"
-    rid = chores.start(conn, "review", it["id"], prompt(conn, it), priority)
+    pick = roles.pick("reviewer", conn, background=priority == "background")
+    if pick.provider is None:
+        return _settle(conn, it, "the reviewer role is off" if pick.target == "off" else pick.why)
+    rid = chores.start(conn, "review", it["id"], prompt(conn, it), priority, role="reviewer")
     if rid is None:
-        return _settle(conn, it, "no local model")
+        return _settle(conn, it, "no reviewer")
     selfwork._set(conn, it["id"], state="reviewing", review_run=rid, review=None)
     return [f"item {it['id']}: fit — reviewing ({rid[:8]})"]
 

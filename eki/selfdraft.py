@@ -2,22 +2,20 @@
 plan (a goal becomes items) — docs/self-build.md, "The draft".
 
 Both run in a read-only worktree of the integration repo, pinned to the
-planner (routing.json `self.planner`: the strongest model eki has). The
+planner (the `planner` role, eki/roles.py: the strongest model eki has). The
 goals table holds everything: a restart mid-draft just waits for the run,
 and `conclude` rechecks the goal's state under a transaction, so it moves a
 goal on exactly once.
 """
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, integration, paths, projectbrief, projects, selfbrief, store, workspace
-from .routing import table
+from . import db, integration, projectbrief, projects, roles, selfbrief, store, targets, workspace
 
 #: the old eki, read as reference by a draft when it is there
 OLD = "~/eki-2026-09-26"
@@ -33,16 +31,15 @@ item depend on every other item."""
 
 
 def planner() -> Tuple[str, Optional[str]]:
-    """(provider, model) for draft and plan runs. The provider defaults to the
-    `code` row's first choice; no model means the provider's default."""
-    try:
-        got = json.loads(paths.config("routing").read_text()).get("self") or {}
-    except (OSError, ValueError):
-        got = {}
-    want = got.get("planner") if isinstance(got.get("planner"), dict) else {}
-    provider = str(want.get("provider") or "").strip() or table.row("code")["targets"][0]
-    model = str(want.get("model") or "").strip() or None
-    return provider, model
+    """(provider, model) for draft and plan runs: the `planner` role
+    (eki/roles.py; by default `self.planner`, else the `code` row's first
+    choice). No model means the provider's default. When neither the role
+    nor its default can run, the default's provider still comes back, so the
+    run waits for it with its reason rather than go nowhere."""
+    pick = roles.pick("planner")
+    if pick.provider is not None:
+        return pick.provider, pick.model
+    return targets.provider_of(roles.default("planner")), None
 
 
 def _priority(owner: str) -> str:

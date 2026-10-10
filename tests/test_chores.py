@@ -1,8 +1,13 @@
-"""Chores: local-model jobs as runs (eki/chores.py)."""
+"""Chores: eki's own text jobs as runs, on their role (eki/chores.py)."""
 import json
 
-from eki import chores, db, engine, store
+import pytest
+
+from eki import capacity, chores, db, engine, providers, store
 from conftest import run_inline
+
+#: the fake stands in for the local model on chores
+pytestmark = pytest.mark.usefixtures("text_fake")
 
 
 def use_local(home, name="bare"):
@@ -17,26 +22,80 @@ def start(conn, kind="review", subject="it1", prompt="steps=1 look at this"):
 
 
 def test_no_local_model_skips_the_chore(conn):
-    assert chores.local() is None
     assert start(conn) is None
     c = chores.latest(conn, "review", "it1")
-    assert c["state"] == "skipped" and c["run_id"] is None
+    assert c["state"] == "skipped" and c["run_id"] is None and c["result"] == "no local model"
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
     assert chores.finished(conn, "review") == []
 
 
-def test_local_honours_off_and_falls_back_to_the_first_local_kind(home, conn):
+def test_off_or_nobody_skips_with_the_why_and_the_first_local_kind_is_the_default(home, conn, monkeypatch):
+    monkeypatch.setattr(capacity, "status", lambda conn, background=False: {
+        n: (True, "") for n in providers.config()})
     prov = json.loads((home / "providers.json").read_text())
     prov["mlx"] = {"kind": "local"}
     prov["mlx2"] = {"kind": "local"}
     (home / "providers.json").write_text(json.dumps(prov))
-    assert chores.local() == "mlx"
+    assert store.run(conn, start(conn))["provider"] == "mlx"
     use_local(home, "off")
-    assert chores.local() is None
+    assert start(conn, subject="it2") is None
+    assert chores.latest(conn, "review", "it2")["result"] == "the chores role is off"
     use_local(home, "nobody")
-    assert chores.local() is None
+    assert start(conn, subject="it3") is None
+    assert "nobody: no such provider" in chores.latest(conn, "review", "it3")["result"]
     use_local(home, "mlx2")
-    assert chores.local() == "mlx2"
+    assert store.run(conn, start(conn, subject="it4"))["provider"] == "mlx2"
+
+
+def set_roles(home, **want):
+    cfg = json.loads((home / "routing.json").read_text())
+    cfg["roles"] = want
+    (home / "routing.json").write_text(json.dumps(cfg))
+
+
+def test_a_chore_on_a_role_target_gets_its_provider_model_and_why(home, conn):
+    use_local(home)
+    prov = json.loads((home / "providers.json").read_text())
+    prov["fake2"]["models"] = {"fast": "small-1"}
+    (home / "providers.json").write_text(json.dumps(prov))
+    set_roles(home, chores="fake2:fast")
+    r = store.run(conn, start(conn))
+    assert (r["provider"], r["model"], r["row"], r["pinned"]) == ("fake2", "small-1", "chore", 1)
+    assert r["why"] == "chores → fake2:fast"
+    set_roles(home, chores="fake2:top")                   # an unpicked tier: its default, and why
+    r = store.run(conn, start(conn, subject="it3"))
+    assert r["model"] is None and r["why"] == "chores → fake2:top; fake2 has no top model picked; its default"
+    with db.tx(conn):                                     # a named role, not `chores`
+        rid = chores.start(conn, "review", "it2", "look", "now", role="reviewer")
+    assert store.run(conn, rid)["provider"] == "bare"
+
+
+def test_over_the_background_budget_a_chore_falls_back_to_local_with_the_why(home, conn, monkeypatch):
+    use_local(home)
+    set_roles(home, chores="fake2")
+
+    def status(conn, background=False):
+        out = {n: (True, "") for n in providers.config()}
+        if background:
+            out["fake2"] = (False, "kept for you: day share used")
+        return out
+    monkeypatch.setattr(capacity, "status", status)
+    r = store.run(conn, start(conn))                       # a background chore
+    assert r["provider"] == "bare" and r["model"] is None
+    assert r["why"] == "chores fake2 can't run (fake2: kept for you: day share used) → bare"
+    with db.tx(conn):
+        rid = chores.start(conn, "digest", "p", "look", "now")
+    assert store.run(conn, rid)["provider"] == "fake2"
+
+
+def test_a_role_that_cant_run_with_no_default_skips_with_the_why(home, conn, monkeypatch):
+    use_local(home)
+    set_roles(home, chores="fake2")
+    monkeypatch.setattr(capacity, "status", lambda conn, background=False: {
+        "fake2": (False, "limit reached"), "bare": (False, "not running")})
+    assert start(conn) is None
+    why = chores.latest(conn, "review", "it1")["result"]
+    assert "fake2: limit reached" in why and "bare: not running" in why
 
 
 def test_start_makes_a_pinned_run_on_the_chore_row(home, conn):

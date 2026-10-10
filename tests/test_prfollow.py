@@ -7,6 +7,9 @@ from eki import chores, db, github, paths, prfollow, selfwork, store, workspace
 from conftest import run_inline
 from test_project_goals import built, planned, says, src  # noqa: F401  (src is a fixture)
 
+#: the fake stands in for the local model on chores
+pytestmark = pytest.mark.usefixtures("text_fake")
+
 URL = "https://github.com/me/proj/pull/7"
 SEEN = "2026-09-28T10:00:00Z"
 

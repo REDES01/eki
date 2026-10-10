@@ -1,53 +1,50 @@
-"""Chores: jobs eki gives the local model — a review, a digest's prose, a
-fault's first brief.
+"""Chores: text jobs eki gives itself — a review, a digest's prose, a
+fault's first brief, a PR comment's triage.
 
-Each is an ordinary run, pinned to the local model on row `chore`, in a
-thread of its own, with a row in `chores` saying what it is for. Nothing
-is held in memory: the caller finds finished chores with `finished` and
-moves each on once with `close`, so a restart at any moment loses nothing.
-A chore run never hands off (eki/providers/local.py sends no handoff tool
-on this row, eki/worker.py fails one that tries), so it never reaches Claude.
+Each is an ordinary run on row `chore`, in a thread of its own, pinned to
+the provider and model its role picks (eki/roles.py: `reviewer` for the
+review, `chores` for the rest; by default the local model), with a row in
+`chores` saying what it is for. Nothing is held in memory: the caller finds
+finished chores with `finished` and moves each on once with `close`, so a
+restart at any moment loses nothing. A chore run never hands off
+(eki/providers/local.py sends no handoff tool on this row, eki/worker.py
+fails one that tries), and it reaches Claude or Codex only when you set its
+role there — and then as one call with no tools.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from typing import List, Optional
 
-from . import paths, providers, store
+from . import roles, store
 from .db import now
 
 ROW = "chore"
 KINDS = ("review", "digest", "brief")
 
 
-def local() -> Optional[str]:
-    """The local model chores go to: routing.json `self.local`, else the first
-    provider of kind `local`. None when it's "off" or there is none."""
-    try:
-        chosen = (json.loads(paths.config("routing").read_text()).get("self") or {}).get("local")
-    except (OSError, ValueError, AttributeError):
-        chosen = None
-    cfg = providers.config()
-    if chosen:
-        return chosen if chosen != "off" and chosen in cfg else None
-    return next((n for n, c in cfg.items() if c.get("kind") == "local"), None)
-
-
 def start(conn: sqlite3.Connection, kind: str, subject: str, prompt: str,
-          priority: str) -> Optional[str]:
-    """A chore's run, or None (a `skipped` chore) with no local model.
+          priority: str, role: str = "chores") -> Optional[str]:
+    """A chore's run on whoever does `role` now (eki/roles.py), or None — a
+    `skipped` chore with the pick's why — when nobody can (or the role is off).
 
     It writes without a transaction of its own: the caller holds `db.tx`, so
     the chore and whatever it is for change together."""
-    cid, name = store.new_id(), local()
-    if name is None:
+    cid = store.new_id()
+    pick = roles.pick(role, conn, background=priority == "background")
+    if pick.provider is None:
+        why = f"the {role} role is off" if pick.target == "off" else pick.why or f"no {role} model"
         conn.execute("INSERT INTO chores(id, kind, subject, state, result, created_at, ended_at)"
-                     " VALUES (?,?,?,'skipped','no local model',?,?)",
-                     (cid, kind, subject, now(), now()))
+                     " VALUES (?,?,?,'skipped',?,?,?)",
+                     (cid, kind, subject, why, now(), now()))
         return None
     tid = store.create_thread(conn, f"chore: {kind} {subject}", None)
-    rid = store.create_run(conn, tid, prompt, provider=name, priority=priority, row=ROW)
+    rid = store.create_run(conn, tid, prompt, provider=pick.provider, model=pick.model,
+                           priority=priority, row=ROW)
+    why = f"{role} → {pick.target}"
+    if pick.why:                               # a fallback names the role itself; a note doesn't
+        why = pick.why if pick.why.startswith(f"{role} ") else f"{why}; {pick.why}"
+    conn.execute("UPDATE runs SET why=? WHERE id=?", (why, rid))
     conn.execute("INSERT INTO chores(id, kind, subject, run_id, thread_id, created_at)"
                  " VALUES (?,?,?,?,?,?)", (cid, kind, subject, rid, tid, now()))
     return rid

@@ -84,8 +84,9 @@ def default(role: str) -> str:
         want = own.get("planner") if isinstance(own.get("planner"), dict) else {}
         provider = str(want.get("provider") or "").strip()
         model = str(want.get("model") or "").strip()
-        if not provider:
-            return _code_first(data)
+        if not provider:                 # a model alone goes with the code row's first choice
+            first = _code_first(data)
+            return f"{targets.provider_of(first)}:{model}" if model else first
         return f"{provider}:{model}" if model else provider
     chosen = str(own.get("local") or "").strip()
     if chosen:
@@ -169,6 +170,8 @@ def pick(role: str, conn: Optional[sqlite3.Connection] = None, *, background: bo
     want, fallback = get(role), default(role)
     if want == "off" and role in OFFABLE:
         return Pick(None, None, "off", "off")
+    if not want:                         # no setting and no local model to default to
+        return Pick(None, None, "", "no local model" if role in OFFABLE else f"no {role} set")
     status = None
     if conn is not None:
         from . import capacity        # capacity reads quota and models: import it at use

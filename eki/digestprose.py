@@ -50,7 +50,7 @@ def material(conn: sqlite3.Connection, since: float, until: float) -> str:
 
 def start(conn: sqlite3.Connection, page: Path, since: float, until: float) -> Optional[str]:
     """One `digest` chore for this page (the run's id), unless one is open or done
-    for it already; None when there is no local model or one exists."""
+    for it already; None when nobody can do the `chores` role or one exists."""
     prev = chores.latest(conn, KIND, str(page))
     if prev is not None and prev["state"] in ("open", "done"):
         return None

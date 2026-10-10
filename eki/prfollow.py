@@ -128,7 +128,7 @@ def _one(conn: sqlite3.Connection, iid: str, project: sqlite3.Row, me: str) -> L
         return said + _decide(conn, it, project, me, got, newest, False, view)
     with db.tx(conn):
         rid = chores.start(conn, KIND, f"{iid}:{newest}", _prompt(it, got), "background")
-    if rid is None:                                     # no local model: count it as a change asked
+    if rid is None:                                     # no chores model: count it as a change asked
         return said + _decide(conn, it, project, me, got, newest, True, view)
     return said + [f"item {iid}: {len(got)} new PR comment(s); triage {rid[:8]}"]
 

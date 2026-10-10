@@ -7,6 +7,9 @@ from eki import chores, digest, paths, queue, review, selfview, selfwork, store
 from conftest import run_inline
 from test_self import src, says  # noqa: F401 — the source fixture and what the fake says
 
+#: the fake stands in for the local model on chores
+pytestmark = pytest.mark.usefixtures("text_fake")
+
 
 def settle(**kw):
     rp = paths.config("routing")
@@ -126,6 +129,44 @@ def test_no_local_model_or_review_off_proposes_with_none(conn, src, tmp_path, mo
     settle(local="bare", review=False)
     b = judge(conn, b)
     assert b["state"] == "proposed" and b["review"] == "none: self.review is off"
+
+
+def set_roles(**want):
+    rp = paths.config("routing")
+    rp.write_text(json.dumps({**json.loads(rp.read_text()), "roles": want}))
+
+
+def test_the_review_runs_on_the_reviewer_role(conn, src, tmp_path, monkeypatch):
+    settle(local="bare")
+    set_roles(reviewer="fake2:some-model", chores="fake")
+    selfwork.submit(conn, "add a", plan=False, files=["eki/a.py"])
+    it = build_and_judge(conn, tmp_path, monkeypatch)
+    run = store.run(conn, it["review_run"])
+    assert (run["provider"], run["model"], run["row"]) == ("fake2", "some-model", "chore")
+    assert run["why"] == "reviewer → fake2:some-model"
+    assert reviewed(conn, tmp_path, monkeypatch, it, "REVIEW: ok\n")["state"] == "proposed"
+
+
+def test_a_reviewer_that_cant_run_falls_back_to_local_or_proposes_with_why(conn, src, tmp_path, monkeypatch):
+    from eki import capacity, providers
+    settle(local="bare")
+    set_roles(reviewer="fake2")
+    for f in ("a", "b", "c"):
+        selfwork.submit(conn, f"add {f}", plan=False, files=[f"eki/{f}.py"])
+    a, b, c = build(conn, tmp_path, monkeypatch, ("eki/a.py", "eki/b.py", "eki/c.py"))
+    down = {"fake2": (False, "limit reached")}
+    monkeypatch.setattr(capacity, "status", lambda conn, background=False: {
+        **{n: (True, "") for n in providers.config()}, **down})
+    a = judge(conn, a)
+    run = store.run(conn, a["review_run"])
+    assert run["provider"] == "bare" and run["why"] == "reviewer fake2 can't run (fake2: limit reached) → bare"
+    down["bare"] = (False, "not running")
+    b = judge(conn, b)
+    assert b["state"] == "proposed" and b["review_run"] is None
+    assert b["review"].startswith("none: reviewer fake2 can't run (fake2: limit reached) → bare")
+    set_roles(reviewer="off")
+    c = judge(conn, c)
+    assert c["state"] == "proposed" and c["review"] == "none: the reviewer role is off"
 
 
 def test_the_review_rebuild_keeps_gate_ones_retry(conn, src, tmp_path, monkeypatch):

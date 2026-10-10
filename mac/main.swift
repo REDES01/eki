@@ -8,6 +8,16 @@ let root = Bundle.main.object(forInfoDictionaryKey: "EkiRoot") as? String ?? NSS
 let port = ProcessInfo.processInfo.environment["EKI_PORT"] ?? (Bundle.main.object(forInfoDictionaryKey: "EkiPort") as? String ?? "7788")
 let home = URL(string: "http://127.0.0.1:\(port)/")!
 
+// --eki-url <href> from a Restart, kept only when it's one of eki's own pages.
+func launchURL() -> URL {
+    let args = CommandLine.arguments
+    if let i = args.firstIndex(of: "--eki-url"), i + 1 < args.count,
+       let url = URL(string: args[i + 1]), url.absoluteString.hasPrefix(home.absoluteString) {
+        return url
+    }
+    return home
+}
+
 final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSMenuItemValidation {
     var window: NSWindow!
     var web: WKWebView!
@@ -22,6 +32,8 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     // View → Zoom: the web view's pageZoom, one of these steps, remembered across launches.
     let zoomSteps: [Double] = [0.75, 0.85, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
     let zoomKey = "eki.zoom"
+    // The first page: --eki-url when a Restart relaunched the shell on a page, until one loads.
+    var startURL = launchURL()
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
@@ -30,6 +42,12 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         // tell the page it's in the Mac window, so it leaves room for the window buttons
         config.applicationNameForUserAgent = "EkiMac"
         config.userContentController.add(self, name: "eki")
+        // the commit this app was built from, so the page can tell when a newer shell is installed
+        if let sha = Bundle.main.object(forInfoDictionaryKey: "EkiCommit") as? String, !sha.isEmpty,
+           let js = try? JSONEncoder().encode(sha), let lit = String(data: js, encoding: .utf8) {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.ekiShell = {commit: \(lit)};", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
         web.uiDelegate = self
@@ -119,6 +137,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         guard m.name == "eki", let body = m.body as? [String: Any] else { return }
+        if let href = body["restart"] as? String { restart(href); return }
         func rects(_ key: String) -> [NSRect] {
             (body[key] as? [[Double]] ?? []).compactMap { r in
                 r.count == 4 ? NSRect(x: r[0], y: r[1], width: r[2], height: r[3]) : nil
@@ -127,6 +146,22 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         dragRects = rects("drag")
         noDragRects = rects("nodrag")
         debug("drag areas: \(dragRects) minus \(noDragRects)")
+    }
+
+    // Restart on the page's Restart: once this process has exited, open the app again
+    // (the installed bundle, now the new build) on the same page. Never by itself.
+    func restart(_ href: String) {
+        func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; "
+                       + "open \(q(Bundle.main.bundlePath)) --args --eki-url \(q(href))"]
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { debug("restart failed: \(error)"); return }
+        NSApp.terminate(nil)
     }
 
     // The menu bar item: what's waiting for you, and how much of each plan is left.
@@ -183,7 +218,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     @objc func show() { NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }
     @objc func newThread() { show(); web.load(URLRequest(url: home)) }
     @objc func reload() { web.reload() }
-    func load() { web.load(URLRequest(url: home, cachePolicy: .reloadIgnoringLocalCacheData)) }
+    func load() { web.load(URLRequest(url: startURL, cachePolicy: .reloadIgnoringLocalCacheData)) }
 
     // Zoom: pageZoom stays on the web view across reloads and new pages; the page
     // gets --eki-zoom so it can keep the window buttons' room the same on screen.
@@ -213,6 +248,7 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         let full = window.styleMask.contains(.fullScreen)
         w.evaluateJavaScript("document.documentElement.dataset.fullscreen = '\(full ? "1" : "")'")
         pushZoom(w)
+        if w.url?.host == home.host { startURL = home }
     }
 
     // The engine isn't up: start it once, then keep trying.

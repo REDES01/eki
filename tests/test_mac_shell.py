@@ -1,4 +1,6 @@
-"""The Mac shell zooms the page with WKWebView.pageZoom (View → Zoom In/Out/Actual Size)."""
+"""The Mac shell zooms the page with WKWebView.pageZoom (View → Zoom In/Out/Actual Size),
+and opens a folder panel for the page through window.ekiShell (eki/web/shell.js)."""
+import json
 import re
 import shutil
 import subprocess
@@ -7,6 +9,7 @@ from pathlib import Path
 import pytest
 
 MAIN = Path(__file__).resolve().parent.parent / "mac" / "main.swift"
+SHELL_JS = Path(__file__).resolve().parent.parent / "eki" / "web" / "shell.js"
 
 
 def src():
@@ -43,6 +46,81 @@ def test_drag_area_divides_by_page_zoom():
     s = src()
     body = s[s.index("func inDragArea"):s.index("func onWindowButton")]
     assert "pageZoom" in body
+
+
+def test_pick_folder_opens_a_panel_and_answers_through_ekishell():
+    s = src()
+    body = s[s.index("func pickFolder("):]
+    body = body[:body.index("\n    }\n")]
+    assert "NSOpenPanel()" in body
+    assert "canChooseDirectories = true" in body
+    assert "canChooseFiles = false" in body
+    assert "canCreateDirectories = true" in body
+    assert "beginSheetModal(for: window)" in body
+    assert "JSONSerialization.data" in body
+    assert "window.ekiShell.picked(" in body
+
+
+def test_drag_rects_change_only_on_a_drag_message():
+    s = src()
+    body = s[s.index("func userContentController"):s.index("func pickFolder(")]
+    assert 'body["pickFolder"]' in body
+    guard = body.index('guard body["drag"] != nil else { return }')
+    assert guard < body.index('dragRects = rects("drag")')
+    assert guard < body.index('noDragRects = rects("nodrag")')
+
+
+NODE_STUB = r"""
+const fs = require("fs");
+const posted = [];
+global.window = {};
+window.navigator = {userAgent: process.argv[3] || ""};
+if (process.argv[4] === "webkit") {
+  window.webkit = {messageHandlers: {eki: {postMessage: (m) => posted.push(m)}}};
+}
+if (process.argv[5]) window.ekiShell = {commit: process.argv[5]};
+eval(fs.readFileSync(process.argv[2], "utf8"));
+(async () => {
+  const s = window.ekiShell;
+  const out = {can: s.canPickFolder()};
+  if (s.commit) out.commit = s.commit;
+  const p = s.pickFolder();
+  if (posted.length) {
+    s.picked("not-this-one", "/nope");
+    s.picked(posted[0].pickFolder, "/Users/me/work");
+  }
+  out.path = await p;
+  out.posted = posted;
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def run_shell_js(tmp_path, ua, webkit, commit=""):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "stub.js"
+    stub.write_text(NODE_STUB)
+    r = subprocess.run(["node", str(stub), str(SHELL_JS), ua, "webkit" if webkit else "", commit],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_shell_js_without_webkit_cannot_pick(tmp_path):
+    out = run_shell_js(tmp_path, "Mozilla/5.0", webkit=False)
+    assert out == {"can": False, "path": None, "posted": []}
+    # a webkit handler in some other browser isn't the Mac shell
+    assert run_shell_js(tmp_path, "Mozilla/5.0", webkit=True)["can"] is False
+
+
+def test_shell_js_posts_pick_folder_and_resolves_with_path(tmp_path):
+    out = run_shell_js(tmp_path, "Mozilla/5.0 EkiMac", webkit=True)
+    assert out["can"] is True
+    assert len(out["posted"]) == 1
+    assert set(out["posted"][0]) == {"pickFolder"}
+    assert isinstance(out["posted"][0]["pickFolder"], str)
+    assert out["path"] == "/Users/me/work"
 
 
 @pytest.mark.skipif(shutil.which("swiftc") is None, reason="swiftc is not installed")
@@ -88,3 +166,10 @@ def test_eki_url_used_only_when_it_is_an_eki_page():
     assert "return home" in fn
     assert "web.load(URLRequest(url: startURL" in s
     assert "startURL = home" in s                      # later loads are home again
+
+
+def test_shell_js_keeps_the_commit_the_shell_injected(tmp_path):
+    # main.swift puts {commit} on window.ekiShell before the page runs; shellbar.js reads it
+    assert 'window.ekiShell = {commit:' in src()
+    out = run_shell_js(tmp_path, "Mozilla/5.0 EkiMac", webkit=True, commit="abc123")
+    assert out["commit"] == "abc123" and out["path"] == "/Users/me/work"

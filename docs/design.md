@@ -433,7 +433,11 @@ are Codex's.
   it isn't up. It rarely needs to change. View → Zoom In/Out/Actual Size
   (⌘+ ⌘− ⌘0, and ⌘= too) sets the web view's `pageZoom`, saved as
   `eki.zoom` in UserDefaults; the shell sets `--eki-zoom` on the page so
-  the room for the window buttons stays the same on screen. A shell
+  the room for the window buttons stays the same on screen. The page
+  reaches the shell through `eki/web/shell.js` (`window.ekiShell`):
+  `pickFolder()` posts `{pickFolder: id}` and the shell answers with a
+  folder panel through `ekiShell.picked(id, path)`; outside the shell
+  `canPickFolder()` is false and the page works without it. A shell
   change goes live only after `bin/build-mac`.
 - **Local models** (`eki/models.py`): a local provider with a `serve`
   command can be started and stopped by eki (`eki models`, or the

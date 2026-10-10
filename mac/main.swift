@@ -143,6 +143,9 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
                 r.count == 4 ? NSRect(x: r[0], y: r[1], width: r[2], height: r[3]) : nil
             }
         }
+        if let id = body["pickFolder"] as? String { pickFolder(id) }
+        // only a drag message sets the drag areas, so other messages never clear them
+        guard body["drag"] != nil else { return }
         dragRects = rects("drag")
         noDragRects = rects("nodrag")
         debug("drag areas: \(dragRects) minus \(noDragRects)")
@@ -162,6 +165,21 @@ final class Shell: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { debug("restart failed: \(error)"); return }
         NSApp.terminate(nil)
+    }
+
+    // The page's "Choose…": a folder panel as a sheet, answered through window.ekiShell.picked.
+    func pickFolder(_ id: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { [weak self] r in
+            let path: Any = r == .OK ? (panel.url?.path ?? NSNull()) : NSNull()
+            guard let data = try? JSONSerialization.data(withJSONObject: [id, path]),
+                  let args = String(data: data, encoding: .utf8) else { return }
+            self?.web.evaluateJavaScript("window.ekiShell && window.ekiShell.picked(...\(args))")
+        }
     }
 
     // The menu bar item: what's waiting for you, and how much of each plan is left.

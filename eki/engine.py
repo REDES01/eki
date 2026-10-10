@@ -33,7 +33,7 @@ STUCK = 180
 STARTING = 30
 #: interruptions in a row before a run is given up on
 MAX_ATTEMPTS = 4
-MAX_PARALLEL = int(os.environ.get("EKI_MAX_PARALLEL") or 8)
+MAX_PARALLEL = int(os.environ.get("EKI_MAX_PARALLEL") or 16)   # light agent turns mostly wait on the network; checks have their own slots
 
 
 def alive(pid: Optional[int]) -> bool:

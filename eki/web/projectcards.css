@@ -1,0 +1,66 @@
+/* The Cards area on a project page (projectcards.js) and an open card (projectcardpanel.js).
+   Only style.css's variables, in the look of the page's pj-card / pj-item. */
+
+.pc-area { margin: 8px 0 4px; }
+.pc-h { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.pc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.pc-tile { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 96px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer;
+  font-size: 13px; transition: border-color .12s, box-shadow .12s; }
+.pc-tile:hover { border-color: var(--dim); box-shadow: 0 3px 10px rgba(0, 0, 0, .12); }
+.pc-tile.on { border-color: var(--text); }
+.pc-tile.pc-broken { border-style: dashed; }
+.pc-name, .pc-pname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-name { padding-right: 18px; }
+.pc-kind { font-size: 12px; }
+.pc-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pc-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 6px; font-size: 12px; }
+.pc-state { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--panel); color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-state.up { color: var(--teal); }
+.pc-state.busy { color: var(--text); font-weight: 600; }
+.pc-state.broken { color: var(--red); }
+.pc-x { position: absolute; top: 6px; right: 6px; font: inherit; font-size: 15px; line-height: 1; padding: 1px 6px;
+  background: none; border: 0; border-radius: 6px; color: var(--dim); cursor: pointer; opacity: 0; }
+.pc-tile:hover .pc-x, .pc-x:focus { opacity: 1; }
+.pc-x:hover { background: var(--panel); color: var(--red); }
+.pc-add { align-items: center; justify-content: center; color: var(--dim); border-style: dashed; font-size: 14px; }
+.pc-add:hover { color: var(--text); }
+
+.pc-lib .pj-sub { margin-top: 10px; }
+.pc-pick { width: 100%; text-align: left; font: inherit; font-size: 13px; background: none; border: 0; cursor: pointer;
+  color: var(--text); }
+.pc-pick:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pc-pick .pc-pname { min-width: 110px; }
+
+/* an open card */
+.pp { padding: 12px 14px; }
+.pp-h { margin: 14px 0 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.pp-path { font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-field { display: grid; grid-template-columns: minmax(90px, 160px) 1fr; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 13px; }
+.pp-label { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.pp-ctl { min-width: 0; }
+.pp .set-in { width: 100%; font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+.pp textarea.set-in { resize: vertical; font: 12px/1.45 ui-monospace, Menlo, monospace; }
+.pp .set-in:disabled, .pp textarea:disabled { opacity: .75; }
+.pp .set-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.pp-prompt textarea.set-in { font-family: inherit; font-size: 13px; }
+.pp-args { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+.pp-out { margin: 6px 0; font-size: 13px; }
+.pp-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 4px 0;
+  padding: 6px 8px; border-radius: 8px; background: var(--panel); font: 12px/1.45 ui-monospace, Menlo, monospace; }
+.pp-line { cursor: pointer; font-size: 13px; }
+.pp-line:hover, .pp-line.on { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pp-when { min-width: 72px; font-size: 12px; white-space: nowrap; }
+.pp-who { min-width: 70px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-res { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-detail { padding: 4px 8px 10px 22px; font-size: 13px; }
+.pp-tl { border-left: 2px solid var(--line); margin: 4px 0 8px 4px; padding-left: 10px; }
+.pp-tick { padding: 2px 0; }
+.pp-t { display: inline-block; min-width: 64px; font-size: 12px; }
+.pp-shot { display: flex; align-items: center; justify-content: center; min-height: 70px; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; background: var(--panel); font-size: 11px; text-decoration: none; }
+.pp-shot img { width: 100%; display: block; }
+.pp-shot.big { grid-column: 1 / -1; }

@@ -1,0 +1,9 @@
+/* The knowledge card's Files part (cardknowledge.js): its file rows and one file opened. */
+.ck-row { display: flex; gap: 10px; align-items: baseline; }
+.ck-row .ck-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-row .ck-size, .ck-row .ck-when, .ck-row .ck-who { white-space: nowrap; font-size: 12px; }
+.ck-missing .ck-name { opacity: 0.6; text-decoration: line-through; }
+.ck-file:not(:empty) { margin-top: 8px; }
+.ck-md { max-height: 60vh; overflow: auto; padding: 6px 2px; }
+.ck-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.ck-err .pj-err { display: inline; margin-left: 8px; }

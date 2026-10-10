@@ -106,7 +106,7 @@ def test_journal_session(home):
     a, b = journal.new_session("tester"), journal.new_session("tester")
     assert a != b and a.parent == components.sessions_dir() / "tester"
     r = journal.keep(a, ["first", "the review"])
-    assert r.text == "the review" and r.paths == [str(a)]
+    assert r.text == f"the review\n\nsession: {a}" and r.paths == [str(a)]
     assert "first" in (a / "transcript.md").read_text()
 
 

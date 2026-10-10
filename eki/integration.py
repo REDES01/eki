@@ -130,12 +130,28 @@ def fast_forward(sha: str) -> None:
         raise IntegrationError(str(e)) from e
 
 
+#: repos whose next sync() fetches GitHub: a push was rejected (it has something eki hasn't)
+_want_origin: set = set()
+
+
+def want_origin() -> None:
+    """The next sync() reads GitHub too."""
+    _want_origin.add(str(repo()))
+
+
 def sync() -> str:
     """Fetch origin and source; fast-forward main to whichever strictly contains it
     (origin first). When main and origin/main have both moved, main is rebased onto
     origin/main (a conflict leaves main as it was and is written to the journal);
-    the source only ever fast-forwards. Returns main's sha."""
-    _fetch("origin")
+    the source only ever fast-forwards. Returns main's sha.
+
+    One way: the source (the local checkout) is read every time; GitHub only
+    when it was asked for — a push it rejected (a change made there or on
+    another machine) or want_origin(). eki pushes there itself, so otherwise a
+    fetch would only ever find what eki already has."""
+    key = str(repo())
+    if key in _want_origin and _fetch("origin"):
+        _want_origin.discard(key)
     _fetch("source")
     for ref in ("origin/main", "source/main"):
         other = _sha(ref)
@@ -241,7 +257,8 @@ def push() -> bool:
         git(repo(), "push", "-q", "origin", "main:main")
         return True
     except (WorkspaceError, IntegrationError) as e:
-        log.warning("integration: push failed: %s", e)
+        log.warning("integration: push failed: %s; GitHub is read on the next sync", e)
+        want_origin()                     # it may have something eki hasn't: read it, rebase, push again
         return False
 
 

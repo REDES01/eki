@@ -8,6 +8,18 @@ from eki import db, integration, paths, workspace
 from tests.test_integration import commit, on_branch, origin, src  # noqa: F401  (fixtures)
 
 
+@pytest.fixture(autouse=True)
+def _reads_github(monkeypatch):
+    """These tests are about what sync does with a GitHub that moved; sync reads GitHub
+    only when asked (a rejected push), so here every sync asks."""
+    real = integration.sync
+
+    def sync():
+        integration.want_origin()
+        return real()
+    monkeypatch.setattr(integration, "sync", sync)
+
+
 @pytest.fixture
 def someone(tmp_path, origin):  # noqa: F811
     other = tmp_path / "someone"

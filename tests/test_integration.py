@@ -138,7 +138,16 @@ def test_update_source_leaves_a_source_with_its_own_commits(src):
     assert integration.update_source() is False and workspace.head(src) == mine
 
 
-def test_sync_picks_up_origin_and_the_source(src, origin, tmp_path):
+_REAL_SYNC = integration.sync
+
+
+def _sync_reading_origin():
+    integration.want_origin()
+    return _REAL_SYNC()
+
+
+def test_sync_picks_up_origin_and_the_source(src, origin, tmp_path, monkeypatch):
+    monkeypatch.setattr(integration, "sync", _sync_reading_origin)
     integration.repo()
     other = tmp_path / "someone"
     workspace.git(tmp_path, "clone", "-q", str(origin), str(other))
@@ -154,6 +163,21 @@ def test_sync_picks_up_origin_and_the_source(src, origin, tmp_path):
     workspace.git(other, "push", "-q", "origin", "main")
     rebased = integration.sync()                      # main is rebased onto it (test_integration_diverge.py)
     assert integration.contains(diverged) and integration.carries(mine) and rebased != mine
+
+
+def test_sync_is_one_way_until_a_push_is_rejected(src, origin, tmp_path):
+    integration.repo()
+    integration.sync()
+    other = tmp_path / "someone"
+    workspace.git(tmp_path, "clone", "-q", str(origin), str(other))
+    theirs = commit(other, "theirs.py")
+    workspace.git(other, "push", "-q", "origin", "main")
+    assert not integration.contains(theirs, integration.sync())     # GitHub isn't read
+    mine = commit(src, "mine.py")
+    assert integration.sync() == mine                                 # the local checkout always is
+    assert integration.push() is False                                # GitHub has theirs: rejected
+    assert integration.contains(theirs, integration.sync())          # so the next sync reads it
+    assert integration.carries(mine) and integration.push() is True
 
 
 def test_sync_survives_an_unreachable_origin(src, origin, tmp_path):

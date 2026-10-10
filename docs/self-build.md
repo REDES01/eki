@@ -73,21 +73,29 @@ A goal has four parts, and a planner can split it without guessing:
 - **Tests** — what the tests prove, with which fixtures (the fake provider,
   temp homes), and that `bin/check` stays green.
 
-Items are small on purpose — a few files, an hour of agent work at most.
-Conflicts scale with change size times time in flight; the first eki's
+Items are small on purpose — about 15 minutes of agent work or less, and
+never a multi-hour run: when the work is big, it splits into parallel parts
+that are merged after, never one long turn. Conflicts scale with change size times time in flight; the first eki's
 median change touched seven files and a third of them needed an agent to
 resolve conflicts.
 
-**How a plan is shaped.** Plans are wide, not long (`selfbrief.SPLIT_RULES`,
-shared by the self and project plan briefs; the draft's item-shape guidance
-says the same). Items that don't depend on each other are preferred; a dep
+**How a plan is shaped.** Plans are few and wide, not long
+(`selfbrief.SPLIT_RULES`, shared by the self and project plan briefs; the
+draft's and the ranking's item-shape guidance say the same). The planner
+makes the fewest items that keep each agent turn to about 15 minutes of
+agent work or less. Usually that is one item; at most it is one root plus a
+few leaves that depend only on the root, and no dependency chain is longer
+than two. Every item carries a fixed overhead around its agent work (a turn
+to start, gate 1, the review, the queue), so more items cost more even when
+they run side by side. Items that don't depend on each other are preferred; a dep
 is declared only when the later item's tests can't pass without the earlier
 item's code. A shared interface — the exact function signature, table and
 column, JSON key — is written into the spec of every item that uses it, so
 each can build without waiting to see the other. When several items need the
 same new names, one small root item adds them, with working minimal bodies
-and tests, and the rest depend only on it: two levels deep unless the goal
-truly can't be. Two items share a file only if one depends on the other.
+and tests, and the rest depend only on it. Two items share a file only if one
+depends on the other. Nothing enforces the shape in code — it is what the
+briefs ask for.
 When a plan concludes, `plangraph.shape` measures it — depth is the longest
 dependency chain, width the most items on one level, `chained` the deps
 between disjoint write-sets — and stores it in `goals.shape`; the `eki self`
@@ -118,11 +126,12 @@ covers all of it and nothing needs a resumption system of its own:
 draft    agent run, read-only worktree          → goal
 plan     agent run, read-only worktree          → items
 build    agent run in worktree self/<id>         → commit on branch self/<id>
-judge    command run: bin/check in the worktree  → verdict           (gate 1)
+judge    command run: fast bin/check in the worktree → verdict      (gate 1)
+ +review chore run beside gate 1, same moment    → ok / no / none    (both awaited)
 queue    rebase onto the predicted head; a resolve run only on conflict
 judge    command run: fast bin/check on that head → verdict          (gate 2)
 land     fast-forward the integration ref         (serial, milliseconds)
-train    build, full check + candidate, swap  (serial; gate 3)
+train    build, drills + candidate (full check unless gate 2 passed that exact head), swap  (serial; gate 3)
 ```
 
 `judge` and `resolve` need the **command** provider: a worker that runs an
@@ -184,11 +193,19 @@ Judge runs share a few check slots.
 
 **Gate 1 — on its own.** In the change's worktree, on the commit it made,
 before it may join the queue: `bin/check` with `EKI_CHECK_FAST=1` — the
-tests and the file-size test, not the drills — run by a command worker. The
-drills run once, at release, on the build that goes live (gate 3). The agent
-runs only the tests for what it touched; this is the first full run. Red goes back to the change's
-thread with the failure; one retry with the failure in the brief, then it's
-left for you. Cheap, parallel, keeps junk out of the predicted futures. A
+tests and the file-size test, not the drills — run by a command worker,
+started the moment the build turn ends. The drills run once, at release, on
+the build that goes live (gate 3). The builder doesn't run the whole suite
+(plain `bin/check`) in its turn: it runs only the tests for the files it
+touched (`bin/check tests/test_x.py`; `bin/check` passes its arguments to
+pytest), and eki runs the whole check right after the turn — this is the
+first full run. Red goes back to the change's thread with the failure
+through the same retry (`failure=` and the item's `verdict`); one retry with
+the failure in the brief, then it's left for you (`unfit`). A resolve run
+works the same way: it runs the tests for what it touched, and gate 1 runs
+again on the resolved change. A project builder (`projectbrief`) still runs
+the project's own check in its turn, because a project has no gate 2 or
+train behind it. Cheap, parallel, keeps junk out of the predicted futures. A
 **docs-only** item — every touched file is `*.md` (any folder) or under
 `docs/` — runs no tests: its judge is `python -m eki.doccheck <base>..<sha>`
 (`eki/doccheck.py`), which checks that every changed file is UTF-8 text and
@@ -203,7 +220,14 @@ unfit and the changes behind it are judged again in the next batch.
 
 **Gate 3 — before the swap, then live.** The train (`eki/train.py`,
 `eki/traincheck.py`) runs one command run on the very build it is about to
-ship, before `current` moves: the full `bin/check`, drills included, plus
+ship, before `current` moves. When every commit in `<running>..<build>` in
+the integration repo is the `rebased` commit of a landed item whose gate 2
+was green, the fast tests have already passed on exactly that head, so the
+run is only what gate 2 skips: `bin/check -q -m drill` (the drills; the
+`-m` goes through `bin/check` to pytest). Otherwise — a commit pushed by
+hand, a `git revert` written by an earlier red train, no running commit
+(dev mode), or anything git can't answer — it is the full `bin/check -q`,
+drills included. Either way it is followed by
 what unit tests can't cover (`python -m eki.candidate`): the engine boots in
 an empty home on port 0 and answers `/api/health`; it opens a *copy* of the
 real `eki.db` (SQLite's backup API) and lists the same threads; and the
@@ -213,10 +237,13 @@ otherwise rollback would be a lie. The build has no `.venv`, so the run's
 the newest item the build carries is reverted on integration main as a new
 commit (`git revert --no-edit`; main was pushed, so no reset), pushed, and
 marked unfit with the check's tail in its thread; the next tick builds the
-new main and tries again with the items left, until green or none are. A
+new main and tries again with the items left, until green or none are (the
+revert commit makes that next check a full one). A
 train that carries only docs-only items skips this check. The result lives
 beside the build's `.eki-build.json` as `.checked` (running, green or red),
-so a restart mid-check finds the run or starts it again; `eki builds` shows
+with the scope chosen when the check started (`"scope": "drills"` or
+`"full"`), so a restart mid-check finds the same run or starts it again
+with the same scope; `eki builds` shows
 it per build. After the swap the launcher watches: the new engine has to
 come up, tick and write a healthy marker within the window; if it dies
 first, the launcher flips `current` back to `previous` and records why.
@@ -227,9 +254,11 @@ judge runs — gate 1, gate 2 and the train's check together — run at once;
 the rest stay queued, held by the engine's scheduling (`eki/checkslots.py`),
 not the queue's, and the board says "waiting for a check slot". `bin/check`
 runs the suite on a third of the cores (`EKI_CHECK_WORKERS` overrides), so
-the judge slots plus the agents' own runs inside build turns share the
-cores instead of each taking all of them (with `-n auto` each, load went
-past 100 on 18 cores): a few fast checks beat many crawling ones.
+the judge slots share the cores instead of each taking all of them (with
+`-n auto` each, load went past 100 on 18 cores): a few fast checks beat many
+crawling ones. Agents no longer run the full suite inside their turns —
+only the tests for the files they touched — so the slots are where the
+suite runs: gate 1, gate 2, and the train's drills (or full check).
 
 **Gate 4 — better, not just working** (built; see the next section): every
 build that goes live gets a score before and after, from the journal — the
@@ -239,32 +268,46 @@ offered for undo. It is a trailing judgment, never a gate: nothing waits
 for it and nothing is undone by itself.
 
 **The review — a second reader** (`eki/review.py`). The gates judge
-whether a change works, not whether it does what it was asked. When gate 1
-is green the item goes to `reviewing`, not `proposed`, and a `review` chore
-(docs/design.md, "Chores") asks the local model — at `now` priority for
-your goals, `background` for eki's. It is given the goal (first 2000
-characters), the item's title, spec and `SUMMARY:`, and the diff
-`<base>..<commit>` from the integration repo (40 000 characters at most, with
-a note of what was cut), and asked whether the diff does what the spec and
+whether a change works, not whether it does what it was asked. The review
+starts *with* gate 1, not after it: when a build turn ends, the gate 1 run
+(`bin/check` or the doccheck) and a `review` chore (docs/design.md,
+"Chores") start in the same transaction, and the item goes to `judging`
+with `run_id` the gate 1 run and `review_run` the review's. The chore asks
+the local model — at `now` priority for your goals, `background` for eki's.
+It is given the goal (first 2000 characters), the item's title, spec and
+`SUMMARY:`, and the diff `<base>..<commit>` from the integration repo
+(40 000 characters at most, with a note of what was cut), told the checks
+are running beside it, and asked whether the diff does what the spec and
 summary say, without obvious bugs, missing tests or stray changes. Its last
-`REVIEW:` line decides:
+`REVIEW:` line is its verdict.
 
-- `REVIEW: ok` → `proposed`, review `ok`.
-- `REVIEW: no <why>`, the first time → back to `waiting` for one rebuild,
-  with "A second reader objected: … Answer it in the change, or say in
-  SUMMARY why it's wrong" in the build brief. The rebuild doesn't cost gate
-  1's one retry (`tries - reviews` is what's compared).
-- `REVIEW: no` a second time → `proposed` with the objection kept; the queue
-  never takes it by itself, even under `apply`. The long digest page lists it
-  under **Waits for you** with the objection; `eki self apply <id>` is the
-  person's call.
-- A review that can't judge — no local model, `self.review: false`, a failed
-  or cancelled run, an answer without the line — → `proposed` with
-  `none: <why>`. The reviewer never holds an item it couldn't judge.
+The item waits in `judging` until both runs have ended — when gate 1 goes
+red first, it still waits for the review rather than cancelling it. Then:
 
-Docs-only items are reviewed too. The board shows `reviewing` with the
-chore's run, and the verdict under a proposed item. Like every stage it
-resumes from the item and its runs: a restart mid-review loses nothing.
+| gate 1 | review | the item |
+|---|---|---|
+| green | `ok` or `none` | `proposed` |
+| green | first `no` | back to `waiting` for one rebuild, `reviews=1`, with "A second reader objected: … Answer it in the change, or say in SUMMARY why it's wrong" in the build brief; the rebuild is free (`tries - reviews` is what's compared) |
+| green | second `no` | `proposed` with the objection kept; the queue never takes it by itself, even under `apply` |
+| red | any | gate 1's path: one retry with the failure in the brief, else `unfit`; a `no` objection is written to `items.review` too and also reaches the rebuild brief, and that rebuild counts as gate 1's retry, not the review's |
+
+The review chore is closed in every case. An item proposed with a second
+`no` is listed by the long digest page under **Waits for you** with the
+objection; `eki self apply <id>` is the person's call. A review that can't
+run — no local model, `self.review: false`, the reviewer role off or unable
+to run, no chore — is `none: <why>` at once, when the build concludes, and
+gate 1 alone decides; a review that ran but couldn't judge (a failed or
+cancelled run, an answer without the line) is `none: <why>` too. The reviewer
+never holds an item it couldn't judge.
+
+Docs-only items are reviewed too. A project item gets the same parallel
+review; one with no check is still proposed directly. The board names both
+runs of a `judging` item ("gate 1 run X · review run Y"), still says
+"waiting for a check slot" while gate 1 is held, and shows the verdict
+under a proposed item. Items left in the old `reviewing` state from before
+this change still conclude the old way (`review.conclude`). Like every
+stage it resumes from the item and its runs: a restart mid-review loses
+nothing.
 
 ## The journal, the score and the digest
 
@@ -553,7 +596,8 @@ refresh. The Swift shell is rebuilt only when `mac/` changed.
 
 The **train** goes every `self_release_minutes` (5): if the integration ref
 is ahead of the running build and its head is green, build it, run the
-full check on the build (gate 3; skipped when it carries only docs), flip
+check on the build (gate 3: the drills when gate 2 passed that exact head,
+the full suite otherwise; skipped when it carries only docs), flip
 `current`, and ask the engine to step aside. Every change landed since the
 last train goes live together. `eki swap <ref>` does the same by hand;
 `eki swap --back` goes to `previous`.

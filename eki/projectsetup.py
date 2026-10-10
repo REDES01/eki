@@ -93,12 +93,12 @@ def _clone_run(conn: sqlite3.Connection, repo: str, dest: Path) -> str:
     d, part = shlex.quote(str(dest)), shlex.quote(f"{dest}.part")
     script = (f"rm -rf {part} && {{ [ -d {d}/.git ] || {{ gh repo clone {shlex.quote(repo)} {part} "
               f"-- --filter=blob:none && mv {part} {d}; }}; }}")
-    tid = store.create_thread(conn, f"clone {repo}", str(paths.projects()))
+    tid = store.create_thread(conn, f"clone {repo}", str(paths.projects()), by="eki")
     return store.create_run(conn, tid, json.dumps(["/bin/sh", "-c", script]), provider="command")
 
 
 def _install_run(conn: sqlite3.Connection, project: sqlite3.Row, cmd: str) -> str:
-    tid = store.create_thread(conn, f"install {project['repo']}", project["path"])
+    tid = store.create_thread(conn, f"install {project['repo']}", project["path"], by="eki")
     return store.create_run(conn, tid, json.dumps(["/bin/sh", "-c", cmd]), provider="command")
 
 

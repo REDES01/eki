@@ -50,7 +50,7 @@ def start_draft(conn: sqlite3.Connection, gid: str, wish: str, base: str, owner:
     """Start the draft run for goal `gid` (inside the caller's tx)."""
     from . import digest               # digest reads selfwork's settings: import it late
     wt = workspace.add(integration.repo(), f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
-    tid = store.create_thread(conn, f"draft: {wish}", str(wt))
+    tid = store.create_thread(conn, f"draft: {wish}", str(wt), by="eki")
     last = digest.latest()
     old = Path(OLD).expanduser()
     prompt = selfbrief.draft(wish, base, digest=str(last) if last else None,
@@ -68,7 +68,7 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone()
     repo = projects.repo_for(conn, goal) if goal is not None else integration.repo()
     wt = workspace.add(repo, f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
-    tid = store.create_thread(conn, f"plan: {text}", str(wt))
+    tid = store.create_thread(conn, f"plan: {text}", str(wt), by="eki")
     provider, model, effort = planner()
     project = projects.get(conn, goal["project"]) if goal is not None and goal["project"] else None
     brief = (selfbrief.plan(text, base) if project is None
@@ -95,7 +95,7 @@ def open_rank(conn: sqlite3.Connection, entries: List[Any], why: str) -> str:
         conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, why, pick_key) "
                      "VALUES (?,?,?,'roadmap','eki','drafting',?,?,NULL)", (gid, wish, wish, db.now(), why))
         wt = workspace.add(integration.repo(), f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
-        tid = store.create_thread(conn, f"draft: {RANK}", str(wt))
+        tid = store.create_thread(conn, f"draft: {RANK}", str(wt), by="eki")
         provider, model, effort = planner()
         rid = store.create_run(conn, tid, prompt, provider=provider, model=model, effort=effort,
                                row="code", priority=_priority("eki"))

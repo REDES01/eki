@@ -263,7 +263,7 @@ def start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, ot
             wt = workspace.add(repo(), it["id"], base=base, branch=branch)
         else:
             wt, base, branch = projectwork.worktree(project, it["id"])
-        tid = store.create_thread(conn, f"{project['name'] if project else 'self'}: {it['title']}", str(wt))
+        tid = store.create_thread(conn, f"{project['name'] if project else 'self'}: {it['title']}", str(wt), by="eki")
         _set(conn, it["id"], worktree=str(wt), branch=branch, base=base, thread_id=tid)
         it = store_item(conn, it["id"])
     failure = it["verdict"] if it["tries"] else None

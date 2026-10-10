@@ -38,7 +38,7 @@ def start(conn: sqlite3.Connection, kind: str, subject: str, prompt: str,
                      " VALUES (?,?,?,'skipped',?,?,?)",
                      (cid, kind, subject, why, now(), now()))
         return None
-    tid = store.create_thread(conn, f"chore: {kind} {subject}", None)
+    tid = store.create_thread(conn, f"chore: {kind} {subject}", None, by="eki")
     rid = store.create_run(conn, tid, prompt, provider=pick.provider, model=pick.model,
                            effort=pick.effort, priority=priority, row=ROW)
     why = f"{role} → {roles.shown(pick.target)}"

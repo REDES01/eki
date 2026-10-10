@@ -154,7 +154,7 @@ def clone_home(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     if os.path.lexists(dest):
         raise ValueError(f"{dest} already exists: pick it as the folder instead")
     with db.tx(conn):
-        tid = store.create_thread(conn, "", str(home))
+        tid = store.create_thread(conn, "", str(home), by="eki")
         conn.execute("UPDATE threads SET title=? WHERE id=?",       # whole: `_cloning` finds it by title
                      (_clone_title(row["repo"], str(dest)), tid))
         rid = store.create_run(conn, tid, json.dumps(["gh", "repo", "clone", row["repo"], str(dest)]),

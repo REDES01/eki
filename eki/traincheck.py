@@ -125,7 +125,7 @@ def _write(build: Path, **rec: Any) -> Dict[str, Any]:
 def _start(conn: sqlite3.Connection, build: Path) -> str:
     tree = tree_for(build)
     with db.tx(conn):
-        tid = store.create_thread(conn, f"train check: build {build.name}", str(tree))
+        tid = store.create_thread(conn, f"train check: build {build.name}", str(tree), by="eki")
         rid = store.create_run(conn, tid, command(build), provider="command", priority="now")
     _write(build, state="running", run=rid)
     return rid

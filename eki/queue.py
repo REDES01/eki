@@ -216,7 +216,7 @@ def _start_gate2(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         row = conn.execute("SELECT state, rebased FROM items WHERE id=?", (it["id"],)).fetchone()
         if row["state"] != "queued" or row["rebased"] != it["rebased"]:
             return []
-        tid = store.create_thread(conn, f"gate 2: {it['title']}", str(tree))
+        tid = store.create_thread(conn, f"gate 2: {it['title']}", str(tree), by="eki")
         docs = doccheck.of_item(it)
         judge = doccheck.command(it["head"], it["rebased"]) if docs else GATE2
         rid = store.create_run(conn, tid, judge, provider="command",

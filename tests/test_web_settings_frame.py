@@ -26,7 +26,7 @@ def _node():
 
 def test_nav_routes_a_settings_section_and_never_as_a_thread(tmp_path):
     js = (WEB / "nav.js").read_text()
-    assert 'return ["settings", s[1]]' in js
+    assert '(settings|customize)' in js
     _node()
     body = re.search(r"function route\(name\) \{.*?\n  \}", js, re.S).group(0)
     stub = tmp_path / "route.js"

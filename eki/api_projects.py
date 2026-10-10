@@ -13,7 +13,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import asking, db, gallery, paths, projectchats, store
 
@@ -27,6 +27,9 @@ INSTRUCTIONS_PROMPT = (
 #: how many event rows are read looking for a project's files still on disk
 _FILE_EVENTS = 2000
 _ACTIVE = ("queued", "starting", "running")
+
+#: (method, regex, fn) — see eki/apiroutes.py
+ROUTES: List[Tuple[str, str, Callable]] = []
 
 
 def projects_list(conn: sqlite3.Connection) -> Dict[str, Any]:

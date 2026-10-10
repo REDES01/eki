@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import (api, api_models, api_projects, api_settings, api_station, api_threads, db, observe,
-               shellbuild, threadacts)
+from . import (api, api_models, api_projects, api_settings, api_station, api_threads, apiroutes, db,
+               observe, shellbuild, threadacts)
 
 log = logging.getLogger("eki.server")
 
@@ -208,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/projects/([\w.-]+)", p)
         if m:
             return self._call(api_projects.show, m.group(1))
-        self._json({"error": "not found"}, 404)
+        return self._routed("GET", p, q, {})
 
     def do_POST(self) -> None:
         if self.headers.get("X-Eki") != "1":
@@ -280,7 +280,16 @@ class Handler(BaseHTTPRequestHandler):
             if action == "clone":
                 return self._call(api_projects.clone_home, pid)
             return self._call(api_projects.write_instructions, pid)
-        self._json({"error": "not found"}, 404)
+        q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        return self._routed("POST", p, q, body)
+
+    def _routed(self, method: str, p: str, q: dict, body: dict) -> None:
+        """The route table (eki/apiroutes.py), then not found."""
+        hit = apiroutes.match(method, p)
+        if not hit:
+            return self._json({"error": "not found"}, 404)
+        fn, m = hit
+        return self._call(fn, m, q, body)
 
 
 def _update_thread(conn: Any, tid: str, body: dict) -> dict:

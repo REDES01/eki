@@ -211,6 +211,20 @@ CREATE TABLE IF NOT EXISTS chat_groups (    -- your own groups of chats in the s
     ord REAL NOT NULL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS schedules (      -- a prompt sent on a clock (eki/schedule.py)
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    project TEXT,                           -- projects.id or "eki"; NULL: no project
+    cadence TEXT NOT NULL,                  -- JSON: {"every": hourly|daily|weekdays|weekly, ...}
+    tz TEXT NOT NULL,                       -- the IANA zone, fixed when added
+    target TEXT,                            -- JSON targets.fmt; NULL: Auto
+    state TEXT NOT NULL DEFAULT 'on',       -- on | paused | dropped
+    next_at REAL,
+    last_at REAL,
+    last_thread TEXT,
+    why TEXT,                               -- why the last firing was skipped
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -274,6 +288,8 @@ ADDED = [
     ("threads", "archived_at", "REAL"),
     ("threads", "chat_group", "TEXT"),  # chat_groups.id
     ("threads", "deleted_at", "REAL"),  # hidden at once; the rows go once nothing is active
+    ("threads", "schedule", "TEXT"),    # schedules.id a firing's chat came from
+    ("projects", "description", "TEXT"),   # what you're trying to achieve; eki's is fixed
 ]
 
 

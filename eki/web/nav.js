@@ -1,12 +1,14 @@
-// The page's addresses. #pictures, #station, #settings and #projects are views
-// that take #main's place, and #project/<id> is one project's page; any other
-// hash is a thread id, and none is a new thread. #settings/<section> is one
-// section of Settings. The address is the whole
-// state, so a refresh reopens the same view.
+// The page's addresses. #projects, #artifacts, #scheduled, #customize,
+// #station and #settings are views that take #main's place, and
+// #project/<id> is one project's page; any other hash is a thread id, and
+// none is a new thread. #settings/<section> is one section of Settings,
+// #customize/<tab> one tab of Customize, and the old #pictures is Artifacts
+// showing pictures. The address is the whole state, so a refresh reopens the
+// same view.
 (function () {
   const $ = (id) => document.getElementById(id);
   if (/EkiMac/.test(navigator.userAgent)) document.documentElement.dataset.shell = "mac";
-  const RESERVED = ["pictures", "station", "settings", "projects"];
+  const RESERVED = ["station", "settings", "projects", "artifacts", "scheduled", "customize"];
   const views = {};
   let openThread = () => {};
   let started = false;
@@ -21,22 +23,26 @@
   }
 
   // "project/<id>" is the project view with its id, "settings/<section>" one section of
-  // Settings; a reserved name is its own view.
+  // Settings, "customize/<tab>" one tab of Customize; a reserved name is its own view.
   function route(name) {
     const m = /^project\/(.+)$/.exec(name);
     if (m) return ["project", m[1]];
-    const s = /^settings\/(.+)$/.exec(name);
-    if (s) return ["settings", s[1]];
+    const s = /^(settings|customize)\/(.+)$/.exec(name);
+    if (s) return [s[1], s[2]];
+    if (name === "pictures") return ["artifacts", "picture"];
     return [RESERVED.includes(name) ? name : "chat", null];
   }
 
   function dispatch() {
     const name = current();
     for (const v of Object.values(views)) v.hide();
-    const [view, arg] = route(name);
+    let [view, arg] = route(name);
+    if (view === "artifacts" && !views.artifacts && views.pictures) view = "pictures";   // a build from before Artifacts
     $("app").dataset.view = view;
-    const link = view === "project" ? "projects" : view;   // a project's page lights up Projects
-    document.querySelectorAll("#side .side-link").forEach((a) => a.classList.toggle("on", a.id === link && !(view === "chat" && name)));
+    // a project's page lights up Projects; the old Pictures link is Artifacts
+    const link = view === "project" ? "projects" : view === "pictures" ? "artifacts" : view;
+    const lit = (id) => (id === "pictures" ? "artifacts" : id) === link;
+    document.querySelectorAll("#side .side-link").forEach((a) => a.classList.toggle("on", lit(a.id) && !(view === "chat" && name)));
     if (view === "chat") openThread(name || null);
     else if (views[view]) views[view].show(arg);
     else {  // a reserved view whose script isn't here: say so rather than show a broken chat
@@ -81,5 +87,5 @@
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); go(""); }
   });
 
-  window.nav = { register, thread: (fn) => { openThread = fn; }, go, drag, start, current };
+  window.nav = { register, thread: (fn) => { openThread = fn; }, go, drag, start, current, route };
 })();

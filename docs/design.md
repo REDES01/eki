@@ -89,6 +89,12 @@ eki follow <run>  ◄── events table
 | `threadacts` | what you do to a chat: pin, unread, rename, move to a project (cwd follows, sessions dropped), group, archive, delete (cancel, hide; `purge` removes the rows once nothing is active) |
 | `api_threads` | the chat list: eki's threads that need you, then your pinned chats, then the rest; `all`, `archived`; each entry's pin, unread, own, title_by, group, sessions; `groups` |
 | `titles` | a `title` chore per new chat of yours with an answer, once; the cleaned title is written only while the title is still the prompt's |
+| `apiroutes` | the window's newer API as a table: `ROUTES` is each page's `api_*.ROUTES` joined, entries `(method, regex, fn)` with `fn(conn, m, q, body)`; `server.py` asks `match(method, path)` before its 404 |
+| `api_artifacts`, `api_schedule`, `api_customize` | the Artifacts, Scheduled and Customize pages over HTTP, each only through its own `ROUTES` (`api_projects.ROUTES` holds the projects page's newer routes) |
+| `artifacts` | what your chats made that is still on disk — pictures, pages, documents — newest first, from the store's `tool` events with a path |
+| `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
+| `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
+| `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
 | `cli/*` | one file per command |
 
 **Scheduling.** The engine's spawn step holds each kind of run only by the
@@ -108,6 +114,14 @@ per folder, and `priority == "background"` runs wait for `machine.room`.
 below 1 means no cap), and when set it caps all `starting`/`running` runs
 of every kind, checks included; the held runs stay `queued` and start in
 order as slots free up.
+
+**The window's pages.** The sidebar opens with **New** (a new chat, ⌘K),
+**Projects** (`#projects`, a card per project), **Artifacts** (`#artifacts`,
+what your chats made; the old `#pictures` is Artifacts showing pictures),
+**Scheduled** (`#scheduled`, standing goals and prompts on a clock) and
+**Customize** (`#customize/<tab>`, skills and connectors). They share one
+look (`eki/web/pages.css`), and each folds detail: a card or a row shows a
+line or two, the rest opens on click.
 
 ## Runs
 
@@ -195,7 +209,8 @@ when the folder changes its sessions are dropped, so the next turn starts
 fresh with the whole transcript, as after a handoff. New chats are titled
 from the prompt (`title_by='prompt'`) and then by a `title` chore, once; a
 title you set (`'you'`) always wins, and chats from before (`'old'`) are
-never retitled.
+never retitled. A chat a scheduled prompt started carries the schedule's id in
+`threads.schedule`.
 
 ## Routing
 

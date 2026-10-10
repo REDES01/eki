@@ -85,7 +85,7 @@ def dispatch(tmp_path, hash_):
     ("#projects", {"seen": [["projects", None]], "view": "projects"}),
     ("#project/ab12cd", {"seen": [["project", "ab12cd"]], "view": "project"}),
     ("#project/eki", {"seen": [["project", "eki"]], "view": "project"}),
-    ("#pictures", {"seen": [["pictures", None]], "view": "pictures"}),
+    ("#pictures", {"seen": [["pictures", "picture"]], "view": "pictures"}),   # the gallery until Artifacts
     ("#f00dfeed", {"seen": [["chat", "f00dfeed"]], "view": "chat"}),
     ("", {"seen": [["chat", None]], "view": "chat"}),
 ])

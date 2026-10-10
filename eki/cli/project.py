@@ -1,27 +1,31 @@
-"""`eki project [key]` — every project, or one: its folder and chats; on GitHub its check, branch, setup retry."""
+"""`eki project [key]` — every project, or one: its folder and chats; on GitHub its check, branch, setup retry;
+`eki project rm <key>` deletes one (your folder is never touched)."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import List
 
-from .. import db, projectchats, projects, projectsetup
+from .. import db, projectchats, projectdelete, projects, projectsetup
 from . import projectlist
 from .common import conn, err
 
 NAME = "project"
-HELP = "list your projects, show or make one, set its folder; on GitHub: its check, branch, setup retry"
+HELP = ("list your projects, show or make one, set its folder, delete one (`rm`); "
+        "on GitHub: its check, branch, setup retry")
 
 
 def add(p) -> None:
     p.add_argument("key", nargs="?", help="a project's name, id, OWNER/REPO or eki; none lists them all; "
-                                          "`describe <key> TEXT` sets what it's for")
-    p.add_argument("more", nargs="*", metavar="ARG", help="with `describe`: the project and its text ('' clears it)")
+                                          "`describe <key> TEXT` sets what it's for; `rm <key>` deletes it")
+    p.add_argument("more", nargs="*", metavar="ARG", help="with `describe`: the project and its text ('' clears it); "
+                                                       "with `rm`: the project")
     p.add_argument("--new", metavar="NAME", help="make a project (folder ~/NAME unless --folder)")
     p.add_argument("--folder", metavar="PATH", help="the folder the project's chats run in")
     p.add_argument("--description", metavar="TEXT", help="with --new: what you're trying to achieve")
     p.add_argument("--check", help="the shell command that judges an item ('' for none); replaces the guess")
     p.add_argument("--branch", help="the branch eki works from and opens PRs against")
     p.add_argument("--retry", action="store_true", help="start the failed setup step (clone or install) again")
+    p.add_argument("--yes", action="store_true", help="with `rm`: delete without asking")
 
 
 def setup_line(project) -> str:
@@ -80,8 +84,55 @@ def describe(c, key: str, text: str) -> int:
     return 0
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def remove(c, key: str, yes: bool) -> int:
+    """Delete a project after asking once (unless --yes); say what stopped, archived and went."""
+    try:
+        pre = projectdelete.preview(c, key)
+    except ValueError as e:
+        err(f"eki: {e}")
+        return 1
+    except KeyError:
+        projectlist.resolve(c, key)                 # says why, as the other subcommands do
+        return 1
+    if not yes:
+        print(pre["line"])
+        try:
+            reply = input(f"Delete {pre['name']}? [y/N] ")
+        except EOFError:
+            reply = ""
+        if reply.strip().lower() not in ("y", "yes"):
+            print("kept")
+            return 1
+    try:
+        done = projectdelete.delete(c, pre["id"])
+    except (ValueError, KeyError) as e:
+        err(f"eki: {str(e).strip(chr(39))}")
+        return 1
+    print(f"deleted {done['name']}")
+    print("  stopped: " + ", ".join([_plural(done["runs"], "run"), _plural(done["goals"], "goal"),
+                                     _plural(done["items"], "item"), _plural(done["standing"], "standing goal"),
+                                     _plural(done["asks"], "ask")]))
+    print(f"  archived: {_plural(done['chats'], 'chat')}")
+    for path in done["removed"]:
+        print(f"  removed: {path}")
+    print(f"  your folder {done['folder'] or '(none)'} is not touched")
+    return 0
+
+
 def run(args) -> int:
     c = conn()
+    if args.key == "rm":
+        if len(args.more) != 1:
+            err("eki: eki project rm <name|id|OWNER/REPO> [--yes]")
+            return 1
+        return remove(c, args.more[0], args.yes)
+    if args.yes:
+        err("eki: --yes goes with `eki project rm <key>`")
+        return 1
     if args.key == "describe" and args.more:
         if len(args.more) != 2:
             err('eki: eki project describe <key> "text"')

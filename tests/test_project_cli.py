@@ -150,3 +150,48 @@ def test_github_flags_on_other_rows_say_github_only(conn, capsys):
         assert "GitHub-only" in capsys.readouterr().err
     assert main(["project", "eki", "--check", "true"]) == 1
     assert "GitHub-only" in capsys.readouterr().err
+
+
+@pytest.fixture
+def folder_proj(conn, tmp_path, monkeypatch):
+    """A local project with a chat, beside eki's own source."""
+    src = tmp_path / "src"
+    src.mkdir()
+    workspace.git(src, "init", "-q", "-b", "main")
+    monkeypatch.setenv("EKI_SOURCE", str(src))
+    pid = projectchats.create(conn, "tokenbar")
+    tid = store.create_thread(conn, "hi", projectchats.folder_of(conn, pid))
+    conn.execute("UPDATE threads SET project=? WHERE id=?", (pid, tid))
+    conn.commit()
+    return pid
+
+
+def test_rm_yes_deletes_and_says_what_it_did(conn, capsys, folder_proj):
+    folder = projectchats.folder_of(conn, folder_proj)
+    assert main(["project", "rm", "tokenbar", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "deleted tokenbar" in out
+    assert "stopped: 0 runs, 0 goals, 0 items, 0 standing goals, 0 asks" in out
+    assert "archived: 1 chat" in out
+    assert out.strip().endswith(f"your folder {folder} is not touched")
+    assert projects.get(conn, folder_proj)["state"] == "deleted"
+    assert folder_proj not in [e["id"] for e in projectchats.listing(conn)]
+
+
+def test_rm_asks_once_and_n_keeps_it(conn, capsys, folder_proj, monkeypatch):
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "n")
+    assert main(["project", "rm", "tokenbar"]) == 1
+    assert asked == ["Delete tokenbar? [y/N] "]
+    assert "archives its 1 chats" in capsys.readouterr().out
+    assert projects.get(conn, folder_proj)["state"] != "deleted"
+
+
+def test_rm_eki_is_refused(conn, capsys, folder_proj):
+    assert main(["project", "rm", "eki", "--yes"]) == 1
+    assert capsys.readouterr().err.startswith("eki: eki can't be deleted")
+
+
+def test_rm_unknown_says_so(conn, capsys, folder_proj):
+    assert main(["project", "rm", "nope", "--yes"]) == 1
+    assert "no project named nope" in capsys.readouterr().err

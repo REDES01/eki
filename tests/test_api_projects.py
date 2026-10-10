@@ -181,3 +181,31 @@ def test_routes(conn, src):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_delete_route(conn, src):
+    srv = server.serve(0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def call(path, method="GET", eki=True):
+        req = urllib.request.Request(base + path, method=method, headers={"X-Eki": "1"} if eki else {})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+    try:
+        pid = projectchats.create(conn, "web")
+        assert call(f"/api/projects/{pid}", "DELETE", eki=False)[0] == 403
+        code, got = call("/api/projects/eki", "DELETE")
+        assert code == 400 and "eki can't be deleted" in got["error"]
+        assert call("/api/projects/nope", "DELETE")[0] == 404
+        code, got = call(f"/api/projects/{pid}", "DELETE")
+        assert code == 200 and got["id"] == pid and got["name"] == "web"
+        assert {"runs", "goals", "items", "standing", "asks", "chats", "removed", "folder"} <= set(got)
+        assert pid not in [p["id"] for p in call("/api/projects")[1]["projects"]]
+        assert call(f"/api/projects/{pid}", "DELETE")[0] == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import asking, db, gallery, paths, projectchats, store
+from . import asking, db, gallery, paths, projectchats, projectdelete, store
 
 #: what the page's "Have an agent write instructions" asks for
 INSTRUCTIONS_PROMPT = (
@@ -217,8 +217,14 @@ def write_instructions(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     return {"thread": tid, "run": rid}
 
 
+def remove(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """DELETE /api/projects/<id>: the project leaves eki (your folder stays); what was stopped and removed."""
+    return projectdelete.delete(conn, m.group(1))
+
+
 #: (method, regex, fn) — see eki/apiroutes.py
 ROUTES: List[Tuple[str, str, Callable]] = [
     ("POST", r"/api/projects/([^/]+)/describe", describe),
     ("GET", r"/api/folders", folders),
+    ("DELETE", r"/api/projects/([^/]+)", remove),
 ]

@@ -45,7 +45,7 @@ eki follow <run>  ◄── events table
 | `db` | schema, WAL, busy timeout — the one source of truth |
 | `threads`, `runs`, `events` | the data: a thread is a conversation, a run is one turn by one provider, events are what it said and did |
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
-| `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers |
+| `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers within the per-kind limits, with no overall cap unless `EKI_MAX_PARALLEL` is set |
 | `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run); `oneshot` (one call with no tools through the `claude` or `codex` CLI, for eki's own text jobs) |
 | `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
@@ -90,6 +90,24 @@ eki follow <run>  ◄── events table
 | `api_threads` | the chat list: eki's threads that need you, then your pinned chats, then the rest; `all`, `archived`; each entry's pin, unread, own, title_by, group, sessions; `groups` |
 | `titles` | a `title` chore per new chat of yours with an answer, once; the cleaned title is written only while the title is still the prompt's |
 | `cli/*` | one file per command |
+
+**Scheduling.** The engine's spawn step holds each kind of run only by the
+limit that already exists for it. Checks — gate 1, gate 2, the train's
+check, the docs check, a project's own check — wait for a check slot
+(`checkslots.is_judge`, `checkslots.limit()` = `self.check_slots`, default
+2). Items being built are held by `self.parallel` in
+`scheduler.start_ready` before a build run exists; the engine doesn't count
+build runs, and a waiting item's `items.why` says so ("4 building
+(self.parallel)"). The local model's own server queues its requests, so the
+engine adds no limit for it. Everything else — chats, drafts, plans,
+reviews, chores, other command runs — is a light agent turn and isn't held
+by how many other runs are going. Always: one run at a time per thread, one
+per folder, and `priority == "background"` runs wait for `machine.room`.
+`EKI_MAX_PARALLEL` is an optional overall ceiling, off by default:
+`engine.ceiling()` reads it on every call (unset, empty, not a number or
+below 1 means no cap), and when set it caps all `starting`/`running` runs
+of every kind, checks included; the held runs stay `queued` and start in
+order as slots free up.
 
 ## Runs
 

@@ -100,7 +100,9 @@ An item starts when its write-set is disjoint from the items already running
 *in the same repo* — items of different projects never block each other —
 up to the room the machine and the subscriptions give (`machine.room`,
 `capacity`). `self.parallel` (4) counts building items only; judging is
-limited by `self.check_slots`. Overlapping items go one after another; an
+limited by `self.check_slots`. Other runs aren't counted against either
+limit, and the engine has no overall cap unless `EKI_MAX_PARALLEL` is set.
+Overlapping items go one after another; an
 item marked `independent` never waits. An item that stays waiting says why
 in `items.why`, written only when it changes and cleared when it starts —
 "after <dep title>", "shares eki/engine.py with <item id>", "no write-set:

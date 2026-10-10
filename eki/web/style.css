@@ -27,8 +27,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand { font-weight: 650; letter-spacing: .02em; }
 /* In the Mac shell the window's close/minimize/zoom buttons (centred 16px from
    the top, ending at x≈70) share this row: the brand and the New button sit on
-   the same line as them, and New loses its box so the row reads as one strip. */
-[data-shell="mac"] .side-head { padding: 0 10px 0 78px; height: 32px; min-height: 0; border-bottom: 1px solid var(--line); }
+   the same line as them, and New loses its box so the row reads as one strip.
+   The left room is divided by --eki-zoom (set by the shell when it zooms the
+   page) so it stays the same size on screen. */
+[data-shell="mac"] .side-head { padding: 0 10px 0 calc(78px / var(--eki-zoom, 1)); height: 32px; min-height: 0; border-bottom: 1px solid var(--line); }
 [data-shell="mac"] #views { border-bottom: 0; }
 [data-shell="mac"] .side-head .mark { width: 18px; height: 18px; }
 [data-shell="mac"] .side-head .brand { font-size: 14px; }

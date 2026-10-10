@@ -73,3 +73,12 @@ def test_the_composer_names_the_project_and_sends_no_folder():
     assert '"📁 " + (state.project.name' in app
     assert 'cwd: state.project ? "" :' in app
     assert '.closest(".mrow").hidden = !!state.project' in app
+
+
+def test_the_window_button_room_scales_back_with_the_shell_zoom():
+    css = (WEB / "style.css").read_text()
+    rule = lambda sel: next(l for l in css.splitlines() if l.startswith(sel + " {"))
+    mac = rule('[data-shell="mac"] .side-head')
+    assert "78px" in mac and "var(--eki-zoom, 1)" in mac
+    full = rule('[data-shell="mac"][data-fullscreen="1"] .side-head')
+    assert "14px" in full and "--eki-zoom" not in full

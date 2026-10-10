@@ -110,3 +110,42 @@ def test_show_prints_folder_scope_and_json(proj, temps, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert str(proj / "components" / "say") in out and "project" in out and '"run": "echo hi"' in out
     assert main(["component", "show", "nope"]) == 1
+
+
+def test_add_without_name_takes_the_next_free(proj, temps, monkeypatch):
+    monkeypatch.chdir(proj)
+    for _ in range(3):
+        assert main(["component", "add", "service"]) == 0
+    assert sorted(p.name for p in (proj / "components").iterdir()) == ["service", "service-2", "service-3"]
+
+
+def test_attach_rm_and_uses(proj, temps, monkeypatch, capsys, conn):
+    from eki import db, paths, store
+    monkeypatch.chdir(proj)
+    main(["component", "add", "service", "--pool", "--name", "shared"])
+    assert main(["component", "attach", "shared", "-C", str(proj)]) == 0
+    card = proj / "components" / "shared" / "component.json"
+    assert json.loads(card.read_text()) == {"pool": "shared"}
+    assert main(["component", "attach", "shared"]) == 1
+    assert main(["component", "attach", "nope"]) == 1
+    assert "no component nope" in capsys.readouterr().err
+
+    prompt = json.dumps({"component": "shared", "args": ["x"], "caller_dir": str(proj), "caller_run": None})
+    with db.tx(conn):
+        tid = store.create_thread(conn, "use shared", None, by="eki")
+        rid = store.create_run(conn, tid, prompt, provider="component")
+    conn.execute("UPDATE runs SET state='done', created_at=100, started_at=100, ended_at=103.5 WHERE id=?", (rid,))
+    conn.commit()
+    store.add_event(conn, rid, 0, "text", {"text": "made it\nmore"})
+    assert main(["component", "uses", "shared"]) == 0
+    out = capsys.readouterr().out
+    assert "you" in out and "done" in out and "3.5s" in out and "made it" in out and "more" not in out
+    assert main(["component", "uses", "voice"]) == 0
+    assert "no calls" in capsys.readouterr().out
+
+    assert main(["component", "rm", "shared", "-C", str(proj)]) == 0
+    out = capsys.readouterr().out
+    assert str(paths.user_home() / ".Trash") in out
+    assert not card.exists() and (components.pool_dir() / "shared" / "component.json").is_file()
+    assert main(["component", "rm", "shared"]) == 1
+    assert "no card shared" in capsys.readouterr().err

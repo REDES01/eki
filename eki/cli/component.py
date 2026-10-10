@@ -1,22 +1,24 @@
-"""`eki component kinds | ls [folder] | add <kind|template> | show <name>` — the component folders.
+"""`eki component kinds | ls | add | attach | rm | uses | show` — the component folders.
 
 `add` copies a template into `components/<name>/` of a project folder (the project of the cwd by
-default, of -C folder, or the machine-wide pool with --pool). It never overwrites and never
-commits or stages anything: the folder is the person's to keep. A template's `mcp_servers` go
-into eki's MCP registry, switched off, and leave the copied component.json.
+default, of -C folder, or the machine-wide pool with --pool), under the template's name or the
+next free `-2`, `-3`…. `attach` adds a card reaching a pool component; `rm` moves a card to the
+Trash. Nothing is overwritten, deleted, committed or staged: the folder is the person's to keep.
+A template's `mcp_servers` go into eki's MCP registry, switched off, and leave the copy.
 """
 from __future__ import annotations
 
 import json
 import os
-import shutil
+import time
 from pathlib import Path
 from typing import List, Optional
 
-from .. import components, db, mcp
+from .. import components, db
+from ..components import cards, uses
 
 NAME = "component"
-HELP = "the components a project or the pool holds: kinds, ls, add from a template, show"
+HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show"
 
 
 def add(p) -> None:
@@ -26,20 +28,21 @@ def add(p) -> None:
     ls.add_argument("folder", nargs="?", help="default: here")
     a = sub.add_parser("add", help="copy a template into components/<name>/ (never overwrites)")
     a.add_argument("template", help="a kind or a template (eki component kinds lists them)")
-    a.add_argument("--name", help="the component's name (default: the template's)")
+    a.add_argument("--name", help="the component's name (default: the template's, else -2, -3…)")
     where = a.add_mutually_exclusive_group()
     where.add_argument("--pool", action="store_true", help="into the machine-wide pool")
     where.add_argument("-C", dest="folder", help="into this folder's project (default: here)")
+    at = sub.add_parser("attach", help="a card reaching a pool component: components/<name>/")
+    at.add_argument("pool_name")
+    at.add_argument("-C", dest="folder", help="this folder's project (default: here)")
+    r = sub.add_parser("rm", help="move a card's folder to the Trash (never deletes)")
+    r.add_argument("name")
+    r.add_argument("-C", dest="folder", help="this folder's project (default: here)")
+    u = sub.add_parser("uses", help="the last 20 calls of a component from this project")
+    u.add_argument("name")
+    u.add_argument("-C", dest="folder", help="this folder's project (default: here)")
     s = sub.add_parser("show", help="one component: folder, scope, component.json, notes")
     s.add_argument("name")
-
-
-def _templates() -> List[Path]:
-    base = components.templates_dir()
-    try:
-        return sorted(d for d in base.iterdir() if d.is_dir() and not d.name.startswith((".", "_")))
-    except OSError:
-        return []
 
 
 def _about(folder: Path) -> str:
@@ -58,7 +61,7 @@ def _kinds() -> int:
         except Exception as e:  # a broken kind module is reported, not raised
             about = f"broken: {e}"
         print(f"  {kind:<10} {about}")
-    temps = _templates()
+    temps = cards.templates()
     print("templates:" if temps else "templates: none")
     for t in temps:
         print(f"  {t.name:<10} {_about(t)}")
@@ -82,58 +85,53 @@ def _ls(folder: Optional[str]) -> int:
     return 0
 
 
-def _dest(args) -> Path:
-    if args.pool:
-        return components.pool_dir()
-    where = args.folder or os.getcwd()
+def _root(folder: Optional[str]) -> Path:
+    where = folder or os.getcwd()
     root = components.project_root(where, db.connect())
     if root is None:
         raise ValueError(f"{where} is not a folder")
-    return root / "components"
-
-
-def _register_mcp(spec: dict) -> List[str]:
-    """Each of the template's MCP servers into eki's registry, off; one already there is left alone."""
-    said = []
-    have = {s["name"] for s in mcp.all_servers()}
-    for name, s in (spec.pop("mcp_servers", None) or {}).items():
-        if name in have:
-            said.append(f"MCP server {name} is already in eki's registry: kept as it is")
-            continue
-        s = s if isinstance(s, dict) else {}
-        mcp.add(name, command=s.get("command"), args=s.get("args"), url=s.get("url"), env=s.get("env"))
-        mcp.set_on(name, False)
-        said.append(f"MCP server {name} added to eki's registry, off (eki mcp on {name})")
-    return said
+    return root
 
 
 def _add(args) -> int:
-    temps = {t.name: t for t in _templates()}
-    src = temps.get(args.template)
-    if src is None:
-        raise ValueError(f"no template {args.template} (templates: {', '.join(temps) or 'none'})")
-    name = args.name or args.template
-    if not components.NAME.match(name) or name in components.RESERVED:
-        raise ValueError(f"bad name {name!r}: lowercase letters, digits, - and _, not 'sessions'")
-    base = _dest(args)
-    out = base / name
-    if out.exists():
-        raise ValueError(f"{out} already exists: nothing written (pick another --name)")
-    base.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, out)
-    said = []
-    f = out / "component.json"
-    try:
-        spec = json.loads(f.read_text())
-    except (OSError, ValueError):
-        spec = None
-    if isinstance(spec, dict) and "mcp_servers" in spec:
-        said = _register_mcp(spec)
-        f.write_text(json.dumps(spec, indent=2) + "\n")
+    base = components.pool_dir() if args.pool else _root(args.folder) / "components"
+    out, said = cards.add_template(base, args.template, args.name)
     print(f"wrote {out}")
     for line in said:
         print(line)
     _notes(out, "pool" if args.pool else "project")
+    return 0
+
+
+def _attach(args) -> int:
+    out = cards.attach(_root(args.folder) / "components", args.pool_name)
+    print(f"wrote {out / 'component.json'}: reaches the pool's {args.pool_name}")
+    return 0
+
+
+def _rm(args) -> int:
+    try:
+        dest = cards.remove(_root(args.folder) / "components", args.name)
+    except KeyError as e:
+        raise ValueError(e.args[0] if e.args else str(e))
+    print(f"moved {args.name} to the Trash: {dest}")
+    return 0
+
+
+def _use_line(c: dict) -> str:
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(c["when"])) if c["when"] else "?"
+    secs = f"{c['seconds']}s" if c["seconds"] is not None else "-"
+    what = f"error: {c['error']}" if c["error"] else c["result"]
+    return f"{when}  {c['caller']:<12} {c['state']:<8} {secs:>7}  {what}"
+
+
+def _uses(args) -> int:
+    conn = db.connect()
+    got = uses.calls(conn, args.name, _root(args.folder), limit=20)
+    if not got:
+        print(f"no calls of {args.name} from here yet")
+    for c in got:
+        print(_use_line(c))
     return 0
 
 
@@ -167,7 +165,14 @@ def run(args) -> int:
         return _ls(args.folder)
     if args.action == "add":
         return _add(args)
+    if args.action == "attach":
+        return _attach(args)
+    if args.action == "rm":
+        return _rm(args)
+    if args.action == "uses":
+        return _uses(args)
     if args.action == "show":
         return _show(args.name)
-    print("eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder] | show <name>")
+    print("eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder]"
+          " | attach <pool-name> [-C folder] | rm <name> [-C folder] | uses <name> [-C folder] | show <name>")
     return 0

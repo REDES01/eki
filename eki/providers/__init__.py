@@ -31,10 +31,12 @@ from .codex import Codex
 from .codex_local import CodexLocal, default_entry
 from .comfyui import Comfyui
 from .command import Command
+from .component import ComponentCall
 from .fake import Fake
 from .local import Local
 
-KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, CodexLocal, Local, Comfyui, Fake, Command)}
+KINDS = {cls.kind: cls for cls in (ClaudeCode, Codex, CodexLocal, Local, Comfyui, Fake, Command,
+                                     ComponentCall)}
 
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     "claude": {"kind": "claude_code", "label": "Claude Code"},
@@ -63,6 +65,7 @@ CAN: Dict[str, List[str]] = {
     "local": ["text"],
     "comfyui": ["image", "image-edit"],
     "command": [],
+    "component": [],
     "fake": ["text", "tools"],
 }
 
@@ -81,6 +84,7 @@ def capabilities(name: str, cfg: Dict[str, Any]) -> List[str]:
 #: always there, never in the routing table: reached only when picked by name
 BUILTIN: Dict[str, Dict[str, Any]] = {
     "command": {"kind": "command", "label": "a command in a folder"},
+    "component": {"kind": "component", "label": "a component call (eki use)"},
 }
 
 

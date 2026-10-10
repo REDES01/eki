@@ -20,7 +20,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import asks, capacity, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store, transient
+from . import asks, capacity, components, files, db, mcp, models, observe, paths, providers, quota, routing, skills, store, transient
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
 
@@ -76,6 +76,10 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         turn.extra["model"] = r["model"]
     if r["effort"]:
         turn.extra["effort"] = r["effort"]
+    if r["row"] != "chore":                     # which components it can reach, and how to call them
+        line = components.brief(turn.cwd, conn)
+        if line:
+            turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
     return turn
 
 

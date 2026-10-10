@@ -172,7 +172,7 @@ def _self_thread(conn: sqlite3.Connection, thread_id: Optional[str]) -> bool:
 def scope(conn: sqlite3.Connection, thread_id: Optional[str], provider: Optional[str],
           row: Optional[str]) -> str:
     """'self' (eki's own work), 'picture', or 'chat' (what you asked for): the score counts only chat."""
-    if provider == "command" or _self_thread(conn, thread_id):
+    if provider in ("command", "component") or _self_thread(conn, thread_id):
         return "self"
     from .routing import table
     if _kind(provider) == "comfyui" or (row is not None and row in table.PICTURE_ROWS):

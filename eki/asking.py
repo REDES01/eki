@@ -37,7 +37,7 @@ def submit(conn: sqlite3.Connection, prompt: str, *, project: Optional[str] = No
         tid = None
         if thread:
             t = store.thread(conn, thread)
-            if t is None:
+            if t is None or t["deleted_at"] is not None:
                 raise KeyError(f"no thread {thread}")
             tid = t["id"]
         elif continue_last:
@@ -58,6 +58,8 @@ def submit(conn: sqlite3.Connection, prompt: str, *, project: Optional[str] = No
         rid = store.create_run(conn, tid, prompt, provider=to or None,
                                priority="background" if background else "now",
                                attachments=files)
+        conn.execute("UPDATE threads SET archived_at=NULL WHERE id=? AND archived_at IS NOT NULL",
+                     (tid,))   # a new message brings an archived chat back
     return tid, rid
 
 

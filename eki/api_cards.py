@@ -51,6 +51,29 @@ def _state(conn: sqlite3.Connection, comp: components.Component) -> str:
     return state
 
 
+def _links(c: components.Component) -> List[dict]:
+    """The serving links that are up for a `serve` card; [] for anything else or on any trouble."""
+    if c.kind != "serve":
+        return []
+    try:
+        from .components import serve
+        return list(serve.links(c))
+    except Exception:  # a dead server or odd state must never break the page
+        return []
+
+
+def _size(c: components.Component) -> str:
+    """An `assets` card's pool size as a human string; '' for other kinds or a missing pool."""
+    if c.kind != "assets":
+        return ""
+    try:
+        from .components import assets
+        p = assets.root_of(c) / c.spec["path"]
+        return assets._human(assets._size(p)) if p.exists() else ""
+    except Exception:  # never breaks the page
+        return ""
+
+
 def _waiting(conn: sqlite3.Connection, name: str, state: str) -> str:
     n = uses.waiting(conn, name)
     return f"{state} · {n} waiting" if n else state
@@ -68,7 +91,7 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
            "ref": c.name if c.card else "", "card": str(c.card or c.folder), "folder": str(c.folder),
            "error": "", "notes": components._notes(c), "spec": c.spec, "prompt": prompt,
            "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
-           "last_use": uses.last_use(conn, c.name, root)}
+           "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c)}
     if c.kind == "skills":
         from .components import skillcard
         good, broken = skillcard.held(c.folder)
@@ -86,7 +109,7 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
     return {"name": name, "kind": kind, "about": about, "scope": "project", "ref": ref, "card": where,
             "folder": where, "error": why, "notes": [], "spec": spec, "prompt": None,
             "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
-            "last_use": uses.last_use(conn, name, root)}
+            "last_use": uses.last_use(conn, name, root), "links": [], "size": ""}
 
 
 def cards_of(conn: sqlite3.Connection, root: Path) -> List[Dict[str, Any]]:

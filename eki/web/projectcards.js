@@ -45,6 +45,15 @@
     return `<div class="pc-about">${esc(f.heading || f.file)}</div><div class="dim">${esc(f.lines)} lines</div>`;
   }
 
+  // a serve card's links that are up ("folder → URL", the folder cut to its last two parts) and
+  // an assets card's pool size; nothing when there are none
+  function serving(c) {
+    const short = (f) => String(f || "").split("/").filter(Boolean).slice(-2).join("/");
+    const links = (c.links || []).map((l) => `<div class="dim">${esc(short(l.folder))} → ` +
+      `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a></div>`).join("");
+    return links + (c.size ? `<div class="dim">pool: ${esc(c.size)}</div>` : "");
+  }
+
   function tile(c, ro) {
     const broken = !!c.error;
     const state = broken ? c.state || "broken" : c.state || "idle";
@@ -54,6 +63,7 @@
       <div class="pc-name">${esc(c.name)}</div>
       <div class="pc-kind dim">${esc(c.kind || "?")}${c.ref ? " · from the pool" : ""}</div>
       ${about(c)}
+      ${serving(c)}
       ${broken ? `<div class="pj-err pc-about">${esc(c.error)}</div>` : ""}
       <div class="pc-foot"><span class="pc-state ${cls}">${esc(state)}</span>
         <span class="dim">${c.last_use ? esc(ago(c.last_use)) : "never used"}</span></div></div>`;
@@ -153,6 +163,7 @@
   function onClick(e) {
     const t = e.target;
     if (t.closest(".pc-panel")) return;               // the panel handles its own clicks
+    if (t.closest("a[href]")) return;                 // a serving link opens in its own tab
     const rm = t.closest("[data-rm]");
     if (rm) { e.stopPropagation(); return remove(rm.dataset.rm); }
     const lib = t.closest("[data-lib]");

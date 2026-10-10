@@ -72,12 +72,12 @@ def test_same_file_names_in_two_repos_both_start(conn, src, tmp_path):
     assert state(conn, theirs)["state"] == "building"
 
 
-def test_an_overlapping_item_waits_naming_the_other(conn, src):
+def test_overlapping_items_build_together(conn, src):
     first = one(conn, "change x", ["eki/x.py"])
     second = one(conn, "change x too", ["eki/x.py", "eki/y.py"])
     scheduler.start_ready(conn)
     assert state(conn, first)["state"] == "building"
-    assert tuple(state(conn, second)) == ("waiting", f"shares eki/x.py with {first}")
+    assert state(conn, second)["state"] == "building"
     nows = one(conn, "change anything", [])
     scheduler.start_ready(conn)
     assert tuple(state(conn, nows)) == ("waiting", scheduler.NO_WRITE_SET)
@@ -106,7 +106,7 @@ def test_judging_items_do_not_count_against_parallel(conn, src):
 
 def test_the_board_shows_shape_and_why(conn, src, capsys):
     first = one(conn, "change x", ["eki/x.py"])
-    second = one(conn, "change x too", ["eki/x.py"])
+    second = one(conn, "change anything", [])
     gid = conn.execute("SELECT goal_id FROM items WHERE id=?", (second,)).fetchone()[0]
     conn.execute("UPDATE goals SET shape=? WHERE id=?",
                  (json.dumps({"items": 5, "depth": 2, "width": 4, "chained": 0}), gid))
@@ -114,4 +114,4 @@ def test_the_board_shows_shape_and_why(conn, src, capsys):
     selfboard.board(conn)
     out = capsys.readouterr().out
     assert "5 items · 2 deep · 4 wide" in out
-    assert f"shares eki/x.py with {first}" in out
+    assert scheduler.NO_WRITE_SET in out

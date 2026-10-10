@@ -104,16 +104,16 @@ board shows it on the goal line as "5 items · 2 deep · 4 wide".
 **The scheduler** (`eki/scheduler.py`) starts ready items across all goals
 at once. Waiting items are taken goal by goal, round-robin: the goal with the
 fewest items building goes first, then the older goal, then the older item.
-An item starts when its write-set is disjoint from the items already running
-*in the same repo* — items of different projects never block each other —
-up to the room the machine and the subscriptions give (`machine.room`,
+An item starts as soon as its dependencies are done — items whose write-sets
+overlap build at the same time, and the queue merges them (a resolve run on a
+conflict) — up to the room the machine and the subscriptions give (`machine.room`,
 `capacity`). `self.parallel` (4) counts building items only; judging is
 limited by `self.check_slots`. Other runs aren't counted against either
 limit, and the engine has no overall cap unless `EKI_MAX_PARALLEL` is set.
-Overlapping items go one after another; an
-item marked `independent` never waits. An item that stays waiting says why
+Only an item with no write-set waits, until nothing else builds in its
+repo; an item marked `independent` never waits. An item that stays waiting says why
 in `items.why`, written only when it changes and cleared when it starts —
-"after <dep title>", "shares eki/engine.py with <item id>", "no write-set:
+"after <dep title>", "no write-set:
 waits until its repo is quiet", "4 building (self.parallel)" — and the board
 shows it. The write-set is a prediction, not a lock: at commit time eki
 records what was touched against what was declared, and the drift feeds the

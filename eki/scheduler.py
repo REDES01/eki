@@ -2,10 +2,10 @@
 
 Waiting items are taken goal by goal, round-robin: the goal with the fewest
 items building goes first, then the older goal, then the older item. An item
-starts once its deps are fit and its write-set doesn't overlap what is
-building, judging or being reviewed in the same repo (items of two projects
-never block each other), up to `self.parallel` building at once — judging
-and review are held elsewhere.
+starts once its deps are fit, up to `self.parallel` building at once —
+judging and review are held elsewhere. Items whose write-sets overlap build
+at the same time: the queue merges them (a resolve run on conflict). Only an
+item with no write-set waits, until nothing else builds in its repo.
 An item left waiting says why in `items.why`, written only when it changes.
 Nothing is kept between ticks but a cache of the tracked files, cleared at
 every pass.
@@ -73,12 +73,9 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         if it["independent"]:
             return None
         files = json.loads(it["files"] or "[]")
-        mine = expand(files, tracked(r))
-        for oid, theirs in taken.get(str(r), []):
-            both = (mine & theirs) - {"*"}
-            if both or ("*" in mine and "*" in theirs):
-                return NO_WRITE_SET if not files else f"shares {sorted(both)[0] if both else '*'} with {oid}"
-        return None
+        if files:       # a declared write-set never waits on another: overlaps are merged by the queue
+            return None
+        return NO_WRITE_SET if taken.get(str(r)) else None
 
     said = []
     started = True

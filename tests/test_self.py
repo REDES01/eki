@@ -84,7 +84,7 @@ def test_a_goal_is_planned_built_judged_and_proposed(conn, src, tmp_path, monkey
     assert not workspace.git(src, "worktree", "list", "--porcelain").count("worktree ") > 1
 
 
-def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
+def test_overlapping_write_sets_build_together_and_deps_wait(conn, src):
     gid = selfwork.submit(conn, "x", plan=False, files=["eki/x.py"])
     first = selfwork.items_in(conn, ("waiting",))[0]
     with conn:
@@ -93,7 +93,7 @@ def test_overlapping_write_sets_take_turns_and_deps_wait(conn, src):
         fourth = selfwork.new_item(conn, gid, "free", "…", ["README.md"], [], True)
     selfwork.tick(conn)
     states = {i["id"]: i["state"] for i in conn.execute("SELECT id, state FROM items")}
-    assert states[first["id"]] == "building" and states[second] == "waiting"
+    assert states[first["id"]] == "building" and states[second] == "building"
     assert states[third] == "waiting" and states[fourth] == "building"
     wt = item(conn, first["id"])["worktree"]
     (Path(wt) / "eki" / "x.py").write_text("# by first\n")

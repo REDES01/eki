@@ -20,7 +20,7 @@ import re
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .. import providers, roles
+from .. import providers, roles, targets
 from . import rules
 from .needs import describe, row_needs
 from .table import checker_wakes, rows
@@ -95,6 +95,8 @@ def _ask(judge: object, pick: roles.Pick, messages: List[Dict], max_tokens: int,
          started: float, spent: Optional[list]) -> object:
     """The model's reply, or the exception it raised; the call goes into `spent`."""
     kw = {"model": pick.model} if pick.model else {}
+    if pick.effort:
+        kw["effort"] = pick.effort
     try:
         got = judge.complete(messages, max_tokens=max_tokens, timeout=30, **kw)   # type: ignore[attr-defined]
         ok = True
@@ -109,9 +111,9 @@ def _judge(pick: roles.Pick) -> Tuple[Optional[object], str]:
     """(the checker, "") when it can answer now, else (None, why not);
     an on-demand checker is started only if `checker_wakes`."""
     if pick.provider is None:
-        if pick.why.endswith("→ nobody") and pick.target.partition(":")[0] not in providers.config():
+        if pick.why.endswith("→ nobody") and targets.provider_of(pick.target) not in providers.config():
             return None, "no prompt checker configured"
-        return None, f"prompt check skipped: {pick.why or pick.target}"
+        return None, f"prompt check skipped: {pick.why or roles.shown(pick.target)}"
     checker = pick.provider
     try:
         judge = providers.get(checker)

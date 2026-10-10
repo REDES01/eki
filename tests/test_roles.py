@@ -179,6 +179,37 @@ def test_a_switched_off_provider_falls_back(home, monkeypatch):
     assert got.provider == "mlx" and "claude: switched off" in got.why
 
 
+def test_a_pick_with_an_object_target_carries_its_effort(home, conn, monkeypatch):
+    _status(monkeypatch)
+    _providers(home, claude={"kind": "claude_code"})
+    want = {"provider": "claude", "model": "opus", "effort": "high"}
+    _routing(home, roles={"planner": want})
+    assert roles.get("planner") == want
+    assert roles.pick("planner", conn) == roles.Pick("claude", "opus", want, "", "high")
+    conn.execute("INSERT INTO provider_models(provider, model, label, efforts, is_default, read_at)"
+                 " VALUES ('claude','opus','Opus 5.5','[\"low\", \"medium\"]',1,?)", (time.time(),))
+    got = roles.pick("planner", conn)
+    assert (got.model, got.effort) == ("opus", None)
+    assert got.why == "claude opus doesn't offer effort high any more; its default"
+
+
+def test_set_role_writes_the_shortest_form(home):
+    roles.set_role("planner", {"provider": "claude", "model": "opus", "effort": "high"})
+    roles.set_role("router", {"provider": "claude", "model": "haiku"})
+    roles.set_role("chores", "off")
+    assert json.loads((home / "routing.json").read_text())["roles"] == {
+        "planner": {"provider": "claude", "model": "opus", "effort": "high"},
+        "router": "claude:haiku", "chores": "off"}
+    assert roles.problems({"planner": {"provider": "claude", "effort": "high"}}, {"claude"}) == []
+    assert roles.problems({"planner": {"provider": "claude", "speed": 1}}, {"claude"})
+
+
+def test_an_object_first_code_target_is_the_planner_default_as_it_is(home):
+    first = {"provider": "fake2", "model": "big", "effort": "high"}
+    _routing(home, rows=[{"key": "code", "title": "tools", "targets": [first, "fake"]}])
+    assert roles.default("planner") == first
+
+
 # -- timings ------------------------------------------------------------------
 
 def test_record_and_timings_take_the_median_of_the_last_n(conn):
@@ -191,3 +222,9 @@ def test_record_and_timings_take_the_median_of_the_last_n(conn):
     assert got == {"claude:fast": (250.0, 4), "local": (14000.0, 2)}
     assert roles.timings(conn, "router", n=2)["claude:fast"] == (4650.0, 2)
     assert roles.timings(conn, "planner") == {}
+
+
+def test_record_keys_an_object_target_by_targets_key(conn):
+    roles.record(conn, "router", {"provider": "claude", "model": "opus", "effort": "high"}, "opus", 10, True)
+    roles.record(conn, "router", "claude:fast", None, 20, True)
+    assert roles.timings(conn, "router") == {"claude:opus@high": (10.0, 1), "claude:fast": (20.0, 1)}

@@ -70,6 +70,14 @@ def test_a_chore_on_a_role_target_gets_its_provider_model_and_why(home, conn):
     assert store.run(conn, rid)["provider"] == "bare"
 
 
+def test_a_chore_on_an_object_target_gets_its_effort(home, conn):
+    use_local(home)
+    set_roles(home, chores={"provider": "fake2", "model": "small-1", "effort": "low"})
+    r = store.run(conn, start(conn))
+    assert (r["provider"], r["model"], r["effort"]) == ("fake2", "small-1", "low")
+    assert r["why"] == "chores → fake2:small-1@low"
+
+
 def test_over_the_background_budget_a_chore_falls_back_to_local_with_the_why(home, conn, monkeypatch):
     use_local(home)
     set_roles(home, chores="fake2")

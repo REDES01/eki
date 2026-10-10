@@ -40,8 +40,8 @@ def start(conn: sqlite3.Connection, kind: str, subject: str, prompt: str,
         return None
     tid = store.create_thread(conn, f"chore: {kind} {subject}", None)
     rid = store.create_run(conn, tid, prompt, provider=pick.provider, model=pick.model,
-                           priority=priority, row=ROW)
-    why = f"{role} → {pick.target}"
+                           effort=pick.effort, priority=priority, row=ROW)
+    why = f"{role} → {roles.shown(pick.target)}"
     if pick.why:                               # a fallback names the role itself; a note doesn't
         why = pick.why if pick.why.startswith(f"{role} ") else f"{why}; {pick.why}"
     conn.execute("UPDATE runs SET why=? WHERE id=?", (why, rid))

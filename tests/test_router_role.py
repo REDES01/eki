@@ -115,3 +115,15 @@ def test_a_failed_call_is_recorded_as_failed(setup, conn):
 
 def test_checker_name_reads_the_role(setup):
     assert routing.checker_name() == "claude:fast"
+
+
+def test_an_object_router_target_is_asked_with_its_effort(setup, conn, home):
+    _, judges = setup
+    data = json.loads((home / "routing.json").read_text())
+    data["roles"] = {"router": {"provider": "claude", "model": "fast", "effort": "low"}}
+    (home / "routing.json").write_text(json.dumps(data))
+    d = decide(conn, "what's a good name for a cat")
+    assert d.row == "answer"
+    assert judges["claude"].asked[0] == {"max_tokens": 80, "timeout": 30,
+                                         "model": "claude-haiku-4-5", "effort": "low"}
+    assert calls(conn) == [("router", "claude:fast@low", "claude-haiku-4-5", 1)]

@@ -179,7 +179,7 @@ def _held(conn: sqlite3.Connection, st: sqlite3.Row) -> Optional[str]:
     ok, why = machine.room()
     if not ok:
         return f"waiting for the Mac: {why}"
-    provider = selfdraft.planner()[0]
+    provider, _, _ = selfdraft.planner()
     ok, why = capacity.status(conn, background=True).get(provider, (False, "not configured"))
     if not ok:
         return f"waiting for {provider}: {why}"

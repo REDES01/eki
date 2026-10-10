@@ -92,21 +92,21 @@ def test_a_failed_draft_run_fails_the_goal(conn, src):
 
 
 def test_planner_defaults(home):
-    assert selfdraft.planner() == ("fake", None)
+    assert selfdraft.planner() == ("fake", None, None)
     set_planner(model="opus")
-    assert selfdraft.planner() == ("fake", "opus")
+    assert selfdraft.planner() == ("fake", "opus", None)
     set_planner(provider="fake2")
-    assert selfdraft.planner() == ("fake2", None)
+    assert selfdraft.planner() == ("fake2", None, None)
 
 
 def test_the_planner_role_wins_over_self_planner(home):
     set_planner(provider="fake", model="opus")
     roles.set_role("planner", "fake2:top-model")
-    assert selfdraft.planner() == ("fake2", "top-model")
+    assert selfdraft.planner() == ("fake2", "top-model", None)
     roles.set_role("planner", "bare")                    # a planner needs tools: back to self.planner
-    assert selfdraft.planner() == ("fake", "opus")
+    assert selfdraft.planner() == ("fake", "opus", None)
     roles.set_role("planner", "default")
-    assert selfdraft.planner() == ("fake", "opus")
+    assert selfdraft.planner() == ("fake", "opus", None)
 
 
 class Entry:

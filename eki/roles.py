@@ -6,14 +6,16 @@
     chores     digest prose, fault briefs, PR-comment triage
 
 The setting is routing.json `"roles": {"router": "claude:fast", ...}`,
-holding only the roles you set. With no entry a role reads the old settings,
+holding only the roles you set; a target with an effort is an object,
+`{"provider": "claude", "model": "opus", "effort": "high"}` (eki/targets.py). With no entry a role reads the old settings,
 which are never rewritten: router the top-level `checker` (else "local");
 planner `self.planner` {provider, model} (else the `code` row's first
 target); reviewer and chores `self.local` (else the first `local` provider).
 "off" is allowed for reviewer and chores.
 
-A pick is recomputed from the settings at every use: when the target can't
-run, the role falls back to its default and says why; when that can't run
+A pick is recomputed from the settings at every use, and its model and
+effort are checked against the read model list (targets.choose()): when the
+target can't run, the role falls back to its default and says why; when that can't run
 either, the pick has no provider. Timings of the calls made for a role live
 in the role_calls table.
 
@@ -27,9 +29,9 @@ import sqlite3
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from . import paths, providers, targets
+from . import modellist, paths, providers, targets
 
 ROLES = ("router", "planner", "reviewer", "chores")
 #: roles that may be "off"
@@ -46,8 +48,9 @@ CODE_FIRST = "claude"
 class Pick:
     provider: Optional[str]
     model: Optional[str]
-    target: str
+    target: Union[str, Dict[str, str]]   # as written: text, or an object with an effort
     why: str
+    effort: Optional[str] = None          # None: the model's own default
 
 
 def _settings() -> Dict[str, Any]:
@@ -63,17 +66,19 @@ def _known(role: str) -> None:
         raise KeyError(f"no role named {role!r}; the roles are {', '.join(ROLES)}")
 
 
-def _code_first(data: Dict[str, Any]) -> str:
-    """The `code` row's first target (else `general`'s), as table.row() picks it."""
+def _code_first(data: Dict[str, Any]) -> Union[str, Dict[str, str]]:
+    """The `code` row's first target (else `general`'s), as table.row() picks it;
+    an object target is kept as it is."""
     rows = [r for r in (data.get("rows") or []) if isinstance(r, dict)]
     for key in ("code", "general"):
         for r in rows:
             if r.get("key") == key and r.get("targets"):
-                return str(r["targets"][0])
+                first = r["targets"][0]
+                return first if isinstance(first, dict) else str(first)
     return CODE_FIRST
 
 
-def default(role: str) -> str:
+def default(role: str) -> Union[str, Dict[str, str]]:
     """What the role reads when routing.json has no `roles` entry for it ("" for none)."""
     _known(role)
     data = _settings()
@@ -94,24 +99,35 @@ def default(role: str) -> str:
     return next((n for n, c in providers.config().items() if c.get("kind") == "local"), "")
 
 
-def get(role: str) -> str:
+def get(role: str) -> Union[str, Dict[str, str]]:
+    """The role's stored target as written (text, or an object), else its default."""
     _known(role)
     set_ = _settings().get("roles")
-    got = str((set_ or {}).get(role) or "").strip() if isinstance(set_, dict) else ""
+    got = (set_ or {}).get(role) if isinstance(set_, dict) else None
+    if isinstance(got, dict) and got:
+        return got
+    got = str(got or "").strip()
     return got or default(role)
 
 
-def set_role(role: str, target: Optional[str]) -> None:
-    """Write `roles[role]` into routing.json, keeping every other key;
-    "default" or None removes the entry."""
+def shown(target: Any) -> str:
+    """A target as one line: "off", or targets.key() (`claude:opus@high`)."""
+    return target if target in ("", "off") else targets.key(target)
+
+
+def set_role(role: str, target: Any) -> None:
+    """Write `roles[role]` into routing.json as targets.fmt()'s shortest form,
+    keeping every other key; "default" or None removes the entry."""
     _known(role)
     path = paths.config("routing")
     data = _settings()
     roles = dict(data.get("roles") or {}) if isinstance(data.get("roles"), dict) else {}
-    if target is None or str(target).strip() in ("", "default"):
+    if target is None or (isinstance(target, str) and target.strip() in ("", "default")):
         roles.pop(role, None)
+    elif isinstance(target, str) and target.strip() == "off":
+        roles[role] = "off"
     else:
-        roles[role] = str(target).strip()
+        roles[role] = targets.fmt(targets.parse(target.strip() if isinstance(target, str) else target))
     if roles:
         data["roles"] = roles
     else:
@@ -121,23 +137,22 @@ def set_role(role: str, target: Optional[str]) -> None:
     os.replace(tmp, path)
 
 
-def _listed(conn: Optional[sqlite3.Connection], name: str) -> Optional[List[str]]:
-    """The provider's read model list, or None when it was never read."""
+def _listed(conn: Optional[sqlite3.Connection], name: str) -> Optional[List[Dict[str, Any]]]:
+    """The provider's read model list (modellist.listed()), or None when it was never read."""
     own = conn is None
     try:
         if own:
             from . import db
             conn = db.connect()
-        got = [r[0] for r in conn.execute("SELECT model FROM provider_models WHERE provider=?", (name,))]
+        return modellist.listed(conn, name)
     except sqlite3.Error:
         return None
     finally:
         if own and conn is not None:
             conn.close()
-    return got or None
 
 
-def _cannot(role: str, target: str, status: Optional[Dict[str, Tuple[bool, str]]]) -> Optional[str]:
+def _cannot(role: str, target: Any, status: Optional[Dict[str, Tuple[bool, str]]]) -> Optional[str]:
     """Why `target` can't do `role` right now, or None when it can."""
     if not target:
         return "nothing set"
@@ -182,17 +197,17 @@ def pick(role: str, conn: Optional[sqlite3.Connection] = None, *, background: bo
     if cause is not None:
         if fallback == want or (fallback == "off" and role in OFFABLE):
             last = "nobody" if fallback == want else "off"
-            return Pick(None, None, want, f"{role} {want or '(none)'} can't run ({cause}) → {last}")
-        why = f"{role} {want} can't run ({cause}) → {fallback or '(none)'}"
+            return Pick(None, None, want, f"{role} {shown(want) or '(none)'} can't run ({cause}) → {last}")
+        why = f"{role} {shown(want)} can't run ({cause}) → {shown(fallback) or '(none)'}"
         target = fallback
         again = _cannot(role, fallback, status)
         if again is not None:
             return Pick(None, None, fallback, f"{why}, which can't run either ({again})")
     name = targets.parse(target).provider
-    model, note = targets.resolve(target, providers.config().get(name) or {}, _listed(conn, name))
-    if note:
-        why = f"{why}; {note}" if why else note
-    return Pick(name, model, target, why)
+    c = targets.choose(target, providers.config().get(name) or {}, _listed(conn, name))
+    if c.note:
+        why = f"{why}; {c.note}" if why else c.note
+    return Pick(name, c.model, target, why, c.effort)
 
 
 def problems(data: Any, known: set) -> List[str]:
@@ -213,14 +228,15 @@ def problems(data: Any, known: set) -> List[str]:
     return out
 
 
-def record(conn: sqlite3.Connection, role: str, target: str, model: Optional[str],
+def record(conn: sqlite3.Connection, role: str, target: Any, model: Optional[str],
            ms: float, ok: bool) -> None:
+    """One call made for `role`, keyed by targets.key(target)."""
     conn.execute("INSERT INTO role_calls (role, target, model, ms, ok, at) VALUES (?,?,?,?,?,?)",
-                 (role, target, model, float(ms), 1 if ok else 0, time.time()))
+                 (role, targets.key(target), model, float(ms), 1 if ok else 0, time.time()))
 
 
 def timings(conn: sqlite3.Connection, role: str, n: int = 20) -> Dict[str, Tuple[float, int]]:
-    """{target: (median ms, count)} over each target's last `n` calls for `role`."""
+    """{targets.key(target): (median ms, count)} over each target's last `n` calls for `role`."""
     out: Dict[str, Tuple[float, int]] = {}
     names = [r[0] for r in conn.execute(
         "SELECT target FROM role_calls WHERE role=? GROUP BY target ORDER BY MAX(id) DESC", (role,))]

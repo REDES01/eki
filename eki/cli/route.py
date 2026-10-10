@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .. import capacity, paths, providers, roles, routing, targets
+from .. import capacity, modellist, paths, providers, roles, routing, targets
 from ..routing import needs
 from ..routing.table import rows
 from .common import conn
-from .roles import line as role_line, listed
+from .roles import line as role_line
 
 NAME = "route"
 HELP = "show the routing table, or explain where a request would go"
@@ -49,13 +49,17 @@ def run(args) -> int:
     return 0
 
 
-def _model(c, t: str) -> str:
-    """` → model` for a target naming a tier or model (with the note when it can't), else ""."""
-    if ":" not in t:
-        return ""
-    name = targets.provider_of(t)
+def _model(c, t: Any) -> str:
+    """` → claude · Opus 5.5 · high` for a target naming a tier, model or
+    effort, as it resolves against the read list (with the note when it falls
+    back), else ""."""
     try:
-        model, note = targets.resolve(t, providers.config().get(name) or {}, listed(c, name))
+        parsed = targets.parse(t)
     except ValueError as e:
         return f"  ({e})"
-    return f" → {model or 'its default'}" + (f" ({note})" if note else "")
+    if not (parsed.tier or parsed.model or parsed.effort):
+        return ""
+    name = parsed.provider
+    listed = modellist.listed(c, name)
+    got = targets.choose(parsed, providers.config().get(name) or {}, listed)
+    return f" → {targets.label(name, got.model, got.effort, listed)}" + (f" ({got.note})" if got.note else "")

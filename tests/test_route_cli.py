@@ -86,13 +86,13 @@ def test_table_prints_the_roles_with_models_and_router_medians(home, conn, capsy
     out = capsys.readouterr().out
     lines = out.splitlines()
     router = next(l for l in lines if l.startswith("router "))
-    assert router.startswith("router    fake:fast → fake-small   median 2.4 s over 20")
+    assert router.startswith("router    fake:fast → fake · fake-small   median 2.4 s over 20")
     assert "(lm: 13.1 s over 20)" in router
-    assert any(l.startswith("planner   fake:top → fake-big") for l in lines)
-    assert any(l.startswith("reviewer  lm → its default") for l in lines)
-    assert any(l.startswith("chores    lm → its default") for l in lines)
+    assert any(l.startswith("planner   fake:top → fake · fake-big") for l in lines)
+    assert any(l.startswith("reviewer  lm → lm · its default") for l in lines)
+    assert any(l.startswith("chores    lm → lm · its default") for l in lines)
     assert "checker:" not in out
-    assert "fake · top" in next(l for l in lines if "→ fake-big" in l and l.startswith("    "))
+    assert "fake · top" in next(l for l in lines if "→ fake · fake-big" in l and l.startswith("    "))
 
 
 def test_table_role_that_falls_back_says_why(home, capsys):
@@ -101,5 +101,22 @@ def test_table_role_that_falls_back_says_why(home, capsys):
                                                        "roles": {"router": "gone:fast"}}))
     assert cli.main(["route"]) == 0
     router = next(l for l in capsys.readouterr().out.splitlines() if l.startswith("router "))
-    assert router.startswith("router    gone:fast → lm → its default")
+    assert router.startswith("router    gone:fast → lm → lm · its default")
     assert "router gone:fast can't run (gone: switched off) → lm" in router
+
+
+def test_table_prints_each_targets_model_effort_and_note(home, conn, capsys):
+    provs = dict(PROVS, fake={"kind": "fake"})
+    (home / "providers.json").write_text(json.dumps(provs))
+    rows = [{"key": "general", "title": "all",
+             "targets": [{"provider": "fake", "model": "big", "effort": "high"},
+                         {"provider": "fake", "model": "big", "effort": "max"}, "fake"]}]
+    (home / "routing.json").write_text(json.dumps({"checker": "none", "rows": rows}))
+    conn.execute("INSERT INTO provider_models(provider, model, label, efforts, is_default, read_at)"
+                 " VALUES ('fake','big','Big One','[\"low\", \"high\"]',1,1)")
+    conn.commit()
+    assert cli.main(["route"]) == 0
+    lines = [l for l in capsys.readouterr().out.splitlines() if l.startswith("    ")]
+    assert lines[0].startswith("    ✓ fake · big · high [text, tools] → fake · Big One · high")
+    assert lines[1].endswith("→ fake · Big One (fake big doesn't offer effort max any more; its default)")
+    assert lines[2] == "    ✓ fake [text, tools]"

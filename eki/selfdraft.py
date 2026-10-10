@@ -30,16 +30,16 @@ in ROADMAP.md (change `- [ ]` to `- [x]` on the entry "{title}"), and make that
 item depend on every other item."""
 
 
-def planner() -> Tuple[str, Optional[str]]:
-    """(provider, model) for draft and plan runs: the `planner` role
+def planner() -> Tuple[str, Optional[str], Optional[str]]:
+    """(provider, model, effort) for draft and plan runs: the `planner` role
     (eki/roles.py; by default `self.planner`, else the `code` row's first
-    choice). No model means the provider's default. When neither the role
+    choice). No model or effort means the program's own default. When neither the role
     nor its default can run, the default's provider still comes back, so the
     run waits for it with its reason rather than go nowhere."""
     pick = roles.pick("planner")
     if pick.provider is not None:
-        return pick.provider, pick.model
-    return targets.provider_of(roles.default("planner")), None
+        return pick.provider, pick.model, pick.effort
+    return targets.provider_of(roles.default("planner")), None, None
 
 
 def _priority(owner: str) -> str:
@@ -55,9 +55,9 @@ def start_draft(conn: sqlite3.Connection, gid: str, wish: str, base: str, owner:
     old = Path(OLD).expanduser()
     prompt = selfbrief.draft(wish, base, digest=str(last) if last else None,
                              old=str(old) if old.exists() else None)
-    provider, model = planner()
-    rid = store.create_run(conn, tid, prompt, provider=provider, model=model, row="code",
-                           priority=_priority(owner))
+    provider, model, effort = planner()
+    rid = store.create_run(conn, tid, prompt, provider=provider, model=model, effort=effort,
+                           row="code", priority=_priority(owner))
     conn.execute("UPDATE goals SET thread_id=?, draft_run=?, state='drafting' WHERE id=?", (tid, rid, gid))
     return rid
 
@@ -69,11 +69,11 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     repo = projects.repo_for(conn, goal) if goal is not None else integration.repo()
     wt = workspace.add(repo, f"plan-{gid}", base=base, branch=f"eki/plan-{gid}")
     tid = store.create_thread(conn, f"plan: {text}", str(wt))
-    provider, model = planner()
+    provider, model, effort = planner()
     project = projects.get(conn, goal["project"]) if goal is not None and goal["project"] else None
     brief = (selfbrief.plan(text, base) if project is None
              else projectbrief.plan(text, base, project, standing=bool(goal["standing_id"])))
-    rid = store.create_run(conn, tid, brief, provider=provider, model=model,
+    rid = store.create_run(conn, tid, brief, provider=provider, model=model, effort=effort,
                            row="code", priority=_priority(owner))
     conn.execute("UPDATE goals SET thread_id=?, plan_run=?, state='planning' WHERE id=?", (tid, rid, gid))
     return rid
@@ -96,9 +96,9 @@ def open_rank(conn: sqlite3.Connection, entries: List[Any], why: str) -> str:
                      "VALUES (?,?,?,'roadmap','eki','drafting',?,?,NULL)", (gid, wish, wish, db.now(), why))
         wt = workspace.add(integration.repo(), f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
         tid = store.create_thread(conn, f"draft: {RANK}", str(wt))
-        provider, model = planner()
-        rid = store.create_run(conn, tid, prompt, provider=provider, model=model, row="code",
-                               priority=_priority("eki"))
+        provider, model, effort = planner()
+        rid = store.create_run(conn, tid, prompt, provider=provider, model=model, effort=effort,
+                               row="code", priority=_priority("eki"))
         conn.execute("UPDATE goals SET thread_id=?, draft_run=? WHERE id=?", (tid, rid, gid))
     return gid
 

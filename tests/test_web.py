@@ -91,8 +91,9 @@ def test_the_chat_look_is_served(web):
     assert "cards.render" in app and "ekiAttach.thumbs" in app and "data-copy-code" in app
     code, css = get(web + "/ui/chat.css")
     assert code == 200 and ".bubble" in css and ".code-copy" in css
-    # one reading column for the log and the composer, growing with the window
-    assert "--col-w: 1100px" in css and "max-width: 760px" not in css
+    # one centred reading column for the log and the composer, capped at --col-w
+    assert "--col-w: 860px" in css and "1100px" not in css and "max-width: 760px" not in css
+    assert css.count("--col-w:") == 1
     for sel in (r"#log", r"#composer"):
         rule = re.search(r"(?m)^" + sel + r" \{([^}]*)\}", css).group(1)
         assert "max-width: var(--col-w)" in rule

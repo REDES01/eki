@@ -1,6 +1,6 @@
 /* The chat: the thread, its turns, steps, asks and the composer. Base variables are in style.css. */
 /* the reading column: #log and #composer share one width, so it grows with the window up to --col-w */
-#main { --col-w: 1100px; }
+#main { --col-w: 860px; }
 #scroll { flex: 1; overflow-y: auto; position: relative; }
 #log { max-width: var(--col-w); margin: 0 auto; padding: 24px 32px 48px; }
 #empty { position: absolute; inset: 34% 0 auto; text-align: center; padding: 0 24px; }

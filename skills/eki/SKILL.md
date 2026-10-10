@@ -91,6 +91,7 @@ eki models [start|stop <name>]  # list local models; start or stop one
 eki pictures [--limit N]        # the pictures eki has drawn: path, kind, prompt
 eki skills [add|remove|sync]    # list, add or remove skills (shared by every program)
 eki mcp [add|remove <name>]     # list, add or remove MCP servers (shared by every program)
+eki use [<name> args…]          # call a component; alone, list the components reachable from here
 eki open                        # open eki's window
 eki drill                       # prove a restart loses nothing (runs in a throwaway home)
 eki swap <commit> | --back      # make a build of a commit, check it, and put it live

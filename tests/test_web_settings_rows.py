@@ -47,6 +47,12 @@ out.closed = opens(h);
 out.memo = h.includes("not saved — in memory") && h.includes('class="set-fold added');
 s.act("fold", null, card("d0")); h = s.html(draft);
 out.one = opens(h) === 1 && h.includes('data-fold="d0"') && h.includes('data-f="examples"');
+const body = (h) => h.slice(h.indexOf('<div class="set-fbody">'));
+const b0 = body(h);
+out.lines = b0.includes("set-flines") && /<div class="set-line">\s*<div class="set-label">Key[\s\S]*?data-f="key"/.test(b0)
+  && /set-line set-block[\s\S]*?Examples[\s\S]*?set-wide[^]*?data-f="examples"/.test(b0)
+  && /set-line set-block[\s\S]*?Targets[\s\S]*?set-wide[^]*?set-targets/.test(b0)
+  && /set-danger" data-act="delrow"/.test(b0) && !/set-field|set-grid|set-top/.test(b0);
 s.act("fold", null, card("d1")); h = s.html(draft);
 out.other = opens(h) === 1 && /data-fold="d1"[^>]*>/.test(h) && h.indexOf('class="set-fold open') > h.indexOf('data-fold="d0"');
 s.act("fold", null, card("d1"));
@@ -55,6 +61,8 @@ s.act("addrow", null, null); h = s.html(draft);
 out.added = draft.rows.length === 3 && opens(h) === 1 && h.includes('class="set-fold open" data-fold="d2"');
 s.act("delrow", null, card("d2"));
 out.deleted = draft.rows.length === 2 && opens(s.html(draft)) === 0;
+s.act("fold", null, card("a:pics")); h = s.html(draft);
+out.memopen = opens(h) === 1 && h.includes('data-f="examples"') && !h.includes("delrow");
 console.log(JSON.stringify(out));
 """
 
@@ -68,4 +76,5 @@ def test_rows_fold_and_open_one_at_a_time(tmp_path):
     run = subprocess.run(["node", str(drv), *files], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     assert json.loads(run.stdout) == {"summary": True, "closed": 0, "memo": True, "one": True, "other": True,
-                                      "shut": 0, "added": True, "deleted": True}
+                                      "shut": 0, "added": True, "deleted": True, "lines": True,
+                                      "memopen": True}

@@ -24,19 +24,22 @@
   }
 
   function editor(r, added) {
-    const { check, text, field } = settingsForm;
+    const { check, text, line, lines, block, danger } = settingsForm;
     const [targets, needs] = [r.targets, r.needs].map((x) => (Array.isArray(x) ? x : []));
     const names = settingsProviders.names(), last = targets.length - 1;
-    return `<div class="set-top">${text("key", r.key, "key")}<span class="grow"></span>
-        ${added ? "" : '<button type="button" class="ghost small" data-act="delrow" title="Delete this row">Delete</button>'}</div>
-      ${field("Title", text("title", r.title, "what this row is for"))}
-      ${field("Needs", `<div class="set-checks">${ABILITIES.map((a) => check(needs.includes(a), `data-need="${a}"`, a)).join("")}</div>`)}
-      ${field("Examples <i class=\"dim\">one per line</i>", `<textarea class="set-in" data-f="examples" rows="${Math.max(2, (r.examples || []).length)}">${esc((r.examples || []).join("\n"))}</textarea>`)}
-      ${field("Targets <i class=\"dim\">first that can answer wins</i>", `<ol class="set-targets">${targets.map((t, i) => `<li>${settingsTarget.html(t, { names, models: models(), attrs: `data-t="${i}"` })}<span class="grow"></span>
+    const list = `<ol class="set-targets">${targets.map((t, i) => `<li>${settingsTarget.html(t, { names, models: models(), attrs: `data-t="${i}"` })}<span class="grow"></span>
         <button type="button" class="ghost small" data-act="up" data-t="${i}" ${i ? "" : "disabled"} title="Earlier">↑</button>
         <button type="button" class="ghost small" data-act="down" data-t="${i}" ${i < last ? "" : "disabled"} title="Later">↓</button>
         <button type="button" class="ghost small" data-act="rmt" data-t="${i}" title="Remove">✕</button></li>`).join("")}</ol>
-        <select class="set-in" data-f="addt"><option value="">＋ add a target…</option>${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select>`)}`;
+      <select class="set-in" data-f="addt"><option value="">＋ add a target…</option>${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select>`;
+    return lines("", line("Key", text("key", r.key, "key"), "the name a request is labelled with")
+        + line("Title", text("title", r.title, "title"), "what this row is for"))
+      + lines("", line("Needs", `<div class="set-checks">${ABILITIES.map((a) => check(needs.includes(a), `data-need="${a}"`, a)).join("")}</div>`,
+        "what a target must be able to do"))
+      + block("Examples", `<textarea class="set-in" data-f="examples" rows="${Math.max(2, (r.examples || []).length)}">${esc((r.examples || []).join("\n"))}</textarea>`,
+        "one per line — requests that belong here")
+      + block("Targets", list, "first that can answer wins")
+      + (added ? "" : danger("Delete this row", "delrow"));
   }
 
   function rowLine(r, id, added) {

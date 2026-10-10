@@ -44,3 +44,59 @@ def test_a_page_that_hangs_up_is_not_a_fault(srv, monkeypatch):
     answer.set()
     assert done.wait(10)
     assert faults == []
+
+
+def _req(srv, method, path, body=None, eki=True):
+    import json
+    import urllib.error
+    import urllib.request
+    host, port = srv.server_address[:2]
+    req = urllib.request.Request(f"http://{host}:{port}{path}", method=method,
+                                 data=None if body is None else json.dumps(body).encode())
+    if eki:
+        req.add_header("X-Eki", "1")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def _chat(title="a chat"):
+    from eki import db, store
+    conn = db.connect()
+    try:
+        return store.create_thread(conn, title, None)
+    finally:
+        conn.close()
+
+
+def test_delete_a_thread_needs_the_header(srv):
+    tid = _chat()
+    assert _req(srv, "DELETE", f"/api/threads/{tid}", eki=False)[0] == 403
+    assert tid in [t["id"] for t in _req(srv, "GET", "/api/threads")[1]]
+    assert _req(srv, "DELETE", f"/api/threads/{tid}") == (200, {"deleted": True, "stopping": 0})
+    assert tid not in [t["id"] for t in _req(srv, "GET", "/api/threads")[1]]
+    assert _req(srv, "DELETE", f"/api/threads/{tid}")[0] == 404
+
+
+def test_pin_returns_the_entry(srv):
+    tid = _chat()
+    code, got = _req(srv, "POST", f"/api/threads/{tid}", {"pin": True})
+    assert code == 200 and got["id"] == tid and got["pinned"] is True
+    assert _req(srv, "POST", f"/api/threads/{tid}", {"title": "  "})[0] == 400
+    assert _req(srv, "POST", "/api/threads/nope", {"pin": True})[0] == 404
+
+
+def test_groups_are_made_and_listed(srv):
+    code, g = _req(srv, "POST", "/api/groups", {"name": "Work"})
+    assert code == 200 and g["name"] == "Work"
+    assert _req(srv, "GET", "/api/groups") == (200, [g])
+
+
+def test_archived_lists_only_archived(srv):
+    kept, gone = _chat("kept"), _chat("gone")
+    code, got = _req(srv, "POST", f"/api/threads/{gone}", {"archive": True})
+    assert code == 200 and got["archived"] is True
+    assert [t["id"] for t in _req(srv, "GET", "/api/threads?archived=1")[1]] == [gone]
+    assert [t["id"] for t in _req(srv, "GET", "/api/threads")[1]] == [kept]

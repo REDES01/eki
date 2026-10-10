@@ -70,6 +70,13 @@ def test_drag_rects_change_only_on_a_drag_message():
     assert guard < body.index('noDragRects = rects("nodrag")')
 
 
+def test_shell_js_detects_the_user_agent_the_shell_sets():
+    # canPickFolder() looks for the name the shell adds to WKWebView's user agent
+    name = re.search(r'applicationNameForUserAgent = "(\w+)"', src()).group(1)
+    assert name == "EkiMac"
+    assert "/" + name + "/.test(" in SHELL_JS.read_text()
+
+
 NODE_STUB = r"""
 const fs = require("fs");
 const posted = [];

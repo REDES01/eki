@@ -217,6 +217,24 @@ def test_local_hands_off(server):
     assert out.state == "handed_off" and out.reason == "needs files"
 
 
+def test_local_stops_a_loop(server):
+    _Server.reply = [{"content": "Let me check the threads table schema.\n\n"}] * 30
+    out = Local("local", {"base_url": server}).take(Turn(prompt="review", history=[]), lambda k, d: None)
+    assert out.state == "failed" and "repeated itself" in out.error
+
+
+def test_looping_needs_a_real_repeat():
+    from eki.providers.local import looping
+    line = "Let me check the threads table schema."
+    assert looping([line] * 4)
+    assert looping(["intro", "first long line of a block", "second line", "first long line of a block",
+                    "second line", "first long line of a block", "second line",
+                    "first long line of a block", "second line"])
+    assert not looping([line] * 3)
+    assert not looping(["}"] * 10 + ["return x"] * 5)       # short lines repeat in code
+    assert not looping([f"step {i}: look at the schema of table {i}" for i in range(12)])
+
+
 def test_local_down():
     ok, why = Local("local", {"base_url": "http://127.0.0.1:9"}).available()
     assert not ok and "not running" in why

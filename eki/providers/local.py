@@ -24,8 +24,9 @@ SYSTEM = (
     "the thread. Otherwise just answer.")
 
 #: for a chore (row `chore`): eki's own job, answered here or not at all
-CHORE = ("You are a model running locally on the user's Mac, doing a job for eki. Answer "
-         "from what the request gives you, in the form it asks for.")
+CHORE = ("You are a model running locally on the user's Mac, doing a job for eki. You have "
+         "no tools and can't open files: everything you need is in the request. Answer from "
+         "it in one go, in the form it asks for.")
 
 HANDOFF_TOOL = {
     "type": "function",
@@ -40,6 +41,25 @@ HANDOFF_TOOL = {
 }
 
 DEFAULT_PARAMS = {"temperature": 1.0, "top_p": 0.95, "top_k": 20}
+
+#: a loop: one block of 1..LOOP_BLOCK lines (LOOP_MIN+ characters) LOOP_TIMES times in a row
+LOOP_TIMES, LOOP_BLOCK, LOOP_MIN = 4, 4, 20
+
+
+class Looping(ValueError):
+    """The model got stuck repeating itself; the stream was cut."""
+
+
+def looping(lines: List[str]) -> bool:
+    """True when the last non-empty lines are one block repeated LOOP_TIMES times."""
+    for p in range(1, LOOP_BLOCK + 1):
+        need = p * LOOP_TIMES
+        if len(lines) < need:
+            break
+        tail, block = lines[-need:], lines[-p:]
+        if sum(map(len, block)) >= LOOP_MIN and all(tail[i] == block[i % p] for i in range(need)):
+            return True
+    return False
 
 
 class Local(Provider):
@@ -76,6 +96,8 @@ class Local(Provider):
                                      headers={"Content-Type": "application/json"})
         text: List[str] = []
         calls: Dict[int, Dict[str, str]] = {}
+        lines: List[str] = []       # finished non-empty lines, for the loop check
+        partial = ""
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             for raw in resp:
                 if stop is not None and stop.is_set():
@@ -96,6 +118,12 @@ class Local(Provider):
                         text.append(delta["content"])
                         if on_text:
                             on_text(delta["content"])
+                        partial += delta["content"]
+                        if "\n" in partial:
+                            *full, partial = partial.split("\n")
+                            lines.extend(x.strip() for x in full if x.strip())
+                            if looping(lines):
+                                raise Looping(f"the model repeated itself: {lines[-1][:80]!r}")
                     for tc in delta.get("tool_calls") or []:
                         slot = calls.setdefault(int(tc.get("index", 0)), {"name": "", "arguments": ""})
                         fn = tc.get("function") or {}

@@ -1,5 +1,6 @@
 """The window's project pages: sections, the pictures filter, clone to your home, instructions."""
 import json
+import os
 import threading
 import urllib.request
 
@@ -145,10 +146,10 @@ def test_instructions_without_a_folder_say_why(conn, src):
 
 def test_create_and_set_folder_take_tilde_as_your_home(conn, src, tmp_path):
     got = api_projects.create(conn, {"name": "notes", "folder": "~/notes"})
-    assert got["folder"] == projectchats.norm(paths.user_home() / "notes")
+    assert got["folder"] == projectchats.folder_of(conn, got["id"]) == os.path.realpath(paths.user_home() / "notes")
     (paths.user_home() / "elsewhere").mkdir()
     moved = api_projects.set_folder(conn, got["id"], {"folder": "~/elsewhere"})
-    assert moved["folder"] == projectchats.norm(paths.user_home() / "elsewhere")
+    assert moved["folder"] == projectchats.folder_of(conn, got["id"]) == os.path.realpath(paths.user_home() / "elsewhere")
     with pytest.raises(ValueError):
         api_projects.set_folder(conn, got["id"], {"folder": ""})
 

@@ -150,7 +150,7 @@ def clone_home(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     if not row["repo"]:
         raise ValueError(f"{row['name']} is not on GitHub: there is nothing to clone")
     home = paths.user_home()
-    dest = Path(projectchats.norm(home)) / row["repo"].split("/")[-1]
+    dest = Path(os.path.realpath(home)) / row["repo"].split("/")[-1]
     if os.path.lexists(dest):
         raise ValueError(f"{dest} already exists: pick it as the folder instead")
     with db.tx(conn):

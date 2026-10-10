@@ -86,7 +86,7 @@
 
   // ---- the menu -----------------------------------------------------------------------------------------------------
 
-  function esc(s) { return window.md ? md.esc(s) : String(s); }
+  function esc(s) { return window.md ? md.esc(String(s)) : String(s); }   // numbers too: a session index
 
   function item(label, key, a, extra) {
     const x = extra || {};

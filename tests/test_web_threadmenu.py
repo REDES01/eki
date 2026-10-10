@@ -60,3 +60,11 @@ def test_loads_under_a_stub(tmp_path):
     stub.write_text(STUB)
     out = subprocess.run(["node", str(stub), str(WEB / "threadmenu.js")], capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
+
+
+def test_esc_takes_numbers_too():
+    """A chat with a Claude Code or Codex session gets 'Copy … session ID' lines whose data-arg is
+    the session's index, a number: md.esc only takes strings, and the menu didn't open on such chats."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "eki" / "web" / "threadmenu.js").read_text()
+    assert "md.esc(String(s))" in js

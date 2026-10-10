@@ -126,6 +126,11 @@
     if (active) poll();
   }
 
+  // You've seen this chat: it reads as read in the sidebar until a run ends while you're elsewhere.
+  function seen(tid) {
+    if (tid) call("/api/threads/" + tid, { unread: false }).then(() => side.loadThreads()).catch(() => {});
+  }
+
   async function poll() {
     if (state.polling || !state.thread) return;
     state.polling = true;
@@ -139,7 +144,11 @@
           await loadThread(false);
           side.loadThreads();
         }
-        if (!got.active) { await loadThread(false); side.loadThreads(); break; }
+        if (!got.active) {
+          await loadThread(false);
+          if (document.visibilityState === "visible") seen(tid); else side.loadThreads();
+          break;
+        }
       }
     } catch (e) {
       setTimeout(() => { state.polling = false; poll(); }, 1500);   // engine restarting: try again
@@ -162,6 +171,7 @@
     $("main").classList.add("blank");
     if (!id) { $("title").textContent = "New thread"; $("meta").textContent = ""; }
     loadThread(true);
+    seen(state.thread);
     $("prompt").focus();
   }
 

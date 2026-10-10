@@ -158,3 +158,24 @@
 #menu .mrow[hidden] { display: none; }
 .phead .dot { position: static; flex: none; }
 .pchats .thread .dot { left: 17px; }
+
+/* ---- the sidebar's list (sidelist.js): Pinned, your groups, the unread dot, the … button, Archived ---- */
+.dot.unread { background: var(--text); opacity: .55; animation: none; }
+.tgroup.pinned { padding-top: 6px; }
+.cgroup { margin: 2px 0; }
+.chead { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: 0; padding: 4px 10px 4px 6px;
+  border-radius: 8px; color: var(--text); text-align: left; }
+.chead:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.chead .cname { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chead .ptoggle { padding: 0 4px; }
+.tmore { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; background: var(--panel);
+  border: 0; border-radius: 6px; padding: 0 6px; color: var(--dim); line-height: 20px; }
+.tmore:hover { color: var(--text); }
+.thread:hover .tmore, .tmore:focus { display: block; }
+.archline { display: block; width: 100%; background: none; border: 0; text-align: left; font-size: 12px;
+  padding: 12px 10px 4px 16px; }
+.archline:hover { color: var(--text); }
+.archived .arow { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 16px; border-radius: 8px; }
+.archived .arow:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.archived .t { flex: 1; min-width: 0; color: var(--dim); text-decoration: none; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }

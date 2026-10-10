@@ -1,5 +1,5 @@
-// The sidebar: chats in a project under its header, the rest grouped by when they last moved, and at the bottom the
-// providers, the machine and the latest digest. All of it from the API.
+// The sidebar: the chat list (sidelist.js draws it), and at the bottom the providers, the machine and the latest
+// digest. All of it from the API.
 (function () {
   const $ = (id) => document.getElementById(id);
   let offline = false;
@@ -15,73 +15,19 @@
     return data;
   }
 
-  function ago(t) {
-    const s = Math.max(0, Math.floor(Date.now() / 1000 - t));
-    if (s < 60) return "now";
-    if (s < 3600) return Math.floor(s / 60) + "m";
-    if (s < 86400) return Math.floor(s / 3600) + "h";
-    return Math.floor(s / 86400) + "d";
-  }
+  // ---- threads: drawn by sidelist.js --------------------------------------------------------
 
-  // ---- threads ---------------------------------------------------------------------------
+  let lastList = [], lastGroups = [], lastArchived = [];
+  function render(list, cur, groups, archived) { return sidelist.render(list, cur, groups, archived); }
+  function draw() { $("threads").innerHTML = render(lastList, nav.current(), lastGroups, lastArchived); }
 
-  function group(t) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const day = today.getTime() / 1000;
-    if (t >= day) return "Today";
-    if (t >= day - 86400) return "Yesterday";
-    if (t >= day - 7 * 86400) return "Previous 7 days";
-    return "Older";
-  }
-
-  function threadLink(t, cur) {
-    return `
-      <a href="#${t.id}" class="thread ${t.id === cur ? "on" : ""}" data-id="${t.id}">
-        ${t.needs_you ? '<span class="dot you" title="needs you"></span>' : t.working ? '<span class="dot" title="working"></span>' : ""}
-        <span class="t">${md.esc(t.title || "(untitled)")}</span>
-        <span class="when dim">${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
-      </a>`;
-  }
-
-  // Project groups you opened or closed: what the page shows, not keeps. Unset, the current thread's is open.
-  const opened = new Map();
-
-  // Chats in a project under its header (projects by their latest chat), then the rest by date.
-  function render(list, cur) {
-    const byProject = new Map(), loose = [];
-    for (const t of list) {
-      if (!t.project) { loose.push(t); continue; }
-      if (!byProject.has(t.project.id)) byProject.set(t.project.id, { p: t.project, chats: [] });
-      byProject.get(t.project.id).chats.push(t);
-    }
-    let html = "";
-    const groups = [...byProject.values()];
-    groups.forEach((g) => g.chats.sort((a, b) => b.updated - a.updated));
-    groups.sort((a, b) => b.chats[0].updated - a.chats[0].updated);
-    for (const { p, chats } of groups) {
-      const open = opened.has(p.id) ? opened.get(p.id) : chats.some((t) => t.id === cur);
-      const busy = chats.some((t) => t.needs_you) ? '<span class="dot you" title="needs you"></span>'
-        : chats.some((t) => t.working) ? '<span class="dot" title="working"></span>' : "";
-      html += `<div class="pgroup ${open ? "open" : ""}">
-        <div class="phead"><button type="button" class="ptoggle" data-pgroup="${md.esc(p.id)}" aria-expanded="${open}"
-            title="Show its chats">${open ? "▾" : "▸"}</button>
-          <a href="#project/${encodeURIComponent(p.id)}" class="pname">${md.esc(p.name || p.id)}</a>${busy}
-          <button type="button" class="pcount dim" data-pgroup="${md.esc(p.id)}">${chats.length} chat${chats.length === 1 ? "" : "s"}</button></div>
-        ${open ? `<div class="pchats">${chats.map((t) => threadLink(t, cur)).join("")}</div>` : ""}</div>`;
-    }
-    let last = null;
-    for (const t of loose) {
-      const g = group(t.updated);
-      if (g !== last) { html += `<div class="tgroup">${g}</div>`; last = g; }
-      html += threadLink(t, cur);
-    }
-    return html || '<div class="dim pad">No threads yet.</div>';
-  }
-
-  let lastList = [];
   async function loadThreads() {
-    lastList = await call("/api/threads");
-    $("threads").innerHTML = render(lastList, nav.current());
+    const [list, groups, archived] = await Promise.all([
+      call("/api/threads"), call("/api/groups").catch(() => []), call("/api/threads?archived=1").catch(() => []),
+    ]);
+    lastList = list; lastGroups = groups;
+    lastArchived = archived.filter((t) => t.archived);   // an engine without ?archived=1 sends the whole list
+    draw();
   }
 
   // ---- providers and the machine ---------------------------------------------------------
@@ -141,12 +87,23 @@
   }
 
   document.addEventListener("click", async (e) => {
+    if (e.target.closest(".tmore")) { e.preventDefault(); return; }   // the … opens the menu (threadmenu.js), not the chat
     const pg = e.target.closest("[data-pgroup]");
     if (pg) {   // a project header opens to its chats, or closes
-      const id = pg.dataset.pgroup;
-      opened.set(id, !pg.closest(".pgroup").classList.contains("open"));
-      $("threads").innerHTML = render(lastList, nav.current());
-      return;
+      sidelist.opened.set(pg.dataset.pgroup, !pg.closest(".pgroup").classList.contains("open"));
+      return draw();
+    }
+    const cg = e.target.closest("[data-cgroup]");
+    if (cg) {   // one of your groups, the same
+      sidelist.gopened.set(cg.dataset.cgroup, !cg.closest(".cgroup").classList.contains("open"));
+      return draw();
+    }
+    if (e.target.closest("[data-archived]")) { sidelist.state.archived = !sidelist.state.archived; return draw(); }
+    const un = e.target.closest("[data-unarchive]");
+    if (un) {
+      un.disabled = true;
+      await call(`/api/threads/${un.dataset.unarchive}`, { archive: false }).catch((x) => { $("engine").textContent = x.message; });
+      return loadThreads().catch(() => {});
     }
     const m = e.target.closest("[data-model]");
     if (!m) return;

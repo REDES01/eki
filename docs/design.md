@@ -447,7 +447,11 @@ are Codex's.
     so the page is split by job: `nav.js`, `split.js`, `side.js`, `app.js`,
     one file per view, `style.css` + `chat.css` + one stylesheet per view.
     The sidebar's edge is dragged to resize it (200–480px, double-click
-    resets), and the width is kept in `localStorage` as `eki.side.w`.
+    resets), and the width is kept in `localStorage` as `eki.side.w`. The
+    sidebar's chat list is `sidelist.js` (eki's threads that need you,
+    Pinned, your groups, projects, dates, an unread dot, Archived (n));
+    `side.js` loads it, and `app.js` marks a chat seen when you open it or
+    its run ends while the page is visible.
 - **A thin Mac shell** (`mac/main.swift`, built by `bin/build-mac`): a
   window and a menu bar item around the web UI; it starts the engine if
   it isn't up. It rarely needs to change. View → Zoom In/Out/Actual Size

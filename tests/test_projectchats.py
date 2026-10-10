@@ -235,3 +235,42 @@ def test_housekeeping_never_retires_a_chat_only_project_on_github(conn, src, pro
     row = projects.get(conn, pid)
     assert row["state"] in (None, "on") and row["repo"] is None
     assert projects.by_repo(conn, "me/proj") is None
+
+
+# ---- eki's own repo ---------------------------------------------------------------------------
+
+@pytest.fixture
+def own(monkeypatch):
+    from eki import integration
+    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
+    return "me/eki"
+
+
+@pytest.mark.parametrize("state", ["on", "retired", None])
+def test_eki_is_listed_once_whatever_its_own_rows_state(conn, src, own, state):
+    other = github_row(conn, "me/proj")
+    if state is not None:
+        github_row(conn, own, state=state)
+    listed = projectchats.listing(conn)
+    assert [e["id"] for e in listed if e["repo"] == own or e["name"] == own] == []
+    assert listed[0]["id"] == projectchats.SELF
+    assert [e["id"] for e in listed[1:]] == [other]
+    assert projectchats.find(conn, own) == projectchats.SELF
+    assert projectchats.find(conn, "me/proj") == other
+
+
+def test_eki_entry_carries_its_own_repo_once(conn, src, own):
+    workspace.git(src, "config", "remote.origin.url", "https://github.com/me/eki.git")
+    github_row(conn, own, folder=str(src))
+    listed = projectchats.listing(conn)
+    assert [e["id"] for e in listed if e["repo"] == own] == [projectchats.SELF]
+    assert projectchats.find(conn, own) == projectchats.SELF
+
+
+def test_own_rows_folder_never_adopts_chats(conn, src, own, tmp_path):
+    mine = tmp_path / "mine"
+    mine.mkdir()
+    github_row(conn, own, folder=str(mine))
+    tid = thread(conn, mine)
+    projectchats.adopt(conn)
+    assert project_of(conn, tid) is None

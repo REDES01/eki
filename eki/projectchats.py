@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import builds, db, github, paths, store, workspace
+from . import builds, db, github, integration, paths, store, workspace
 
 SELF = "eki"
 HIDDEN = ("dropped", "merged")
@@ -56,10 +56,13 @@ def folder_of(conn: sqlite3.Connection, pid: str) -> Optional[str]:
 
 
 def _live(conn: sqlite3.Connection) -> List[sqlite3.Row]:
-    """Rows not dropped or merged, oldest first, without retired rows a live row's folder shadows."""
+    """Rows not dropped or merged, oldest first, without retired rows a live row's folder shadows,
+    and never a row on eki's own repo, whatever its state: that is the built-in eki."""
     marks = ",".join("?" * len(HIDDEN))
-    rows = conn.execute(f"SELECT * FROM projects WHERE COALESCE(state,'on') NOT IN ({marks}) "
-                        "ORDER BY created_at", HIDDEN).fetchall()
+    own = integration.own_repo()
+    rows = [p for p in conn.execute(f"SELECT * FROM projects WHERE COALESCE(state,'on') NOT IN ({marks}) "
+                                    "ORDER BY created_at", HIDDEN).fetchall()
+            if own is None or p["repo"] != own]
     live = {_row_folder(p) for p in rows if p["state"] != "retired"} - {None}
     return [p for p in rows if not (p["state"] == "retired" and _row_folder(p) in live)]
 
@@ -276,6 +279,8 @@ def find(conn: sqlite3.Connection, key: str) -> str:
     if named:
         return named[0]["id"]
     if "/" in key:
+        if key == integration.own_repo():
+            return SELF
         hits = [p for p in live if p["repo"] == key and p["state"] != "retired"]
         hits = hits or [p for p in live if p["repo"] == key]
         if hits:

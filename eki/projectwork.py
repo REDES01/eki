@@ -1,9 +1,13 @@
 """The project-only steps of self-work (eki/selfwork.py) for a goal with
 `project` set: its worktree, its gate 1 and when it counts as applied.
 
-eki only adds worktrees and `eki/<item>` branches to a project. It never
-checks out, commits to, fetches into, resets or pushes the project's own
-branches: an item is `applied` once the person merged it into the branch.
+eki adds worktrees and `eki/<item>` branches to a project. It never commits
+on, fetches into, resets, rewrites or pushes the project's own branches.
+Under autonomy 'apply' (a local project's default) eki lands fit
+items itself through its project queue (eki/projectqueue.py): the branch
+moves forward, fast-forward only, and the folder with it when that is safe.
+Under 'propose' (and on GitHub) the person merges, and an item is `applied`
+once its commit is in the branch.
 """
 from __future__ import annotations
 

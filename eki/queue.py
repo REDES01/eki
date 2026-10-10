@@ -78,9 +78,10 @@ def set_autonomy(mode: str) -> None:
 
 
 def order(conn: sqlite3.Connection) -> List[sqlite3.Row]:
-    """The queued items, front first."""
-    return conn.execute("SELECT * FROM items WHERE state='queued' "
-                        "ORDER BY COALESCE(queued_at, created_at), created_at").fetchall()
+    """eki's own queued items, front first: a project's items stand in eki/projectqueue.py."""
+    return conn.execute("SELECT i.* FROM items i LEFT JOIN goals g ON g.id=i.goal_id "
+                        "WHERE i.state='queued' AND g.project IS NULL "
+                        "ORDER BY COALESCE(i.queued_at, i.created_at), i.created_at").fetchall()
 
 
 # ---- the tick --------------------------------------------------------------------------------
@@ -193,9 +194,11 @@ def _result(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[str]:
     return "green" if run["state"] == "done" else "red"
 
 
-def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row]) -> List[str]:
+def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row], start: Optional[Callable] = None) -> List[str]:
     """Gate 2 for the stack as a batch: green on an item clears it and all under it;
-    red on an item means one of the unjudged ones up to it is bad — check the middle."""
+    red on an item means one of the unjudged ones up to it is bad — check the middle.
+    `start(conn, stack, lo, top)` starts the check (eki's own: _start_gate2)."""
+    start = start or _start_gate2
     said: List[str] = []
     results = [_result(conn, it) for it in stack]
     green = max((i for i, r in enumerate(results) if r == "green"), default=-1)
@@ -210,10 +213,10 @@ def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row]) -> List[str]:
         return said
     red = next((i for i in range(lo, len(stack)) if results[i] == "red"), None)
     if red is None:
-        return said + _start_gate2(conn, stack, lo, len(stack) - 1)
+        return said + start(conn, stack, lo, len(stack) - 1)
     if red == lo:
         return said + _unfit(conn, stack[lo], store.run(conn, stack[lo]["gate2_run"]))
-    return said + _start_gate2(conn, stack, lo, (lo + red - 1) // 2)
+    return said + start(conn, stack, lo, (lo + red - 1) // 2)
 
 
 def _rebase(conn: sqlite3.Connection, it: sqlite3.Row, head: str) -> tuple:

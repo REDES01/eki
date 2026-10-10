@@ -134,13 +134,13 @@ COUNT = "from eki import db; print(db.connect().execute('SELECT count(*) FROM th
 
 def opens_copy(checkout: Path, db_path: Path, home: Path, python: str) -> str:
     copy_db(db_path, home / "eki.db")
-    want = threads_in(db_path)
+    want = threads_in(home / "eki.db")                    # the copy, not the live db: it keeps moving
     p = _run(python, checkout, home, ["-c", COUNT])
     if p.returncode != 0:
         return f"the checkout couldn't open the copy ({_tail(p)})"
     got = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ""
     if got != str(want):
-        return f"the copy lists {got or 'nothing'} threads, the db has {want}"
+        return f"the checkout lists {got or 'nothing'} threads, the copy has {want}"
     return ""
 
 

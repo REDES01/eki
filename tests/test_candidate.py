@@ -34,6 +34,22 @@ def test_the_copy_lists_the_same_threads(two_threads, tmp_path):
     assert candidate.threads_in(copy / "eki.db") == 2
 
 
+def test_a_thread_made_during_the_copy_isnt_a_failure(two_threads, tmp_path, monkeypatch):
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    real = candidate.copy_db
+
+    def copy_then_write(src, dest):                       # the live engine keeps writing
+        real(src, dest)
+        c = db.connect()
+        store.create_thread(c, "three", None)
+        c.close()
+
+    monkeypatch.setattr(candidate, "copy_db", copy_then_write)
+    assert candidate.opens_copy(HERE, two_threads, copy, sys.executable) == ""
+    assert candidate.threads_in(two_threads) == 3 and candidate.threads_in(copy / "eki.db") == 2
+
+
 def test_a_missing_db_is_zero_threads(tmp_path):
     copy = tmp_path / "copy"
     copy.mkdir()

@@ -449,7 +449,10 @@ are Codex's.
     (a row's key, title and target chain as labels joined by " → ", from
     `settingsTarget.label`, which is `targets.label`); clicking one opens
     its editor and closes any other, so one is open at a time, and which
-    one is page state, not in the address. Rows and
+    one is page state, not in the address. An open editor is the same
+    one-line settings, in titled runs (`settingsForm.lines`), with long
+    controls (examples, targets) under their label (`block`) and Delete in
+    red at the bottom (`danger`). Rows and
     the ComfyUI entry that eki only adds in memory are shown as such and
     written only when edited. The server checks the data before writing
     (unique row keys, known targets, needs and `can` within the abilities,

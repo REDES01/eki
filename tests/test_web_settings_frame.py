@@ -16,7 +16,8 @@ SECTIONS = {"jobs": "settingsmodels", "rows": "settingsrows", "providers": "sett
 ORDER = ["settingsform", "settingstarget", "settingsmodels", "settingsnotify", "settingsself",
          "settingsrows", "settingsproviders", "settings"]
 CLASSES = ["#set-nav", ".set-group", ".set-line", ".set-label", ".set-sub", ".set-ctl", ".set-fold",
-           ".set-fold.open", ".set-sum", ".set-pill", ".set-amber", ".set-target"]
+           ".set-fold.open", ".set-sum", ".set-pill", ".set-amber", ".set-target",
+           ".set-flines", ".set-ftitle", ".set-block", ".set-wide", ".set-danger"]
 
 
 def _node():
@@ -64,9 +65,24 @@ def test_the_page_loads_the_section_files_before_the_frame(web):
 def test_the_form_helpers_are_shared(web):
     code, js = get(f"{web}/ui/settingsform.js")
     assert code == 200
-    assert "window.settingsForm = { group, line, fold, check, text, field, memo }" in js
+    assert "window.settingsForm = { group, line, fold, check, text, field, memo, block, lines, danger }" in js
     for cls in ("set-group", "set-line", "set-label", "set-sub", "set-ctl", "set-fold", "set-sum", "data-fold", "not saved — in memory"):
         assert cls in js
+
+
+def test_lines_block_and_danger_draw_a_fold_body(tmp_path):
+    _node()
+    stub = tmp_path / "form.js"
+    stub.write_text('global.window = global; global.md = { esc: (s) => String(s) };\nrequire(process.argv[2]);\n'
+                    'const f = settingsForm;\n'
+                    'console.log(JSON.stringify([f.lines("T", "<i>"), f.lines("", "<i>"),'
+                    ' f.block("Examples", "<textarea>", "s"), f.danger("Delete", "delrow")]));')
+    out = subprocess.run(["node", str(stub), str(WEB / "settingsform.js")], capture_output=True, text=True, timeout=30, check=True)
+    titled, bare, block, danger = json.loads(out.stdout)
+    assert "set-flines" in titled and "set-ftitle" in titled and ">T<" in titled and "<i>" in titled
+    assert "set-flines" in bare and "set-ftitle" not in bare
+    assert "set-line set-block" in block and "set-wide" in block and "set-sub" in block and "<textarea>" in block
+    assert 'data-act="delrow"' in danger and "set-danger" in danger and "set-red-label" in danger and "set-line" in danger
 
 
 def test_settings_css_has_every_class_and_no_hex_colour(web):

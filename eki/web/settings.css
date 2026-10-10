@@ -75,7 +75,14 @@ textarea.set-in { resize: vertical; font-size: 13px; }
 .set-sum::before { content: "›"; color: var(--dim); display: inline-block; width: 10px; transition: transform .12s; }
 .set-fold.open > .set-sum::before { transform: rotate(90deg); }
 .set-fold.open > .set-sum { border-bottom: 1px solid var(--line); }
-.set-fbody { padding: 6px 14px 12px; }
+.set-fbody { padding: 0; }
+.set-flines + .set-flines { border-top: 1px solid var(--line); }
+.set-ftitle { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 10px 14px 2px; font-weight: 600; }
+.set-block { flex-direction: column; align-items: stretch; gap: 6px; }
+.set-wide { width: 100%; }
+.set-danger, .set-red-label { color: var(--red); }
+.set-fbody .set-ctl > .set-in { width: 260px; }
+.set-fbody .set-ctl .set-checks { justify-content: flex-end; }
 .set-pill { font-size: 11px; padding: 0 7px; border-radius: 6px; color: var(--dim); white-space: nowrap;
   background: color-mix(in srgb, var(--text) 7%, transparent); }
 .set-amber { color: var(--amber); }

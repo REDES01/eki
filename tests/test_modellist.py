@@ -1,4 +1,4 @@
-"""Model lists: each program's own list into provider_models, tiers suggested, never written."""
+"""Model lists: what each program says of its models, into provider_models, never written to settings."""
 import json
 import sys
 import threading
@@ -18,10 +18,17 @@ for line in sys.stdin:
         print(json.dumps({"type": "system", "subtype": "other"}), flush=True)
         print(json.dumps({"type": "control_response", "response": {
             "subtype": "success", "request_id": msg["request_id"], "response": {"models": [
-                {"value": "default", "displayName": "Default (recommended)", "description": "Opus"},
-                {"value": "claude-sonnet-4-5", "displayName": "Sonnet", "description": "everyday"},
-                {"value": "claude-opus-4-1", "displayName": "Opus", "description": "hardest"},
-                {"value": "haiku", "displayName": "Haiku 4.5", "description": "quick"}]}}}), flush=True)
+                {"value": "default", "displayName": "Default (recommended)", "description": "Opus 5.5",
+                 "resolvedModel": "claude-opus-5-5", "supportsEffort": True,
+                 "supportedEffortLevels": ["low", "medium", "high"]},
+                {"value": "claude-sonnet-4-5", "displayName": "Sonnet", "description": "everyday",
+                 "supportsEffort": True, "supportedEffortLevels": ["low", "high"]},
+                {"value": "opus", "displayName": "Opus", "description": "hardest",
+                 "resolvedModel": "claude-opus-5-5", "supportsEffort": True,
+                 "supportedEffortLevels": ["low", "medium", "high", "max"]},
+                {"value": "haiku", "displayName": "Haiku 4.5", "description": "quick",
+                 "resolvedModel": "claude-haiku-4-5", "supportsEffort": False,
+                 "supportedEffortLevels": ["low"]}]}}}), flush=True)
 '''
 
 FAKE_CODEX = r'''
@@ -36,8 +43,13 @@ for line in sys.stdin:
     elif msg.get("method") == "model/list":
         print(json.dumps({"jsonrpc": "2.0", "method": "some/notification", "params": {}}), flush=True)
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"data": [
-            {"id": "gpt-5-codex", "displayName": "GPT-5 Codex", "isDefault": True},
-            {"id": "gpt-5", "displayName": "GPT-5", "isDefault": False},
+            {"id": "gpt-5-codex", "displayName": "GPT-5 Codex", "description": "for code",
+             "supportedReasoningEfforts": [{"reasoningEffort": "low", "description": "quick"},
+                                           {"reasoningEffort": "medium"}, {"reasoningEffort": "high"}],
+             "defaultReasoningEffort": "medium", "isDefault": True},
+            {"id": "gpt-5", "displayName": "GPT-5", "description": "broad",
+             "supportedReasoningEfforts": [{"reasoningEffort": "minimal"}, {"reasoningEffort": "high"}],
+             "defaultReasoningEffort": "high", "isDefault": False},
             {"id": "gpt-5-codex-mini", "displayName": "GPT-5 Codex Mini", "isDefault": False},
             {"id": "secret", "displayName": "Hidden", "hidden": True}]}}), flush=True)
 '''
@@ -60,17 +72,29 @@ def progs(home, tmp_path):
     return home / "providers.json"
 
 
+def _fields(m):
+    return {k: m[k] for k in ("model", "label", "description", "resolved", "efforts",
+                              "default_effort", "is_default", "floating")}
+
+
 def test_claude_list_from_the_initialize_reply(conn, progs):
     before = progs.read_text()
     assert modellist.listed(conn, "claude") is None
     rows = modellist.refresh(conn, "claude")
-    assert [r["model"] for r in rows] == ["default", "claude-sonnet-4-5", "claude-opus-4-1", "haiku"]
+    assert [r["model"] for r in rows] == ["default", "claude-sonnet-4-5", "opus", "haiku"]
     got = modellist.listed(conn, "claude")
-    assert {k: got[0][k] for k in ("model", "label", "is_default", "floating")} == \
-        {"model": "default", "label": "Default (recommended)", "is_default": True, "floating": True}
+    assert [_fields(m) for m in got] == [
+        {"model": "default", "label": "Default (recommended)", "description": "Opus 5.5",
+         "resolved": "claude-opus-5-5", "efforts": ["low", "medium", "high"], "default_effort": None,
+         "is_default": True, "floating": True},
+        {"model": "claude-sonnet-4-5", "label": "Sonnet", "description": "everyday", "resolved": None,
+         "efforts": ["low", "high"], "default_effort": None, "is_default": False, "floating": False},
+        {"model": "opus", "label": "Opus", "description": "hardest", "resolved": "claude-opus-5-5",
+         "efforts": ["low", "medium", "high", "max"], "default_effort": None,
+         "is_default": False, "floating": True},
+        {"model": "haiku", "label": "Haiku 4.5", "description": "quick", "resolved": "claude-haiku-4-5",
+         "efforts": None, "default_effort": None, "is_default": False, "floating": True}]   # no supportsEffort
     assert modellist.read_at(conn, "claude") is not None
-    assert modellist.suggest("claude", "claude_code", got) == {
-        "fast": "haiku", "default": "claude-sonnet-4-5", "top": "claude-opus-4-1"}
     assert progs.read_text() == before
 
 
@@ -79,19 +103,25 @@ def test_codex_list_from_model_list(conn, progs, tmp_path):
     modellist.refresh(conn, "codex")
     assert (tmp_path / "codex.initialized").exists()
     got = modellist.listed(conn, "codex")
-    assert [(m["model"], m["is_default"]) for m in got] == [
-        ("gpt-5-codex", True), ("gpt-5", False), ("gpt-5-codex-mini", False)]
-    assert modellist.suggest("codex", "codex", got) == {
-        "default": "gpt-5-codex", "fast": "gpt-5-codex-mini", "top": "gpt-5"}
+    assert [_fields(m) for m in got] == [
+        {"model": "gpt-5-codex", "label": "GPT-5 Codex", "description": "for code", "resolved": None,
+         "efforts": ["low", "medium", "high"], "default_effort": "medium", "is_default": True,
+         "floating": False},
+        {"model": "gpt-5", "label": "GPT-5", "description": "broad", "resolved": None,
+         "efforts": ["minimal", "high"], "default_effort": "high", "is_default": False, "floating": False},
+        {"model": "gpt-5-codex-mini", "label": "GPT-5 Codex Mini", "description": None, "resolved": None,
+         "efforts": None, "default_effort": None, "is_default": False, "floating": False}]
     assert progs.read_text() == before
 
 
-def test_local_list_and_no_suggestion(conn, progs, monkeypatch):
-    monkeypatch.setattr(Local, "models", lambda self, timeout=1.5: ["qwen3-30b", "gemma"])
+def test_local_list_takes_no_effort(conn, progs, monkeypatch):
+    monkeypatch.setattr(Local, "models", lambda self, timeout=1.5: ["qwen3:32b", "gemma"])
     modellist.refresh(conn, "local")
     got = modellist.listed(conn, "local")
-    assert [m["model"] for m in got] == ["qwen3-30b", "gemma"]
-    assert modellist.suggest("local", "local", got) == {}
+    assert [m["model"] for m in got] == ["qwen3:32b", "gemma"]
+    assert all(m["efforts"] is None and m["description"] is None and not m["floating"] for m in got)
+    assert conn.execute("SELECT COUNT(*) FROM provider_models WHERE provider='local'"
+                        " AND efforts IS NOT NULL").fetchone()[0] == 0
 
 
 def test_refresh_replaces_only_that_providers_rows(conn, progs, monkeypatch):
@@ -102,6 +132,10 @@ def test_refresh_replaces_only_that_providers_rows(conn, progs, monkeypatch):
     modellist.refresh(conn, "local")
     assert [m["model"] for m in modellist.listed(conn, "local")] == ["c"]
     assert len(modellist.listed(conn, "claude")) == 4
+    conn.execute("UPDATE provider_models SET description='stale', efforts=NULL WHERE provider='claude'")
+    modellist.refresh(conn, "claude")                                      # a re-read replaces the rows
+    got = modellist.listed(conn, "claude")
+    assert len(got) == 4 and got[0]["description"] == "Opus 5.5" and got[0]["efforts"] == ["low", "medium", "high"]
 
 
 def test_a_program_that_never_answers_is_killed(conn, progs, tmp_path):
@@ -113,25 +147,21 @@ def test_a_program_that_never_answers_is_killed(conn, progs, tmp_path):
     assert modellist.listed(conn, "claude") is None
 
 
-def test_tier_command_writes_models_and_refuses_unlisted(conn, progs, capsys):
-    assert main(["providers", "tier", "claude", "fast", "haiku"]) == 1     # never read yet
-    modellist.refresh(conn, "claude")
-    assert main(["providers", "tier", "claude", "fast", "haiku"]) == 0
-    assert main(["providers", "tier", "claude", "top", "suggested"]) == 0
-    assert main(["providers", "tier", "claude", "top", "claude-opus-9"]) == 1
-    assert main(["providers", "tier", "claude", "huge", "haiku"]) == 1
-    entry = json.loads(progs.read_text())["claude"]
-    assert entry["models"] == {"fast": "haiku", "top": "claude-opus-4-1"}
-    assert entry["model"] == "sonnet" and entry["binary"]                  # the rest kept
-    assert "isn't in claude's list" in capsys.readouterr().err
-
-
-def test_models_command_lists_picked_and_suggested(conn, progs, capsys):
+def test_models_command_shows_what_each_model_offers(conn, progs, capsys):
     assert main(["providers", "models", "claude", "--refresh"]) == 0
     out = capsys.readouterr().out
-    assert "default  sonnet   (suggested claude-sonnet-4-5)" in out
-    assert "fast     -   (suggested haiku)" in out
-    assert "Default (recommended)  (its default)" in out
+    assert "default  Default (recommended)  (its default)  follows the newest (now claude-opus-5-5)" in out
+    assert "  claude-sonnet-4-5  Sonnet\n      everyday\n      effort: low, high\n" in out
+    assert "  haiku  Haiku 4.5  follows the newest (now claude-haiku-4-5)\n      quick\n" in out
+    assert "suggested" not in out
+    assert main(["providers", "models", "codex", "--refresh"]) == 0
+    assert "effort: low, medium (default), high" in capsys.readouterr().out
+
+
+def test_tier_command_is_gone(capsys):
+    with pytest.raises(SystemExit):
+        main(["providers", "tier", "claude", "fast", "haiku"])
+    assert not hasattr(modellist, "suggest") and not hasattr(modellist, "SMALL")
 
 
 def test_housekeep_skips_a_fresh_list_and_reads_a_stale_one(conn, progs, monkeypatch):

@@ -3,7 +3,7 @@
 GET /api/models is read(); POST /api/models/refresh {"name"} reads one
 provider's list again (eki/modellist.py). Nothing here writes a settings
 file: the page saves a picked tier or role through /api/settings/(routing|
-providers) like any other edit, so a suggestion is only ever shown.
+providers) like any other edit.
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ def _provider(conn: sqlite3.Connection, name: str, cfg: Dict[str, Any]) -> Dict[
     kind = str(cfg.get("kind") or "")
     listed = modellist.listed(conn, name)
     return {"kind": kind, "tiers": _tiers(cfg), "listed": listed,
-            "suggested": modellist.suggest(name, kind, listed) if listed else {},
             "read_at": modellist.read_at(conn, name), "lists": kind in modellist.KINDS}
 
 

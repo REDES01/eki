@@ -10,10 +10,11 @@ never with a token or a vendor API of eki's own:
     Codex        `codex app-server`: initialize, initialized, `model/list`
     local        GET /v1/models (Local.models())
 
-A read replaces that provider's rows in provider_models in one transaction.
-suggest() maps a list onto the tiers (eki/targets.py); a suggestion is only
-shown — nothing here writes providers.json. The person picks with
-`eki providers tier` or the Settings page.
+A read keeps what the program says of each model: its id, its name, its own
+description, the pinned model an alias stands for, the effort levels it takes
+(NULL when it takes none) and its default effort. A read replaces that
+provider's rows in provider_models in one transaction. Nothing here writes a
+settings file, and no text is ever sent to a model.
 """
 from __future__ import annotations
 
@@ -34,8 +35,6 @@ KINDS = ("claude_code", "codex", "local")
 TIMEOUT = 20.0
 #: a list older than this is read again by housekeeping
 STALE = 24 * 3600.0
-#: names that sound like a provider's smaller, quicker model
-SMALL = ("mini", "nano", "small", "lite")
 INIT = "eki-init"                    # the handshake id eki/providers/claude_code.py uses
 
 
@@ -110,6 +109,9 @@ def _claude(cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
         models = [m for m in models if isinstance(m, dict) and m.get("value")]
         mark = _claude_default(models)
         return [{"model": str(m["value"]), "label": str(m.get("displayName") or m["value"]),
+                 "description": _text(m.get("description")), "resolved": _text(m.get("resolvedModel")),
+                 "efforts": _levels(m.get("supportedEffortLevels")) if m.get("supportsEffort") else None,
+                 "default_effort": _text(m.get("defaultEffortLevel")),
                  "is_default": m is mark} for m in models]
 
     argv = [binary, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
@@ -156,7 +158,12 @@ def _codex(cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
         for m in result.get("data") or []:
             mid = isinstance(m, dict) and (m.get("id") or m.get("model"))
             if mid and not m.get("hidden"):
+                efforts = _levels([e.get("reasoningEffort") if isinstance(e, dict) else e
+                                   for e in m.get("supportedReasoningEfforts") or []])
                 out.append({"model": str(mid), "label": str(m.get("displayName") or mid),
+                            "description": _text(m.get("description")), "resolved": None,
+                            "efforts": efforts or None,
+                            "default_effort": _text(m.get("defaultReasoningEffort")),
                             "is_default": bool(m.get("isDefault"))})
         if result.get("nextCursor") and asked["n"] < 10:
             ask_list(write, result["nextCursor"])
@@ -171,7 +178,22 @@ def _codex(cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
 
 def _local(name: str, cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
     ids = providers.build(name, cfg).models(timeout=min(timeout, 5.0))
-    return [{"model": i, "label": i, "is_default": i == cfg.get("model")} for i in ids]
+    return [{"model": i, "label": i, "description": None, "resolved": None, "efforts": None,
+             "default_effort": None, "is_default": i == cfg.get("model")} for i in ids]
+
+
+def _text(x: Any) -> Optional[str]:
+    return str(x).strip() or None if isinstance(x, (str, int, float)) else None
+
+
+def _levels(xs: Any) -> List[str]:
+    """Effort levels as the program names them, in its order, once each."""
+    out: List[str] = []
+    for x in xs if isinstance(xs, list) else []:
+        t = _text(x)
+        if t and t not in out:
+            out.append(t)
+    return out
 
 
 def read(name: str, cfg: Dict[str, Any], timeout: float = TIMEOUT) -> List[Dict[str, Any]]:
@@ -197,13 +219,21 @@ def refresh(conn: sqlite3.Connection, name: str, timeout: float = TIMEOUT) -> Li
     for r in read(name, cfg, timeout):
         if r["model"] not in seen:
             seen.add(r["model"])
-            rows.append({"model": r["model"], "label": r["label"], "is_default": bool(r["is_default"])})
+            efforts = r.get("efforts")
+            rows.append({"model": r["model"], "label": r.get("label") or r["model"],
+                         "description": r.get("description"), "resolved": r.get("resolved"),
+                         "efforts": list(efforts) if efforts is not None else None,
+                         "default_effort": r.get("default_effort"),
+                         "is_default": bool(r.get("is_default"))})
     now = db.now()
     with db.tx(conn):
         conn.execute("DELETE FROM provider_models WHERE provider=?", (name,))
         conn.executemany(
-            "INSERT INTO provider_models(provider, model, label, is_default, read_at) VALUES (?,?,?,?,?)",
-            [(name, r["model"], r["label"], int(r["is_default"]), now) for r in rows])
+            "INSERT INTO provider_models(provider, model, label, description, resolved, efforts,"
+            " default_effort, is_default, read_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            [(name, r["model"], r["label"], r["description"], r["resolved"],
+              json.dumps(r["efforts"]) if r["efforts"] is not None else None,
+              r["default_effort"], int(r["is_default"]), now) for r in rows])
     return rows
 
 
@@ -248,32 +278,4 @@ def stale(conn: sqlite3.Connection, now: Optional[float] = None) -> List[str]:
         t = read_at(conn, name)
         if t is None or now - t > STALE:
             out.append(name)
-    return out
-
-
-# ---- tiers ----------------------------------------------------------------------------
-
-def _says(m: Dict[str, Any], word: str) -> bool:
-    return word in f"{m.get('model', '')} {m.get('label', '')}".lower()
-
-
-def suggest(name: str, kind: str, models: Optional[List[Dict[str, Any]]]) -> Dict[str, str]:
-    """Tier → model id, guessed from the names in a read list (only ever shown)."""
-    models = [m for m in models or [] if m.get("model")]
-    out: Dict[str, str] = {}
-    if kind == "claude_code":
-        for tier, word in (("fast", "haiku"), ("default", "sonnet"), ("top", "opus")):
-            hit = next((m for m in models if _says(m, word)), None)
-            if hit:
-                out[tier] = hit["model"]
-    elif kind == "codex":
-        small = [m for m in models if any(_says(m, w) for w in SMALL)]
-        dflt = next((m for m in models if m.get("is_default")), None)
-        if dflt:
-            out["default"] = dflt["model"]
-        if small:
-            out["fast"] = small[0]["model"]
-        top = next((m for m in models if not m.get("is_default") and m not in small), None)
-        if top:
-            out["top"] = top["model"]
     return out

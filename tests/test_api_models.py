@@ -25,7 +25,7 @@ def _seed(conn, name, models, at=1000.0):
             [(name, m, m.title(), int(i == 1), at) for i, m in enumerate(models)])
 
 
-def test_read_gives_each_providers_tiers_list_and_suggestion_and_the_roles(home, conn):
+def test_read_gives_each_providers_tiers_and_list_and_the_roles(home, conn):
     _providers(home, claude={"kind": "claude_code", "model": "claude-sonnet-4-5",
                              "models": {"fast": "claude-haiku-4-5"}})
     _seed(conn, "claude", ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-1"])
@@ -33,10 +33,10 @@ def test_read_gives_each_providers_tiers_list_and_suggestion_and_the_roles(home,
     got = api_models.read(conn)
     c = got["providers"]["claude"]
     assert c["tiers"] == {"fast": "claude-haiku-4-5", "default": "claude-sonnet-4-5"}
-    assert c["suggested"] == {"fast": "claude-haiku-4-5", "default": "claude-sonnet-4-5", "top": "claude-opus-4-1"}
+    assert "suggested" not in c
     assert [m["model"] for m in c["listed"]] == ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-1"]
     assert c["read_at"] == 1000.0 and c["lists"] is True
-    assert got["providers"]["fake"]["listed"] is None and got["providers"]["fake"]["suggested"] == {}
+    assert got["providers"]["fake"]["listed"] is None
     assert set(got["roles"]) == set(roles.ROLES)
     r = got["roles"]["router"]
     assert r["target"] == "claude:fast" and r["default"] == "none" and r["set"] is True

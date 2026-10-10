@@ -187,6 +187,24 @@ CREATE TABLE IF NOT EXISTS notices (        -- a push to the person's phone, sen
     tries INTEGER NOT NULL DEFAULT 0,
     error TEXT                              -- never holds the topic
 );
+CREATE TABLE IF NOT EXISTS provider_models (  -- what each program says it offers (eki/modellist.py)
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,                    -- the id to ask for
+    label TEXT,                             -- the program's display name
+    is_default INTEGER NOT NULL DEFAULT 0,
+    read_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS provider_models_by ON provider_models(provider);
+CREATE TABLE IF NOT EXISTS role_calls (     -- one call made for one of eki's own jobs (eki/roles.py)
+    id INTEGER PRIMARY KEY,
+    role TEXT NOT NULL,                     -- router | planner | reviewer | chores
+    target TEXT NOT NULL,
+    model TEXT,
+    ms REAL,
+    ok INTEGER NOT NULL DEFAULT 1,
+    at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS role_calls_by ON role_calls(role, target, id);
 """
 
 

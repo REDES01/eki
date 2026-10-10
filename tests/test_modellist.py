@@ -157,3 +157,14 @@ def test_housekeep_skips_a_program_not_installed(conn, progs):
     cfg["local"]["off"] = True
     progs.write_text(json.dumps(cfg))
     assert modellist.stale(conn) == ["codex"]
+
+
+def test_claude_default_is_what_the_program_says():
+    m = lambda v, name="", desc="", **kw: {"value": v, "displayName": name, "description": desc, **kw}
+    flagged = [m("default", "Default"), m("claude-opus-4-1", "Opus", isDefault=True)]
+    assert modellist._claude_default(flagged)["value"] == "claude-opus-4-1"
+    alias = [m("claude-opus-4-1", "Opus"), m("default", "Default (recommended)")]
+    assert modellist._claude_default(alias)["value"] == "default"
+    worded = [m("claude-opus-4-1", "Opus"), m("claude-sonnet-4-5", "Sonnet", "Recommended for most work")]
+    assert modellist._claude_default(worded)["value"] == "claude-sonnet-4-5"
+    assert modellist._claude_default([m("claude-opus-4-1", "Opus")]) is None

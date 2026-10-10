@@ -107,13 +107,28 @@ def _claude(cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:
         if resp.get("subtype") == "error":
             raise RuntimeError(f"claude: {resp.get('error') or 'initialize failed'}")
         models = (resp.get("response") or {}).get("models") or resp.get("models") or []
+        models = [m for m in models if isinstance(m, dict) and m.get("value")]
+        mark = _claude_default(models)
         return [{"model": str(m["value"]), "label": str(m.get("displayName") or m["value"]),
-                 "is_default": m["value"] == "default"}
-                for m in models if isinstance(m, dict) and m.get("value")]
+                 "is_default": m is mark} for m in models]
 
     argv = [binary, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
     return _converse(argv, [{"type": "control_request", "request_id": INIT,
                              "request": {"subtype": "initialize"}}], on_line, timeout)
+
+
+def _claude_default(models: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The entry the program itself calls its default: a flag when it gives
+    one, else its `default` alias ("Default (recommended)"), else an entry
+    whose name or description says default or recommended."""
+    for test in (lambda m: m.get("isDefault") is True or m.get("default") is True,
+                 lambda m: m["value"] == "default",
+                 lambda m: any(w in f"{m.get('displayName', '')} {m.get('description', '')}".lower()
+                               for w in ("default", "recommended"))):
+        hit = next((m for m in models if test(m)), None)
+        if hit is not None:
+            return hit
+    return None
 
 
 def _codex(cfg: Dict[str, Any], timeout: float) -> List[Dict[str, Any]]:

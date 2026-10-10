@@ -189,3 +189,9 @@ a.pj-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
   box-shadow: 0 2px 10px color-mix(in srgb, var(--text) 10%, transparent); }
 #shellbar[hidden] { display: none; }
 #shellbar button { color: var(--teal); }
+
+#pagebar { position: fixed; right: 10px; bottom: 10px; z-index: 50; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; padding: 4px 6px 4px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--text) 10%, transparent); }
+#pagebar[hidden] { display: none; }
+#pagebar button { color: var(--teal); }

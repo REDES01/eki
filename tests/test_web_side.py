@@ -254,3 +254,4 @@ def test_side_js_leaves_the_machine_to_sidestatus_js():
     assert "/api/providers" not in side and "data-model" not in side and "loadProviders" not in side
     css = (WEB / "style.css").read_text()
     assert "#side-foot" in css and "#status-pop" in css and ".led.warn" in css and "#gallery" not in css
+

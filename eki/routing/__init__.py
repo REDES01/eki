@@ -15,6 +15,12 @@ A request that lands on `code` by rule or check, while a `code-easy` row
 exists, is asked once more whether it's small and well-defined (check.narrow):
 "rule: has a folder → code; check: easy → code-easy → codex-local". A run
 whose row was set beforehand is never narrowed.
+
+A row's targets may name a tier or a model (eki/targets.py): needs and
+capacity are checked by the target's provider, the decision carries the
+model the target resolves to, and the why names both:
+"→ answer → claude:fast (claude-haiku-4-5)". The check and narrow are asked
+of the router role (eki/roles.py); each call's time goes into role_calls.
 """
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from .. import capacity, models, paths, providers, store
+from .. import capacity, models, providers, roles, store, targets as targeting
 from . import needs, rules
 from .check import check, narrow
 from .table import row as table_row
@@ -35,14 +41,26 @@ class Decision:
     provider: Optional[str]      # None: nothing can take it now
     row: str
     why: str
+    model: Optional[str] = None  # the model the target names; None: the provider's default
 
 
 def checker_name() -> str:
-    path = paths.config("routing")
+    return roles.get("router")
+
+
+def resolve(conn: sqlite3.Connection, target: str) -> Tuple[Optional[str], str]:
+    """(model, note) for a row target, against providers.json and the read model list."""
+    name = targeting.provider_of(target)
+    listed = [r[0] for r in conn.execute("SELECT model FROM provider_models WHERE provider=?", (name,))]
     try:
-        return str(json.loads(path.read_text()).get("checker") or "local")
-    except (OSError, ValueError):
-        return "local"
+        return targeting.resolve(target, providers.config().get(name) or {}, listed or None)
+    except ValueError as e:                  # a hand-written target settings would refuse
+        return None, str(e)
+
+
+def _record(conn: sqlite3.Connection, spent: List[Tuple]) -> None:
+    for target, model, ms, ok in spent:
+        roles.record(conn, "router", target, model, ms, ok)
 
 
 def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
@@ -89,41 +107,49 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
         else:
             note = f"{mine} can't take it ({why}); "
 
+    spent: List[Tuple] = []
+    pick = None if run["row"] or ruled else roles.pick("router", conn)
     if run["row"]:
         key, reason = run["row"], (run["why"] or f"row {run['row']}")
     elif ruled:
         key, reason = ruled
     else:
-        key, reason = check(run["prompt"], previous=prev, cwd=cwd, checker=checker_name(),
-                            attachments=atts, last_picture=pic)
+        key, reason = check(run["prompt"], previous=prev, cwd=cwd, pick=pick,
+                            attachments=atts, last_picture=pic, spent=spent)
     if not run["row"]:
-        key, reason = _narrowed(key, reason, run["prompt"], cwd)
+        key, reason = _narrowed(conn, key, reason, run["prompt"], cwd, pick, spent)
+    _record(conn, spent)
     entry = table_row(key)
     want = needs.request_needs(entry, atts)
     targets = list(entry["targets"])
     # a subscription near the end of its plan goes last in its row
-    saved = {t: capacity.saving(conn, t) for t in targets}
+    saved = {t: capacity.saving(conn, targeting.provider_of(t)) for t in targets}
     order = [t for t in targets if not saved[t]] + [t for t in targets if saved[t]]
     last = "".join(f" ({t} last: {saved[t]})" for t in targets if saved[t]) if len(targets) > 1 else ""
     refused: List[str] = []
     for target in order:
-        lack = [] if target in skip else needs.lacking(target, want)
-        ok, why = (False, needs.cant(lack)) if lack else can(target)
+        name = targeting.provider_of(target)
+        lack = [] if name in skip else needs.lacking(target, want)
+        ok, why = (False, needs.cant(lack)) if lack else can(name)
         if ok:
+            model, said = resolve(conn, target)
             tail = f"; skipped {', '.join(refused)}" if refused else ""
-            return Decision(target, entry["key"],
-                            f"{note}{reason} → {entry['key']} → {target}{last}{tail}")
+            tail += f"; {said}" if said else ""
+            shown = f"{target} ({model})" if model else target
+            return Decision(name, entry["key"],
+                            f"{note}{reason} → {entry['key']} → {shown}{last}{tail}", model)
         refused.append(f"{target}: {why}")
     return Decision(None, entry["key"], f"{note}{reason} → {entry['key']}: waiting — "
                     + ", ".join(refused))
 
 
-def _narrowed(key: str, reason: str, prompt: str, cwd: Optional[str]) -> Tuple[str, str]:
+def _narrowed(conn: sqlite3.Connection, key: str, reason: str, prompt: str, cwd: Optional[str],
+              pick: Optional[roles.Pick], spent: List[Tuple]) -> Tuple[str, str]:
     """`code` narrowed to `code-easy` when that row exists and the check says easy;
     otherwise `code` stays, and a check that couldn't run leaves the why as it was."""
     if key != "code" or not any(r["key"] == "code-easy" for r in table_rows()):
         return key, reason
-    got = narrow(prompt, cwd=cwd, checker=checker_name())
+    got = narrow(prompt, cwd=cwd, pick=pick or roles.pick("router", conn), spent=spent)
     if got is None:
         return key, reason
     return got[0], f"{reason} → code; {got[1]}"
@@ -158,20 +184,26 @@ def explain(conn: sqlite3.Connection, prompt: str, *, cwd: Optional[str] = None,
     if thread_id:
         nxt = max([r["seq"] for r in store.thread_runs(conn, thread_id)] or [0]) + 1
         pic = previous_picture(conn, thread_id, nxt)
-    key, reason = check(prompt, cwd=cwd, checker=checker_name(), attachments=attachments,
-                        last_picture=pic)
-    key, reason = _narrowed(key, reason, prompt, cwd)
+    spent: List[Tuple] = []
+    pick = roles.pick("router", conn)
+    key, reason = check(prompt, cwd=cwd, pick=pick, attachments=attachments,
+                        last_picture=pic, spent=spent)
+    key, reason = _narrowed(conn, key, reason, prompt, cwd, pick, spent)
+    _record(conn, spent)
     entry = table_row(key)
     want = needs.request_needs(entry, attachments)
     avail = capacity.status(conn)
     cfgs = providers.config()
     targets = []
     for t in entry["targets"]:
+        name = targeting.provider_of(t)
         lack = needs.lacking(t, want)
-        ok, why = (False, needs.cant(lack)) if lack else avail.get(t, (False, "no such provider"))
-        cfg = cfgs.get(t)
-        targets.append({"name": t, "ok": bool(ok), "why": why,
-                        "can": providers.capabilities(t, cfg) if cfg is not None else [],
+        ok, why = (False, needs.cant(lack)) if lack else avail.get(name, (False, "no such provider"))
+        cfg = cfgs.get(name)
+        model, said = resolve(conn, t) if cfg is not None else (None, "")
+        targets.append({"name": t, "provider": name, "model": model, "note": said,
+                        "ok": bool(ok), "why": why,
+                        "can": providers.capabilities(name, cfg) if cfg is not None else [],
                         "about": str((cfg or {}).get("about") or "")})
     return {"row": entry["key"], "title": entry["title"], "why": reason, "needs": want,
             "targets": targets, "providers": sorted(cfgs)}

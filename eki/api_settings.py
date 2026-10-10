@@ -15,7 +15,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import notify, paths, providers, queue
+from . import notify, paths, providers, queue, roles, targets
 from .routing import table
 
 NAMES = ("routing", "providers")
@@ -111,11 +111,11 @@ def _check_routing(data: Any, known: set) -> List[str]:
         elif key in seen:
             out.append(f"row key {key!r} is used twice")
         seen.add(key)
-        targets = r.get("targets")
-        if not _strings(targets):
-            out.append(f"{label}: targets must be a list of provider names")
+        aims = r.get("targets")
+        if not _strings(aims):
+            out.append(f"{label}: targets must be a list of provider names or provider:tier")
         else:
-            out += [f"{label}: no provider named {t!r}" for t in targets if t not in known]
+            out += [f"{label}: {p}" for t in aims for p in targets.problems(t, known)]
         needs = r.get("needs", [])
         if not _strings(needs):
             out.append(f"{label}: needs must be a list")
@@ -131,6 +131,7 @@ def _check_routing(data: Any, known: set) -> List[str]:
         out.append(f"self.autonomy is one of {', '.join(queue.MODES)}, not {me['autonomy']!r}")
     if "notify" in data:
         out += _check_notify(data["notify"])
+    out += roles.problems(data.get("roles"), known)
     return out
 
 
@@ -157,6 +158,19 @@ def _check_providers(data: Any) -> List[str]:
             else:
                 out += [f"{n!r}: {a!r} is not an ability (one of {', '.join(providers.ABILITIES)})"
                         for a in can if a not in providers.ABILITIES]
+        if "models" in cfg:
+            out += _check_models(n, cfg["models"])
+    return out
+
+
+def _check_models(name: str, tiers: Any) -> List[str]:
+    """A provider's `models`: tier → model id, the tiers being targets.TIERS."""
+    if not isinstance(tiers, dict):
+        return [f"{name!r}: models must be an object of tier → model"]
+    out = [f"{name!r}: models: {t!r} is not a tier (one of {', '.join(targets.TIERS)})"
+           for t in tiers if t not in targets.TIERS]
+    out += [f"{name!r}: models.{t} must be a model name" for t, m in tiers.items()
+            if t in targets.TIERS and not (isinstance(m, str) and m.strip())]
     return out
 
 

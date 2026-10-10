@@ -2,6 +2,7 @@
 import json
 
 from eki import api, db, providers, routing, store
+from eki.routing import table
 
 
 def _setup(home, provs, rows):
@@ -80,14 +81,14 @@ def test_explain_gives_needs_and_each_target(home, conn):
     e = routing.explain(conn, "fix the failing test")
     assert e["row"] == "code" and e["why"] == "rule: starts with fix" and e["needs"] == ["tools"]
     t = {x["name"]: x for x in e["targets"]}
-    assert t["bare"] == {"name": "bare", "ok": False, "why": "can't do tools", "can": ["text"],
-                         "about": "A plain model."}
+    assert t["bare"] == {"name": "bare", "provider": "bare", "model": None, "note": "", "ok": False,
+                         "why": "can't do tools", "can": ["text"], "about": "A plain model."}
     assert t["fake"]["ok"] and t["fake"]["can"] == ["text", "tools"]
     assert not t["gone"]["ok"] and t["gone"]["why"] == "switched off"
     e = routing.explain(conn, "tell me something")
     assert e["row"] == "general" and e["needs"] == []
-    assert e["targets"][0] == {"name": "mlx", "ok": True, "why": "off; starts for the run",
-                               "can": ["text"], "about": ""}
+    assert e["targets"][0] == {"name": "mlx", "provider": "mlx", "model": None, "note": "", "ok": True,
+                               "why": "off; starts for the run", "can": ["text"], "about": ""}
     assert api.route(conn, "fix the failing test")["needs"] == ["tools"]
 
 
@@ -151,3 +152,48 @@ def test_comfyui_joins_a_file_without_it_but_off_keeps_it_off(home, tmp_path, mo
     (home / "providers.json").write_text(json.dumps({"fake": {"kind": "fake"},
                                                      "comfyui": {"kind": "comfyui", "off": True}}))
     assert "comfyui" not in providers.all_providers()
+
+
+def test_a_row_target_names_a_tier_and_the_why_names_the_model(home, conn):
+    _setup(home, {"claude": {"kind": "fake", "models": {"fast": "claude-haiku-4-5"}}, "fake": {"kind": "fake"}},
+           [{"key": "general", "title": "all", "targets": ["fake"]},
+            {"key": "answer", "title": "words", "targets": ["claude:fast", "fake"]}])
+    _, rid = _run(conn, "a haiku", row="answer")
+    d = routing.decide(conn, store.run(conn, rid))
+    assert (d.provider, d.row, d.model) == ("claude", "answer", "claude-haiku-4-5")
+    assert d.why == "row answer → answer → claude:fast (claude-haiku-4-5)"
+    e = routing.explain(conn, "fix the failing test")
+    assert e["row"] == "general"
+
+
+def test_a_tier_not_picked_goes_to_the_default_and_says_so(home, conn):
+    _setup(home, {"claude": {"kind": "fake"}},
+           [{"key": "general", "title": "all", "targets": ["claude:top"]}])
+    _, rid = _run(conn, "a haiku", row="general")
+    d = routing.decide(conn, store.run(conn, rid))
+    assert (d.provider, d.model) == ("claude", None)
+    assert d.why == "row general → general → claude:top; claude has no top model picked; its default"
+
+
+def test_a_model_off_the_read_list_is_not_asked_for(home, conn):
+    _setup(home, {"claude": {"kind": "fake"}},
+           [{"key": "general", "title": "all", "targets": ["claude:claude-opus-4-1"]}])
+    conn.execute("INSERT INTO provider_models VALUES ('claude', 'claude-opus-4-5', 'Opus', 0, 0)")
+    _, rid = _run(conn, "a haiku", row="general")
+    d = routing.decide(conn, store.run(conn, rid))
+    assert (d.provider, d.model) == ("claude", None)
+    assert d.why.endswith("; claude-opus-4-1 isn't in claude's list any more; its default")
+
+
+def test_capacity_and_needs_go_by_the_provider(home, conn):
+    _setup(home, {"bare": {"kind": "fake", "harness": False, "models": {"top": "big"}},
+                  "fake": {"kind": "fake", "models": {"fast": "small"}}},
+           [{"key": "general", "title": "all", "targets": ["fake"]},
+            {"key": "code", "title": "tools", "targets": ["bare:top", "fake:fast"]}])
+    store.cool(conn, "fake", 9e9, "limit reached")
+    _, rid = _run(conn, "fix it", row="code")
+    d = routing.decide(conn, store.run(conn, rid))
+    assert d.provider is None
+    assert "bare:top: can't do tools" in d.why and "fake:fast: limit reached" in d.why
+    assert table.cheapest_first(["claude:top", "mlx:fast"], {"claude": "claude_code", "mlx": "local"}) \
+        == ["mlx:fast", "claude:top"]

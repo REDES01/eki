@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from eki import paths
+from eki import paths, roles
 import importlib
 
 checking = importlib.import_module("eki.routing.check")
@@ -149,25 +149,25 @@ def _rows(home, *extra):
 def test_check_uses_the_rules_first(home, monkeypatch):
     _rows(home, "image")
     monkeypatch.setattr(checking.providers, "get", lambda n: pytest.fail("asked a model"))
-    assert checking.check("draw a fox", checker="none") == ("image", "rule: asks for a picture")
-    assert checking.check("fix the tests", checker="none") == ("code", "rule: starts with fix")
+    assert checking.check("draw a fox") == ("image", "rule: asks for a picture")
+    assert checking.check("fix the tests") == ("code", "rule: starts with fix")
 
 
 def test_check_passes_attachments(home):
     _rows(home, "answer")
-    assert checking.check("what is this", checker="none", attachments=["x.png"]) == \
+    assert checking.check("what is this", attachments=["x.png"]) == \
         ("answer", "rule: a picture attached")
 
 
 def test_check_passes_the_last_picture(home, monkeypatch):
     _rows(home, "image-edit")
     monkeypatch.setattr(checking.providers, "get", lambda n: pytest.fail("asked a model"))
-    assert checking.check("make it bluer", checker="none", last_picture="/x/a.png") == \
+    assert checking.check("make it bluer", last_picture="/x/a.png") == \
         ("image-edit", "rule: follow-up to a picture: edit it")
 
 
 def test_no_rule_is_general_with_the_checker_reason():
-    assert checking.check("what's a good name for a cat", checker="none") == \
+    assert checking.check("what's a good name for a cat") == \
         ("general", "no prompt checker configured")
 
 
@@ -179,7 +179,7 @@ def test_an_off_checker_doesnt_wake_when_told_not_to(home, monkeypatch):
     (home / "routing.json").write_text(json.dumps(got))
     from eki import models
     monkeypatch.setattr(models, "ensure", lambda name: pytest.fail("woke the checker"))
-    assert checking.check("what's a good name for a cat", checker="tiny") == \
+    assert checking.check("what's a good name for a cat", pick=roles.Pick("tiny", None, "tiny", "")) == \
         ("general", "prompt check skipped: tiny is off (checker_wakes is false)")
 
 

@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from eki import cli, providers, routing, store
+from eki import capacity, cli, providers, roles, routing, store
 from eki.routing.check import check, narrow
 from eki.routing import table
 
@@ -40,9 +40,14 @@ def rung2(home, monkeypatch):
     return home
 
 
+LM = roles.Pick("lm", None, "lm", "")
+
+
 def judge(monkeypatch, j):
-    real = providers.get
+    real, status = providers.get, capacity.status
     monkeypatch.setattr(providers, "get", lambda name: j if name == "lm" else real(name))
+    monkeypatch.setattr(capacity, "status", lambda conn, background=False:
+                        {**status(conn, background), "lm": (True, "")})
     return j
 
 
@@ -80,7 +85,7 @@ def test_no_checker_stays_on_code(rung2, conn, tmp_path):
     got = json.loads((rung2 / "routing.json").read_text())
     got["checker"] = "none"
     (rung2 / "routing.json").write_text(json.dumps(got))
-    assert narrow("rename x", checker="none") is None
+    assert narrow("rename x") is None
     d = ask(conn, "rename parse to parse_line", str(tmp_path))
     assert d.row == "code" and d.provider == "claude"
 
@@ -94,7 +99,7 @@ def test_a_preset_row_is_never_narrowed(rung2, conn, tmp_path, monkeypatch):
 
 def test_the_general_check_never_offers_code_easy(rung2, monkeypatch):
     j = judge(monkeypatch, Judge('{"row": "code-easy", "why": "tiny"}'))
-    key, why = check("what's a good name for a cat", checker="lm")
+    key, why = check("what's a good name for a cat", pick=LM)
     assert key == "general" and "gave no row" in why
     assert "code-easy" not in j.asked[0][0]["content"]
 
@@ -103,7 +108,7 @@ def test_without_codex_local_there_is_no_row_and_no_narrowing(home, conn, tmp_pa
     monkeypatch.setattr(providers, "codex_installed", lambda cfg: False)
     j = judge(monkeypatch, Judge('{"row": "code-easy", "why": "tiny"}'))
     assert "code-easy" not in {r["key"] for r in table.rows()}
-    assert narrow("rename x", checker="lm") is None
+    assert narrow("rename x", pick=LM) is None
     d = ask(conn, "rename parse to parse_line", str(tmp_path))
     assert d.row == "code" and d.why == "rule: has a folder → code → fake"
     assert j.asked == []

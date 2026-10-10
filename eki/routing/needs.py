@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from .. import providers
+from .. import providers, targets
 
 #: what a row needs when it doesn't say
 ROW_NEEDS: Dict[str, List[str]] = {"code": ["tools"], "web": ["web"], "general": [],
@@ -42,8 +42,9 @@ def request_needs(row: Dict[str, Any], attachments: Optional[List[str]] = None) 
     return list(dict.fromkeys(out))
 
 
-def lacking(name: str, needs: List[str]) -> List[str]:
-    """Which of `needs` the provider `name` can't do (all of them if there's no such provider)."""
+def lacking(target: str, needs: List[str]) -> List[str]:
+    """Which of `needs` the target's provider can't do (all of them if there's no such provider)."""
+    name = targets.provider_of(target)
     cfg = providers.config().get(name)
     if cfg is None:
         return list(needs)
@@ -55,9 +56,10 @@ def cant(missing: List[str]) -> str:
     return "can't do " + " or ".join(WORDS.get(m, m) for m in missing)
 
 
-def describe(name: str) -> str:
-    """One line for the prompt-check menu and `eki route`: name [tags] — about."""
+def describe(target: str) -> str:
+    """One line for the prompt-check menu and `eki route`: target [tags] — about."""
+    name = targets.provider_of(target)
     cfg = providers.config().get(name, {})
-    line = f"{name} [{', '.join(providers.capabilities(name, cfg))}]"
+    line = f"{target} [{', '.join(providers.capabilities(name, cfg))}]"
     about = str(cfg.get("about") or "").strip()
     return f"{line} — {about}" if about else line

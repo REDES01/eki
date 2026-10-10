@@ -81,7 +81,7 @@ def test_bad_data_is_refused_with_every_problem_and_the_file_untouched(web, home
 def test_routing_may_name_a_provider_being_saved_alongside():
     from eki import api_settings
     data = {"rows": [{"key": "general", "targets": ["new"]}]}
-    assert api_settings.check("routing", data) == ["row 'general': no provider named 'new'"]
+    assert api_settings.check("routing", data) == ["row 'general': unknown provider 'new' in target 'new'"]
     assert api_settings.check("routing", data, {"new": {"kind": "fake"}}) == []
 
 
@@ -101,3 +101,20 @@ def test_no_header_is_forbidden_and_an_unknown_name_is_not_found(web, home):
         get(web + "/api/settings/secrets")
     assert e.value.code == 404
     assert paths.config("secrets").exists() is False
+
+
+def test_routing_targets_roles_and_provider_tiers_are_checked(home):
+    from eki import api_settings
+    rows = [{"key": "general", "targets": ["fake:fast", "fake2:some-model"]}]
+    assert api_settings.check("routing", {"rows": rows, "roles": {"router": "fake:fast"}}) == []
+    bad = api_settings.check("routing", {"rows": [{"key": "general", "targets": ["nope:fast", "fake:"]}],
+                                         "roles": {"planner": "off", "boss": "fake"}})
+    text = "\n".join(bad)
+    assert "unknown provider 'nope' in target 'nope:fast'" in text
+    assert "nothing after the colon" in text and "planner can't be off" in text and "'boss'" in text
+    ok = {"claude": {"kind": "claude_code", "models": {"fast": "claude-haiku-4-5", "top": "claude-opus-4-1"}}}
+    assert api_settings.check("providers", ok) == []
+    got = api_settings.check("providers", {"claude": {"kind": "claude_code",
+                                                      "models": {"quick": "x", "top": 4}}})
+    assert got == ["'claude': models: 'quick' is not a tier (one of fast, default, top)",
+                   "'claude': models.top must be a model name"]

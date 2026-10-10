@@ -35,3 +35,37 @@ def test_handoff_does_not_carry_the_model(conn):
     worker.finish(conn, store.run(conn, rid), "fake", Outcome(state="handed_off", reason="tools"))
     nxt = conn.execute("SELECT * FROM runs WHERE parent=?", (rid,)).fetchone()
     assert nxt is not None and nxt["model"] is None
+
+
+def _tiered(home):
+    import json
+    (home / "providers.json").write_text(json.dumps({
+        "claude": {"kind": "fake", "models": {"fast": "claude-haiku-4-5"}}, "fake": {"kind": "fake"}}))
+    (home / "routing.json").write_text(json.dumps({"checker": "none", "rows": [
+        {"key": "general", "title": "all", "targets": ["claude:fast", "fake"]}]}))
+
+
+def test_route_writes_the_model_the_row_names(home, conn):
+    _tiered(home)
+    tid = store.create_thread(conn, "t", None)
+    rid = store.create_run(conn, tid, "hi", row="general")
+    assert worker.route(conn, store.run(conn, rid)) == "claude"
+    assert store.run(conn, rid)["model"] == "claude-haiku-4-5"
+
+
+def test_a_run_with_its_own_model_keeps_it(home, conn):
+    _tiered(home)
+    tid = store.create_thread(conn, "t", None)
+    rid = store.create_run(conn, tid, "hi", row="general", model="opus")
+    assert worker.route(conn, store.run(conn, rid)) == "claude"
+    assert store.run(conn, rid)["model"] == "opus"
+
+
+def test_a_reroute_drops_the_model_the_last_route_wrote(home, conn):
+    _tiered(home)
+    tid = store.create_thread(conn, "t", None)
+    rid = store.create_run(conn, tid, "hi", row="general")
+    worker.route(conn, store.run(conn, rid))
+    store.update_run(conn, rid, provider=None, exclude='["claude"]')   # claude hit its limit
+    assert worker.route(conn, store.run(conn, rid)) == "fake"
+    assert store.run(conn, rid)["model"] is None

@@ -8,14 +8,19 @@ silently guesses. A request that lands on `code` may be narrowed to
 `code-easy` (narrow) by a second, smaller question; when that can't run it
 stays on `code` — easy is never guessed. A checker that is off on purpose (an on-demand model) is
 started for the check only if routing.json's `checker_wakes` is true.
+
+Who answers is the router role (eki/roles.py): a Pick of provider and
+model, with the why when it fell back. Each call made appends
+(target, model, ms, ok) to `spent`, ms counted from before any wake.
 """
 from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Dict, List, Optional, Tuple
 
-from .. import providers
+from .. import providers, roles
 from . import rules
 from .needs import describe, row_needs
 from .table import checker_wakes, rows
@@ -47,16 +52,19 @@ def _menu(table: List[Dict]) -> str:
 
 
 def check(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = None,
-          checker: str = "local", attachments: Optional[List[str]] = None,
-          last_picture: Optional[str] = None) -> Tuple[str, str]:
-    """(row key, why): a rule's if one fires, else the model's."""
+          pick: Optional[roles.Pick] = None, attachments: Optional[List[str]] = None,
+          last_picture: Optional[str] = None, spent: Optional[list] = None) -> Tuple[str, str]:
+    """(row key, why): a rule's if one fires, else the model's. Without a
+    pick, the router role as the settings name it now."""
     table = [r for r in rows() if r["key"] != "code-easy"]   # only narrow() reaches code-easy
     keys = {r["key"] for r in table}
     ruled = rules.match(prompt, previous=previous, cwd=cwd, attachments=attachments, keys=keys,
                         last_picture=last_picture)
     if ruled:
         return ruled
-    judge, why_not = _judge(checker)
+    pick = pick or roles.pick("router")
+    started = time.monotonic()
+    judge, why_not = _judge(pick)
     if judge is None:
         return "general", why_not
     request = prompt if not previous else f"(previous answer: {previous[:300]})\n{prompt}"
@@ -64,24 +72,47 @@ def check(prompt: str, *, previous: Optional[str] = None, cwd: Optional[str] = N
         request = f"(working in folder {cwd})\n{request}"
     messages = [{"role": "system", "content": ASK.format(rows=_menu(table))},
                 {"role": "user", "content": request[:4000]}]
-    try:
-        got = judge.complete(messages, max_tokens=80, timeout=30)   # type: ignore[attr-defined]
-    except Exception as e:                    # noqa: BLE001 — any failure means "couldn't check"
-        return "general", f"prompt check failed: {e}"
+    got = _ask(judge, pick, messages, 80, started, spent)
+    if isinstance(got, Exception):
+        return "general", f"prompt check failed: {got}"
     m = re.search(r"\{.*\}", got.get("text", ""), re.S)
     try:
         answer = json.loads(m.group(0)) if m else {}
     except ValueError:
         answer = {}
-    key = str(answer.get("row", ""))
+    key = str(answer.get("row", "")) if isinstance(answer, dict) else ""
     if key not in keys:
         return "general", f"prompt check gave no row ({got.get('text', '')[:60]!r})"
-    return key, f"prompt check: {answer.get('why') or key}"
+    return key, f"prompt check: {answer.get('why') or key}" + _fell(pick)
 
 
-def _judge(checker: str) -> Tuple[Optional[object], str]:
+def _fell(pick: roles.Pick) -> str:
+    """The pick's why (a fallback, a model it couldn't use) as a tail, or ""."""
+    return f" ({pick.why})" if pick.why else ""
+
+
+def _ask(judge: object, pick: roles.Pick, messages: List[Dict], max_tokens: int,
+         started: float, spent: Optional[list]) -> object:
+    """The model's reply, or the exception it raised; the call goes into `spent`."""
+    kw = {"model": pick.model} if pick.model else {}
+    try:
+        got = judge.complete(messages, max_tokens=max_tokens, timeout=30, **kw)   # type: ignore[attr-defined]
+        ok = True
+    except Exception as e:                    # noqa: BLE001 — any failure means "couldn't check"
+        got, ok = e, False
+    if spent is not None:
+        spent.append((pick.target, pick.model, (time.monotonic() - started) * 1000, ok))
+    return got
+
+
+def _judge(pick: roles.Pick) -> Tuple[Optional[object], str]:
     """(the checker, "") when it can answer now, else (None, why not);
     an on-demand checker is started only if `checker_wakes`."""
+    if pick.provider is None:
+        if pick.why.endswith("→ nobody") and pick.target.partition(":")[0] not in providers.config():
+            return None, "no prompt checker configured"
+        return None, f"prompt check skipped: {pick.why or pick.target}"
+    checker = pick.provider
     try:
         judge = providers.get(checker)
     except KeyError:
@@ -98,14 +129,16 @@ def _judge(checker: str) -> Tuple[Optional[object], str]:
     return judge, ""
 
 
-def narrow(prompt: str, *, cwd: Optional[str] = None,
-           checker: str = "local") -> Optional[Tuple[str, str]]:
+def narrow(prompt: str, *, cwd: Optional[str] = None, pick: Optional[roles.Pick] = None,
+           spent: Optional[list] = None) -> Optional[Tuple[str, str]]:
     """A `code` request: ("code-easy", "check: easy") or ("code", "check: not easy"),
     or None when the check can't run — never a guess at easy."""
     easy = next((r for r in rows() if r["key"] == "code-easy"), None)
     if easy is None:
         return None
-    judge, _ = _judge(checker)
+    pick = pick or roles.pick("router")
+    started = time.monotonic()
+    judge, _ = _judge(pick)
     if judge is None:
         return None
     ex = "; ".join(easy.get("examples") or [])
@@ -113,9 +146,8 @@ def narrow(prompt: str, *, cwd: Optional[str] = None,
     messages = [{"role": "system",
                  "content": NARROW.format(easy=easy["title"] + (f" (e.g. {ex})" if ex else ""))},
                 {"role": "user", "content": request[:4000]}]
-    try:
-        got = judge.complete(messages, max_tokens=60, timeout=30)   # type: ignore[attr-defined]
-    except Exception:                         # noqa: BLE001 — any failure means "couldn't check"
+    got = _ask(judge, pick, messages, 60, started, spent)
+    if isinstance(got, Exception):
         return None
     m = re.search(r"\{.*\}", got.get("text", ""), re.S)
     try:
@@ -124,7 +156,7 @@ def narrow(prompt: str, *, cwd: Optional[str] = None,
         return None
     key = str(answer.get("row", "")) if isinstance(answer, dict) else ""
     if key == "code-easy":
-        return "code-easy", "check: easy"
+        return "code-easy", "check: easy" + _fell(pick)
     if key == "code":
-        return "code", "check: not easy"
+        return "code", "check: not easy" + _fell(pick)
     return None

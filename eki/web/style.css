@@ -172,3 +172,10 @@ a.pj-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .pj-dot { position: absolute; left: 3px; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); animation: pulse 1.2s ease-in-out infinite; }
 .pj-state { font-size: 11px; color: var(--dim); min-width: 64px; }
 .pj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+
+/* ---- the Mac window's update bar (shellbar.js): low in the corner, away from the drag strips ---- */
+#shellbar { position: fixed; left: 10px; bottom: 10px; z-index: 50; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; padding: 4px 6px 4px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--text) 10%, transparent); }
+#shellbar[hidden] { display: none; }
+#shellbar button { color: var(--teal); }

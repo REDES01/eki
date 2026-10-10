@@ -193,7 +193,13 @@ def _red(conn: sqlite3.Connection, build: Path, rec: Dict[str, Any],
          carried: List[sqlite3.Row]) -> List[str]:
     """Revert the newest carried item. Which one is written down first, so a kill
     anywhere in here comes back to the same item (the revert is idempotent)."""
-    from . import integration
+    from . import integration, notify
+    if not rec.get("reverted") and _by_hand(conn, build):
+        notify.queue(conn, f"train:{build.name}:by-hand", "needs_you", "eki · needs you",
+                     f"build {build.name} failed its release check and carries commits made by hand; "
+                     f"nothing was reverted — fix main (eki builds)")
+        return [f"train: build {build.name} failed its check; it carries commits made by hand, which gate 2 "
+                f"never judged, so no item is blamed or reverted — the next main is checked again"]
     if rec.get("reverted"):
         it = conn.execute("SELECT * FROM items WHERE id=?", (rec["reverted"],)).fetchone()
     else:
@@ -211,6 +217,14 @@ def _red(conn: sqlite3.Connection, build: Path, rec: Dict[str, Any],
                 f"({e}); tried again next tick"]
     _unfit(conn, it, rec.get("tail") or "")
     return [f"train: build {build.name} failed its check; item {it['id']} reverted"]
+
+
+def _by_hand(conn: sqlite3.Connection, build: Path) -> bool:
+    """The build carries a commit no gate-2-green item made (a fix pushed by hand):
+    then the newest item isn't the likely culprit, and reverting it punishes the wrong one."""
+    from . import train
+    running = train.running_commit()
+    return bool(running) and not judged(conn, running, _commit(build))
 
 
 def _revert(sha: str, key: str) -> None:

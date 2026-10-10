@@ -103,6 +103,20 @@ def test_red_reverts_the_newest_item_and_the_next_train_checks_again(conn, src, 
     assert builds.current() == second and item(conn, old)["build"] == second.name
 
 
+def test_a_red_build_with_commits_by_hand_reverts_nothing(conn, src, monkeypatch):
+    land(conn, "a")
+    new = land(conn, "b")
+    train.release(conn)
+    build = builds.root() / integration.main()[:12]
+    main = integration.main()
+    monkeypatch.setattr(traincheck, "_by_hand", lambda c, b: True)
+    monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "1")
+    run_inline(conn, check_run(conn, build)["id"])
+    said = train.release(conn)
+    assert any("made by hand" in s for s in said) and not any(f"item {new} reverted" in s for s in said), said
+    assert item(conn, new)["state"] == "landed" and integration.main() == main
+
+
 def test_a_red_handled_twice_reverts_once(conn, src, monkeypatch):
     land(conn, "a")
     new = land(conn, "b")

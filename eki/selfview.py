@@ -123,7 +123,7 @@ def said(it) -> str:
     if state in ("left", "unfit", "rolled back") and it["error"]:
         return f"! {it['error'].splitlines()[0][:150]}"
     if state == "reviewing":
-        return "a second reader (the local model) is reading the diff"
+        return "a second reader (the reviewer role, Settings → Routing) is reading the diff"
     if state == "judging" and it["review_run"]:
         return "the checks and a second reader run side by side"
     if state == "proposed" and it["pr"]:

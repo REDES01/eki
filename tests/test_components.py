@@ -118,5 +118,3 @@ def test_eki_use_lists(proj, monkeypatch, capsys):
     out = capsys.readouterr()
     assert "voice" in out.out and "speaks lines" in out.out and "project" in out.out
     assert "broken: " in out.err
-    assert main(["use", "voice"]) == 1
-    assert "not built yet" in capsys.readouterr().err

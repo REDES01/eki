@@ -8,8 +8,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import (asking, asks, attachments, capacity, digest, engine, gallery, machine, modellist, models, paths,
-               projectchats, projects, providers, quota, routing, store, targets)
+from . import (api_threads, asking, asks, attachments, capacity, digest, engine, gallery, machine, modellist,
+               models, paths, projects, providers, quota, routing, store, targets)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -41,38 +41,18 @@ def _shown(conn: sqlite3.Connection, provider: Optional[str], model: Optional[st
     return targets.label(provider, model, effort, listed) if (model or effort or listed) else provider
 
 
-#: eki's own threads, by the title it gives them; kept out of the chat list unless one needs you
-#: (a stopgap until threads carry who made them: goal 410f0007d0)
-_OWN = " OR ".join(f"t.title LIKE '{p}%'" for p in
-                   ("chore:", "self:", "gate 2:", "train check:", "plan:", "draft:"))
-
-
-def threads(conn: sqlite3.Connection, limit: int = 60) -> List[Dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT t.*, MAX(r.created_at) AS updated, "
-        " SUM(CASE WHEN r.state IN ('queued','starting','running') THEN 1 ELSE 0 END) AS active, "
-        " (SELECT COUNT(*) FROM asks a WHERE a.thread_id = t.id AND a.state = 'open') AS waiting "
-        "FROM threads t LEFT JOIN runs r ON r.thread_id = t.id "
-        "GROUP BY t.id HAVING waiting > 0 OR NOT (" + _OWN + ") "
-        "ORDER BY waiting > 0 DESC, active > 0 DESC, updated DESC LIMIT ?", (limit,)).fetchall()
-    return [{"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
-             "updated": t["updated"] or t["created_at"], "working": bool(t["active"]),
-             "needs_you": bool(t["waiting"]), "project": _project(conn, t["project"])} for t in rows]
+def threads(conn: sqlite3.Connection, limit: int = 60, all: bool = False,
+            archived: bool = False) -> List[Dict[str, Any]]:
+    return api_threads.threads(conn, limit, all=all, archived=archived)
 
 
 def _project(conn: sqlite3.Connection, pid: Optional[str]) -> Optional[Dict[str, str]]:
-    """A thread's project as {id, name}, or None for a chat outside any project."""
-    if not pid:
-        return None
-    if pid == projectchats.SELF:
-        return {"id": pid, "name": "eki"}
-    row = conn.execute("SELECT name FROM projects WHERE id=?", (pid,)).fetchone()
-    return {"id": pid, "name": row["name"] if row else pid}
+    return api_threads.project(conn, pid)
 
 
 def thread(conn: sqlite3.Connection, tid: str) -> Dict[str, Any]:
     t = store.thread(conn, tid)
-    if t is None:
+    if t is None or t["deleted_at"] is not None:
         raise KeyError(f"no thread {tid}")
     return {"id": t["id"], "title": t["title"], "provider": t["provider"], "cwd": t["cwd"],
             "project": _project(conn, t["project"]),

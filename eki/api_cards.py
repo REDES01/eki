@@ -79,6 +79,14 @@ def _waiting(conn: sqlite3.Connection, name: str, state: str) -> str:
     return f"{state} · {n} waiting" if n else state
 
 
+def _shown(kind: str, spec: Any) -> Any:
+    """What of a card's spec may leave the server: an mcp card's env values masked."""
+    if kind == "mcp" and isinstance(spec, dict):
+        from .components import mcpserver
+        return mcpserver.public(spec)
+    return spec
+
+
 def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict[str, Any]:
     prompt = None
     if c.kind == "agent":
@@ -89,7 +97,7 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
             prompt = ""
     out = {"name": c.name, "kind": c.kind, "about": c.spec.get("about", ""), "scope": c.scope,
            "ref": c.name if c.card else "", "card": str(c.card or c.folder), "folder": str(c.folder),
-           "error": "", "notes": components._notes(c), "spec": c.spec, "prompt": prompt,
+           "error": "", "notes": components._notes(c), "spec": _shown(c.kind, c.spec), "prompt": prompt,
            "instructions": None, "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
            "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c)}
     if c.kind == "skills":
@@ -110,7 +118,7 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
     kind = spec.get("kind") if spec is not None and isinstance(spec.get("kind"), str) else ""
     about = spec.get("about") if spec is not None and isinstance(spec.get("about"), str) else ""
     return {"name": name, "kind": kind, "about": about, "scope": "project", "ref": ref, "card": where,
-            "folder": where, "error": why, "notes": [], "spec": spec, "prompt": None,
+            "folder": where, "error": why, "notes": [], "spec": _shown(kind, spec), "prompt": None,
             "instructions": None, "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
             "last_use": uses.last_use(conn, name, root), "links": [], "size": ""}
 

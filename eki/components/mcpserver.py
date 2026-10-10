@@ -7,12 +7,15 @@ merged with the registry for that run only. Env values never leave whole: `publi
 from __future__ import annotations
 
 import copy
+import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .. import mcp
-from . import Call, Component, Result
+from .. import mcp, paths
+from ..providers.codex import mcp_flags
+from . import Call, Component, Result, own, project_root
 
 ABOUT = "an MCP server only this project's runs get"
 
@@ -45,15 +48,42 @@ def public(spec: dict) -> dict:
     return out
 
 
+def _claude(server: dict) -> dict:
+    if 'url' in server:
+        return {'type': 'http', 'url': server['url']}
+    out = {'command': server['command'], 'args': list(server.get('args') or [])}
+    if server.get('env'):
+        out['env'] = dict(server['env'])
+    return out
+
+
 def servers_of(folder, conn: Optional[sqlite3.Connection] = None) -> Dict[str, dict]:
     """The project's mcp cards reachable from `folder`, by name, in Claude's format."""
-    return {}
+    try:
+        root = project_root(folder, conn)
+    except Exception:
+        return {}
+    if root is None:
+        return {}
+    found, _ = own(root)
+    return {c.name: _claude(c.spec['server']) for c in found.values() if c.kind == 'mcp'}
 
 
 def run_config(folder, run_id: str, conn: Optional[sqlite3.Connection] = None
                ) -> Tuple[Optional[str], List[str]]:
     """(the file for Claude's --mcp-config or None, Codex's -c flags) for one run."""
-    return mcp.claude_config(), mcp.codex_config()
+    mine = servers_of(folder, conn)
+    if not mine or not run_id or '/' in run_id or run_id.startswith('.'):
+        return mcp.claude_config(), mcp.codex_config()
+    merged = {**mcp.servers(), **mine}            # a project card wins a name clash
+    d = paths.home() / 'mcp-runs'
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f'{run_id}.json'
+    fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as out:
+        out.write(json.dumps({'mcpServers': merged}, indent=2) + '\n')
+    os.chmod(f, 0o600)
+    return str(f), mcp_flags(merged)
 
 
 def notes(comp: Component) -> List[str]:

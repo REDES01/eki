@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Tuple
 from . import api_cards, components
 from .api_settings import Invalid
 
+MASKED = "••••"
 POOL = "a pool component: edit it in the pool"
 FIELD = re.compile(r"^([a-z_][a-z0-9_]*):?\b")
 
@@ -60,6 +61,18 @@ def _write(f: Path, text: str) -> None:
     os.replace(tmp, f)
 
 
+def _keep_secrets(spec: dict, settings: dict) -> dict:
+    """An mcp card's server.env value sent back masked (as the card shows it) keeps the stored one."""
+    server = settings.get("server")
+    if spec.get("kind") != "mcp" or not isinstance(server, dict) or not isinstance(server.get("env"), dict):
+        return settings
+    old = (spec.get("server") or {}).get("env") if isinstance(spec.get("server"), dict) else None
+    old = old if isinstance(old, dict) else {}
+    env = {k: old[k] if isinstance(v, str) and v.startswith(MASKED) and k in old else v
+           for k, v in server["env"].items()}
+    return {**settings, "server": {**server, "env": env}}
+
+
 def save_settings(folder: Path, settings: Any) -> None:
     """Merge `settings` into folder/component.json (None removes a key); Invalid writes nothing."""
     if not isinstance(settings, dict) or not settings:
@@ -77,7 +90,7 @@ def save_settings(folder: Path, settings: Any) -> None:
         e.problems = bad  # type: ignore[assignment]
         raise e
     merged = dict(spec)
-    for k, v in settings.items():
+    for k, v in _keep_secrets(spec, settings).items():
         if not isinstance(k, str) or not k:
             raise ValueError(f"bad setting name {k!r}")
         if v is None:

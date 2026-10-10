@@ -426,8 +426,10 @@ are Codex's.
     `/api/settings/<name>`, `/api/models/refresh`. An unknown id is 404, a refused action 400 with
     the reason. `/api/route` serves the table and a request's explain.
   - The web's JS and CSS files are held to 400 lines too (the size test),
-    so the page is split by job: `nav.js`, `side.js`, `app.js`, one file
-    per view, `style.css` + `chat.css` + one stylesheet per view.
+    so the page is split by job: `nav.js`, `split.js`, `side.js`, `app.js`,
+    one file per view, `style.css` + `chat.css` + one stylesheet per view.
+    The sidebar's edge is dragged to resize it (200–480px, double-click
+    resets), and the width is kept in `localStorage` as `eki.side.w`.
 - **A thin Mac shell** (`mac/main.swift`, built by `bin/build-mac`): a
   window and a menu bar item around the web UI; it starts the engine if
   it isn't up. It rarely needs to change. View → Zoom In/Out/Actual Size

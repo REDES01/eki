@@ -1,0 +1,6 @@
+{
+  "kind": "service",
+  "about": "says back what it is given — replace with what this service does",
+  "access": "shared",
+  "run": ["echo"]
+}

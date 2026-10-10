@@ -15,7 +15,9 @@ queued notices to the person's phone through ntfy (eki/notify.py), keep the
 chat list (eki/threadkeep.py: mark eki's own threads, purge deleted ones,
 title new chats), and read a
 program's model list again when it is a day old (eki/modellist.py — on a thread
-of its own with a 20 s limit, so the pass never waits on it). Nothing here is
+of its own with a 20 s limit, so the pass never waits on it), and stop each
+component server eki started that has sat idle past its `idle_stop`
+(eki/components/servers.py). Nothing here is
 state that matters: the hour between prunes and the last list tries live in
 memory, and losing them on a restart only means an early prune or an early try.
 """
@@ -29,6 +31,7 @@ from typing import Callable, Dict, List, Tuple
 
 from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
                prmirror, projectsetup, prs, schedule, score, selfpick, standing, threadkeep)
+from .components import servers
 
 log = logging.getLogger("eki.housekeep")
 
@@ -100,6 +103,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("digestprose", digestprose.tick),
     ("models", _models),
     ("threads", threadkeep.tick),
+    ("componentservers", servers.tick),
     ("schedule", schedule.tick),
     ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),

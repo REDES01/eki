@@ -1,0 +1,8 @@
+{
+  "kind": "service",
+  "about": "speech from text — fill in your TTS command",
+  "access": "exclusive",
+  "memory_gb": 8,
+  "run": ["<your TTS command>"],
+  "idle_stop": 5
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "service",
+  "about": "pictures from a prompt on this Mac's ComfyUI",
+  "access": "queue",
+  "slots": 1,
+  "memory_gb": 20,
+  "provider": "comfyui",
+  "idle_stop": 5
+}

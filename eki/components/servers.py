@@ -1,0 +1,203 @@
+"""Servers of `serve`-form service components: started on demand, stopped when idle.
+
+Each server eki starts has a state file under ~/.eki/component-state/, keyed
+by the component's name and folder (two projects' `voice` never collide):
+its pid, when it was started, and the run of its latest call. The server
+runs detached in a session of its own, so a restart of eki leaves it up and
+finds it again from the file. eki only stops servers it started.
+
+Idle is read from the runs table: the end of the latest call run (or, while
+that run is still active, not idle at all). `idle_stop` minutes (default 5;
+0 never) after that, the housekeeping step `tick` stops it.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import signal
+import sqlite3
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .. import paths
+
+log = logging.getLogger("eki.components.servers")
+
+#: how long stop() gives a server to exit before it is killed
+STOP_WAIT = 5.0
+#: between health polls while a server comes up
+POLL = 0.2
+ACTIVE = ("queued", "starting", "running", "waiting")
+
+
+def state_dir() -> Path:
+    d = paths.home() / "component-state"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def key(name: str, folder) -> str:
+    h = hashlib.sha1(str(Path(folder).resolve()).encode()).hexdigest()[:10]
+    return f"{name}-{h}"
+
+
+def _path(comp) -> Path:
+    return state_dir() / f"{key(comp.name, comp.folder)}.json"
+
+
+def read(comp) -> Dict[str, Any]:
+    try:
+        return json.loads(_path(comp).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _write(comp, **fields: Any) -> None:
+    st = read(comp)
+    st.update(fields, name=comp.name, folder=str(comp.folder))
+    p = _path(comp)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st))
+    tmp.replace(p)
+
+
+def alive(pid: Optional[int]) -> bool:
+    if not pid:
+        return False
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0]:      # ours and exited: reaped now
+            return False
+    except ChildProcessError:
+        pass
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def healthy(spec: dict, timeout: float = 2.0) -> bool:
+    url = str(spec.get("url", "")).rstrip("/") + "/" + str(spec.get("health", "")).lstrip("/")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status == 200
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+
+
+def is_up(comp) -> bool:
+    return healthy(comp.spec, timeout=1.0)
+
+
+def ours(comp) -> bool:
+    return alive(read(comp).get("pid"))
+
+
+def start(comp, by: str = "") -> Dict[str, Any]:
+    """Start the server detached unless it (or ours) is already there; then wait for health."""
+    spec = comp.spec
+    if not healthy(spec) and not ours(comp):
+        env = dict(os.environ)
+        env.update({k: os.path.expanduser(str(v)) for k, v in (spec.get("env") or {}).items()})
+        cwd = Path(os.path.expanduser(str(spec.get("cwd") or ".")))
+        if not cwd.is_absolute():
+            cwd = comp.folder / cwd
+        logf = open(paths.logs() / f"component-{key(comp.name, comp.folder)}.log", "ab")
+        try:
+            proc = subprocess.Popen([os.path.expanduser(a) if a.startswith("~") else a for a in spec["serve"]],
+                                    cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, stdout=logf,
+                                    stderr=logf, start_new_session=True)
+        finally:
+            logf.close()
+        _write(comp, pid=proc.pid, started_at=time.time(), by=by)
+        log.info("started component %s (pid %s) for %s", comp.name, proc.pid, by or "a call")
+    end = time.time() + float(spec.get("start_timeout", 120))
+    while time.time() < end:
+        if healthy(spec):
+            return {"up": True, "why": ""}
+        st = read(comp)
+        if st.get("pid") and not alive(st["pid"]):
+            return {"up": False, "why": f"{comp.name}'s server exited while starting "
+                                        f"(see the log in {paths.logs()})"}
+        time.sleep(POLL)
+    return {"up": False, "why": f"{comp.name} didn't answer {spec.get('health')} within "
+                                f"{spec.get('start_timeout', 120)} s"}
+
+
+def stop(comp) -> bool:
+    """Stop the server if eki started it; False when there was nothing of ours to stop."""
+    return _stop_pid(read(comp).get("pid"), _path(comp), comp.name)
+
+
+def _stop_pid(pid: Optional[int], state: Path, name: str) -> bool:
+    if not alive(pid):
+        state.unlink(missing_ok=True)
+        return False
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    end = time.time() + STOP_WAIT
+    while alive(pid) and time.time() < end:
+        time.sleep(0.05)
+    if alive(pid):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    state.unlink(missing_ok=True)
+    log.info("stopped component %s (pid %s)", name, pid)
+    return True
+
+
+def used(comp, run_id: str) -> None:
+    """A call run is using the server; its end is the server's last use."""
+    _write(comp, last_run=run_id, last_call_at=time.time())
+
+
+def _last_use(conn: sqlite3.Connection, st: Dict[str, Any]) -> Optional[float]:
+    """When the server was last used; None while its latest call run is still active."""
+    t = max(float(st.get("started_at") or 0), float(st.get("last_call_at") or 0))
+    rid = st.get("last_run")
+    if rid:
+        row = conn.execute("SELECT state, ended_at FROM runs WHERE id=?", (rid,)).fetchone()
+        if row is not None:
+            if row["state"] in ACTIVE:
+                return None
+            t = max(t, float(row["ended_at"] or 0))
+    return t
+
+
+def tick(conn: sqlite3.Connection) -> List[str]:
+    """Housekeeping: stop each server of ours idle for longer than its idle_stop minutes."""
+    said: List[str] = []
+    for f in sorted(state_dir().glob("*.json")):
+        try:
+            st = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        pid = st.get("pid")
+        if not alive(pid):
+            f.unlink(missing_ok=True)
+            continue
+        try:
+            spec = json.loads((Path(st["folder"]) / "component.json").read_text())
+        except (KeyError, OSError, ValueError):
+            spec = {}
+        minutes = float(spec.get("idle_stop", st.get("idle_stop", 5)))
+        if minutes <= 0:
+            continue
+        last = _last_use(conn, st)
+        if last is None or time.time() - last <= minutes * 60:
+            continue
+        if _stop_pid(pid, f, st.get("name", f.stem)):
+            said.append(f"stopped component {st.get('name', f.stem)}: idle for {minutes:g} min")
+    return said

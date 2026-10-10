@@ -1,8 +1,10 @@
 """Components: concrete pieces any agent can call with `eki use <name>`.
 
 A component is a folder `components/<name>/component.json` in a project
-folder, or `~/.eki/components/<name>/` in the machine-wide pool. A project's
-own component wins over a pool one with the same name. A broken one is
+folder, or `~/.eki/components/<name>/` in the machine-wide pool. A project
+assumes nothing: from a project folder only its own components/ is reachable,
+a pool component through a card `components/<name>/component.json` holding
+just `{"pool": "<name>"}`. With no project, the whole pool is. A broken one is
 reported and skipped; finding never raises.
 """
 from __future__ import annotations
@@ -26,6 +28,7 @@ class Component:
     folder: Path
     spec: dict
     scope: str
+    card: Optional[Path] = None   # the card folder, for a pool component reached through a card
 
 
 @dataclass
@@ -150,6 +153,33 @@ def load(folder: Path, scope: str) -> Component:
     return Component(name=name, kind=spec['kind'], folder=folder, spec=spec, scope=scope)
 
 
+def _ref(folder: Path) -> Optional[dict]:
+    """The card's JSON when `folder` is a pool reference card (exactly {"pool": …}), else None."""
+    try:
+        spec = json.loads((folder / 'component.json').read_text())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return spec if isinstance(spec, dict) and list(spec) == ['pool'] else None
+
+
+def load_card(folder: Path, ref: dict) -> Component:
+    """The pool component a reference card names, with `card` set; ValueError when it's broken."""
+    name = ref.get('pool')
+    if not isinstance(name, str) or not NAME.match(name) or name in RESERVED:
+        raise ValueError(f'pool card names {name!r}: not a component name')
+    if name != folder.name:
+        raise ValueError("a pool card's folder must be named like its pool component")
+    target = pool_dir() / name
+    if not (target / 'component.json').is_file():
+        raise ValueError(f'the pool has no component {name}')
+    try:
+        comp = load(target, 'pool')
+    except ValueError as e:
+        raise ValueError(f'pool component {name} is broken: {e}')
+    comp.card = folder
+    return comp
+
+
 def _scan(base: Path, scope: str, found: Dict[str, Component], errors: List[Tuple[str, str]]) -> None:
     try:
         entries = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
@@ -162,9 +192,27 @@ def _scan(base: Path, scope: str, found: Dict[str, Component], errors: List[Tupl
         if d.name.startswith('.'):
             continue
         try:
-            found[d.name] = load(d, scope)
+            ref = _ref(d) if scope == 'project' else None
+            found[d.name] = load_card(d, ref) if ref is not None else load(d, scope)
         except Exception as e:
             errors.append((str(d), str(e)))
+
+
+def is_project(root: Path, conn: Optional[sqlite3.Connection] = None) -> bool:
+    """A project folder: it has components/, or it is a listed project's folder (eki's own too).
+    The folders come from projectchats' cheap map, not its full listing: finding runs often."""
+    if (root / 'components').is_dir():
+        return True
+    from .. import db, projectchats
+    try:
+        c = conn if conn is not None else db.connect()
+        try:
+            return projectchats.norm(root) in projectchats._folders(c)
+        finally:
+            if conn is None:
+                c.close()
+    except Exception:  # an unreadable db: not known
+        return False
 
 
 def find(folder, conn: Optional[sqlite3.Connection] = None
@@ -173,12 +221,24 @@ def find(folder, conn: Optional[sqlite3.Connection] = None
     found: Dict[str, Component] = {}
     errors: List[Tuple[str, str]] = []
     try:
-        _scan(pool_dir(), 'pool', found, errors)
         root = project_root(folder, conn)
-        if root is not None:
+        if root is not None and is_project(root, conn):
             _scan(root / 'components', 'project', found, errors)
+        else:
+            _scan(pool_dir(), 'pool', found, errors)
     except Exception as e:
         errors.append((str(folder), f'finding components failed: {e}'))
+    return dict(sorted(found.items())), errors
+
+
+def own(root: Path) -> Tuple[Dict[str, Component], List[Tuple[str, str]]]:
+    """A project's cards: only what root/components holds (own components and pool cards)."""
+    found: Dict[str, Component] = {}
+    errors: List[Tuple[str, str]] = []
+    try:
+        _scan(Path(root) / 'components', 'project', found, errors)
+    except Exception as e:
+        errors.append((str(root), f'finding components failed: {e}'))
     return dict(sorted(found.items())), errors
 
 
@@ -200,14 +260,21 @@ def _notes(c: Component) -> List[str]:
 
 
 def listing(folder, conn: Optional[sqlite3.Connection] = None) -> List[dict]:
-    found, errors = find(folder, conn)
+    return entries(*find(folder, conn))
+
+
+def entries(found: Dict[str, Component], errors: List[Tuple[str, str]]) -> List[dict]:
+    """One dict per component found, then one per broken one (with its error)."""
     out = [{'name': c.name, 'kind': c.kind, 'about': c.spec.get('about', ''), 'scope': c.scope,
-            'folder': str(c.folder), 'error': '', 'notes': _notes(c)} for c in found.values()]
+            'folder': str(c.folder), 'error': '', 'notes': _notes(c),
+            'card': str(c.card or (c.folder if c.scope == 'project' else '')),
+            'ref': c.name if c.card else ''} for c in found.values()]
     pool = str(pool_dir())
     for where, why in errors:
+        in_pool = where == pool or where.startswith(pool + '/')
         out.append({'name': Path(where).name, 'kind': '', 'about': '',
-                    'scope': 'pool' if where.startswith(pool) else 'project',
-                    'folder': where, 'error': why, 'notes': []})
+                    'scope': 'pool' if in_pool else 'project',
+                    'folder': where, 'error': why, 'notes': [], 'card': '' if in_pool else where, 'ref': ''})
     return out
 
 

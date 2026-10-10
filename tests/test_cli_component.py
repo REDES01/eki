@@ -90,6 +90,8 @@ def test_ls_shows_pool_project_and_broken(proj, temps, monkeypatch, capsys):
     monkeypatch.chdir(proj)
     main(["component", "add", "service", "--pool", "--name", "shared"])
     main(["component", "add", "service", "--name", "own"])
+    (proj / "components" / "shared").mkdir()
+    (proj / "components" / "shared" / "component.json").write_text('{"pool": "shared"}')
     (proj / "components" / "bad").mkdir()
     (proj / "components" / "bad" / "component.json").write_text("{nope")
     capsys.readouterr()

@@ -35,6 +35,7 @@
         <div id="pj-desc" class="pj-desc"></div>
         <div id="pj-head" class="pj-headline"></div>
         <div id="pj-setup"></div>
+        <div id="pj-cards"></div>
         <form id="pj-ask" class="pj-card" autocomplete="off">
           <textarea id="pj-ask-text" rows="2" placeholder="New chat here…"></textarea>
           <div class="pj-row"><span class="grow"></span><span id="pj-ask-err"></span>
@@ -237,12 +238,14 @@
     loadOne();
     clearInterval(S.timer);
     S.timer = setInterval(loadOne, 5000);
+    window.projectCards && projectCards.mount(document.getElementById("pj-cards"), id);
   }
 
   function hide() {
     if (!S.on) return;
     S.on = null;
     clearInterval(S.timer);
+    window.projectCards && projectCards.unmount();
     box().hidden = true;
   }
 

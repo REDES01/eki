@@ -86,3 +86,17 @@ def test_an_old_db_gets_the_new_columns_and_table(home):
             "last_thread", "why", "created_at"} <= cols("schedules")
     conn.execute("INSERT INTO schedules (id, text, cadence, tz, created_at) VALUES ('s', 't', '{}', 'UTC', 0)")
     assert conn.execute("SELECT state FROM schedules").fetchone()["state"] == "on"
+
+
+def test_a_delete_reaches_the_route_table(srv, monkeypatch):
+    monkeypatch.setattr(api_customize, "ROUTES", [("DELETE", r"/api/things/(\w+)",
+                                                    lambda c, m, q, b: {"gone": m.group(1)})])
+    req = urllib.request.Request(srv + "/api/things/abc", method="DELETE", headers={"X-Eki": "1"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        assert json.loads(r.read()) == {"gone": "abc"}
+    req = urllib.request.Request(srv + "/api/things/abc", method="DELETE")
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        raise AssertionError("no 403")
+    except urllib.error.HTTPError as e:
+        assert e.code == 403

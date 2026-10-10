@@ -52,13 +52,17 @@ def test_validate_exception_is_contained(proj, monkeypatch):
     assert found == {} and "ZeroDivisionError" in errors[0][1]
 
 
-def test_project_overrides_pool(proj):
+def test_project_reaches_pool_only_through_a_card(proj):
     put(components.pool_dir(), "voice", svc("pool voice"))
     put(components.pool_dir(), "images", svc("pool images"))
     put(proj / "components", "voice", svc("project voice"))
     found, _ = components.find(proj)
+    assert list(found) == ["voice"] and found["voice"].spec["about"] == "project voice"
+    put(proj / "components", "images", {"pool": "images"})
+    found, _ = components.find(proj)
     assert found["voice"].scope == "project" and found["voice"].spec["about"] == "project voice"
-    assert found["images"].scope == "pool"
+    assert found["images"].scope == "pool" and found["images"].card == proj / "components" / "images"
+    assert found["images"].folder == components.pool_dir() / "images"
     assert components.brief(proj) == ("Components you can call with `eki use <name> [args…]` (`eki use` lists them): "
                                       "images — pool images; voice — project voice")
 

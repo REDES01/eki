@@ -250,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             return self._call(lambda c, tid: {"deleted": True, "stopping": threadacts.delete(c, tid)},
                               m.group(1))
-        self._json({"error": "not found"}, 404)
+        u = urlparse(self.path)
+        return self._routed("DELETE", u.path, {k: v[0] for k, v in parse_qs(u.query).items()}, {})
 
     def _station_post(self, p: str, body: dict) -> None:
         if p == "/api/self":

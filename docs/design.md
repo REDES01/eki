@@ -95,9 +95,11 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
-| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `journal` (a playtester session's notes, emotions, review, screenshots) |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
+| `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use) and the library (templates and the pool); the helpers the card leaves share |
+| `api_cardadd`, `api_cardedit`, `api_cardrun`, `api_cardsessions` | a card added (template or pool card) and removed (to the Trash); its settings and prompt edited; run through the engine and its uses; an agent card's sessions |
 | `cli/*` | one file per command |
 
 **Scheduling.** The engine's spawn step holds each kind of run only by the
@@ -850,12 +852,20 @@ routing rows.
 **Concrete pieces any agent can use, before any project framework**
 (`eki/components/`). A component is a folder: `components/<name>/component.json`
 plus the files its kind needs, inside a project folder, or in the
-machine-wide pool `~/.eki/components/<name>/` that every project shares. A
-project's own component with the same name wins over the pool's. eki finds
-the components of the folder a run works in; a worktree reads its project's
-from the project folder, never from the worktree. A broken component (bad
-JSON, unknown kind, a missing file) is reported with its error and skipped;
-it never breaks the engine. A folder with no `components/` behaves as before.
+machine-wide pool `~/.eki/components/<name>/`. **A project assumes
+nothing:** from a project folder (one with `components/`, or any listed
+project's folder, eki's own included) only its own `components/` is
+reachable — its cards. A pool component is reached through a card
+`components/<name>/component.json` holding just `{"pool": "<name>"}` (named
+like the pool component; a missing or broken one makes the card broken). A
+run with no project (no folder, or a folder no project knows and with no
+`components/`) sees the whole pool. eki finds the components of the folder a
+run works in; a worktree reads its project's from the project folder, never
+from the worktree. A broken component (bad JSON, unknown kind, a missing
+file) is reported with its error and skipped; it never breaks the engine.
+The project page shows a project's components as cards
+(`eki/web/projectcards.js`, `api_cards`): add from the library, open to set
+up, run, see its uses, remove.
 
 **The common keys.** `kind` (`service`, `assets`, `agent`), `about` (one
 line, shown wherever the component is listed), and how it is shared:

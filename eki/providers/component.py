@@ -37,12 +37,16 @@ class ComponentCall(Provider):
     kind = "component"
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
-        from .. import components
+        from .. import components, db
         out = Outcome()
         try:
             want = parse(turn.prompt)
             name = want["component"]
-            comp = components.get(name, want["caller_dir"])
+            conn = db.connect()                      # resolve exactly as `eki use` did
+            try:
+                comp = components.get(name, want["caller_dir"], conn)
+            finally:
+                conn.close()
             call = components.Call(want["args"], want["caller_dir"], want["caller_run"],
                                    run_id=turn.run_id, emit=emit, extra=turn.extra)
             res = components.kind_module(comp.kind).call(comp, call)

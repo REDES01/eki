@@ -94,6 +94,14 @@ def test_not_ignored_note(proj):
     assert assets.notes(comp) == []
 
 
+def _raises(fn):
+    try:
+        fn()
+    except KeyError as e:
+        return e
+    raise AssertionError("no KeyError")
+
+
 def test_no_git_is_fine_and_pool_scope(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -102,6 +110,9 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
     d = components.pool_dir() / "shared"
     d.mkdir(parents=True)
     (d / "component.json").write_text(json.dumps({"kind": "assets", "about": "x", "path": "files"}))
+    assert "no component shared" in str(_raises(lambda: components.get("shared", plain)))
+    (plain / "components" / "shared").mkdir()
+    (plain / "components" / "shared" / "component.json").write_text(json.dumps({"pool": "shared"}))
     comp = components.get("shared", plain)
     assert assets.pool(comp) == d / "files" and assets.notes(comp) == []
 

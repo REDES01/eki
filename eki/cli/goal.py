@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from .. import budget, builds, github, integration, projects, projectsetup, standing
+from .. import budget, github, projects, projectsetup, standing
 from . import project as projectcli
 from .common import conn, err
 
@@ -136,11 +136,6 @@ def _add(c, args) -> int:
     try:
         if repo is None:
             print(standing.add(c, args.folder, args.text, check=args.check, branch=args.branch))
-            return 0
-        if repo == integration.own_repo():            # eki's own repo: a self goal, no row, no clone
-            sid = standing.add(c, str(builds.source()), args.text, issue=None)
-            print(f"{repo} is eki's own repo: on eki's own queue")
-            print(sid)
             return 0
         merged: list = []
         p = projectsetup.ensure(c, repo, merged)

@@ -224,23 +224,3 @@ def test_a_standing_goal_from_an_issue_shows_its_number(conn, capsys, proj, gh_r
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == f"{sid}  garden  on  #12 keep it tidy"
     assert lines[1] == "  path: GitHub me/proj — issues labelled eki in, PRs out"
-
-
-def test_add_on_ekis_own_repo_goes_on_ekis_own_queue(conn, capsys, proj, fake_gh, monkeypatch):
-    from eki import integration
-    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
-    workspace.git(proj, "remote", "add", "origin", "https://github.com/me/eki.git")
-    out = added(capsys, proj).splitlines()
-    assert out[0] == "me/eki is eki's own repo: on eki's own queue"
-    st = row(conn, out[-1])
-    assert st["project"] is None and st["issue"] is None and st["text"].startswith("keep the tests fast")
-    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
-    assert not paths.projects().exists() or not any(paths.projects().iterdir())
-
-
-def test_add_on_another_repo_still_clones_when_eki_has_its_own(conn, capsys, proj, gh_repo, monkeypatch):
-    from eki import integration
-    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
-    out = added(capsys, proj).splitlines()
-    assert out[0].startswith("me/proj: working in eki's own clone")
-    assert projects.by_repo(conn, "me/proj") is not None

@@ -135,3 +135,11 @@ def test_unknown_mcp_server_is_an_error(proj, home):
     comp = put(proj, "lost", {"bare": True, "mcp": ["nowhere"]})
     r = agent.call(comp, call_of(proj))
     assert "nowhere" in r.error
+
+
+def test_bare_on_default_claude_is_valid_without_providers_entry(proj, home):
+    d = proj / "components" / "dflt"
+    d.mkdir(parents=True)
+    (d / "prompt.md").write_text("x")
+    assert agent.validate({"kind": "agent", "target": "claude:opus@high", "bare": True}, d) == []
+    assert agent.validate({"kind": "agent", "target": "local", "bare": True}, d)

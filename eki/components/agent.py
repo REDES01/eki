@@ -47,8 +47,8 @@ def validate(spec: dict, folder: Path) -> List[str]:
         errs.append('url must be text')
     if spec.get('bare') and t is not None:
         kind = _kind(t.provider)
-        if kind != 'claude_code':
-            errs.append(f'a bare agent runs on Claude Code only (target {t.provider!r} is {kind or "unknown"})')
+        if kind and kind != 'claude_code':   # a provider this Mac doesn't have fails at call time
+            errs.append(f'a bare agent runs on Claude Code only (target {t.provider!r} is {kind})')
     return errs
 
 
@@ -66,7 +66,8 @@ def target(spec: dict):
 def _kind(provider: str) -> str:
     from .. import providers
     try:
-        return str((providers.config().get(provider) or {}).get('kind') or '')
+        entry = providers.config().get(provider) or providers.DEFAULTS.get(provider) or {}
+        return str(entry.get('kind') or '')
     except Exception:
         return ''
 

@@ -74,7 +74,7 @@ def _go(conn: sqlite3.Connection) -> List[str]:
     sha = _commit_of(build) or main
     carried = [it for it in waiting if integration.carries(it["rebased"] or it["commit_sha"] or "", sha)]
     if traincheck.needed(carried):
-        green, said = traincheck.step(conn, build, carried)
+        green, said = traincheck.step(conn, build, carried, running)
         if not green:
             _last_check[0] = 0.0                      # the result, or the next train, is up next tick
             return said

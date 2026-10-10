@@ -163,6 +163,90 @@ def test_needed_and_command(conn, src):
     a, d = land(conn, "a"), land(conn, "d", touched="notes.md")
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM items")}
     assert traincheck.needed([rows[a], rows[d]]) and not traincheck.needed([rows[d]])
-    argv = json.loads(traincheck.command(builds.root() / "x"))
+    argv = json.loads(traincheck.command(builds.root() / "x", "full"))
     assert argv[:2] == ["/bin/sh", "-c"] and "bin/check -q && " in argv[2] and "-m eki.candidate" in argv[2]
-    assert "EKI_PYTHON=" in argv[2]
+    assert "EKI_PYTHON=" in argv[2] and "-m drill" not in argv[2]
+    argv = json.loads(traincheck.command(builds.root() / "x", "drills"))
+    assert "bin/check -q -m drill && " in argv[2] and "bin/check -q && " not in argv[2]
+    assert "-m eki.candidate" in argv[2] and "EKI_PYTHON=" in argv[2]
+
+
+# ---- scope: only the drills on a head gate 2 passed -------------------------------------------
+
+def scope_of(conn, running):
+    """Start a check on a fresh build of main the way the train does; the run's argv and scope."""
+    build = builds.make(integration.repo(), "main")
+    carried = conn.execute("SELECT * FROM items WHERE state='landed'").fetchall()
+    green, said = traincheck.step(conn, build, carried, running)
+    assert green is None and any("checking build" in s for s in said)
+    return json.loads(check_run(conn, build)["prompt"])[2], traincheck.status(build)["scope"]
+
+
+def is_drills(script):
+    return "bin/check -q -m drill && " in script and "bin/check -q && " not in script
+
+
+def test_a_head_gate_2_passed_runs_only_the_drills(conn, src):
+    base = integration.main()
+    land(conn, "a")
+    script, scope = scope_of(conn, base)
+    assert is_drills(script) and "-m eki.candidate" in script and scope == "drills"
+
+
+def test_a_chain_of_two_passed_items_runs_only_the_drills(conn, src):
+    base = integration.main()
+    land(conn, "a"), land(conn, "b")
+    assert traincheck.judged(conn, base, integration.main())
+    script, scope = scope_of(conn, base)
+    assert is_drills(script) and scope == "drills"
+
+
+def test_a_commit_by_hand_runs_the_full_check(conn, src):
+    base = integration.main()
+    land(conn, "a")
+    r = integration.repo()
+    (r / "eki" / "hand.py").write_text("# by hand\n")
+    workspace.git(r, "add", "-A")
+    workspace.git(r, "commit", "-q", "-m", "a fix by hand")
+    script, scope = scope_of(conn, base)
+    assert "bin/check -q && " in script and "-m drill" not in script and scope == "full"
+
+
+def test_a_revert_on_top_runs_the_full_check(conn, src):
+    base = integration.main()
+    land(conn, "a")
+    iid = land(conn, "b")
+    workspace.git(integration.repo(), "revert", "--no-edit", item(conn, iid)["rebased"])
+    assert not traincheck.judged(conn, base, integration.main())
+    assert scope_of(conn, base)[1] == "full"
+
+
+def test_no_running_build_or_a_gate_2_not_green_runs_the_full_check(conn, src):
+    base = integration.main()
+    iid = land(conn, "a")
+    assert not traincheck.judged(conn, None, integration.main())
+    assert not traincheck.judged(conn, "0" * 40, integration.main())     # git can't answer
+    assert not traincheck.judged(conn, integration.main(), integration.main())   # nothing between
+    conn.execute("UPDATE items SET gate2=NULL WHERE id=?", (iid,))
+    assert not traincheck.judged(conn, base, integration.main())
+    assert scope_of(conn, base)[1] == "full"
+
+
+def test_a_restart_mid_check_keeps_the_run_and_its_scope(conn, src):
+    base = integration.main()
+    land(conn, "a")
+    build = builds.make(integration.repo(), "main")
+    carried = conn.execute("SELECT * FROM items WHERE state='landed'").fetchall()
+    traincheck.step(conn, build, carried, base)
+    first = traincheck.status(build)
+    assert first["scope"] == "drills"
+    traincheck.step(conn, build, carried, None)                  # would be "full" if decided again
+    assert traincheck.status(build)["run"] == first["run"] and traincheck.status(build)["scope"] == "drills"
+    conn.execute("DELETE FROM runs WHERE id=?", (first["run"],))  # the run is gone: started again
+    traincheck.step(conn, build, carried, None)
+    again = traincheck.status(build)
+    assert again["run"] != first["run"] and again["scope"] == "drills"
+    assert is_drills(json.loads(store.run(conn, again["run"])["prompt"])[2])
+    run_inline(conn, again["run"])
+    assert traincheck.step(conn, build, carried, None)[0] is True
+    assert traincheck.status(build)["state"] == "green" and traincheck.status(build)["scope"] == "drills"

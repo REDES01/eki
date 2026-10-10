@@ -1,15 +1,22 @@
-"""The train's check: the build about to go live passes the full bin/check and
+"""The train's check: the build about to go live passes bin/check and
 eki.candidate first (docs/self-build.md, "Judging", gate 3).
 
 Gate 2 judges each item with the fast tests only; the drills and the candidate
 checks run here, once per train, on the very build that would be swapped to.
+When the build's head is exactly what gate 2 passed — every commit since the
+running build is the rebased commit of a landed, gate-2-green item — the fast
+tests already ran on it, so only the drills run (scope "drills"); anything else
+(a commit by hand, a revert from an earlier red train, no running build, git
+unable to say) runs the full suite (scope "full").
 The check is one provider='command' run in a worktree of the integration repo
 at the build's commit (the exported build has no .git). Its result is
 written beside the build's .eki-build.json as `.checked`:
 
-    {"state": "running"|"green"|"red", "run": rid, "tail": str, "at": float}
+    {"state": "running"|"green"|"red", "run": rid, "scope": "drills"|"full",
+     "tail": str, "at": float}
 
-so a restart mid-check finds the run again (or runs it again when it's gone).
+so a restart mid-check finds the run again (or runs it again when it's gone),
+with the scope chosen when it first started.
 Red: the newest item the build carries is reverted on integration main as a new
 commit (main was pushed, so no reset), pushed, and marked 'unfit'; the next
 train builds the new main and checks it again with the remaining items.
@@ -32,6 +39,8 @@ log = logging.getLogger("eki.traincheck")
 CHECKED = ".checked"
 TAIL_LINES = 25
 SCRIPT = 'bin/check -q && PYTHONPATH=$PWD "$EKI_PYTHON" -m eki.candidate'
+DRILLS = 'bin/check -q -m drill && PYTHONPATH=$PWD "$EKI_PYTHON" -m eki.candidate'
+SCOPES = {"drills": DRILLS, "full": SCRIPT}
 
 
 def status(build: Path) -> Optional[Dict[str, Any]]:
@@ -83,15 +92,15 @@ def _python() -> str:
     return py if os.access(py, os.X_OK) else builds.python()
 
 
-def command(build: Path) -> str:
+def command(build: Path, scope: str = "full") -> str:
     """The check's prompt. It runs in a worktree of the integration repo at the
     build's commit — the same ground as gate 2, with a .git and a linked .venv —
     not in the exported build, where tests that ask git about the checkout
     they're in would be asking about the wrong one. The candidate check is
-    told which build is running."""
+    told which build is running. Scope "drills" runs only what gate 2 skips."""
     running = builds.current() or builds.running()
     return json.dumps(["/bin/sh", "-c", f"EKI_PYTHON={shlex.quote(_python())}; export EKI_PYTHON; "
-                       f"{SCRIPT} --running {shlex.quote(str(running))}"])
+                       f"{SCOPES.get(scope, SCRIPT)} --running {shlex.quote(str(running))}"])
 
 
 def tree_for(build: Path) -> Path:
@@ -102,6 +111,26 @@ def tree_for(build: Path) -> Path:
     if (dest / ".git").exists():
         return dest
     return rebase.gate_tree(integration.repo(), key, _commit(build))
+
+
+def judged(conn: sqlite3.Connection, running: Optional[str], sha: str) -> bool:
+    """True only when every commit from the running build to `sha` is the rebased
+    commit of a landed item gate 2 passed: the fast tests already ran on this head."""
+    from . import integration
+    if not running or not sha:
+        return False
+    try:
+        commits = workspace.git(integration.repo(), "rev-list", f"{running}..{sha}").split()
+    except (workspace.WorkspaceError, OSError) as e:
+        log.info("train: can't list %s..%s (%s); full check", running[:12], sha[:12], e)
+        return False
+    if not commits:
+        return False
+    marks = ",".join("?" * len(commits))
+    passed = {r["rebased"] for r in conn.execute(
+        f"SELECT rebased FROM items WHERE state='landed' AND gate2='green' AND rebased IN ({marks})",
+        commits)}
+    return all(c in passed for c in commits)
 
 
 def _commit(build: Path) -> str:
@@ -122,18 +151,19 @@ def _write(build: Path, **rec: Any) -> Dict[str, Any]:
     return rec
 
 
-def _start(conn: sqlite3.Connection, build: Path) -> str:
+def _start(conn: sqlite3.Connection, build: Path, scope: str) -> str:
     tree = tree_for(build)
     with db.tx(conn):
         tid = store.create_thread(conn, f"train check: build {build.name}", str(tree), by="eki")
-        rid = store.create_run(conn, tid, command(build), provider="command", priority="now")
-    _write(build, state="running", run=rid)
+        rid = store.create_run(conn, tid, command(build, scope), provider="command", priority="now")
+    _write(build, state="running", run=rid, scope=scope)
     return rid
 
 
 def step(conn: sqlite3.Connection, build: Path,
-         carried: List[sqlite3.Row]) -> Tuple[Optional[bool], List[str]]:
-    """True: green, swap. None: still checking. False: red, and handled."""
+         carried: List[sqlite3.Row], running: Optional[str] = None) -> Tuple[Optional[bool], List[str]]:
+    """True: green, swap. None: still checking. False: red, and handled.
+    `running` is the running build's commit; the scope is decided once, at the start."""
     rec = status(build) or {}
     if rec.get("state") == "green":
         return True, []
@@ -141,17 +171,18 @@ def step(conn: sqlite3.Connection, build: Path,
         return False, _red(conn, build, rec, carried)
     run = store.run(conn, rec["run"]) if rec.get("run") else None
     if run is None or run["state"] not in store.ACTIVE + ("done", "failed", "cancelled"):
-        rid = _start(conn, build)
-        return None, [f"train: checking build {build.name} ({rid[:8]})"]
+        scope = rec.get("scope") or ("drills" if judged(conn, running, _commit(build)) else "full")
+        rid = _start(conn, build, scope)
+        return None, [f"train: checking build {build.name} ({rid[:8]}, {scope})"]
     if run["state"] in store.ACTIVE:
         return None, [f"train: checking build {build.name} ({run['id'][:8]})"]
     if run["state"] == "done":
-        _write(build, state="green", run=run["id"])
+        _write(build, state="green", run=run["id"], scope=rec.get("scope") or "full")
         _done_with(build)
         return True, [f"train: build {build.name} passed its check"]
     tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-TAIL_LINES:])
     tail = (tail + f"\n(train check {run['state']}: {run['error'] or ''})").strip()
-    rec = _write(build, state="red", run=run["id"], tail=tail)
+    rec = _write(build, state="red", run=run["id"], scope=rec.get("scope") or "full", tail=tail)
     _done_with(build)
     return False, _red(conn, build, rec, carried)
 

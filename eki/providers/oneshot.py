@@ -60,17 +60,37 @@ def toml_string(s: str) -> str:
 def run(argv: List[str], stdin: str, timeout: float, cwd: Optional[str] = None,
         stop: Optional[threading.Event] = None) -> str:
     """Run once and give back stdout. A timeout kills it; a non-zero exit raises
-    (`Limited` when it says a limit is reached). A stop kills it and gives ""."""
+    (`Limited` when it says a limit is reached). A stop kills it and gives "".
+
+    The request is written by a thread of its own, all of it, then stdin is closed;
+    stdout and stderr are drained by two more. (Polling communicate() every 0.25 s
+    stopped writing after the first call: a slow start on a busy Mac with a request
+    bigger than the pipe left the program waiting for the rest forever.)"""
     proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, process_group=0)
-    data: Optional[bytes] = stdin.encode()
+    got: Dict[str, bytes] = {"out": b"", "err": b""}
+
+    def feed() -> None:
+        try:
+            proc.stdin.write(stdin.encode())
+            proc.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass                          # it exited, or was killed, before reading it all
+
+    def drain(stream: Any, key: str) -> None:
+        got[key] = stream.read()
+
+    threads = [threading.Thread(target=feed, daemon=True),
+               threading.Thread(target=drain, args=(proc.stdout, "out"), daemon=True),
+               threading.Thread(target=drain, args=(proc.stderr, "err"), daemon=True)]
+    for t in threads:
+        t.start()
     waited = 0.0
     while True:
         try:
-            out, err = proc.communicate(data, timeout=0.25)
+            proc.wait(timeout=0.25)
             break
         except subprocess.TimeoutExpired:
-            data = None                   # a retry carries on the same writing
             waited += 0.25
             if stop is not None and stop.is_set():
                 _kill(proc)
@@ -78,7 +98,9 @@ def run(argv: List[str], stdin: str, timeout: float, cwd: Optional[str] = None,
             if waited >= timeout:
                 _kill(proc)
                 raise TimeoutError(f"{os.path.basename(argv[0])} gave no answer in {int(timeout)}s")
-    text, err_text = out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    for t in threads:
+        t.join(5)
+    text, err_text = got["out"].decode("utf-8", "replace"), got["err"].decode("utf-8", "replace")
     if proc.returncode != 0:
         said = (err_text.strip() or _failure(text) or f"exited {proc.returncode}")[-400:]
         if looks_like_limit(said) or looks_like_limit(_failure(text)):
@@ -92,7 +114,7 @@ def _kill(proc: subprocess.Popen) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         proc.kill()
-    proc.communicate()
+    proc.wait()
 
 
 def _failure(out: str) -> str:

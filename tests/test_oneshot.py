@@ -200,3 +200,15 @@ def test_local_complete_model_over_configured(monkeypatch):
     assert p.complete([{"role": "user", "content": "x"}], model="x")["text"] == "hi"
     assert p.complete([{"role": "user", "content": "x"}])["text"] == "hi"
     assert [b["model"] for b in sent] == ["x", "qwen"]
+
+
+def test_a_slow_reader_still_gets_a_prompt_bigger_than_the_pipe(tmp_path):
+    """A program that starts reading only after a while (a busy Mac) must still get all of a
+    prompt larger than the pipe's buffer, and see it end."""
+    slow = tmp_path / "slow"
+    slow.write_text("#!/bin/sh\nsleep 1\nwc -c\n")
+    slow.chmod(0o755)
+    from eki.providers import oneshot
+    big = "x" * 200_000
+    out = oneshot.run([str(slow)], big, timeout=20)
+    assert out.strip() == "200000"

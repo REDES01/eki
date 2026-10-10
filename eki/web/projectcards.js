@@ -37,6 +37,14 @@
     return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
+  // an instructions card shows its file's first heading and length in place of the about line
+  function about(c) {
+    const f = c.kind === "instructions" && c.instructions;
+    if (!f) return c.about ? `<div class="pc-about">${esc(c.about)}</div>` : "";
+    if (!f.exists) return `<div class="pc-about dim">${esc(f.file)} missing</div>`;
+    return `<div class="pc-about">${esc(f.heading || f.file)}</div><div class="dim">${esc(f.lines)} lines</div>`;
+  }
+
   function tile(c, ro) {
     const broken = !!c.error;
     const state = broken ? c.state || "broken" : c.state || "idle";
@@ -45,7 +53,7 @@
       ${ro ? "" : `<button type="button" class="pc-x" data-rm="${esc(c.name)}" title="Remove (moves it to the Trash)">×</button>`}
       <div class="pc-name">${esc(c.name)}</div>
       <div class="pc-kind dim">${esc(c.kind || "?")}${c.ref ? " · from the pool" : ""}</div>
-      ${c.about ? `<div class="pc-about">${esc(c.about)}</div>` : ""}
+      ${about(c)}
       ${broken ? `<div class="pj-err pc-about">${esc(c.error)}</div>` : ""}
       <div class="pc-foot"><span class="pc-state ${cls}">${esc(state)}</span>
         <span class="dim">${c.last_use ? esc(ago(c.last_use)) : "never used"}</span></div></div>`;
@@ -73,6 +81,9 @@
     const ro = d.readonly || "";
     const cards = d.cards || [];
     put(".pc-sum", cards.length ? `${cards.length} card${cards.length === 1 ? "" : "s"}` : "");
+    const sg = !ro && d.suggest;
+    put(".pc-suggest", sg ? `<div class="pj-card pj-row pc-suggest-row"><span class="grow">${esc(sg.why || "")}</span>
+        <button type="button" class="pj-btn primary" data-suggest="${esc(sg.template)}">Add instructions card</button></div>` : "");
     put(".pc-grid", cards.map((c) => tile(c, ro)).join("") +
       (ro ? "" : `<div class="pc-tile pc-add" data-lib="open" role="button" tabindex="0">+ Add card</div>`));
     put(".pc-note", (ro ? `<div class="dim">Cards are read-only here: ${esc(ro)}.</div>` : "") +
@@ -110,7 +121,7 @@
       await load();
       const name = got.card && (got.card.name || got.card);
       if (typeof name === "string") openCard(name);
-    } catch (e) { if (S.lib) { S.lib.err = e.message; draw(); } }
+    } catch (e) { if (S.lib) S.lib.err = e.message; else S.err = "Can't add the card: " + e.message; draw(); }
   }
 
   async function remove(name) {
@@ -146,6 +157,8 @@
     if (rm) { e.stopPropagation(); return remove(rm.dataset.rm); }
     const lib = t.closest("[data-lib]");
     if (lib) { if (lib.dataset.lib === "open" && !S.lib) return openLib(); S.lib = null; return draw(); }
+    const sg = t.closest("[data-suggest]");
+    if (sg) { sg.disabled = true; return add({ template: sg.dataset.suggest }); }
     const tpl = t.closest("[data-tpl]");
     if (tpl) return add({ template: tpl.dataset.tpl });
     const pool = t.closest("[data-pool]");
@@ -164,7 +177,7 @@
     if (!el) return;
     if (S.el !== el) {
       el.innerHTML = `<section class="pc-area"><h3 class="pc-h">Cards <span class="pj-sum dim pc-sum"></span></h3>
-        <div class="pc-note"></div><div class="pc-grid"></div><div class="pc-libbox"></div><div class="pc-panel"></div></section>`;
+        <div class="pc-note"></div><div class="pc-suggest"></div><div class="pc-grid"></div><div class="pc-libbox"></div><div class="pc-panel"></div></section>`;
       el.addEventListener("click", onClick);
       el.addEventListener("keydown", onKey);
     }
@@ -183,10 +196,11 @@
     if (S.el) put(".pc-grid", "");
   }
 
-  // the panel and the look come with this file (project.js only mounts it)
-  if (document.querySelector && !document.querySelector('script[src="/ui/projectcardpanel.js"]')) {
+  // the panels and the look come with this file (project.js only mounts it)
+  for (const src of ["/ui/projectcardpanel.js", "/ui/projectinstructions.js"]) {
+    if (!document.querySelector || document.querySelector(`script[src="${src}"]`)) continue;
     const t = document.createElement("script");
-    t.src = "/ui/projectcardpanel.js"; t.async = false;
+    t.src = src; t.async = false;
     document.head.appendChild(t);
   }
   if (document.querySelector && !document.querySelector('link[href="/ui/projectcards.css"]')) {

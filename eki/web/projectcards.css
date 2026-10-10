@@ -64,3 +64,13 @@
   border-radius: 8px; overflow: hidden; background: var(--panel); font-size: 11px; text-decoration: none; }
 .pp-shot img { width: 100%; display: block; }
 .pp-shot.big { grid-column: 1 / -1; }
+
+/* the suggestion above the grid, and an open instructions card (projectinstructions.js) */
+.pc-suggest-row { margin-bottom: 10px; font-size: 13px; }
+.pi-file { font-size: 12px; }
+.pi-claude-row { margin: 8px 0; padding: 6px 10px; border-radius: 8px; background: var(--panel); font-size: 13px; }
+.pi-body { margin-top: 10px; }
+.pi-md { font-size: 13px; line-height: 1.5; max-height: 520px; overflow: auto; overflow-wrap: anywhere; }
+.pi-md pre { padding: 6px 8px; border-radius: 8px; background: var(--panel); overflow: auto; }
+.pp textarea.pi-text { font-size: 13px; }
+.pi-back { font-size: 13px; }

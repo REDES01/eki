@@ -110,7 +110,8 @@
     else if (e.key === "Escape") { e.preventDefault(); S.editing = false; put("pj-desc", desc(S.data || { id: S.id })); }
   }
 
-  // What the project still needs: a folder (pick one, or clone it home), or instructions.
+  // What the project still needs: a folder (pick one, or clone it home). Instructions are a card
+  // (the Cards area suggests one).
   function setup(p) {
     if (p.cloning) return `<div class="pj-card dim">cloning ${esc(p.repo)} to <code>${esc(p.folder)}</code>…</div>`;
     if (!p.folder || !p.folder_ok) {
@@ -122,8 +123,6 @@
         ${p.repo && !p.folder ? `<div class="pj-row"><button type="button" class="pj-btn" data-act="clone">Clone to ~/${esc(name)}</button></div>` : ""}
         ${err("folder")}</div>`;
     }
-    if (!p.instructions) return `<div class="pj-card pj-row"><span class="dim grow">No AGENTS.md or CLAUDE.md in this folder.</span>
-        <button type="button" class="pj-btn" data-act="instructions">Have an agent write instructions</button>${err("instructions")}</div>`;
     return "";
   }
 
@@ -198,9 +197,6 @@
     if (b.dataset.act === "clone") {
       await act("folder", () => api(base + "/clone", {}));
       loadOne();
-    } else if (b.dataset.act === "instructions") {
-      const got = await act("instructions", () => api(base + "/instructions", {}));
-      if (got) nav.go(got.thread);
     }
     b.disabled = false;
   }

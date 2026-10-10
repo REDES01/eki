@@ -11,7 +11,7 @@ import pytest
 from eki import server
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
-FILES = ("projectcards.js", "projectcardpanel.js", "projectcards.css")
+FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "projectcards.css")
 
 
 @pytest.fixture
@@ -50,6 +50,20 @@ def test_the_panel_names_its_routes(web):
         assert name in js, name
 
 
+def test_the_instructions_card(web):
+    js = get(web + "/ui/projectinstructions.js")[1]
+    for name in ('"/instructions"', '"/link-claude"', '"/read?path="', "Read first", "Link CLAUDE.md", "Edit",
+                 "metaKey", "ctrlKey", "preventDefault", '"focusout"', "md.render(", "Back to", "pj-err",
+                 '"unlinked"', "window.projectInstructions = { open, update, close }"):
+        assert name in js, name
+    assert len((WEB / "projectinstructions.js").read_text().splitlines()) < 250
+    grid = get(web + "/ui/projectcards.js")[1]
+    for name in ("suggest", "Add instructions card", "projectinstructions.js", "lines", " missing"):
+        assert name in grid, name
+    assert "projectInstructions" in get(web + "/ui/projectcardpanel.js")[1]
+    assert "Have an agent write instructions" not in get(web + "/ui/project.js")[1]
+
+
 def test_project_js_still_mounts_it(web):
     js = get(web + "/ui/project.js")[1]
     assert 'id="pj-cards"' in js and "projectCards.mount(" in js and "projectCards.unmount()" in js
@@ -62,6 +76,6 @@ def test_small_and_valid():
         assert len((WEB / f).read_text().splitlines()) < 400, f
     if not shutil.which("node"):
         pytest.skip("node is not installed")
-    for f in FILES[:2]:
+    for f in FILES[:3]:
         out = subprocess.run(["node", "--check", str(WEB / f)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr

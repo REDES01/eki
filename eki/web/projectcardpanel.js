@@ -286,6 +286,7 @@
   }
 
   function onEvent(e) {
+    if (!P.card) return;                       // an instructions card: projectinstructions.js has it
     const t = e.target;
     if (e.type === "submit") { e.preventDefault(); return t.matches(".pp-runform") && run(); }
     if (e.type === "change" && t.dataset && t.dataset.key) return saveSetting(t);
@@ -304,6 +305,7 @@
   function open(el, pid, card, ro, ctx) {
     close();
     if (!el) return;
+    if (card.kind === "instructions" && window.projectInstructions) return projectInstructions.open(el, pid, card, ro, ctx);
     Object.assign(P, { el, pid, card, ro, ctx, problems: {}, err: {}, run: null, uses: null, use: null, useData: null,
                        sessions: null, sess: null, sessData: null, shots: {} });
     if (!el.dataset.ppWired) {
@@ -318,6 +320,7 @@
 
   // the cards reloaded: the card as it is now
   function update(card, ro) {
+    if (card.kind === "instructions" && window.projectInstructions) return projectInstructions.update(card, ro);
     if (!P.card || !P.el || card.name !== P.card.name) return;
     P.card = card; P.ro = ro;
     draw();
@@ -326,6 +329,7 @@
   }
 
   function close() {
+    window.projectInstructions && projectInstructions.close();
     if (P.run) clearTimeout(P.run.timer);
     if (P.el) P.el.innerHTML = "";
     Object.assign(P, { card: null, run: null, last: {} });

@@ -366,7 +366,8 @@ are Codex's.
   Nothing lives in the page that the engine doesn't have: refresh, or
   restart the engine mid-run, and the page picks up where it was.
   One page, views on hash addresses (`eki/web/nav.js` sends each to its
-  view; a refresh reopens it): **Chat** (`#<thread>`, a centered column,
+  view; a refresh reopens it): **Chat** (`#<thread>`, a reading column that grows with the window
+  up to 1100px, where a long code line scrolls inside its own block,
   replies with the provider's mark and the route's why, a floating
   composer with Send/Stop), **Pictures** (`#pictures`), **Station**
   (`#station`) and **Settings** (`#settings`, `#settings/<section>`).

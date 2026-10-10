@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -84,7 +85,14 @@ def test_the_chat_look_is_served(web):
     assert "pmark" in app and "data-why" in app and "navigator.clipboard" in app and "execCommand" in app
     assert "cards.render" in app and "ekiAttach.thumbs" in app and "data-copy-code" in app
     code, css = get(web + "/ui/chat.css")
-    assert code == 200 and "max-width: 760px" in css and ".bubble" in css and ".code-copy" in css
+    assert code == 200 and ".bubble" in css and ".code-copy" in css
+    # one reading column for the log and the composer, growing with the window
+    assert "--col-w: 1100px" in css and "max-width: 760px" not in css
+    for sel in (r"#log", r"#composer"):
+        rule = re.search(r"(?m)^" + sel + r" \{([^}]*)\}", css).group(1)
+        assert "max-width: var(--col-w)" in rule
+    # a long code line in your own bubble scrolls inside its block
+    assert "overflow-x: auto" in re.search(r"(?m)^\.bubble pre \{([^}]*)\}", css).group(1)
     _, cards = get(web + "/ui/cards.js")
     assert "window.cards = { render }" in cards and "/api/asks/${card.dataset.ask}/answer" in cards
     _, body = get(web + "/")

@@ -8,8 +8,8 @@
 .set-seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 2px; }
 .set-seg button { background: transparent; padding: 3px 12px; border-radius: 8px; color: var(--dim); }
 .set-seg button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent); }
-.set-save { background: var(--text); color: var(--bg); padding: 4px 16px; font-weight: 600; }
-.set-save:disabled { opacity: .5; cursor: default; }
+#set-status { color: var(--dim); font-size: 12px; min-width: 64px; text-align: right; }
+#set-status.bad { color: var(--amber); }
 
 /* the frame: the section list next to one body */
 #set-wrap { flex: 1; display: flex; min-height: 0; }

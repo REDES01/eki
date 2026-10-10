@@ -206,4 +206,4 @@ def write(conn: sqlite3.Connection, name: str, body: Dict[str, Any]) -> Dict[str
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     os.replace(tmp, path)
-    return {"ok": True, "path": str(path), "backup": str(backup)}
+    return {"ok": True, "path": str(path), "backup": str(backup), "mtime": path.stat().st_mtime}

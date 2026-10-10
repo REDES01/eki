@@ -49,6 +49,10 @@ def test_a_valid_save_writes_keeps_a_backup_and_is_seen_next(web, home):
     assert (home / "routing.json.bak").read_text() == old
     assert (home / "routing.json").read_text().endswith("}\n")
     assert any(r["key"] == "draw" and r["targets"] == ["fake2"] for r in table.rows())
+    assert out["mtime"] == os.stat(home / "routing.json").st_mtime
+    data["self"] = {"autonomy": "apply"}   # the next save carries the mtime the last one gave, no read between
+    code, out = post(web + "/api/settings/routing", {"data": data, "mtime": out["mtime"]})
+    assert code == 200 and json.loads((home / "routing.json").read_text())["self"] == {"autonomy": "apply"}
 
     p = _read(web, "providers")
     pdata = {**p["data"], "third": {"kind": "fake", "can": ["text"], "label": "Third"}}

@@ -41,9 +41,10 @@ def test_settings_js_is_the_frame(web):
     assert 'const SECTIONS = ["jobs", "rows", "providers", "notifications", "self"]' in js
     for want in ('id="set-nav"', 'id="set-body"', '"#settings/"', "S.sect", "window.settingsSections",
                  "/api/settings/", "mtime", "X-Eki", "problems", "409", 'nav.register("settings"', "window.settings",
-                 "changed, not saved", "draft:", "got:", "note,", "render,", "clone,", "section,"):
+                 "saving…", "not saved", "set-status", "draft:", "got:", "note,", "render,", "clone,", "section,"):
         assert want in js, want
     assert "S.tab" not in js and "rowCard" not in js and "provCard" not in js
+    assert 'data-act="save"' not in js and "changed, not saved" not in js
 
 
 @pytest.mark.parametrize("name, path", SECTIONS.items())
@@ -141,3 +142,79 @@ def test_sections_register_though_window_settings_is_the_sidebar_link(tmp_path, 
     got = json.loads(out.stdout)
     assert got["errors"] == []
     assert got["sections"] == ["jobs", "rows", "providers", "notifications", "self"]
+
+
+# settings.js over a stub page: fake timers, a fetch whose POSTs we answer by hand, one section
+SAVES = r"""
+const vm = require("vm"), fs = require("fs");
+const posts = [], timers = [];
+let now = 0, nid = 0;
+const el = (id) => ({ id, textContent: "", innerHTML: "", hidden: false, scrollTop: 0, dataset: {},
+  classList: { toggle(c, on) { this[c] = on; }, add() {}, remove() {} },
+  querySelectorAll: () => [], querySelector: () => null, insertBefore() {}, addEventListener(t, f) { (this.on = this.on || {})[t] = f; } });
+const els = {};
+let view = null;
+const document = { getElementById: (id) => id === "setview" ? view : (els[id] = els[id] || el(id)),
+  createElement: () => (view = el("setview")) };
+const answer = (status, body) => ({ ok: status === 200, status, statusText: "", json: async () => body });
+const fetch = (url, o) => {
+  if (!o) return Promise.resolve(answer(200, { data: { v: "" }, mtime: 1, path: "/x/routing.json" }));
+  return new Promise((res) => posts.push({ body: JSON.parse(o.body), res }));
+};
+const ctx = vm.createContext({ document, fetch, console, location: {}, confirm: () => true,
+  md: { esc: String }, nav: { register() {} },
+  setTimeout: (f, ms) => (timers.push({ id: ++nid, at: now + ms, f }), nid),
+  clearTimeout: (id) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); } });
+vm.runInContext("var window = this;", ctx);
+ctx.settingsSections = [["rows", { title: "Rows", file: "routing", html: () => "",
+  edit: (e, d) => { d.v = e.value; return false; } }]];
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), ctx);
+const flush = () => new Promise((r) => setImmediate(r));
+const tick = async (ms) => {
+  now += ms;
+  for (let t; (t = timers.filter((x) => x.at <= now).sort((a, b) => a.at - b.at)[0]);) { timers.splice(timers.indexOf(t), 1); t.f(); }
+  for (let i = 0; i < 5; i++) await flush();
+};
+const type = (value, kind = "input") => view.on[kind]({ type: kind,
+  target: { id: "f", value, type: "text", tagName: "INPUT", matches: () => true, closest: () => null } });
+(async () => {
+  await ctx.settings.show("rows");
+  const out = {};
+  type("a"); await tick(300); type("ab"); await tick(300);
+  out.waited = posts.length;
+  await tick(300);
+  out.one = posts.map((p) => p.body);
+  out.during = els["set-status"].textContent + " | " + els.meta.textContent;
+  type("abc"); await tick(600);
+  out.inflight = posts.length;
+  posts[0].res(answer(200, { ok: true, mtime: 2 })); await tick(0);
+  out.two = posts.map((p) => p.body);
+  posts[1].res(answer(200, { ok: true, mtime: 3 })); await tick(0);
+  out.after = [posts.length, els["set-status"].textContent, els.meta.textContent];
+  type("", "change"); await tick(0);
+  posts[2].res(answer(400, { problems: ["rows[2] has no key"] })); await tick(0);
+  out.refused = [els["set-status"].textContent, els["set-status"].classList.bad, els.meta.textContent, els["set-note"].innerHTML];
+  type("abc", "change"); await tick(0);
+  out.back = [posts.length, els["set-status"].textContent, els["set-note"].innerHTML];
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def test_changes_save_themselves_one_post_per_file_at_a_time(tmp_path):
+    _node()
+    stub = tmp_path / "saves.js"
+    stub.write_text(SAVES)
+    run = subprocess.run(["node", str(stub), str(WEB / "settings.js")], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    out = json.loads(run.stdout)
+    assert out["waited"] == 0                                          # still typing: nothing sent
+    assert out["one"] == [{"data": {"v": "ab"}, "mtime": 1}]            # two edits within 600 ms, one POST
+    assert out["during"] == "Saving… | /x/routing.json · saving…"
+    assert out["inflight"] == 1                                         # an edit in flight waits for the answer
+    assert out["two"][1] == {"data": {"v": "abc"}, "mtime": 2}          # then goes once, with the mtime it gave
+    assert out["after"] == [2, "Saved", "/x/routing.json"]
+    status, bad, meta, note = out["refused"]
+    assert status == "Not saved" and bad is True and meta.endswith(" · not saved")
+    assert "Not saved yet — 1 problem:<ul><li>rows[2] has no key</li></ul>" in note
+    assert out["back"] == [3, "", ""]                                   # back to what's on disk: nothing to send, note gone

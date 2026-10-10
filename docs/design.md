@@ -430,12 +430,19 @@ are Codex's.
     its own (`settingsmodels.js`, `settingsrows.js`,
     `settingsproviders.js`, `settingsnotify.js`, `settingsself.js`) that
     registers with `settings.section(name, {title, file, html, edit,
-    act})` and names the one file it edits; Form/Raw JSON, Reset and Save
-    act on that file. A section file calls `settings.section` only when it
+    act})` and names the one file it edits; Form/Raw JSON and Reset act on
+    that file. There is no Save button: a change saves itself as it is
+    made (selects, checkboxes and buttons at once, text after a 600 ms
+    pause or on blur, raw JSON only once it parses), through the same
+    POST, one save per file at a time (a change made meanwhile goes when
+    it returns, with the mtime it gave). A good save doesn't redraw, so
+    focus and the open fold stay; a refusal is shown, "Not saved yet",
+    and the draft is kept for the next change to try again; a 409 pauses
+    saving that file and asks to reload it. A section file calls `settings.section` only when it
     is a function, else it pushes onto `window.settingsSections` (drained
     by `settings.js`), because the sidebar link `#settings` makes
-    `window.settings` an element until `settings.js` loads. There is one draft per file, so edits in Jobs and
-    Rows are saved together, and changing section never drops a draft.
+    `window.settings` an element until `settings.js` loads. There is one draft per file, so Jobs and Rows
+    edit the same routing.json, and changing section never drops a draft.
     Settings sit in rounded groups of one-line settings — the label (and a
     dim sentence) on the left, the control on the right
     (`settingsform.js`). Rows and providers fold to one summary line each

@@ -127,7 +127,7 @@
     if (!card || !card.dataset.fold) return false;
     const name = card.dataset.fold;
     if (act === "fold") { open = open === name ? null : name; return true; }
-    if (act === "delprov" && confirm(`Delete ${name}? (Only in the draft until you save.)`)) {
+    if (act === "delprov" && confirm(`Delete ${name}?`)) {
       delete d[name];
       if (open === name) open = null;
       return true;

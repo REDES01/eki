@@ -102,7 +102,7 @@
     }
     if (a === "delrow") {
       const i = +card.dataset.fold.slice(1);
-      if (!confirm(`Delete the row ${JSON.stringify(d.rows[i].key || "")}? (Only in the draft until you save.)`)) return false;
+      if (!confirm(`Delete the row ${JSON.stringify(d.rows[i].key || "")}?`)) return false;
       d.rows.splice(i, 1);
       open = null;
       return true;

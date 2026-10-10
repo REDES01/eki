@@ -20,6 +20,7 @@ def test_the_providers_section_folds_its_entries(web):
         assert want in js, want
     assert len(re.findall(r"\blet open\b", js)) == 1          # a single open id: one editor at a time
     assert "set-card" not in js and "data-unw" not in js
+    assert "until you save" not in js
     assert len(js.splitlines()) < 400
 
 

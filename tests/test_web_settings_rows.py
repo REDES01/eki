@@ -22,6 +22,7 @@ def test_rows_fold_to_one_line(web):
     assert "location.hash" not in js                   # page state only, not in the address
     assert 'style="color: var(--amber)"' not in js
     assert len(js.splitlines()) < 400
+    assert "until you save" not in js
 
 
 # the section run in node over stubs: the summary line, one open at a time, add opens the new row

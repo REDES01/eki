@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import glob
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
 from . import Call, Component, Result
+from .. import components
 
 ABOUT = "files every agent of the project reads: always, or when relevant"
 READ = ('always', 'when-relevant')
@@ -44,6 +46,16 @@ def root_of(comp: Component) -> Path:
     return (comp.card or comp.folder).parent.parent
 
 
+def author(root: Path, p: Path) -> str:
+    """Who last changed `p`, from git log in `root`; '' when it isn't in git. Never raises."""
+    try:
+        out = subprocess.run(['git', '-C', str(root), 'log', '-1', '--format=%an', '--', str(p)],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ''
+    return out.stdout.strip() if out.returncode == 0 else ''
+
+
 def _entry(pattern: str, root: Path, p: Optional[Path]) -> dict:
     if p is None:
         return {'pattern': pattern, 'path': pattern, 'abs': str(root / pattern), 'name': Path(pattern).name,
@@ -54,7 +66,7 @@ def _entry(pattern: str, root: Path, p: Optional[Path]) -> dict:
     except OSError:
         size, changed = None, None
     return {'pattern': pattern, 'path': str(p.relative_to(root)), 'abs': str(p), 'name': p.name,
-            'size': size, 'changed': changed, 'author': '', 'missing': False}
+            'size': size, 'changed': changed, 'author': author(root, p), 'missing': False}
 
 
 def _inside(root: Path, p: Path) -> Optional[Path]:
@@ -104,9 +116,48 @@ def notes(comp: Component) -> List[str]:
     return [line + (f', {len(gone)} missing: {", ".join(gone)}' if gone else '')]
 
 
+def _brief_paths(root: Path, pattern: str) -> List[str]:
+    """What the brief names for one pattern: a folder as itself with a trailing /, a glob as its
+    existing matches, a file as itself; nothing when it is missing or empty."""
+    if _bad_pattern(pattern) or not _expand(root, pattern):
+        return []
+    hits = sorted(glob.glob(str(root / pattern), recursive=True)) if glob.has_magic(pattern) else [str(root / pattern)]
+    out = []
+    for h in hits:
+        r = _inside(root, Path(h))
+        if r is None or not (r.is_file() or (r.is_dir() and _expand(root, str(r.relative_to(root))))):
+            continue
+        name = str(r) + '/' if r.is_dir() else str(r)
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _line(comp: Component, root: Path) -> str:
+    found: List[str] = []
+    for pattern in comp.spec.get('files') or []:
+        found += [p for p in _brief_paths(root, pattern) if p not in found]
+    if not found:
+        return ''
+    how = 'read first' if comp.spec.get('read') == 'always' else 'look here when relevant'
+    return f'- {how}: {", ".join(found)} — {comp.spec.get("about", "")}'
+
+
 def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
     """What a run in `folder` is told of the project's knowledge cards ('' when none)."""
-    return ''
+    try:
+        root = components.project_root(folder, conn)
+        if root is None or not components.is_project(root, conn):
+            return ''
+        found, _ = components.own(root)
+        cards = sorted((c for c in found.values() if c.kind == 'knowledge'),
+                       key=lambda c: (c.spec.get('read') != 'always', c.name))
+        lines = [ln for ln in (_line(c, root.resolve()) for c in cards) if ln]
+    except Exception:  # a brief never breaks a run
+        return ''
+    if not lines:
+        return ''
+    return '\n'.join(['Shared knowledge of this project (knowledge cards in its components/):'] + lines)
 
 
 def call(comp: Component, c: Call) -> Result:

@@ -1,4 +1,4 @@
-"""`eki component kinds | ls | add | attach | rm | uses | show | skills` — the component folders.
+"""`eki component kinds | ls | add | attach | rm | uses | show | knowledge | skills` — the component folders.
 
 `add` copies a template into `components/<name>/` of a project folder (the project of the cwd by
 default, of -C folder, or the machine-wide pool with --pool), under the template's name or the
@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from .. import components, db
-from ..components import cards, uses
+from ..components import cards, knowledge, uses
 from . import componentskills
 
 NAME = "component"
-HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show, skills"
+HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show, knowledge, skills"
 
 
 def add(p) -> None:
@@ -46,6 +46,8 @@ def add(p) -> None:
     u.add_argument("-C", dest="folder", help="this folder's project (default: here)")
     s = sub.add_parser("show", help="one component: folder, scope, component.json, notes")
     s.add_argument("name")
+    k = sub.add_parser("knowledge", help="what a run in the project is told of its knowledge cards")
+    k.add_argument("project", nargs="?", help="a project id or name, or a folder (default: here)")
     componentskills.add(sub)
 
 
@@ -162,6 +164,12 @@ def _show(name: str) -> int:
     return 0
 
 
+def _knowledge(project: Optional[str]) -> int:
+    root = componentskills.card_of(project or os.getcwd()).parent.parent
+    print(knowledge.brief(str(root), db.connect()) or "no knowledge cards here")
+    return 0
+
+
 def run(args) -> int:
     if args.action == "kinds":
         return _kinds()
@@ -177,6 +185,8 @@ def run(args) -> int:
         return _uses(args)
     if args.action == "show":
         return _show(args.name)
+    if args.action == "knowledge":
+        return _knowledge(args.project)
     if args.action == "skills":
         return componentskills.run(args)
     print("eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder]"

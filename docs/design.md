@@ -95,7 +95,7 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
-| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
 | `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use) and the library (templates and the pool); the helpers the card leaves share |
@@ -881,7 +881,7 @@ The project page shows a project's components as cards
 (`eki/web/projectcards.js`, `api_cards`): add from the library, open to set
 up, run, see its uses, remove.
 
-**The common keys.** `kind` (`service`, `assets`, `agent`, `skills`), `about` (one
+**The common keys.** `kind` (`service`, `assets`, `agent`, `skills`, `serve`), `about` (one
 line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
@@ -922,6 +922,32 @@ of its own; the CLI is the integration.
   path by symlink (never a copy or a hardlink), so anything written there
   lands in the pool at once. `eki use <name> ls|info|rm <path>`; `rm` moves
   to the macOS Trash. eki says so when the path isn't git-ignored.
+  **How worktrees get assets:** each new worktree of the project gets every
+  assets card linked in as a symlink at the same relative path, before the
+  build run starts; writes through it land in the one pool. Nothing is
+  copied, never a hardlink. An assets path that isn't git-ignored as a whole,
+  or that has tracked files inside, is reported on the card and not linked.
+- **`serve`** — your own copy of the project in a browser. `"path"` is the
+  URL prefix the folder is served under (starts and ends with `/`, e.g.
+  `"/chapter1/"`, so the project's absolute paths keep their shape),
+  `"headers"` extra response headers (default `{"Cache-Control":
+  "no-store"}`), `"index"` the file for a folder (default `index.html`). The
+  server is eki's own (`components/static.py`): threaded, 127.0.0.1 only,
+  range requests so audio and video seek, the right MIME types (.mjs, .wasm,
+  .glb, .ktx2, .ogg …), symlinks followed (an assets link is served
+  through), no listing, nothing outside the prefix. One server and one port
+  per worktree, and one for the person's own folder: the port is recorded
+  under `~/.eki/component-state/ports/` so the same folder gets it again
+  after a restart; the server starts on first use, stops after `idle_stop`
+  (the template: 30), and when the worktree goes housekeeping stops its
+  server and frees its port for the next folder. A run in a project
+  worktree or folder whose project has a serve card gets `EKI_SERVE_URL`
+  (e.g. `http://127.0.0.1:47213/chapter1/`) and one brief line — its own
+  copy is served there, open that and not the person's server. `eki use
+  <name>` starts it for the caller's checkout and prints the URL. The
+  playtester called from such a run plays its caller's link; its own `url`
+  is the default only when there is none. The card shows each link that is
+  up (folder → URL).
 - **`agent`** — a persona: `prompt.md`, optional `skills/`, `uses` (the
   components it may call), `mcp` (the MCP servers it gets) and a `target`
   (provider → model → effort). Each call is a session; it can be called many

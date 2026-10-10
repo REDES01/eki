@@ -1,7 +1,8 @@
 """Servers of `serve`-form service components: started on demand, stopped when idle.
 
 Each server eki starts has a state file under ~/.eki/component-state/, keyed
-by the component's name and folder (two projects' `voice` never collide):
+by the component's name and folder (two projects' `voice` never collide), and
+for a card with one server per served folder (the `serve` kind) by that too:
 its pid, when it was started, and the run of its latest call. The server
 runs detached in a session of its own, so a restart of eki leaves it up and
 finds it again from the file. eki only stops servers it started.
@@ -42,26 +43,42 @@ def state_dir() -> Path:
     return d
 
 
-def key(name: str, folder) -> str:
-    h = hashlib.sha1(str(Path(folder).resolve()).encode()).hexdigest()[:10]
+def key(name: str, folder, served: str = "") -> str:
+    where = str(Path(folder).resolve()) + (f"\0{served}" if served else "")
+    h = hashlib.sha1(where.encode()).hexdigest()[:10]
     return f"{name}-{h}"
 
 
-def _path(comp) -> Path:
-    return state_dir() / f"{key(comp.name, comp.folder)}.json"
+def _path(comp, served: str = "") -> Path:
+    return state_dir() / f"{key(comp.name, comp.folder, served)}.json"
 
 
-def read(comp) -> Dict[str, Any]:
+def read(comp, served: str = "") -> Dict[str, Any]:
     try:
-        return json.loads(_path(comp).read_text())
+        return json.loads(_path(comp, served).read_text())
     except (OSError, ValueError):
         return {}
 
 
-def _write(comp, **fields: Any) -> None:
-    st = read(comp)
+def states() -> List[Dict[str, Any]]:
+    """Every state file's content, with its own path as "state"."""
+    out = []
+    for f in sorted(state_dir().glob("*.json")):
+        try:
+            st = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(st, dict):
+            out.append(dict(st, state=str(f)))
+    return out
+
+
+def write(comp, served: str = "", **fields: Any) -> None:
+    st = read(comp, served)
     st.update(fields, name=comp.name, folder=str(comp.folder))
-    p = _path(comp)
+    if served:
+        st["served"] = served
+    p = _path(comp, served)
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(st))
     tmp.replace(p)
@@ -107,8 +124,8 @@ def is_up(comp) -> bool:
     return healthy(comp.spec, timeout=1.0)
 
 
-def ours(comp) -> bool:
-    return alive(read(comp).get("pid"))
+def ours(comp, served: str = "") -> bool:
+    return alive(read(comp, served).get("pid"))
 
 
 def start(comp, by: str = "") -> Dict[str, Any]:
@@ -127,7 +144,7 @@ def start(comp, by: str = "") -> Dict[str, Any]:
                                     stderr=logf, start_new_session=True)
         finally:
             logf.close()
-        _write(comp, pid=proc.pid, started_at=time.time(), by=by)
+        write(comp, pid=proc.pid, started_at=time.time(), by=by)
         log.info("started component %s (pid %s) for %s", comp.name, proc.pid, by or "a call")
     end = time.time() + float(spec.get("start_timeout", 120))
     while time.time() < end:
@@ -142,12 +159,12 @@ def start(comp, by: str = "") -> Dict[str, Any]:
                                 f"{spec.get('start_timeout', 120)} s"}
 
 
-def stop(comp) -> bool:
+def stop(comp, served: str = "") -> bool:
     """Stop the server if eki started it; False when there was nothing of ours to stop."""
-    return _stop_pid(read(comp).get("pid"), _path(comp), comp.name)
+    return stop_pid(read(comp, served).get("pid"), _path(comp, served), comp.name)
 
 
-def _stop_pid(pid: Optional[int], state: Path, name: str) -> bool:
+def stop_pid(pid: Optional[int], state: Path, name: str) -> bool:
     if not alive(pid):
         state.unlink(missing_ok=True)
         return False
@@ -168,9 +185,9 @@ def _stop_pid(pid: Optional[int], state: Path, name: str) -> bool:
     return True
 
 
-def used(comp, run_id: str) -> None:
+def used(comp, run_id: str, served: str = "") -> None:
     """A call run is using the server; its end is the server's last use."""
-    _write(comp, last_run=run_id, last_call_at=time.time())
+    write(comp, served, last_run=run_id, last_call_at=time.time())
 
 
 def _last_use(conn: sqlite3.Connection, st: Dict[str, Any]) -> Optional[float]:
@@ -208,6 +225,6 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         last = _last_use(conn, st)
         if last is None or time.time() - last <= minutes * 60:
             continue
-        if _stop_pid(pid, f, st.get("name", f.stem)):
+        if stop_pid(pid, f, st.get("name", f.stem)):
             said.append(f"stopped component {st.get('name', f.stem)}: idle for {minutes:g} min")
     return said

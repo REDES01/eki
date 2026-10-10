@@ -1,0 +1,8 @@
+{
+  "kind": "serve",
+  "about": "your own copy of the project in a browser: a static server per worktree",
+  "path": "/",
+  "headers": {"Cache-Control": "no-store"},
+  "index": "index.html",
+  "idle_stop": 30
+}

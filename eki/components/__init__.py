@@ -49,7 +49,8 @@ class Result:
 
 
 KINDS = {'service': 'eki.components.service', 'assets': 'eki.components.assets', 'agent': 'eki.components.agent',
-         'skills': 'eki.components.skillcard', 'instructions': 'eki.components.instructions'}
+         'skills': 'eki.components.skillcard', 'instructions': 'eki.components.instructions',
+         'serve': 'eki.components.serve'}
 ACCESS = ('queue', 'exclusive', 'shared')
 NAME = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 RESERVED = {'sessions'}

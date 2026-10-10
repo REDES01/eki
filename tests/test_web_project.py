@@ -1,4 +1,5 @@
-"""The project pages: #projects and #project/<id> route to project.js, which reads and acts on /api/projects."""
+"""The project pages: #projects routes to projectspage.js and #project/<id> to project.js, which reads and acts on
+/api/projects."""
 import json
 import shutil
 import subprocess
@@ -35,11 +36,12 @@ def test_the_page_links_projects_and_loads_its_script(web):
 def test_project_js_names_the_api_and_the_page_parts(web):
     code, js = get(web + "/ui/project.js")
     assert code == 200
-    for name in ('"/api/projects"', '"/api/projects/"', '"/folder"', '"/clone"', '"/instructions"', '"/api/ask"',
-                 "project: S.id", '"X-Eki": "1"', "data-file", "panel.show", 'nav.register("projects"',
-                 'nav.register("project"', "New chat here", "Have an agent write instructions", "Clone to ~/",
-                 "cloning", "your real folder.", "Background: ", "New project", "} open`", "data-sect"):
+    for name in ('"/api/projects/"', '"/folder"', '"/clone"', '"/instructions"', '"/api/ask"',
+                 "project: S.id", '"X-Eki": "1"', "data-file", "panel.show", 'nav.register("project"',
+                 '"/describe"', "eki itself — its own source", "pj-desc-edit", "New chat here", "Have an agent write instructions", "Clone to ~/",
+                 "cloning", "your real folder.", "Background: ", "} open`", "data-sect", "projectspage.js", "pages.css"):
         assert name in js, name
+    assert 'nav.register("projects"' not in js and "New project" not in js    # the list is projectspage.js now
     css = get(web + "/ui/style.css")[1]
     assert "#project-view" in css and ".pj-sect.open .pj-fold" in css
 

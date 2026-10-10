@@ -1,12 +1,12 @@
-// Projects: #projects lists them (eki first) with a form for a new one; #project/<id> is one
-// project's page — a box for a new chat in its folder, then Chats, Background, Pictures and
-// Files, each one summary line that opens on click. Everything comes from /api/projects
-// (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing of its own.
+// #project/<id>: one project's page — its description (Edit opens a textarea, Enter saves), a box
+// for a new chat in its folder, then Chats, Background, Pictures and Files, each one summary line
+// that opens on click. The list of projects is projectspage.js. Everything comes from
+// /api/projects (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing.
 (function () {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-  const S = { on: null, id: null, data: null, timer: null, open: new Set(), errs: {}, last: {}, home: "", typed: false };
+  const S = { on: null, id: null, data: null, timer: null, open: new Set(), errs: {}, last: {}, home: "", editing: false };
 
   async function api(path, body) {
     const r = await fetch(path, body === undefined ? {} : {
@@ -23,7 +23,6 @@
   }
   const err = (key) => S.errs[key] ? `<span class="pj-err">${esc(S.errs[key])}</span>` : "";
   const tilde = (p) => p && S.home && (p === S.home || p.startsWith(S.home + "/")) ? "~" + p.slice(S.home.length) : p;
-  const counts = (p) => `${plural(p.chats, "chat")} · ${plural(p.goals, "goal")} · ${p.prs} PR${p.prs === 1 ? "" : "s"}`;
 
   function box() {
     let el = $("project-view");
@@ -31,17 +30,8 @@
     el = document.createElement("div");
     el.id = "project-view";
     el.innerHTML = `<div class="pj-col">
-      <div id="pj-list-view">
-        <div id="pj-list"></div>
-        <form id="pj-new" class="pj-card" autocomplete="off">
-          <div class="pj-sub">New project</div>
-          <div class="pj-row"><input id="pj-new-name" placeholder="name" spellcheck="false">
-            <input id="pj-new-folder" class="grow" placeholder="~/name" spellcheck="false" title="Your folder: made with git init when it isn't there">
-            <button type="submit" class="pj-btn primary">Make</button></div>
-          <div id="pj-new-err"></div>
-        </form>
-      </div>
       <div id="pj-page">
+        <div id="pj-desc" class="pj-desc"></div>
         <div id="pj-head" class="pj-headline"></div>
         <div id="pj-setup"></div>
         <form id="pj-ask" class="pj-card" autocomplete="off">
@@ -57,40 +47,9 @@
     </div>`;
     $("main").insertBefore(el, $("composer"));
     el.addEventListener("click", onClick);
-    $("pj-new").addEventListener("submit", make);
+    el.addEventListener("keydown", onKey);
     $("pj-ask").addEventListener("submit", ask);
-    $("pj-new-name").addEventListener("input", () => {
-      if (!S.typed) $("pj-new-folder").value = $("pj-new-name").value.trim() ? "~/" + $("pj-new-name").value.trim() : "";
-    });
-    $("pj-new-folder").addEventListener("input", () => { S.typed = !!$("pj-new-folder").value; });
     return el;
-  }
-
-  // ---- #projects ------------------------------------------------------------------------------
-
-  async function loadList() {
-    let got;
-    try { got = await api("/api/projects"); } catch (e) { $("meta").textContent = "Can't load projects: " + e.message; return; }
-    if (S.on !== "projects") return;
-    S.home = got.user_home || "";
-    const ps = got.projects || [];
-    $("meta").textContent = plural(ps.length, "project");
-    put("pj-list", ps.map((p) => `<a class="pj-line" href="#project/${encodeURIComponent(p.id)}">
-        <span class="pj-name">${esc(p.name)}</span>
-        <span class="pj-folder dim">${p.folder ? esc(tilde(p.folder)) : "no folder"}</span>
-        <span class="pj-counts dim">${counts(p)}</span></a>`).join("") || '<div class="dim">No projects yet.</div>');
-  }
-
-  async function make(e) {
-    e.preventDefault();
-    const name = $("pj-new-name").value.trim();
-    if (!name) return;
-    try {
-      const got = await api("/api/projects", { name, folder: $("pj-new-folder").value.trim() || null });
-      $("pj-new-name").value = $("pj-new-folder").value = ""; S.typed = false;
-      put("pj-new-err", "");
-      nav.go("project/" + got.id);
-    } catch (x) { put("pj-new-err", `<span class="pj-err">${esc(x.message)}</span>`); }
   }
 
   // ---- #project/<id> --------------------------------------------------------------------------
@@ -104,13 +63,48 @@
     }
     if (S.on !== "project" || S.id !== id) return;
     S.data = p;
+    S.home = p.user_home || S.home;
     $("title").textContent = p.name;
     $("meta").textContent = [p.kind, p.repo, p.instructions].filter(Boolean).join(" · ");
+    if (!S.editing) put("pj-desc", desc(p));
     put("pj-head", `<div>${p.folder ? `Chats work in <code>${esc(p.folder)}</code> — your real folder.` : "Chats need a folder — none yet."}</div>
       <div class="dim">Background: ${esc(p.background || "none")}</div>`);
     put("pj-setup", setup(p));
     $("pj-ask").hidden = !p.folder_ok;
     sections(p);
+  }
+
+  // The description under the title; eki's is fixed, so it has no Edit.
+  function desc(p) {
+    const text = p.id === "eki" ? "eki itself — its own source" : (p.description || "");
+    const edit = p.id === "eki" ? "" : ` <a href="#" class="pj-edit" data-act="describe">${text ? "Edit" : "Add a description"}</a>`;
+    return `<p class="pj-desc-text">${text ? esc(text) : ""}${edit}</p>${err("describe")}`;
+  }
+
+  function editDesc() {
+    S.editing = true;
+    delete S.errs.describe;
+    $("pj-desc").innerHTML = `<textarea id="pj-desc-edit" rows="3" placeholder="What are you trying to achieve?"></textarea>
+      <div class="quiet">Enter saves · Esc cancels</div>`;
+    S.last["pj-desc"] = null;
+    const t = $("pj-desc-edit");
+    t.value = (S.data && S.data.description) || "";
+    t.focus();
+  }
+
+  async function saveDesc(text) {
+    try {
+      await api("/api/projects/" + encodeURIComponent(S.id) + "/describe", { description: text });
+      if (S.data) S.data.description = text.trim() || null;
+    } catch (x) { S.errs.describe = x.message; }
+    S.editing = false;
+    put("pj-desc", desc(S.data || { id: S.id }));
+  }
+
+  function onKey(e) {
+    if (e.target.id !== "pj-desc-edit") return;
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveDesc(e.target.value); }
+    else if (e.key === "Escape") { e.preventDefault(); S.editing = false; put("pj-desc", desc(S.data || { id: S.id })); }
   }
 
   // What the project still needs: a folder (pick one, or clone it home), or instructions.
@@ -190,6 +184,7 @@
     if (pic) return picture((((S.data || {}).sections || {}).pictures || {}).items[+pic.dataset.pic]);
     const b = e.target.closest("[data-act]");
     if (!b || !S.id) return;
+    if (b.dataset.act === "describe") { e.preventDefault(); return editDesc(); }
     b.disabled = true;
     const base = "/api/projects/" + encodeURIComponent(S.id);
     if (b.dataset.act === "clone") {
@@ -223,21 +218,18 @@
     } catch (x) { put("pj-ask-err", `<span class="pj-err">${esc(x.message)}</span>`); }
   }
 
-  // ---- the two views --------------------------------------------------------------------------
+  // ---- the view -------------------------------------------------------------------------------
 
-  function start(which, id) {
+  function start(id) {
     const el = box();
     el.hidden = false;
     if (S.id !== id) { S.open.clear(); S.errs = {}; S.data = null; }
-    S.on = which; S.id = id; S.last = {};
-    $("pj-list-view").hidden = which !== "projects";
-    $("pj-page").hidden = which !== "project";
-    $("title").textContent = which === "projects" ? "Projects" : "Project";
+    S.on = "project"; S.id = id; S.last = {}; S.editing = false;
+    $("title").textContent = "Project";
     $("meta").textContent = "";
-    const load = which === "projects" ? loadList : loadOne;
-    load();
+    loadOne();
     clearInterval(S.timer);
-    S.timer = setInterval(load, 5000);
+    S.timer = setInterval(loadOne, 5000);
   }
 
   function hide() {
@@ -247,7 +239,19 @@
     box().hidden = true;
   }
 
-  window.projects = { show: (id) => start("project", id), list: () => start("projects", null), hide };
-  nav.register("projects", { show: () => start("projects", null), hide });
-  nav.register("project", { show: (id) => start("project", id), hide });
+  // Until index.html names the Projects page's scripts (the sidebar item), fetch them from here.
+  for (const f of ["shell.js", "newproject.js", "projectspage.js"]) {
+    if (!document.querySelector || document.querySelector(`script[src="/ui/${f}"]`)) continue;
+    const t = document.createElement("script");
+    t.src = "/ui/" + f; t.async = false;
+    document.head.appendChild(t);
+  }
+  if (document.querySelector && !document.querySelector('link[href="/ui/pages.css"]')) {
+    const l = document.createElement("link");
+    l.rel = "stylesheet"; l.href = "/ui/pages.css";
+    document.head.appendChild(l);
+  }
+
+  window.projects = { show: start, hide };
+  nav.register("project", { show: start, hide });
 })();

@@ -116,5 +116,5 @@
   loadProviders();
   setInterval(loadProviders, 5000);
   setInterval(() => loadThreads().catch(() => {}), 4000);
-  window.side = { loadThreads, loadProviders, render };
+  window.side = { loadThreads, loadProviders, render, list: () => lastList.concat(lastArchived) };   // list: threadmenu.js
 })();

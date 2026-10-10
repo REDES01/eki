@@ -238,3 +238,80 @@ def test_the_persons_own_folder_is_never_touched(conn, src, proj, gh, tmp_path, 
     assert workspace.git(proj, "branch", "--list") == branches
     assert workspace.git(proj, "status", "--porcelain") == status
     assert (proj / "notes.txt").read_text() == "the person's own work in progress\n"
+
+
+@pytest.fixture
+def own(monkeypatch):
+    """eki's own repo is me/eki."""
+    from eki import integration
+    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
+    return "me/eki"
+
+
+def test_an_issue_on_ekis_own_repo_becomes_a_self_goal(conn, src, gh, own):
+    found(gh, issue(5, repo="me/eki"))
+    said = issues.tick(conn)
+    [g] = goals(conn)
+    assert g["project"] is None and g["issue"] == 5 and g["owner"] == "eki" and g["source"] == "issue"
+    assert g["state"] == "drafting" and g["draft_run"]
+    assert said == [f"me/eki: issue #5 became self goal {g['id']} (eki's own queue)"]
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
+    assert not (paths.projects() / "me" / "eki").exists()
+    github.soon("issues")
+    issues.tick(conn)
+    assert len(goals(conn)) == 1
+
+
+def test_a_standing_issue_on_ekis_own_repo_is_a_self_standing_goal(conn, src, gh, own):
+    found(gh, issue(5, repo="me/eki", labels=("eki", "standing")))
+    said = issues.tick(conn)
+    [st] = conn.execute("SELECT * FROM standing").fetchall()
+    assert st["project"] is None and st["issue"] == 5 and goals(conn) == []
+    assert said == [f"me/eki: issue #5 became standing goal {st['id']}"]
+    github.soon("issues")
+    issues.tick(conn)
+    assert len(conn.execute("SELECT * FROM standing").fetchall()) == 1
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
+
+
+def test_an_issue_on_ekis_own_repo_by_someone_else_is_skipped(conn, src, gh, own):
+    found(gh, issue(8, login="stranger", repo="me/eki"))
+    assert issues.tick(conn) == ["me/eki: issue #8 skipped — by @stranger, not me; only the person's words count"]
+    assert goals(conn) == []
+
+
+def test_a_closed_issue_on_ekis_own_repo_stops_the_self_goal(conn, src, gh, own):
+    found(gh, issue(5, repo="me/eki"), issue(6, repo="me/eki"))
+    issues.tick(conn)
+    g5, g6 = goals(conn)
+    iid = planned_with_item(conn, g6["id"])
+    conn.commit()
+
+    found(gh)
+    gh.answer(["issue", "view"], "CLOSED\n")
+    github.soon("issues")
+    said = issues.tick(conn)
+    assert ["issue", "view", "5", "--repo", "me/eki", "--json", "state", "--jq", ".state"] in gh.calls()
+    g5 = conn.execute("SELECT * FROM goals WHERE id=?", (g5["id"],)).fetchone()
+    assert g5["state"] == "left" and g5["error"] == "issue #5 closed"
+    assert store.run(conn, g5["draft_run"])["state"] == "cancelled"
+    assert selfwork.store_item(conn, iid)["state"] == "dropped"
+    assert any(s.startswith("eki: issue #5 closed") for s in said)
+
+
+def test_an_issue_taken_by_an_old_eki_projects_row_is_not_taken_again(conn, src, gh, own):
+    conn.execute("INSERT INTO projects(id, name, path, repo, branch, state, created_at) "
+                 "VALUES ('old', 'me/eki', '/nowhere', 'me/eki', 'main', 'on', '2026-01-01')")
+    conn.execute("INSERT INTO goals(id, text, wish, source, owner, state, created_at, project, issue) "
+                 "VALUES ('g0', 'x', 'x', 'issue', 'eki', 'left', '2026-01-01', 'old', 5)")
+    conn.commit()
+    found(gh, issue(5, repo="me/eki"))
+    assert issues.tick(conn) == []
+    assert [g["id"] for g in goals(conn)] == ["g0"]
+
+
+def test_other_repos_are_unchanged_beside_ekis_own(conn, src, gh, own):
+    _, said = discovered(conn, gh, issue(7), issue(5, repo="me/eki"))
+    p = clone(conn)
+    assert p["repo"] == "me/proj" and clone(conn, "me/eki") is None
+    assert {(g["project"], g["issue"]) for g in goals(conn)} == {(None, 5), (p["id"], 7)}

@@ -625,6 +625,15 @@ untouched; they're looked at again when `gh` is back.
   standing goal is dropped; items already out as a PR are left to you.
   Issue work is owner `eki` at background priority, like standing rounds:
   it waits for `machine.room` and the budget.
+- An issue on eki's own repo is self work: when its repo is
+  `integration.own_repo()` (the integration clone's origin, if on
+  github.com) it goes to eki's own queue as a self goal (`goals.project`
+  NULL, owner `eki`, drafted like any wish), or a self standing goal when
+  it's also labelled `standing`. No project row or clone is made for it,
+  and it's taken once, whether by a self goal or by an older projects row
+  of that repo. A closed issue drops the goal like any other. Self items
+  land through the queue, not a PR, and carry no `Closes #N`, so you close
+  the issue.
 - **eki's own clone.** A GitHub project is worked in eki's clone at
   `~/.eki/projects/<owner>/<repo>` (`projects.clone_path`), never in your
   folder: eki doesn't look for it and doesn't touch it. The clone is

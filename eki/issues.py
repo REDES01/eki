@@ -13,14 +13,19 @@ the log line says so. A dropped project ignores the issues open when it was
 dropped; a newer one revives it. An edit to an issue already taken is not
 followed. An issue closed on GitHub drops the unfinished work it started;
 what is already proposed is left for the person.
+
+An issue on eki's own repo (integration.own_repo) is self work: it never
+makes a project row or a clone. It becomes a self goal on eki's own queue,
+drafted like any wish — or, labelled `standing`, a self standing goal — and
+a closed one drops it like any other.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
-from . import db, github, projectsetup, projects, selfwork, standing, store
+from . import builds, db, github, integration, projectsetup, projects, selfwork, standing, store
 
 UNFINISHED = ("waiting", "building", "judging", "reviewing")
 PLANNING = ("drafting", "planning")
@@ -39,16 +44,22 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         repo = (issue.get("repository") or {}).get("nameWithOwner")
         if repo:
             by_repo.setdefault(repo, []).append(issue)
+    own = integration.own_repo()
     said: List[str] = []
     for repo, listed in by_repo.items():
-        said += _repo(conn, repo, listed, me)
+        said += _self(conn, repo, listed, me) if repo == own else _repo(conn, repo, listed, me)
     for project in conn.execute("SELECT * FROM projects WHERE repo IS NOT NULL "
                                 "AND COALESCE(state,'on')!='dropped' ORDER BY created_at").fetchall():
         open_numbers = {int(i["number"]) for i in by_repo.get(project["repo"], [])}
         try:
-            said += _closed(conn, project, project["repo"], open_numbers)
+            said += _closed(conn, project["name"], project["id"], project["repo"], open_numbers)
         except github.GhError as e:
             said.append(f"{project['name']}: GitHub: {_first(str(e))}")
+    if own is not None:
+        try:
+            said += _closed(conn, "eki", None, own, {int(i["number"]) for i in by_repo.get(own, [])})
+        except github.GhError as e:
+            said.append(f"eki: GitHub: {_first(str(e))}")
     return said
 
 
@@ -62,6 +73,24 @@ def _taken(conn: sqlite3.Connection, repo: str, n: int) -> bool:
     return bool(conn.execute("SELECT 1 FROM goals g JOIN projects p ON p.id=g.project WHERE p.repo=? AND g.issue=? "
                              "UNION ALL SELECT 1 FROM standing s JOIN projects p ON p.id=s.project "
                              "WHERE p.repo=? AND s.issue=?", (repo, n, repo, n)).fetchone())
+
+
+def _self_taken(conn: sqlite3.Connection, n: int) -> bool:
+    return bool(conn.execute("SELECT 1 FROM goals WHERE project IS NULL AND issue=? UNION ALL "
+                             "SELECT 1 FROM standing WHERE project IS NULL AND issue=?", (n, n)).fetchone())
+
+
+def _stranger(issue: dict, repo: str, me: str) -> Optional[str]:
+    """The skip line for an issue by anyone but the person, else None."""
+    login = (issue.get("author") or {}).get("login") or ""
+    if login == me:
+        return None
+    return (f"{repo}: issue #{issue['number']} skipped — by @{login or 'unknown'}, not {me}; "
+            "only the person's words count")
+
+
+def _standing(issue: dict) -> bool:
+    return "standing" in {(lb.get("name") or "").lower() for lb in issue.get("labels") or []}
 
 
 def _ignored(row: sqlite3.Row) -> Set[int]:
@@ -87,10 +116,9 @@ def _repo(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> L
         dropped = row is not None and row["state"] == "dropped"
         if dropped and n in _ignored(row):
             continue
-        login = (issue.get("author") or {}).get("login") or ""
-        if login != me:
-            said.append(f"{repo}: issue #{n} skipped — by @{login or 'unknown'}, not {me}; "
-                        "only the person's words count")
+        skip = _stranger(issue, repo, me)
+        if skip:
+            said.append(skip)
             continue
         if row is None or dropped:
             row = projectsetup.ensure(conn, repo, said)
@@ -99,9 +127,8 @@ def _repo(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> L
         if row["setup"] != "ready":
             said.append(f"{repo}: issue #{n} waits — {_waits(row)}")
             continue
-        labels = {(lb.get("name") or "").lower() for lb in issue.get("labels") or []}
         text = text_of(issue, repo)
-        if "standing" in labels:
+        if _standing(issue):
             sid = standing.add(conn, row["path"], text, project=row["id"], issue=n)
             said.append(f"{repo}: issue #{n} became standing goal {sid}")
         else:
@@ -111,17 +138,41 @@ def _repo(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> L
     return said
 
 
+def _self(conn: sqlite3.Connection, repo: str, listed: List[dict], me: str) -> List[str]:
+    """Issues on eki's own repo: self work on eki's own queue, never a project row or a clone."""
+    said: List[str] = []
+    for issue in listed:
+        n = int(issue["number"])
+        if _taken(conn, repo, n) or _self_taken(conn, n):
+            continue
+        skip = _stranger(issue, repo, me)
+        if skip:
+            said.append(skip)
+            continue
+        text = text_of(issue, repo)
+        if _standing(issue):
+            sid = standing.add(conn, str(builds.source()), text, issue=n)
+            said.append(f"{repo}: issue #{n} became standing goal {sid}")
+        else:
+            gid = selfwork.submit(conn, text, plan=True, draft=True, owner="eki", source_kind="issue",
+                                  project=None, issue=n)
+            said.append(f"{repo}: issue #{n} became self goal {gid} (eki's own queue)")
+    return said
+
+
 def _first(text: str) -> str:
     return next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "") or "failed"
 
 
-def _closed(conn: sqlite3.Connection, project: sqlite3.Row, repo: str, open_numbers: Set[int]) -> List[str]:
+def _closed(conn: sqlite3.Connection, name: str, pid: Optional[str], repo: str,
+            open_numbers: Set[int]) -> List[str]:
+    """Stop the work of closed issues on `repo`: project `pid`'s, or eki's own (self) with pid None."""
     said: List[str] = []
-    name, pid = project["name"], project["id"]
-    goals = conn.execute("SELECT * FROM goals WHERE project=? AND issue IS NOT NULL AND standing_id IS NULL "
-                         "AND state NOT IN ('left','failed')", (pid,)).fetchall()
-    stands = conn.execute("SELECT * FROM standing WHERE project=? AND issue IS NOT NULL AND state!='dropped'",
-                          (pid,)).fetchall()
+    on, args = ("project IS NULL", ()) if pid is None else ("project=?", (pid,))
+    goals = conn.execute(f"SELECT * FROM goals WHERE {on} AND issue IS NOT NULL AND standing_id IS NULL "
+                         "AND state NOT IN ('left','failed')", args).fetchall()
+    stands = conn.execute(f"SELECT * FROM standing WHERE {on} AND issue IS NOT NULL AND state!='dropped'",
+                          args).fetchall()
     for g in goals:
         n = g["issue"]
         if n in open_numbers or not _live(conn, g) or github.issue_state(repo, n) != "CLOSED":

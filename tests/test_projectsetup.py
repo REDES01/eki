@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from conftest import run_inline
-from eki import db, github, paths, projects, projectsetup, selfwork, standing, store, workspace
+from eki import db, github, integration, paths, projects, projectsetup, selfwork, standing, store, workspace
 
 
 @pytest.fixture
@@ -20,6 +20,12 @@ def src(tmp_path, monkeypatch):
     workspace.git(r, "commit", "-q", "-m", "first")
     monkeypatch.setenv("EKI_SOURCE", str(r))
     return r
+
+
+@pytest.fixture(autouse=True)
+def not_own(monkeypatch):
+    """No project here is eki's own repo (and ensure needn't clone eki to know it)."""
+    monkeypatch.setattr(integration, "own_repo", lambda: None)
 
 
 def make_bare(tmp_path, files):
@@ -69,6 +75,17 @@ def test_ensure_clones_into_the_home_and_records_the_branch(conn, tmp_path, gh):
     assert github.repo_of(dest) == "me/proj"
     assert p["check_from"] == "none: no check found" and p["check_cmd"] is None
     assert any("ready" in s for s in said)
+
+
+def test_ensure_never_makes_a_row_for_eki_s_own_repo(conn, src, tmp_path, gh, monkeypatch):
+    monkeypatch.setattr(integration, "own_repo", lambda: "me/eki")
+    with pytest.raises(ValueError, match=r"^me/eki is eki's own repo: its work goes on eki's own queue$"):
+        projectsetup.ensure(conn, "me/eki")
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
+    assert not paths.projects().exists() or not any(paths.projects().iterdir())
+    gh.repo("me/proj", make_bare(tmp_path, {"README.md": "# proj\n"}))
+    p = projectsetup.ensure(conn, "me/proj")
+    assert p["repo"] == "me/proj" and p["setup"] == "cloning"
 
 
 def test_a_restart_during_the_clone_runs_it_again_with_one_clone_and_one_row(conn, tmp_path, gh):

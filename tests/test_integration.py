@@ -161,3 +161,21 @@ def test_sync_survives_an_unreachable_origin(src, origin, tmp_path):
     origin.rename(tmp_path / "gone.git")
     mine = commit(src, "mine.py")
     assert integration.sync() == mine
+
+
+def test_own_repo_is_the_github_origin(src, monkeypatch):
+    workspace.git(src, "remote", "set-url", "origin", "https://github.com/me/eki.git")
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")  # the fetch from GitHub fails at once, harmlessly
+    assert integration.own_repo() == "me/eki"
+    assert integration.main() == workspace.head(src)
+
+
+def test_own_repo_is_none_off_github(src):
+    assert integration.own_repo() is None             # origin is a local bare repo
+
+
+def test_own_repo_is_none_without_an_integration_repo(monkeypatch):
+    def broken():
+        raise integration.IntegrationError("no")
+    monkeypatch.setattr(integration, "repo", broken)
+    assert integration.own_repo() is None

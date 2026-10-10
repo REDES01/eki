@@ -17,9 +17,9 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from . import builds, db, observe, paths
+from . import builds, db, github, observe, paths
 from .workspace import NOT_LINKED, QUIET, WorkspaceError, git
 
 log = logging.getLogger("eki.integration")
@@ -57,6 +57,15 @@ def repo() -> Path:
         raise IntegrationError(f"cannot make the integration repo from {src}: {e}") from e
     _fetch("origin")
     return dest
+
+
+def own_repo() -> Optional[str]:
+    """eki's own repo as OWNER/REPO (the integration clone's configured origin), or None
+    when there is no integration repo or its origin isn't on github.com."""
+    try:
+        return github.repo_of(repo())
+    except IntegrationError:
+        return None
 
 
 def _fetch(remote: str) -> bool:

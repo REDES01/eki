@@ -22,7 +22,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Set
 
-from . import checkguess, db, github, paths, projectchats, projects, selfwork, standing, store, workspace
+from . import checkguess, db, github, integration, paths, projectchats, projects, selfwork, standing, store, workspace
 
 UNFINISHED = ("waiting", "building", "judging", "reviewing")
 PLANNING = ("drafting", "planning")
@@ -35,7 +35,11 @@ def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None
     """The project for OWNER/REPO; a new or dropped one is (re)made and its clone started.
 
     A chat project on your folder whose origin is `repo` joins it (`_merge`); why goes in `said`.
+    eki's own repo never gets a row: its work goes on eki's own queue (callers check first).
     """
+    own = integration.own_repo()
+    if own is not None and repo == own:
+        raise ValueError(f"{repo} is eki's own repo: its work goes on eki's own queue")
     got = projects.by_repo(conn, repo)
     if got is not None and got["state"] != "dropped":
         return got

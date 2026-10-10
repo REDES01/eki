@@ -1,9 +1,11 @@
 """A person's own git folders eki works on (standing goals, docs/design.md).
 
-A project is one row per path. eki only ever adds worktrees and `eki/*`
-branches to it: it never checks out, commits to, resets or pushes the
-project's branches. On the local path the person merges `eki/<item>` when
-they want it; on the GitHub path (eki/github.py) merges happen there, so new
+A project is one row per path. eki adds worktrees and `eki/*` branches to it
+and never resets, rewrites or force-pushes the project's branches. On the
+local path, under autonomy 'apply' (the default), eki lands fit items on the
+project's branch itself, fast-forward only (eki/projectqueue.py,
+eki/projectland.py); under 'propose' the person merges `eki/<item>` when they
+want it. On the GitHub path (eki/github.py) merges happen there, so new
 work is based on origin's branch, fetched into refs/remotes/origin only. A goal with `project` NULL is eki itself (the integration repo).
 """
 from __future__ import annotations
@@ -18,6 +20,9 @@ from . import builds, db, github, integration, paths, store, workspace
 
 #: untracked folders a worktree needs to run, linked from the project folder
 DEPS = (".venv", "node_modules")
+
+#: apply: eki lands fit items on the branch; propose: the branch waits for the person
+AUTONOMY = ("apply", "propose")
 
 
 def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = None,
@@ -46,6 +51,25 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
         conn.execute("INSERT INTO projects(id, name, path, branch, check_cmd, created_at) VALUES (?,?,?,?,?,?)",
                      (pid, name or where.name, str(where), branch, check, db.now()))
     return pid
+
+
+def autonomy(project: sqlite3.Row) -> str:
+    """'apply' or 'propose'. A GitHub project proposes: its work goes back as pull requests."""
+    if "repo" in project.keys() and project["repo"]:
+        return "propose"
+    return ("autonomy" in project.keys() and project["autonomy"]) or "apply"
+
+
+def set_autonomy(conn: sqlite3.Connection, pid: str, mode: str) -> None:
+    if mode not in AUTONOMY:
+        raise ValueError(f"autonomy is one of {', '.join(AUTONOMY)}, not {mode!r}")
+    project = get(conn, pid)
+    if project is None:
+        raise KeyError(f"no project {pid}")
+    if project["repo"]:
+        raise ValueError(f"{project['repo']} is on GitHub: its work goes back as pull requests")
+    with db.tx(conn):
+        conn.execute("UPDATE projects SET autonomy=? WHERE id=?", (mode, pid))
 
 
 def clone_path(repo: str) -> Path:

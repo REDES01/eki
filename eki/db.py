@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS projects (       -- a person's own git folder eki wor
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     path TEXT NOT NULL UNIQUE,
-    branch TEXT NOT NULL,                   -- the branch items are based on and merged into by the person
+    branch TEXT NOT NULL,                   -- items are based on it; eki merges into it under 'apply'
     check_cmd TEXT,                         -- gate 1, a shell command; NULL: bin/check if there, else none
     created_at REAL NOT NULL
 );
@@ -290,6 +290,8 @@ ADDED = [
     ("threads", "deleted_at", "REAL"),  # hidden at once; the rows go once nothing is active
     ("threads", "schedule", "TEXT"),    # schedules.id a firing's chat came from
     ("projects", "description", "TEXT"),   # what you're trying to achieve; eki's is fixed
+    ("projects", "autonomy", "TEXT"),   # apply | propose; NULL: the default (eki/projects.py)
+    ("items", "landed_on", "TEXT"),     # the project branch eki landed it on; NULL otherwise
 ]
 
 

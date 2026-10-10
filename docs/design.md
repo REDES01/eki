@@ -78,6 +78,8 @@ eki follow <run>  ◄── events table
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `projectchats` | projects you work inside: a `projects` row or the built-in `eki` (`SELF`, no row); `folder_of`, `listing`, `adopt`, `create`, `set_folder`, `find`, `home_clone` |
+| `projectqueue` | a local project's own queue (autonomy `apply`): its fit items rebased onto the predicted head of its branch, conflicts to a resolve run, gate 2 in batch with the project's check, then landed; one project per batch |
+| `projectland` | landing on a person's branch: `refs/heads/<branch>` moves forward only, the folder follows by `git merge --ff-only` when the branch is checked out there and no tracked file the change touches has local changes, else it waits naming the files; pure git, safe to call again |
 | `github` | the only way to GitHub: one function per `gh` call (a subprocess, 60 s), plain `git push`/`git fetch` against origin, which path a project is on, the in-memory interval of the GitHub steps |
 | `issues` | issues labelled `eki` in: a new one becomes a goal or a standing goal, a closed one drops the unfinished work |
 | `prs` | pull requests out: push `eki/<id>`, open or reuse its PR, poll it — merged is applied, closed is dropped; close the PR of an item you drop |
@@ -746,20 +748,40 @@ untouched; they're looked at again when `gh` is back.
   work there. It pushes only `eki/*` branches, never forced. It still never
   checks out, commits to, resets or pushes the project's own branches.
 
-**The local path — landing is a branch you merge.** For folders not on
-GitHub (origin elsewhere or none; also a GitHub project while `gh` is
-missing or logged out) eki works in your folder, exactly as before, and no
-`gh` is started for it. A project item builds in
-`~/.eki/work/<item id>` on branch `eki/<item id>` of the project's own repo
-(`.venv` and `node_modules` linked from the folder when untracked). Its gate 1
-is the project's `--check`, else its executable `bin/check`, else none: the
-item is proposed "no check configured — not judged". It stays `proposed`
-until its commit is in the project's branch (`git -C <path> merge eki/<id>`),
-then it is `applied`. eki only adds worktrees and `eki/*` branches: it never
-checks out, commits to, fetches into, resets or pushes the project's
-branches. Project items never enter eki's queue, train or swap. `eki goal
-add` on a folder whose origin is on GitHub doesn't take this path: it uses
-eki's own clone and says so.
+**The local path — eki lands it.** For folders not on GitHub (origin
+elsewhere or none; also a GitHub project while `gh` is missing or logged
+out) eki works in your folder, and no `gh` is started for it. A project item
+builds in `~/.eki/work/<item id>` on branch `eki/<item id>` of the project's
+own repo (`.venv` and `node_modules` linked from the folder when
+untracked). Its gate 1 is the project's `--check`, else its executable
+`bin/check`, else none: the item is proposed "no check configured — not
+judged". What happens next is the project's `autonomy`
+(`eki project <name> --autonomy apply|propose`):
+
+- **apply** (the default for local projects): a fit item joins the
+  project's own queue (`eki/projectqueue.py`), the same queue eki's own
+  items go through (docs/self-build.md): rebased onto the predicted head of
+  the project's branch, a conflict resolved by a resolve run, checked in
+  batch (gate 2 is the project's check, if it has one), then landed:
+  `refs/heads/<branch>` moves forward (`eki/projectland.py`) and the item is
+  `applied`; the goal's notice and the board say "landed on <branch>". Items
+  of different projects never share a batch.
+- **propose**: the branch waits for you, as before: the item stays
+  `proposed` until its commit is in the project's branch
+  (`git -C <path> merge eki/<id>`), then it is `applied`.
+
+**Your folder moves only when it's safe.** When the branch is checked out
+in your folder, landing runs `git merge --ff-only` there and nothing else.
+If a tracked file the change touches has local changes in the folder,
+landing waits and the board names it ("waits: chapter1 has local changes to
+src/x.js"); it lands once the file is clean. Local changes to files the
+change doesn't touch (logs, notes) don't block it. Untracked and ignored
+files are never touched. Never a force, a reset, a checkout of another
+branch or a rewrite of history already on the branch; a landing a restart
+interrupted is finished by the next pass (a branch that already contains
+the commit is done). Project items never enter eki's own train or swap.
+`eki goal add` on a folder whose origin is on GitHub doesn't take this
+path: it uses eki's own clone and says so, and its work keeps the PR path.
 
 **When a round opens** (`standing.tick`, a housekeeping step): the goal is
 `on`, not resting, has no open round, the Mac has room (`machine.room`), the
@@ -853,6 +875,13 @@ as any other; nothing in `workspace` or the scheduler changes.
   move to it, and the old row becomes `state='merged'` (or retires as above
   when it has goals of its own), said in the pass's lines. `listing` hides
   dropped and merged rows, and a retired row whose folder a live row has.
+- **Work lands on its own.** A local project's fit items go through its
+  own queue and land on its branch, fast-forward only, unless its autonomy
+  is `propose` (the local path above: `projectqueue`, `projectland`; `eki
+  project <name>` shows `autonomy: apply|propose`). The folder follows by
+  `git merge --ff-only` only when no tracked file the change touches has
+  local changes; untracked and ignored files are never touched. A GitHub
+  project keeps its PR path.
 - **Instructions are the project's own file.** With no `AGENTS.md` or
   `CLAUDE.md` in the folder, the page offers a chat that looks at it and
   writes `AGENTS.md`, plus a `CLAUDE.md` holding only `@AGENTS.md`, so Claude

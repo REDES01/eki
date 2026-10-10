@@ -24,6 +24,8 @@ def add(p) -> None:
     p.add_argument("--description", metavar="TEXT", help="with --new: what you're trying to achieve")
     p.add_argument("--check", help="the shell command that judges an item ('' for none); replaces the guess")
     p.add_argument("--branch", help="the branch eki works from and opens PRs against")
+    p.add_argument("--autonomy", choices=projects.AUTONOMY,
+                   help="a local project: apply (eki lands fit items on its branch) or propose (the branch waits)")
     p.add_argument("--retry", action="store_true", help="start the failed setup step (clone or install) again")
     p.add_argument("--yes", action="store_true", help="with `rm`: delete without asking")
 
@@ -69,6 +71,16 @@ def set_check(c, project, check: str) -> None:
 def set_branch(c, project, branch: str) -> None:
     with db.tx(c):
         c.execute("UPDATE projects SET branch=? WHERE id=?", (branch, project["id"]))
+
+
+def set_autonomy(c, pid: str, name: str, mode: str) -> int:
+    try:
+        projects.set_autonomy(c, pid, mode)
+    except ValueError as e:
+        err(f"eki: {e}")
+        return 1
+    print(f"{name}: autonomy {mode}")
+    return 0
 
 
 def describe(c, key: str, text: str) -> int:
@@ -143,7 +155,7 @@ def run(args) -> int:
         return 1
     github_only = args.check is not None or args.branch or args.retry
     if args.new is not None:
-        if args.key or github_only:
+        if args.key or github_only or args.autonomy:
             err("eki: --new takes a name and maybe --folder and --description, nothing else")
             return 1
         return projectlist.new(c, args.new, args.folder, args.description)
@@ -151,8 +163,8 @@ def run(args) -> int:
         err('eki: --description goes with --new; for a project: eki project describe <key> "text"')
         return 1
     if not args.key:
-        if args.folder or github_only:
-            err("eki: say which project: eki project <key> --folder/--check/--branch/--retry")
+        if args.folder or github_only or args.autonomy:
+            err("eki: say which project: eki project <key> --folder/--check/--branch/--retry/--autonomy")
             return 1
         return projectlist.listing(c)
     pid = projectlist.resolve(c, args.key)
@@ -163,7 +175,12 @@ def run(args) -> int:
         name = "eki" if p is None else p["name"]
         err(f"eki: {name} isn't on GitHub: --check, --branch and --retry are GitHub-only")
         return 1
+    if args.autonomy and p is None:
+        err("eki: eki lands its own work through its queue: --autonomy is for your projects")
+        return 1
     if args.folder and projectlist.set_folder(c, pid, args.folder):
+        return 1
+    if args.autonomy and set_autonomy(c, pid, p["name"], args.autonomy):
         return 1
     if args.check is not None:
         set_check(c, p, args.check)
@@ -177,11 +194,13 @@ def run(args) -> int:
         except ValueError as e:
             err(f"eki: {e}")
             return 1
-    if not args.folder and not github_only:
+    if not args.folder and not github_only and not args.autonomy:
         e = projectlist.entry_of(c, pid)
         if p is not None and p["repo"]:
             print("\n".join(block(c, projects.get(c, pid))))
         else:
             print(e["name"])
+            if p is not None:
+                print(f"  autonomy: {projects.autonomy(p)}")
         print("\n".join(projectlist.details(e)))
     return 0

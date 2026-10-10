@@ -181,6 +181,15 @@ A change behind one that failed is rebased without it and judged again in
 the next batch. That's the price of speculating, and it's paid only on
 failures.
 
+A local project's items have a queue of their own (`eki/projectqueue.py`,
+under the project's autonomy `apply`): the same predicted heads, resolve
+runs and bisecting batches, against the project's branch, with the
+project's check as gate 2, landing on `refs/heads/<branch>` fast-forward
+only and moving the person's folder only by `git merge --ff-only`. Each
+project is its own stack: items of different projects, or a project's and
+eki's own, never share a batch, so one project's red check never holds
+another's up.
+
 When several queued changes conflict on the same files, pairing them up
 before resolving (the first eki's tree merge, `~/eki-2026-09-26/eki/treemerge.py`)
 saves resolver runs. It's an optimisation of the side path, added only if

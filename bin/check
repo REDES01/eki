@@ -3,7 +3,7 @@
 # The interpreter is the first of $EKI_PYTHON, this folder's .venv, python3
 # that has pytest (the engine's own EKI_PYTHON may be a bare runtime), and
 # the tests see it as EKI_PYTHON.
-# In parallel (-n auto) when that interpreter has pytest-xdist, unless
+# In parallel (a third of the cores, or EKI_CHECK_WORKERS) when that interpreter has pytest-xdist, unless
 # EKI_CHECK_SERIAL is set; a bare build without xdist runs serially.
 # EKI_CHECK_FAST=1 skips the tests marked `drill` (real engines, launchers).
 set -e
@@ -15,7 +15,11 @@ for py in "$EKI_PYTHON" "$here/.venv/bin/python" python3; do
         set -- -m "not drill" "$@"
     fi
     if [ -z "${EKI_CHECK_SERIAL:-}" ] && "$py" -c "import xdist" >/dev/null 2>&1; then
-        set -- -n auto "$@"
+        # a third of the cores each (EKI_CHECK_WORKERS overrides): several checks run at
+        # once (gates, the train, agents' own runs) and -n auto each drove load past 100
+        cores="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 6)"
+        workers="${EKI_CHECK_WORKERS:-$(( cores / 3 > 2 ? cores / 3 : 2 ))}"
+        set -- -n "$workers" "$@"
     fi
     EKI_PYTHON="$py" exec "$py" -m pytest -q "$@"
 done

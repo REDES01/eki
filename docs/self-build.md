@@ -213,8 +213,10 @@ Nothing waits for the watch.
 judge runs — gate 1, gate 2 and the train's check together — run at once;
 the rest stay queued, held by the engine's scheduling (`eki/checkslots.py`),
 not the queue's, and the board says "waiting for a check slot". `bin/check`
-runs the suite in parallel (`-n auto`), so one check already fills the
-cores: two fast checks beat five crawling ones.
+runs the suite on a third of the cores (`EKI_CHECK_WORKERS` overrides), so
+the judge slots plus the agents' own runs inside build turns share the
+cores instead of each taking all of them (with `-n auto` each, load went
+past 100 on 18 cores): a few fast checks beat many crawling ones.
 
 **Gate 4 — better, not just working** (built; see the next section): every
 build that goes live gets a score before and after, from the journal — the

@@ -96,6 +96,7 @@ class ProgramProvider(Provider):
         env = dict(os.environ)
         env["EKI_RUN"] = turn.run_id
         env["EKI_THREAD"] = turn.thread_id
+        env.update({k: v for k, v in (turn.extra.get("env") or {}).items() if isinstance(v, str)})
         return env
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:

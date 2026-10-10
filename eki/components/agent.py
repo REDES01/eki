@@ -4,6 +4,8 @@ An agent folder holds prompt.md, optional skills/, and in component.json a
 `target` (provider → model → effort, e.g. "claude:opus@high"), `bare`,
 `uses` (components it may call), `mcp` (servers from eki's registry),
 `deny_tools`, `allow_tools` (a bare agent's whole tool list) and an optional `url` ("{url}" in prompt.md becomes it).
+An agent with a `url` (the playtester) plays the caller's own serving link
+when the caller's project has a serve card; its `url` is only the fallback.
 
 Each call is a new session under ~/.eki/components/sessions/<name>/. A bare
 agent is strict and Claude Code only: prompt.md is its entire system prompt,
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import Call, Component, Result, NAME, journal
 
@@ -86,9 +88,18 @@ def _kind(provider: str) -> str:
         return ''
 
 
-def prompt_text(comp: Component) -> str:
+def prompt_text(comp: Component, url: Optional[str] = None) -> str:
     text = (comp.folder / 'prompt.md').read_text()
-    return text.replace('{url}', str(comp.spec.get('url') or ''))
+    return text.replace('{url}', str(comp.spec.get('url') or '') if url is None else url)
+
+
+def play_url(comp: Component, c: Call) -> str:
+    """What an agent with a `url` plays: the caller's serving link, else its own `url`."""
+    own = str(comp.spec.get('url') or '')
+    if 'url' not in comp.spec:
+        return own
+    from . import serve
+    return serve.for_run(c.caller_dir, by=c.caller_run or c.run_id) or own
 
 
 def mcp_file(comp: Component, session: Path) -> Path:
@@ -122,8 +133,8 @@ def _skills_plugin(comp: Component, session: Path):
     return str(root)
 
 
-def turn_for(comp: Component, c: Call, session: Path):
-    """(provider name, the Turn) for one call of `comp`."""
+def turn_for(comp: Component, c: Call, session: Path, url: Optional[str] = None):
+    """(provider name, the Turn) for one call of `comp`; `url` is what "{url}" becomes (play_url by default)."""
     from .. import providers, skills, targets
     from ..providers.base import Turn
     t = target(comp.spec)
@@ -136,18 +147,19 @@ def turn_for(comp: Component, c: Call, session: Path):
     if choice.effort:
         extra['effort'] = choice.effort
     prompt = ' '.join(c.args) or 'Begin.'
+    url = play_url(comp, c) if url is None else url
     if comp.spec.get('bare'):
         scratch = session / 'scratch'
         scratch.mkdir(parents=True, exist_ok=True)
         for k in ('claude_plugin', 'claude_mcp', 'codex_config', 'codex_skills'):
             extra.pop(k, None)              # nothing of eki's own: only what the agent lists
-        extra.update(bare=True, system_prompt=prompt_text(comp), deny_tools=list(comp.spec.get('deny_tools') or []))
+        extra.update(bare=True, system_prompt=prompt_text(comp, url), deny_tools=list(comp.spec.get('deny_tools') or []))
         extra.update(tool_rules(comp.spec))
         if comp.spec.get('mcp'):
             extra['claude_mcp'] = str(mcp_file(comp, session))
         cwd = str(scratch)
     else:
-        extra['note'] = prompt_text(comp)
+        extra['note'] = prompt_text(comp, url)
         if comp.spec.get('deny_tools'):
             extra['deny_tools'] = list(comp.spec['deny_tools'])
         from . import skillcard
@@ -174,7 +186,8 @@ def call(comp: Component, c: Call) -> Result:
     from .. import providers
     session = journal.new_session(comp.name)
     try:
-        name, turn = turn_for(comp, c, session)
+        url = play_url(comp, c)
+        name, turn = turn_for(comp, c, session, url)
         provider = providers.get(name)
     except (KeyError, ValueError, OSError) as e:
         return Result(text='', paths=[str(session)], error=str(e))
@@ -190,7 +203,7 @@ def call(comp: Component, c: Call) -> Result:
             c.emit(kind, data)
 
     out = provider.take(turn, emit)
-    kept = journal.keep(session, texts, calls, str(comp.spec.get('url') or ''))
+    kept = journal.keep(session, texts, calls, url)
     if out.state != 'done' or out.error:
         kept.error = out.error or out.reason or f'{comp.name} ended {out.state}'
     return kept

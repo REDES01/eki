@@ -22,7 +22,7 @@ import traceback
 from typing import Any, Dict
 
 from . import asks, capacity, components, files, db, models, observe, paths, providers, quota, routing, skills, store, transient
-from .components import knowledge, mcpserver, skillcard
+from .components import knowledge, mcpserver, serve, skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
 
@@ -89,7 +89,23 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         for line in (components.brief(turn.cwd, conn), knowledge.brief(turn.cwd, conn)):
             if line:
                 turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
+        _serving_link(conn, r, turn)
     return turn
+
+
+def _serving_link(conn: sqlite3.Connection, r: sqlite3.Row, turn: Turn) -> None:
+    """A run whose project has a serve card gets its own copy's URL: EKI_SERVE_URL and one brief line."""
+    try:
+        url = serve.for_run(turn.cwd, conn, by=r["id"]) if turn.cwd else ""
+    except Exception as e:                      # noqa: BLE001 — a run never fails for its link
+        log.warning("no serving link for %s: %s", r["id"], e)
+        url = ""
+    if not url:
+        return
+    turn.extra["env"] = {**(turn.extra.get("env") or {}), "EKI_SERVE_URL": url}
+    line = (f"Your own copy of the project is served at {url} (EKI_SERVE_URL); open that in a browser "
+            "for screenshots and tests, not the person's own server (e.g. :4200).")
+    turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
 
 
 def route(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:

@@ -81,12 +81,27 @@ def stage(c, it) -> str:
         return "gate 2 green — waiting for the ones ahead"
     run = store.run(c, it["gate2_run"]) if it["gate2_run"] and it["gate2_on"] == it["rebased"] else None
     if run is None:
-        return "in the batch — checked with one above it"
+        return _batch_of(c, it)
     if checkslots.waiting(c, run):
         return f"waiting for a check slot (run {run['id']})"
     if run["state"] in store.ACTIVE:
         return f"gate 2 (run {run['id']})"
     return f"gate 2 {run['state']} (run {run['id']})"
+
+
+def _batch_of(c, it) -> str:
+    """For an item without a check of its own: in the batch a check above it covers,
+    or waiting for the next batch (it joined after that check started)."""
+    lined = c.execute("SELECT * FROM items WHERE state='queued' "
+                      "ORDER BY COALESCE(queued_at, created_at), created_at").fetchall()
+    ids = [x["id"] for x in lined]
+    for x in lined:
+        run = store.run(c, x["gate2_run"]) if x["gate2_run"] and x["gate2_on"] == x["rebased"] else None
+        if run is not None and run["state"] in store.ACTIVE and it["id"] in ids:
+            if ids.index(it["id"]) < ids.index(x["id"]):
+                return f"in the batch checked on {x['id']}"
+            return f"next batch — joined after the check on {x['id']} started"
+    return "waiting for the next batch"
 
 
 def where(it) -> str:

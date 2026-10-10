@@ -300,3 +300,14 @@ def test_a_green_doccheck_lands_the_item(conn, tmp_path, origin, monkeypatch):
     said = queue.tick(conn)
     A = get(conn, a)
     assert A["state"] == "landed" and integration.main() == A["rebased"], said
+
+
+def test_the_board_says_which_batch_an_item_is_in(conn, src):
+    from eki import selfview
+    autonomy("apply")
+    a, b = item(conn, "A", "a.txt"), item(conn, "B", "b.txt")
+    queue.tick(conn)
+    c = item(conn, "C", "c.txt")
+    queue.tick(conn)
+    assert selfview.stage(conn, get(conn, a)) == f"in the batch checked on {b}"
+    assert selfview.stage(conn, get(conn, c)) == f"next batch — joined after the check on {b} started"

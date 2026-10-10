@@ -1,5 +1,6 @@
 """eki builds eki: goals, items, and the runs that carry each item through
-plan → build → judge → review → proposed (docs/self-build.md).
+plan → build → judge (gate 1 and the review side by side) → proposed
+(docs/self-build.md).
 
 Everything here is a run in an ordinary thread, so a restart loses nothing
 and `eki follow` shows any of it. The engine calls `tick` every couple of
@@ -221,7 +222,10 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
         _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
              touched=db.dumps(touched), error=error)
-    return [f"item {it['id']}: built ({len(touched)} files); judging"]
+        rev, why = review.ask(conn, store_item(conn, it["id"]))     # a second reader beside gate 1
+        _set(conn, it["id"], review_run=rev, review=None if rev else f"none: {why}")
+    return [f"item {it['id']}: built ({len(touched)} files); judging"
+            + (f" and reviewing ({rev[:8]})" if rev else "")]
 
 
 def _judged_by(project: sqlite3.Row, judge: str) -> str:
@@ -234,23 +238,45 @@ def _judged_by(project: sqlite3.Row, judge: str) -> str:
 
 
 def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
+    """Move a `judging` item once gate 1 and its review (if any) have both ended."""
     run = store.run(conn, it["run_id"])
-    if run is None or run["state"] in store.ACTIVE:
+    if run is None or run["state"] in store.ACTIVE or not review.ended(conn, it):
         return []
     tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-25:])
     if run["state"] != "done":
         tail = (tail + f"\n(checks {run['state']}: {run['error'] or ''})").strip()
     with db.tx(conn):
-        if conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()["state"] != "judging":
+        cur = conn.execute("SELECT state, reviews FROM items WHERE id=?", (it["id"],)).fetchone()
+        if cur is None or cur["state"] != "judging":
             return []
+        seen = it["review"]
+        if it["review_run"]:
+            said, why = review.read(conn, it)                # closes the chore (eki/review.py)
+            seen = f"{said}: {why}" if said == "no" else said or f"none: {why}"
         if run["state"] == "done":
-            _set(conn, it["id"], verdict=tail[-800:])
-            return review.start(conn, it)          # a second reader, then proposed (eki/review.py)
-        if it["tries"] - (it["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
-            _set(conn, it["id"], state="waiting", verdict=tail[-800:], error="checks failed; trying once more")
+            return _judged(conn, it, tail, seen, cur["reviews"])
+        if it["tries"] - (cur["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
+            _set(conn, it["id"], state="waiting", verdict=tail[-800:], review=seen,
+                 error="checks failed; trying once more")
             return [f"item {it['id']}: checks failed; one more try"]
-        _set(conn, it["id"], state="unfit", verdict=tail[-800:], error=f"checks {run['state']}")
+        _set(conn, it["id"], state="unfit", verdict=tail[-800:], review=seen, error=f"checks {run['state']}")
     return [f"item {it['id']}: unfit — left for you"]
+
+
+def _judged(conn: sqlite3.Connection, it: sqlite3.Row, tail: str, seen: Optional[str],
+            reviews: Optional[int]) -> List[str]:
+    """Gate 1 green: the review's word decides (under the caller's tx)."""
+    if not (seen or "").startswith("no:"):
+        _set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
+        how = "reviewed ok" if seen == "ok" else f"fit (not reviewed: {(seen or 'none: ?')[6:]})"
+        return [f"item {it['id']}: {how} — proposed on {it['branch']}"]
+    why = seen[3:].strip()
+    if not reviews:
+        _set(conn, it["id"], state="waiting", verdict=None, review=seen, reviews=1,
+             error="review: no — rebuilding once")
+        return [f"item {it['id']}: the review says no — {why[:120]}; rebuilding once"]
+    _set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
+    return [f"item {it['id']}: the review says no again — proposed; `eki self apply {it['id']}` if you agree"]
 
 
 # ---- starting a build -------------------------------------------------------------------------

@@ -92,7 +92,10 @@ def stage(c, it) -> str:
 def where(it) -> str:
     if it["state"] == "reviewing":
         return f"review {it['review_run'] or '-'}"
-    if it["state"] in ("building", "judging", "resolving", "rechecking") and it["run_id"]:
+    if it["state"] == "judging" and it["run_id"]:
+        both = f" · review run {it['review_run']}" if it["review_run"] else ""
+        return f"gate 1 run {it['run_id']}{both}"
+    if it["state"] in ("building", "resolving", "rechecking") and it["run_id"]:
         return f"run {it['run_id']}"
     if it["state"] in ("proposed", "locked"):
         return it["branch"] or ""
@@ -121,6 +124,8 @@ def said(it) -> str:
         return f"! {it['error'].splitlines()[0][:150]}"
     if state == "reviewing":
         return "a second reader (the local model) is reading the diff"
+    if state == "judging" and it["review_run"]:
+        return "the checks and a second reader run side by side"
     if state == "proposed" and it["pr"]:
         return f"PR open: {it['pr']}"
     if state == "proposed":

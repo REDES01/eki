@@ -1,18 +1,21 @@
-"""The review: a second reader between gate 1 and the queue (docs/self-build.md,
-"Judging").
+"""The review: a second reader beside gate 1 (docs/self-build.md, "Judging").
 
-When gate 1 is green the item goes to `reviewing` and a `review` chore asks
-the reviewer (routing.json `roles.reviewer`, by default the local model;
-eki/chores.py) whether the diff does what the spec and the
-builder's summary say. Its last `REVIEW:` line decides: `ok` proposes the
-item; a first `no` sends it back to be built once more with the objection in
-its brief; a second `no` proposes it with the objection kept, and the queue
-never takes it by itself. A review that can't judge — no reviewer that can run,
-the setting off, a failed run or an answer without the line — proposes the item
-with `none: <why>`: the reviewer never holds an item it couldn't judge.
+When a build ends, `ask` starts a `review` chore in the same transaction as
+gate 1: the reviewer (routing.json `roles.reviewer`, by default the local
+model; eki/chores.py) reads whether the diff does what the spec and the
+builder's summary say while the checks run. The item stays `judging` until
+both have ended (`ended`); then selfwork reads the review's last `REVIEW:`
+line (`read`). With gate 1 green, `ok` proposes the item; a first `no` sends
+it back to be built once more with the objection in its brief; a second `no`
+proposes it with the objection kept, and the queue never takes it by itself.
+A review that can't judge — no reviewer that can run, the setting off, a
+failed run or an answer without the line — is `none: <why>`: the reviewer
+never holds an item it couldn't judge.
 
-Nothing is held in memory: `conclude` reads the item, its review run and the
-chore, and moves the item once, under `db.tx`, with a state re-check.
+Items left in `reviewing` by an older eki (the review used to start after
+gate 1) are still moved on by `conclude`. Nothing is held in memory: each
+reads the item, its runs and the chore, and moves the item once, under
+`db.tx`, with a state re-check.
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ DIFF_MAX = 40000
 
 PROMPT = """\
 You are a second reader of a change to eki, a program on this Mac. Another
-agent built the change; its checks passed. Read it and judge it — do not
+agent built the change; its checks are running beside you. Read it and judge it — do not
 change anything.
 
 The goal the change is part of:
@@ -64,20 +67,43 @@ def _settle(conn: sqlite3.Connection, it: sqlite3.Row, why: str) -> List[str]:
     return [f"item {it['id']}: fit — proposed on {it['branch']} (not reviewed: {why})"]
 
 
-def start(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
-    """Called under db.tx when gate 1 is green: review the item, or propose it as it is."""
+def ask(conn: sqlite3.Connection, it: sqlite3.Row) -> Tuple[Optional[str], str]:
+    """Called under db.tx with the item's new commit written: start its review
+    chore. (review run id, '') or (None, why). It never moves the item."""
     if not selfwork.settings().get("review", True):
-        return _settle(conn, it, "self.review is off")
+        return None, "self.review is off"
     goal = conn.execute("SELECT text, owner FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     priority = "now" if goal is None or goal["owner"] == "you" else "background"
     pick = roles.pick("reviewer", conn, background=priority == "background")
     if pick.provider is None:
-        return _settle(conn, it, "the reviewer role is off" if pick.target == "off" else pick.why)
+        return None, "the reviewer role is off" if pick.target == "off" else pick.why
     rid = chores.start(conn, "review", it["id"], prompt(conn, it), priority, role="reviewer")
-    if rid is None:
-        return _settle(conn, it, "no reviewer")
-    selfwork._set(conn, it["id"], state="reviewing", review_run=rid, review=None)
-    return [f"item {it['id']}: fit — reviewing ({rid[:8]})"]
+    return (rid, "") if rid is not None else (None, "no reviewer")
+
+
+def ended(conn: sqlite3.Connection, it: sqlite3.Row) -> bool:
+    """No review run, or it is no longer going."""
+    run = store.run(conn, it["review_run"]) if it["review_run"] else None
+    return run is None or run["state"] not in store.ACTIVE
+
+
+def read(conn: sqlite3.Connection, it: sqlite3.Row) -> Tuple[Optional[str], str]:
+    """Called under db.tx once the review run ended: ('ok' | 'no' | None, why),
+    and its chore closed."""
+    run = store.run(conn, it["review_run"]) if it["review_run"] else None
+    said, why = (None, "")
+    if run is None:
+        why = "the review run is gone"
+    elif run["state"] != "done":
+        why = f"the review run ended {run['state']}: {run['error'] or ''}".strip(" :")
+    else:
+        said, why = verdict(store.answer(conn, run["id"]))
+        if said is None:
+            why = "the review has no REVIEW: line"
+    chore = chores.latest(conn, "review", it["id"])
+    if chore is not None and it["review_run"] and chore["run_id"] == it["review_run"]:
+        chores.close(conn, chore["id"], "done" if said else "failed", f"{said}: {why}" if said else why)
+    return said, why
 
 
 def prompt(conn: sqlite3.Connection, it: sqlite3.Row) -> str:
@@ -107,26 +133,14 @@ def verdict(answer: str) -> Tuple[Optional[str], str]:
 
 
 def conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
-    """Move a `reviewing` item on once its review run has ended."""
-    run = store.run(conn, it["review_run"]) if it["review_run"] else None
-    if run is not None and run["state"] in store.ACTIVE:
+    """Move a legacy `reviewing` item on once its review run has ended."""
+    if not ended(conn, it):
         return []
-    said, why = (None, "")
-    if run is None:
-        why = "the review run is gone"
-    elif run["state"] != "done":
-        why = f"the review run ended {run['state']}: {run['error'] or ''}".strip(" :")
-    else:
-        said, why = verdict(store.answer(conn, run["id"]))
-        if said is None:
-            why = "the review has no REVIEW: line"
-    chore = chores.latest(conn, "review", it["id"])
     with db.tx(conn):
         cur = conn.execute("SELECT state, reviews FROM items WHERE id=?", (it["id"],)).fetchone()
         if cur is None or cur["state"] != "reviewing":
             return []
-        if chore is not None and chore["run_id"] == it["review_run"]:
-            chores.close(conn, chore["id"], "done" if said else "failed", f"{said}: {why}" if said else why)
+        said, why = read(conn, it)
         if said is None:
             return _settle(conn, it, why)
         if said == "ok":

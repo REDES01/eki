@@ -46,6 +46,9 @@ def validate(spec: dict, folder: Path) -> List[str]:
     if not isinstance(h, dict) or not all(isinstance(k, str) and k.strip() and ":" not in k
                                           and isinstance(v, str) and "\n" not in v for k, v in h.items()):
         errs.append('"headers" must be an object of header names to string values')
+    o = spec.get("open", "")
+    if not isinstance(o, str) or o.startswith("/") or ".." in o.split("/") or "://" in o:
+        errs.append('"open" must be a page inside the folder, e.g. "slice/index.html"')
     i = spec.get("index", "index.html")
     if not isinstance(i, str) or not i.strip() or "/" in i:
         errs.append('"index" must be a file name, e.g. "index.html"')
@@ -64,6 +67,12 @@ def _headers(comp: Component) -> Dict[str, str]:
 def link(comp: Component, folder) -> str:
     """The URL `folder` is (or will be) served at; allots and records its port. Starts nothing."""
     return f"http://127.0.0.1:{ports.allot(folder)}{_prefix(comp)}"
+
+
+def entry(comp: Component, url: str) -> str:
+    """The page a run opens: the served base plus the card's `open` page, when it names one."""
+    o = str(comp.spec.get("open") or "")
+    return url + o if url and o else url
 
 
 def answers(port: int, folder) -> bool:
@@ -142,7 +151,7 @@ def for_run(folder, conn=None, by: str = "") -> str:
             return ""
         got = ensure(cards[0], checkout(folder), by=by)
         if got["up"]:
-            return got["url"]
+            return entry(cards[0], got["url"])
         log.warning("no serving link for %s: %s", folder, got["why"])
     except Exception as e:                        # noqa: BLE001 — a run never fails for its link
         log.warning("no serving link for %s: %s", folder, e)
@@ -160,7 +169,7 @@ def links(comp: Component) -> List[dict]:
     for st in _mine(comp):
         folder, port = st["served"], ports.get(st["served"])
         if port and servers.alive(st.get("pid")) and answers(port, folder):
-            out.append({"folder": folder, "url": f"http://127.0.0.1:{port}{_prefix(comp)}"})
+            out.append({"folder": folder, "url": entry(comp, f"http://127.0.0.1:{port}{_prefix(comp)}")})
     return out
 
 
@@ -170,7 +179,7 @@ def call(comp: Component, c: Call) -> Result:
     if not c.caller_dir or not os.path.isdir(c.caller_dir):
         return Result(error=f"{comp.name}: call it from the folder you want served")
     got = ensure(comp, checkout(c.caller_dir), by=c.caller_run or c.run_id)
-    return Result(text=got["url"]) if got["up"] else Result(error=got["why"])
+    return Result(text=entry(comp, got["url"])) if got["up"] else Result(error=got["why"])
 
 
 def is_up(comp: Component) -> bool:

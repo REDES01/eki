@@ -129,3 +129,29 @@ def test_the_journal_keeps_the_callers_link(game, home, monkeypatch):
     res = agent.call(playtester_in(game), call_from(game))
     kept = json.loads((Path(res.paths[0]) / "session.json").read_text())
     assert kept["url"] == link
+
+
+def test_open_names_the_page_a_run_opens(proj, home, conn):
+    """A serve card's `open` page is what EKI_SERVE_URL and the playtester point at (the game's slice)."""
+    (proj / "slice").mkdir()
+    (proj / "slice" / "index.html").write_text("<h1>slice</h1>\n")
+    workspace.git(proj, "add", "slice")
+    workspace.git(proj, "commit", "-q", "-m", "slice")
+    card(proj, "web", {"kind": "serve", "about": "the game", "path": "/chapter1/", "open": "slice/index.html"})
+    try:
+        wt = workspace.add(proj, "wo")
+        url = serve.for_run(str(wt), conn)
+        assert url.endswith("/chapter1/slice/index.html")
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            assert resp.read() == b"<h1>slice</h1>\n"
+    finally:
+        for st in servers.states():
+            servers.stop_pid(st.get("pid"), Path(st["state"]), st.get("name", ""))
+
+
+def test_open_must_stay_inside_the_folder(tmp_path):
+    for bad in ("/etc/passwd", "../x.html", "http://x/y"):
+        assert any('"open"' in e for e in serve.validate({"kind": "serve", "about": "x", "open": bad}, tmp_path))
+    assert not any('"open"' in e for e in serve.validate({"kind": "serve", "about": "x", "open": "slice/index.html"},
+                                                         tmp_path))

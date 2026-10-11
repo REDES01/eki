@@ -12,8 +12,8 @@ import re
 from typing import Callable, List, Optional, Tuple
 
 from . import (api_artifacts, api_cardadd, api_cardedit, api_cardinstructions, api_cardknowledge, api_cardmcp,
-               api_cardrun, api_cards, api_cardsessions, api_cardskills, api_components, api_customize, api_doc,
-               api_docsearch, api_projects, api_schedule, api_workflow)
+               api_cardrun, api_cards, api_cardsessions, api_cardskills, api_comfyui, api_components, api_customize,
+               api_doc, api_docsearch, api_projects, api_schedule, api_workflow)
 
 Route = Tuple[str, str, Callable]
 
@@ -24,7 +24,7 @@ def routes() -> List[Route]:
             + api_components.ROUTES + api_cards.ROUTES + api_cardadd.ROUTES + api_cardedit.ROUTES
             + api_cardinstructions.ROUTES + api_cardrun.ROUTES + api_cardsessions.ROUTES + api_cardskills.ROUTES
             + api_cardknowledge.ROUTES + api_cardmcp.ROUTES + api_doc.ROUTES + api_docsearch.ROUTES
-            + api_workflow.ROUTES)
+            + api_workflow.ROUTES + api_comfyui.ROUTES)
 
 
 ROUTES: List[Route] = routes()

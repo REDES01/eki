@@ -1,8 +1,8 @@
 // An open card in the side panel (projectcards.js hosts it there; the panel's header has its name,
 // kind and about): its state, settings as a form built from component.json (each change saved and
-// checked by its kind — a problem shows beside the field and the saved value comes back), an agent's
-// prompt.md and its bare switch, Run (eki use <name> <args> through the engine, polled every second),
-// its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
+// checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
+// fixed choices, card.choices from its kind, is a dropdown), an agent's prompt.md and its bare switch,
+// Run (eki use <name> <args> through the engine, polled every second), its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
 // read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
 // A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro), close()},
 // from cardknowledge.js, cardmcp.js) gets a section under its title; passive kinds have no Run or Uses.
@@ -35,15 +35,31 @@
 
   // ---- settings -------------------------------------------------------------------------------
 
+  // a setting with a fixed set of values (card.choices, declared by its kind) is a dropdown, or the switch
+  // when its values are true/false; one the spec lacks shows its card.choice_defaults value
+  const choices = () => P.card.choices || {};
+  const bools = (cs) => cs.length > 0 && cs.every((c) => typeof c === "boolean");
+
   function fields() {
-    const spec = P.card.spec || {};
+    const spec = P.card.spec || {}, defs = P.card.choice_defaults || {};
     const keys = Object.keys(spec).filter((k) => k !== "kind" && k !== "pool");
+    for (const k of Object.keys(choices())) if (!keys.includes(k) && k in defs) keys.push(k);
     if (isAgent() && !keys.includes("bare")) keys.push("bare");
-    return keys.map((k) => ({ key: k, value: k === "bare" && !(k in spec) ? false : spec[k] }));
+    return keys.map((k) => ({ key: k, value: k in spec ? spec[k] : k in defs ? defs[k] : k === "bare" ? false : undefined }));
+  }
+
+  // a value outside the choices stays: the first option, selected and marked, until another is picked
+  function choice(f, cs, at) {
+    const bad = !cs.some((c) => c === f.value);
+    const shown = f.value == null ? "" : typeof f.value === "object" ? JSON.stringify(f.value) : f.value;
+    const opt = (c, on) => `<option value="${esc(c)}"${on ? " selected" : ""}>${esc(c)}</option>`;
+    return `<select class="set-in${bad ? " invalid" : ""}" ${at} data-type="${bools(cs) ? "boolchoice" : "choice"}">${bad ? opt(shown, true) : ""}${
+      cs.map((c) => opt(c, !bad && c === f.value)).join("")}</select>${bad ? `<div class="pj-err set-bad">not one of: ${esc(cs.join(", "))}</div>` : ""}`;
   }
 
   function control(f, off) {
-    const v = f.value, dis = off ? " disabled" : "", at = `data-key="${esc(f.key)}"${dis}`;
+    const v = f.value, dis = off ? " disabled" : "", at = `data-key="${esc(f.key)}"${dis}`, cs = choices()[f.key];
+    if (Array.isArray(cs) && cs.length && !(bools(cs) && typeof v === "boolean")) return choice(f, cs, at);
     if (typeof v === "boolean") return `<label class="set-check"><input type="checkbox" ${at} data-type="bool"${v ? " checked" : ""}> ${v ? "true" : "false"}</label>`;
     if (typeof v === "number") return `<input class="set-in" type="number" step="any" ${at} data-type="number" value="${esc(v)}">`;
     if (Array.isArray(v)) return `<textarea class="set-in pp-list" rows="${Math.min(8, Math.max(2, v.length + 1))}" ${at} data-type="list" spellcheck="false">${esc(v.join("\n"))}</textarea>`;
@@ -68,6 +84,7 @@
   function valueOf(el) {
     const t = el.dataset.type;
     if (t === "bool") return el.checked;
+    if (t === "boolchoice") return el.value === "true" ? true : el.value === "false" ? false : el.value;
     if (t === "number") return el.value.trim() === "" ? null : Number(el.value);
     if (t === "list") return el.value.split("\n").map((s) => s.trim()).filter(Boolean);
     if (t === "json") return JSON.parse(el.value);
@@ -242,7 +259,7 @@
     const part = kindPart(), box = q(".pp-kind");
     if (part && box) part.draw(box, P.card, P.pid, P.ro);
     const a = document.activeElement;
-    const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea");
+    const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea, select");
     if (!(typing && a.closest(".pp-settings"))) put(".pp-settings", settings());
     if (!(typing && a.closest(".pp-prompt"))) put(".pp-prompt", prompt());
     put(".pp-runout", runPart());

@@ -44,6 +44,9 @@
   border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
 .pp textarea.set-in { resize: vertical; font: 12px/1.45 ui-monospace, Menlo, monospace; }
 .pp .set-in:disabled, .pp textarea:disabled { opacity: .75; }
+.pp select.set-in.invalid { border-color: var(--red); color: var(--red); }
+.pp select.set-in.invalid option { color: var(--text); }
+.pp .set-bad { margin-top: 3px; font-size: 12px; }
 .pp .set-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .pp-prompt textarea.set-in { font-family: inherit; font-size: 13px; }
 .pp-args { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }

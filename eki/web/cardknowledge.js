@@ -22,6 +22,10 @@
     if (el && K.last[sel] !== html) { el.innerHTML = html; K.last[sel] = html; }
   }
   const editable = () => !K.ro && !K.card.ref;
+  // the project folder: a project card lives in <folder>/components/<name>
+  const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(K.card.card || "")); return m ? m[1] : ""; };
+  const beside = (rel) => root() && !/[*?[]/.test(rel) ? `<button type="button" class="pj-btn ck-beside"
+      data-file="${esc(root() + "/" + rel)}" title="Open beside the chat">Open in panel</button>` : "";
 
   async function api(path, body) {
     const r = await fetch(path, body === undefined ? {} : {
@@ -59,7 +63,7 @@
         ${f.missing ? '<span class="pj-err">missing</span>'
           : `<span class="dim ck-size">${esc(size(f.size))}</span>
              <span class="dim ck-when">${esc(ago(f.changed))}</span>
-             <span class="dim ck-who">${esc(f.author || "")}</span>`}</div>`).join("");
+             <span class="dim ck-who">${esc(f.author || "")}</span>${beside(f.path)}`}</div>`).join("");
   }
 
   async function load() {
@@ -139,7 +143,7 @@
       }
       return;
     }
-    if (e.type !== "click") return;
+    if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one beside the chat
     const b = t.closest("[data-ck]");
     if (b && b.dataset.ck === "close") { K.open = null; K.file = null; K.mode = "view"; put(".ck-list", list()); return put(".ck-file", filePart()); }
     if (b && b.dataset.ck === "edit" && editable()) {

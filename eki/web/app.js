@@ -19,7 +19,10 @@
   }
 
   function stepLine(s) {
-    if (s.kind === "tool") return `<div class="step"><b>${md.esc(s.name || "")}</b> ${md.esc(s.detail || "")}</div>`;
+    if (s.kind === "tool") {
+      const detail = md.esc(s.detail || "");                     // a .md path in it opens in the side panel
+      return `<div class="step"><b>${md.esc(s.name || "")}</b> ${typeof md.linkPaths === "function" ? md.linkPaths(detail) : detail}</div>`;
+    }
     if (s.kind === "handoff") return `<div class="step warn">↪ handed off: ${md.esc(s.reason || "needs tools")}</div>`;
     if (s.kind === "interrupted") return `<div class="step warn">interrupted — resuming</div>`;
     return `<div class="step warn">${md.esc(s.text || s.kind)}</div>`;

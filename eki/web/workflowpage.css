@@ -1,0 +1,20 @@
+/* The Workflow page (workflowpage.js): a thin bar, a banner when there is no card, and the canvas
+   filling the rest. The canvas is workflowcanvas.js's; this only gives it its box, dark with a dot grid. */
+#workflow-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 16px 16px; gap: 8px; }
+#workflow-view[hidden], #workflow-view [hidden] { display: none; }
+#workflow-view .grow { flex: 1; min-width: 0; }
+.wf-bar { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.wf-back { color: var(--dim); text-decoration: none; }
+.wf-back:hover { color: var(--text); }
+.wf-banner { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.wf-broken { border-color: var(--red); color: var(--red); }
+.wf-err { padding: 0 4px; }
+.wf-canvas { position: relative; flex: 1; min-height: 320px; overflow: hidden; border-radius: 12px;
+  border: 1px solid var(--line); touch-action: none;
+  background-color: color-mix(in srgb, var(--bg) 70%, #000);
+  background-image: radial-gradient(color-mix(in srgb, var(--dim) 35%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px; }
+.wf-empty { padding: 24px; font-size: 13px; }
+.pj-wf { float: right; font-size: 13px; color: var(--teal); text-decoration: none; padding: 2px 6px; }
+.pj-wf:hover { text-decoration: underline; }

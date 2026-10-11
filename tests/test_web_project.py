@@ -108,3 +108,14 @@ def dispatch(tmp_path, hash_):
 ])
 def test_nav_routes_projects(tmp_path, hash_, want):
     assert dispatch(tmp_path, hash_) == want
+
+
+def test_the_project_header_links_its_workflow_page(web):
+    js = get(web + "/ui/project.js")[1]
+    assert 'href="#project/${encodeURIComponent(p.id)}/workflow">Workflow</a>' in js
+    page = get(web + "/")[1]
+    order = [page.index(f"/ui/{f}") for f in ("project.js", "workflowcanvas.js", "workflowinspect.js", "workflowpage.js")]
+    assert order == sorted(order)
+    code, wf = get(web + "/ui/workflowpage.js")
+    assert code == 200 and '"/workflow"' in wf and "No workflow card: these are the defaults." in wf
+    assert get(web + "/ui/workflowpage.css")[0] == 200

@@ -61,3 +61,11 @@ def test_pictures_shows_artifacts_filtered_and_lights_it(tmp_path):
 def test_pictures_falls_back_to_the_gallery_while_there_is_no_artifacts_view(tmp_path):
     got = nav(tmp_path, views=["pictures"], hash="pictures")
     assert got["shown"] == [["pictures", "picture"]]
+
+
+def test_a_projects_workflow_routes_to_its_page_and_lights_projects(tmp_path):
+    got = nav(tmp_path, ["project/p1/workflow", "project/p1", "project/eki/workflow"], ["workflow", "project"],
+              hash="project/p1/workflow")
+    assert got["routes"] == [["workflow", "p1"], ["project", "p1"], ["workflow", "eki"]]
+    assert got["shown"] == [["workflow", "p1"]]
+    assert got["lit"] == ["projects"]

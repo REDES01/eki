@@ -68,7 +68,8 @@
     S.home = p.user_home || S.home;
     $("title").textContent = p.name;
     $("meta").textContent = [p.kind, p.repo, p.instructions].filter(Boolean).join(" · ");
-    put("pj-top", window.projectMenu ? window.projectMenu.button(p) : "");     // ⋯ → Delete project… (projectmenu.js)
+    put("pj-top", (window.projectMenu ? window.projectMenu.button(p) : "") +     // ⋯ → Delete project… (projectmenu.js)
+      `<a class="pj-wf" href="#project/${encodeURIComponent(p.id)}/workflow">Workflow</a>`);   // the graph (workflowpage.js)
     if (!S.editing) put("pj-desc", desc(p));
     put("pj-head", `<div>${p.folder ? `Chats work in <code>${esc(p.folder)}</code> — your real folder.` : "Chats need a folder — none yet."}</div>
       <div class="dim">Background: ${esc(p.background || "none")}</div>`);

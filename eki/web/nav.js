@@ -1,7 +1,7 @@
 // The page's addresses. #projects, #artifacts, #scheduled, #customize,
 // #station and #settings are views that take #main's place, and
-// #project/<id> is one project's page; any other hash is a thread id, and
-// none is a new thread. #settings/<section> is one section of Settings,
+// #project/<id> is one project's page (#project/<id>/workflow its workflow);
+// any other hash is a thread id, and none is a new thread. #settings/<section> is one section of Settings,
 // #customize/<tab> one tab of Customize, and the old #pictures is Artifacts
 // showing pictures. The address is the whole state, so a refresh reopens the
 // same view.
@@ -22,9 +22,11 @@
     try { return decodeURIComponent(location.hash.slice(1)); } catch (e) { return location.hash.slice(1); }
   }
 
-  // "project/<id>" is the project view with its id, "settings/<section>" one section of
-  // Settings, "customize/<tab>" one tab of Customize; a reserved name is its own view.
+  // "project/<id>" is the project view with its id, "project/<id>/workflow" its Workflow page,
+  // "settings/<section>" one section of Settings, "customize/<tab>" one tab of Customize; a reserved name is its own view.
   function route(name) {
+    const w = /^project\/(.+)\/workflow$/.exec(name);
+    if (w) return ["workflow", w[1]];
     const m = /^project\/(.+)$/.exec(name);
     if (m) return ["project", m[1]];
     const s = /^(settings|customize)\/(.+)$/.exec(name);
@@ -39,8 +41,8 @@
     let [view, arg] = route(name);
     if (view === "artifacts" && !views.artifacts && views.pictures) view = "pictures";   // a build from before Artifacts
     $("app").dataset.view = view;
-    // a project's page lights up Projects; the old Pictures link is Artifacts
-    const link = view === "project" ? "projects" : view === "pictures" ? "artifacts" : view;
+    // a project's pages light up Projects; the old Pictures link is Artifacts
+    const link = view === "project" || view === "workflow" ? "projects" : view === "pictures" ? "artifacts" : view;
     const lit = (id) => (id === "pictures" ? "artifacts" : id) === link;
     document.querySelectorAll("#side .side-link").forEach((a) => a.classList.toggle("on", lit(a.id) && !(view === "chat" && name)));
     if (view === "chat") openThread(name || null);

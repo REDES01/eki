@@ -60,6 +60,8 @@ def test_what_counts_as_a_judge(conn):
     with db.tx(conn):
         t = store.create_thread(conn, "t", None)
         gate1 = store.create_run(conn, t, selfwork.CHECK, provider="command")
+    assert not checkslots.waiting(conn, store.run(conn, gate1))     # alone, a judge takes a free slot
+    with db.tx(conn):
         gate2 = store.create_run(conn, t, queue.GATE2, provider="command")
         other = store.create_run(conn, t, '["ls"]', provider="command")
         fake = store.create_run(conn, t, "run bin/check please", provider="fake")
@@ -67,7 +69,7 @@ def test_what_counts_as_a_judge(conn):
     assert checkslots.is_judge(store.run(conn, gate2))
     assert not checkslots.is_judge(store.run(conn, other))
     assert not checkslots.is_judge(store.run(conn, fake))
-    assert not checkslots.waiting(conn, store.run(conn, gate1))
+    # (a wide gate 2 queued after it reserves its slots first: tests/test_check.py, docs/self-build.md)
 
 
 def test_an_agents_test_run_takes_a_slot_from_the_judges(home, conn):

@@ -68,3 +68,14 @@ def test_what_counts_as_a_judge(conn):
     assert not checkslots.is_judge(store.run(conn, other))
     assert not checkslots.is_judge(store.run(conn, fake))
     assert not checkslots.waiting(conn, store.run(conn, gate1))
+
+
+def test_an_agents_test_run_takes_a_slot_from_the_judges(home, conn):
+    from eki import testslots
+    slots(home, 1)
+    with db.tx(conn):
+        a = judge(conn, "a")
+    with testslots.hold(conn, wait=0.01):
+        assert checkslots.busy(conn) == 1
+        assert checkslots.waiting(conn, store.run(conn, a))
+    assert not checkslots.waiting(conn, store.run(conn, a))

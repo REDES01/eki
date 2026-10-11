@@ -40,7 +40,7 @@ def test_the_builder_runs_only_its_own_tests():
     b = _flat(selfbrief.build(**_build_kw()))
     assert "run `bin/check` before you finish" not in b
     assert "don't run the whole suite" in b
-    assert "run the tests for the files you touched" in b and "`bin/check tests/test_x.py`" in b
+    assert "run the tests for the files you touched" in b and "`eki slot -- bin/check tests/test_x.py`" in b
     assert "eki runs the whole check right after your turn" in b
 
 

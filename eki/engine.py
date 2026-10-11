@@ -5,8 +5,8 @@ process is gone: its run was *interrupted*, and goes back in the queue to
 be resumed) and spawns (queued runs, in order, one at a time per thread
 and per folder, background ones only when the Mac has room). Each kind of
 run is held only by its own limit: checks by check slots (checkslots.py),
-items being built by `self.parallel` before a build run exists
-(scheduler.py); everything else — chats, plans, reviews — starts at once.
+items being built by `machine.agents` (and each project's own cap) before
+a build run exists (scheduler.py); everything else — chats, plans, reviews — starts at once.
 There is no overall cap unless EKI_MAX_PARALLEL is set (`ceiling`).
 It holds no state of its own — stop it at any moment, start it again,
 and it picks up from the database. Workers it started keep running while it's gone.
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train
+from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, testslots, train
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -134,7 +134,9 @@ def spawn_ready(conn) -> int:
     busy_folders = {store.cwd_of(conn, r["thread_id"]) for r in active} - {None}
     cap = ceiling()
     slots = None if cap is None else cap - len(active)
-    judging, judge_slots = sum(1 for r in active if checkslots.is_judge(r)), checkslots.limit()
+    # agents' own test runs (`eki slot --`) hold check slots too
+    judging = sum(1 for r in active if checkslots.is_judge(r)) + testslots.held()
+    judge_slots = checkslots.limit()
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()

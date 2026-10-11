@@ -84,7 +84,9 @@ Your item: **{title}**
 Files you are expected to touch: {files}.
 {others}
 Rules: read the project's README and any CLAUDE.md or AGENTS.md first and keep
-its conventions; add or change tests for what you change; {check}; do not
+its conventions; add or change tests for what you change; {check}; start every
+test run through `eki slot -- `, e.g. `eki slot -- npm test`, so test runs
+across all agents share the machine's test slots (it waits for a free one); do not
 commit — eki commits what you leave here; do not ask questions — decide, and
 say what you decided.
 Never run `npm install`, `pip install` or any other install inside this
@@ -102,12 +104,12 @@ another item, or `ITEM: person <why>` if this needs a person's hands.
 
 def _check(project) -> str:
     if project["check_cmd"]:
-        return f"run `{project['check_cmd']}` before you finish and leave it green"
+        return f"run `eki slot -- {project['check_cmd']}` before you finish and leave it green"
     if "repo" in project.keys() and project["repo"]:
         return ("there is no check for this project; run the project's own tests before you finish "
                 "and leave them green")
     if projects.check_argv(project):
-        return "run `bin/check` before you finish and leave it green"
+        return "run `eki slot -- bin/check` before you finish and leave it green"
     return "run the project's own tests before you finish and leave them green"
 
 

@@ -65,10 +65,12 @@ Files you are expected to touch: {files}.
 Rules: read CLAUDE.md and docs/design.md first and keep the invariants; no
 module over 400 lines; add or change tests for what you change; don't run the
 whole suite (plain `bin/check`) — run the tests for the files you touched,
-e.g. `bin/check tests/test_x.py` (bin/check passes its arguments to pytest);
-eki runs the whole check right after your turn and sends any failure back; do
-not commit — eki commits what you leave here; do not ask questions — decide,
-and say what you decided.
+e.g. `eki slot -- bin/check tests/test_x.py` (bin/check passes its arguments
+to pytest); start every test run through `eki slot -- ` so test runs across all
+agents share the machine's test slots (it waits for a free one); eki runs the
+whole check right after your turn and sends any failure back; do not commit —
+eki commits what you leave here; do not ask questions — decide, and say what
+you decided.
 Never run `npm install`, `pip install` or any other install inside this
 worktree: node_modules and .venv are links to the project folder's own. If a
 dependency must change, edit package.json or the lockfile (or pyproject) and

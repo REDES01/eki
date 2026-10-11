@@ -1,0 +1,35 @@
+/* The workflow graph (workflowcanvas.js): stages as boxes in one row, arrows between them, the cards
+   that feed a stage as small side nodes on dotted links. Off stages faded and dashed; a red dot where
+   something failed or waits for a person. Dark like the window: the style.css variables. */
+.wf-canvas { position: relative; overflow: hidden; background: var(--bg); cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  background-image: radial-gradient(color-mix(in srgb, var(--dim) 28%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px; }
+.wf-canvas.wf-panning { cursor: grabbing; }
+.wf-svg { display: block; width: 100%; height: 100%; }
+.wf-svg text { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; fill: var(--text); }
+
+.wf-node, .wf-feed, .wf-link { cursor: pointer; }
+.wf-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.wf-node:hover .wf-box { stroke: color-mix(in srgb, var(--teal) 60%, var(--line)); }
+.wf-node.wf-sel .wf-box { stroke: var(--teal); stroke-width: 2.5; }
+.wf-title { font-weight: 650; font-size: 13px !important; }
+.wf-sum, .wf-n { fill: var(--dim) !important; }
+.wf-n { font-variant-numeric: tabular-nums; }
+.wf-lock { font-size: 11px !important; }
+.wf-dot { fill: var(--red); stroke: var(--bg); stroke-width: 2; }
+.wf-off { opacity: 0.45; }
+.wf-off .wf-box { stroke-dasharray: 5 4; fill: var(--panel); }
+.wf-off:hover { opacity: 0.75; }
+
+.wf-edge path { stroke: var(--dim); stroke-width: 1.5; fill: none; }
+#wf-arrow path { fill: var(--dim); }
+.wf-badge rect { fill: var(--teal); }
+.wf-badge text { fill: var(--bg) !important; font-weight: 650; font-size: 11px !important; }
+
+.wf-fbox { fill: var(--panel); stroke: var(--line); stroke-dasharray: 2 3; }
+.wf-feed:hover .wf-fbox { stroke: var(--teal); }
+.wf-fkind { fill: var(--dim) !important; font-size: 10px !important; text-transform: uppercase; letter-spacing: .04em; }
+.wf-flabel { font-size: 12px !important; }
+.wf-link path { stroke: var(--dim); stroke-width: 1.2; stroke-dasharray: 2 4; fill: none; opacity: 0.8; }
+.wf-note { fill: var(--dim) !important; font-size: 10.5px !important; font-style: italic; }

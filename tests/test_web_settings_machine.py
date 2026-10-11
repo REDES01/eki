@@ -42,7 +42,7 @@ def test_a_machine_block_is_written_and_read_back(web, home):
 def test_a_cap_out_of_range_is_refused(web, home):
     got = _read(web, "routing")
     code, out = post(web + "/api/settings/routing",
-                     {"data": {**got["data"], "machine": {"agents": 40}}, "mtime": got["mtime"]})
+                     {"data": {**got["data"], "machine": {"agents": 65}}, "mtime": got["mtime"]})
     assert code == 400 and "machine.agents" in out["problems"][0]
 
 

@@ -4,7 +4,7 @@
 // A field left empty is dropped, and an empty block drops the machine key.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const AGENTS = 12, MOST = 32;                                                  // machinecaps.AGENTS, MOST
+  const AGENTS = 12, MOST = { agents: 64, checks: 32 };                         // machinecaps.AGENTS, MOST
   const EVERY = 4000;
   const block = (d) => (d.machine && typeof d.machine === "object" ? d.machine : {});
   let open = false, got = null, timer = null;
@@ -15,7 +15,7 @@
   const summary = (d) => `${plural(agents(d), "agent")} · ${plural(checks(d), "test run")} at once`;
 
   function num(f, v, ph) {
-    return `<input class="set-in" type="number" min="1" max="${MOST}" data-f="${f}" value="${esc(v == null ? "" : v)}" placeholder="${esc(ph)}">`;
+    return `<input class="set-in" type="number" min="1" max="${MOST[f]}" data-f="${f}" value="${esc(v == null ? "" : v)}" placeholder="${esc(ph)}">`;
   }
 
   function form(d) {
@@ -58,7 +58,7 @@
     const f = el.dataset.f;
     if (f !== "agents" && f !== "checks") return false;
     const m = block(d), v = el.value.trim();
-    if (v === "") delete m[f]; else m[f] = +v;
+    if (v === "" || !isFinite(+v)) delete m[f]; else m[f] = Math.max(1, Math.min(MOST[f], Math.round(+v)));
     if (Object.keys(m).length) d.machine = m; else delete d.machine;
     const sum = document.querySelector("[data-machine-sum]");
     if (sum) sum.textContent = summary(d);

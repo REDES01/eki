@@ -62,6 +62,9 @@ def test_the_instructions_card(web):
                  '"unlinked"', "window.projectInstructions = { open, update, close }"):
         assert name in js, name
     assert len((WEB / "projectinstructions.js").read_text().splitlines()) < 250
+    assert 'data-pi="close"' not in js and "pc-pname" not in js            # the panel's header has those
+    knowledge = get(web + "/ui/cardknowledge.js")[1]
+    assert "ck-beside" not in knowledge and "Open in panel" not in knowledge
     grid = get(web + "/ui/projectcards.js")[1]
     for name in ("suggest", "Add instructions card", "projectinstructions.js", "lines", " missing"):
         assert name in grid, name

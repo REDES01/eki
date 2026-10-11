@@ -1,4 +1,5 @@
-// An open instructions card (projectcardpanel.js hands it over): the project's AGENTS.md rendered
+// An open instructions card in the side panel (projectcardpanel.js hands it over; the panel's header
+// has its name and about): the project's AGENTS.md rendered
 // with md.js, Edit to turn it into a text box (saved when you leave it or on ⌘S, then rendered
 // again), the files it points at under "Read first", and a "Link CLAUDE.md" fix when CLAUDE.md doesn't
 // include the file. In a project card the file's name and each Read first file are [data-file]: panel.js
@@ -23,11 +24,9 @@
   function head() {
     const c = I.card, f = info();
     const edit = editable() && I.mode === "view" ? '<button type="button" class="pj-btn" data-pi="edit">Edit</button>' : "";
-    return `<div class="pj-row"><b class="pc-pname">${esc(c.name)}</b><span class="dim">instructions</span>
-        ${f.exists && root() ? `<a href="#" class="pi-file"${file(f.file)} title="Open in the side panel"><code>${esc(f.file)}</code></a>`
+    return `<div class="pj-row">${f.exists && root() ? `<a href="#" class="pi-file"${file(f.file)} title="Open in the side panel"><code>${esc(f.file)}</code></a>`
           : `<code class="pi-file">${esc(f.file)}</code>`}${f.exists ? `<span class="dim">${esc(f.lines)} lines</span>` : ""}
         <span class="grow"></span>${edit}</div>
-      ${c.about ? `<div class="pj-sub">${esc(c.about)}</div>` : ""}
       ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}
       ${c.ref ? `<div class="pj-sub">From the pool component <b>${esc(c.ref)}</b> — read-only here.</div>`
         : I.ro ? `<div class="pj-sub">Read-only: ${esc(I.ro)}.</div>` : ""}`;

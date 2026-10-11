@@ -3,6 +3,8 @@
 `"server"` is `{"command", "args", "env"}` (stdio) or `{"url"}`. Nothing goes into eki's
 registry (~/.eki/mcp.json) or a program's own config: a project run gets its cards' servers
 merged with the registry for that run only. Env values never leave whole: `public()` masks them.
+A service card's `"mcp"` reaches runs the same way; for a run its command is wrapped in
+`eki mcp-hold` so that using the server holds the card (access, conflicts) like a call.
 """
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import copy
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -62,8 +65,21 @@ def _claude(server: dict) -> dict:
     return out
 
 
-def servers_of(folder, conn: Optional[sqlite3.Connection] = None) -> Dict[str, dict]:
-    """The project's mcp cards reachable from `folder`, by name, in Claude's format."""
+def _held(name: str, server: dict, folder, run_id: str) -> dict:
+    """A service card's command server, run through `eki mcp-hold` so using it holds the card."""
+    env = dict(server.get('env') or {})
+    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2])
+    if os.environ.get('EKI_HOME'):
+        env['EKI_HOME'] = os.environ['EKI_HOME']
+    args = ['-m', 'eki', 'mcp-hold', '--run', run_id, '--dir', os.path.abspath(str(folder)), name, '--',
+            server['command'], *list(server.get('args') or [])]
+    return {'command': sys.executable, 'args': args, 'env': env}
+
+
+def servers_of(folder, conn: Optional[sqlite3.Connection] = None,
+               run_id: Optional[str] = None) -> Dict[str, dict]:
+    """The project's mcp cards and service cards with "mcp" reachable from `folder`, by name,
+    in Claude's format; with `run_id`, a service card's command server is wrapped to hold it."""
     try:
         root = project_root(folder, conn)
     except Exception:
@@ -71,13 +87,20 @@ def servers_of(folder, conn: Optional[sqlite3.Connection] = None) -> Dict[str, d
     if root is None:
         return {}
     found, _ = own(root)
-    return {c.name: _claude(c.spec['server']) for c in found.values() if c.kind == 'mcp'}
+    out = {}
+    for c in found.values():
+        if c.kind == 'mcp':
+            out[c.name] = _claude(c.spec['server'])
+        elif c.kind == 'service' and isinstance(c.spec.get('mcp'), dict):
+            s = c.spec['mcp']
+            out[c.name] = _held(c.name, s, folder, run_id) if run_id and 'url' not in s else _claude(s)
+    return out
 
 
 def run_config(folder, run_id: str, conn: Optional[sqlite3.Connection] = None
                ) -> Tuple[Optional[str], List[str]]:
     """(the file for Claude's --mcp-config or None, Codex's -c flags) for one run."""
-    mine = servers_of(folder, conn)
+    mine = servers_of(folder, conn, run_id)
     if not mine or not run_id or '/' in run_id or run_id.startswith('.'):
         return mcp.claude_config(), mcp.codex_config()
     merged = {**mcp.servers(), **mine}            # a project card wins a name clash

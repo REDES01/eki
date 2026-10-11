@@ -12,6 +12,9 @@
         above with EKI_COMPONENT_URL set; stopped after `idle_stop` minutes.
     {"kind": "service", "about": "…", "provider": "comfyui"}
         one turn of that eki provider; the pictures it makes are the paths.
+Any form may add `"mcp": {"command", "args", "env"}` or `{"url"}` (an mcp card's
+"server"): this project's runs get that server under the card's name, and a run
+using a command server holds the card like a call does (mcpserver.servers_of).
 """
 from __future__ import annotations
 
@@ -40,6 +43,14 @@ def _argv(v: Any) -> List[str]:
 
 
 def validate(spec: dict, folder: Path) -> List[str]:
+    errs = _calls(spec)
+    if "mcp" in spec:
+        from . import mcpserver
+        errs += [f'"mcp": {e}' for e in mcpserver.validate({"server": spec["mcp"]}, folder)]
+    return errs
+
+
+def _calls(spec: dict) -> List[str]:
     forms = [k for k in ("run", "serve", "provider") if k in spec]
     if not forms:
         return ['a service needs "run", or "serve" + "health" + "call", or "provider"']
@@ -184,6 +195,10 @@ def notes(comp: Component) -> List[str]:
             out.append(f'"{k}" is a placeholder: fill it in before calling')
     if "provider" in spec:
         out.append(f"runs on eki's {spec['provider']} provider")
+    m = spec.get("mcp")
+    if isinstance(m, dict):
+        out.append(f"MCP over url: {m.get('url')}, not held" if "url" in m else
+                   "MCP: " + " ".join([str(m.get("command", ""))] + [str(a) for a in m.get("args") or []]))
     if "serve" in spec:
         out.append(f"server at {spec.get('url') or servers.health_url(spec)}, up" if servers.is_up(comp) else
                    f"server at {spec.get('url') or servers.health_url(spec)}, started on the first call")

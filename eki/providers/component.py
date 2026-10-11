@@ -1,7 +1,9 @@
 """A component call, as a run: what `eki use <name> [args…]` makes.
 
 The prompt is JSON — {"component": name, "args": [..], "caller_dir": abs
-path, "caller_run": id or null}. The component is found again from the
+path, "caller_run": id or null}; with "hold": true it is an MCP use of a
+service card's server (`eki mcp-hold`): it runs nothing and ends done at
+once — passing access.gate is what holds the card for its caller. The component is found again from the
 caller's folder (so a project's own one wins, as in `eki use`) and its
 kind's module does the call. The result's text is a `text` event, each
 output path a `tool` event; a result error, or an exception, fails the run
@@ -30,7 +32,7 @@ def parse(prompt: str) -> Dict[str, Any]:
     if not isinstance(got.get("caller_dir"), str) or not got["caller_dir"]:
         raise ValueError('a component call says its "caller_dir"')
     return {"component": got["component"], "args": args, "caller_dir": got["caller_dir"],
-            "caller_run": got.get("caller_run") or None}
+            "caller_run": got.get("caller_run") or None, "hold": got.get("hold") is True}
 
 
 class ComponentCall(Provider):
@@ -42,6 +44,10 @@ class ComponentCall(Provider):
         try:
             want = parse(turn.prompt)
             name = want["component"]
+            if want["hold"]:
+                emit("text", {"text": f"{name}: held for {want['caller_run']} (MCP)"})
+                out.finished = True
+                return out
             conn = db.connect()                      # resolve exactly as `eki use` did
             try:
                 comp = components.get(name, want["caller_dir"], conn)

@@ -47,14 +47,21 @@ def _priority(owner: str) -> str:
 
 
 def start_draft(conn: sqlite3.Connection, gid: str, wish: str, base: str, owner: str) -> str:
-    """Start the draft run for goal `gid` (inside the caller's tx)."""
+    """Start the draft run for goal `gid` (inside the caller's tx), in a
+    read-only worktree of the goal's repo: eki's own, or its project's."""
     from . import digest               # digest reads selfwork's settings: import it late
-    wt = workspace.add(integration.repo(), f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone()
+    repo = projects.repo_for(conn, goal) if goal is not None else integration.repo()
+    wt = workspace.add(repo, f"draft-{gid}", base=base, branch=f"eki/draft-{gid}")
     tid = store.create_thread(conn, f"draft: {wish}", str(wt), by="eki")
-    last = digest.latest()
-    old = Path(OLD).expanduser()
-    prompt = selfbrief.draft(wish, base, digest=str(last) if last else None,
-                             old=str(old) if old.exists() else None)
+    project = projects.get(conn, goal["project"]) if goal is not None and goal["project"] else None
+    if project is not None:
+        prompt = projectbrief.draft(wish, base, project)
+    else:
+        last = digest.latest()
+        old = Path(OLD).expanduser()
+        prompt = selfbrief.draft(wish, base, digest=str(last) if last else None,
+                                 old=str(old) if old.exists() else None)
     provider, model, effort = planner()
     rid = store.create_run(conn, tid, prompt, provider=provider, model=model, effort=effort,
                            row="code", priority=_priority(owner))
@@ -157,12 +164,26 @@ def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
             if goal is None:
                 conn.execute("UPDATE goals SET state='left', error=? WHERE id=?", (why, gid))
                 said = [f"goal {gid}: left — {why}"]
+            elif g["project"] and projects.get(conn, g["project"]) is None:
+                err = f"its project {g['project']} is gone"
+                conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, gid))
+                said = [f"goal {gid}: {err}"]
             else:
                 conn.execute("UPDATE goals SET text=?, drafted_at=? WHERE id=?", (goal, db.now(), gid))
-                start_plan(conn, gid, goal, integration.sync(), g["owner"])
+                start_plan(conn, gid, goal, _base(conn, g), g["owner"])
                 said = [f"goal {gid}: drafted → planning"]
-    workspace.remove(integration.repo(), f"draft-{gid}", delete_branch=True)
+    try:
+        repo = projects.repo_for(conn, g)
+    except KeyError:                   # the project is gone: nothing of it to clean
+        return said
+    workspace.remove(repo, f"draft-{gid}", delete_branch=True)
     return said
+
+
+def _base(conn: sqlite3.Connection, g: sqlite3.Row) -> str:
+    """Where a goal's plan starts: eki's integration tip, or its project's branch tip."""
+    project = projects.get(conn, g["project"]) if g["project"] else None
+    return integration.sync() if project is None else projects.base(project)
 
 
 def retry(conn: sqlite3.Connection, gid: str) -> str:

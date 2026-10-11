@@ -64,6 +64,28 @@ will build at the same time, each in a worktree of its own:
 {rest}
 """
 
+DRAFT = """\
+Draft a goal for {name} from this wish: {first}
+
+The whole wish, as the person typed it:
+
+{wish}
+
+This folder is a read-only worktree of {name} ({path}, branch {branch}) at
+commit {base}. Do not change any file here; you are only writing the goal.
+
+Read first: the project's own README, CLAUDE.md and AGENTS.md (whichever
+exist); then the code the wish touches.
+{known}
+{ask}"""
+
+DRAFT_KNOWLEDGE = """
+The project's knowledge documents (knowledge cards in components/), what each
+holds and how it is read:
+
+{cards}
+"""
+
 REST = """
 This is one round of a standing goal. When nothing is worth doing now, the
 right answer is one line saying why, then `ITEMS:` and an empty list `[]`.
@@ -170,6 +192,21 @@ def plan(goal: str, base: str, project, *, standing: bool = False) -> str:
                         base=base[:12], goal=goal.strip(), split=selfbrief.SPLIT_RULES,
                         rest=REST if standing else "") + known + "\n"
             + ENDING.format(context=CONTEXT_KEY if lines else ""))
+
+
+def draft(wish: str, base: str, project) -> str:
+    """The brief for a project goal's draft run; it ends with selfbrief.DRAFT_ASK, so
+    selfbrief.goal_in reads the answer."""
+    wish = wish.strip()
+    first = wish.splitlines()[0].strip() if wish else "(empty wish)"
+    try:
+        lines = _doc_lines(_cards(project))
+    except Exception:  # reading the documents never breaks the draft brief
+        lines = []
+    known = DRAFT_KNOWLEDGE.format(cards="\n".join(lines)) if lines else ""
+    return DRAFT.format(name=project["name"], path=project["path"], branch=project["branch"],
+                        base=base[:12], first=first, wish=wish or "(empty wish)", known=known,
+                        ask=selfbrief.DRAFT_ASK)
 
 
 def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, base: str,

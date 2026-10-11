@@ -83,20 +83,9 @@ to use it, what to check) and then one last line:
 another item, or `ITEM: person <why>` if this needs a person's hands.
 """
 
-DRAFT = """\
-Draft a goal for eki from this wish: {first}
-
-The whole wish, as the person typed it:
-
-{wish}
-
-This folder is a read-only worktree of eki's source at commit {base}. Do not
-change any file here; you are only writing the goal.
-
-Read first: docs/design.md, docs/self-build.md, ROADMAP.md and CLAUDE.md;
-{digest}; the output of `eki observe --since 7d --kind fault,correction` if it
-prints anything; then the code the wish touches.{old}
-
+#: the shared end of a draft brief (this one and eki/projectbrief.py draft): the four
+#: headings, the item-shape and AskUserQuestion rules, and the ending goal_in reads
+DRAFT_ASK = """\
 Then write the goal a planner will split into items, in four parts with these
 headings:
 
@@ -121,6 +110,22 @@ End your answer with a line `GOAL:` followed by the goal text, then a final
 line `DRAFT: done` — or `DRAFT: person <why>` when the wish can't be made into
 a goal.
 """
+
+DRAFT = """\
+Draft a goal for eki from this wish: {first}
+
+The whole wish, as the person typed it:
+
+{wish}
+
+This folder is a read-only worktree of eki's source at commit {base}. Do not
+change any file here; you are only writing the goal.
+
+Read first: docs/design.md, docs/self-build.md, ROADMAP.md and CLAUDE.md;
+{digest}; the output of `eki observe --since 7d --kind fault,correction` if it
+prints anything; then the code the wish touches.{old}
+
+{ask}"""
 
 RANK = """\
 Pick eki's next piece of self-work from its open ROADMAP.md entries, and draft
@@ -183,7 +188,7 @@ def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[s
     ref = (f"\n\nThe old eki's version of the same thing is at {old} — read it as reference\n"
            "only; do not copy it or change it.") if old else ""
     return DRAFT.format(first=first, wish=wish or "(empty wish)", base=base[:12],
-                        digest=seen, old=ref)
+                        digest=seen, old=ref, ask=DRAFT_ASK)
 
 
 def rank(entries: List[Any], base: str, *, digest: Optional[str] = None,

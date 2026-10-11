@@ -193,3 +193,36 @@ def test_a_restart_between_run_and_conclude_concludes_from_the_goals_table(conn,
         assert selfdraft.conclude(fresh, g) == []                        # once only
     finally:
         fresh.close()
+
+
+def test_a_project_goal_drafts_in_the_projects_repo(conn, src, tmp_path, monkeypatch):
+    from pathlib import Path
+    from eki import projects
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    (repo / "app.py").write_text("print('hi')\n")
+    (repo / "README.md").write_text("# proj\n")
+    workspace.git(repo, "init", "-q", "-b", "trunk")
+    workspace.git(repo, "add", "-A")
+    workspace.git(repo, "commit", "-q", "-m", "first")
+    pid = projects.add(conn, repo, check="true")
+    project = projects.get(conn, pid)
+    gid = selfwork.submit(conn, "greet people", draft=True, project=pid)
+    g = goal(conn, gid)
+    assert g["state"] == "drafting"
+    run = store.run(conn, g["draft_run"])
+    wt = store.cwd_of(conn, run["thread_id"])
+    assert wt.endswith(f"draft-{gid}")
+    common = Path(workspace.git(wt, "rev-parse", "--git-common-dir"))
+    common = common if common.is_absolute() else Path(wt) / common
+    assert common.resolve() == (repo / ".git").resolve()
+    assert workspace.git(wt, "rev-parse", "HEAD") == projects.base(project)
+    assert project["name"] in run["prompt"] and "docs/self-build.md" not in run["prompt"]
+    says(tmp_path, monkeypatch, DRAFTED)
+    run_inline(conn, run["id"])
+    assert f"goal {gid}: drafted → planning" in selfwork.tick(conn)
+    g = goal(conn, gid)
+    assert g["state"] == "planning"
+    assert f"draft-{gid}" not in workspace.git(repo, "worktree", "list")
+    assert not workspace.git(repo, "branch", "--list", f"eki/draft-{gid}")
+    assert workspace.belongs(store.cwd_of(conn, store.run(conn, g["plan_run"])["thread_id"]), repo)

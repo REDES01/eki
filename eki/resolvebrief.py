@@ -39,6 +39,11 @@ CHECK_PROJECT = """\
 Then run the project's check, `{cmd}`, and leave it green — the project's
 queue checks the result with the changes under it."""
 
+CHECK_RULES = """\
+Then run the project's rules whose paths match the files your change touches,
+and leave them green — eki runs them again right after your turn.
+{rules}"""
+
 CHECK_NONE = """\
 The project has no check; run the project's own tests for what you touched
 and leave them green."""
@@ -122,8 +127,13 @@ def resolve(*, goal: str, title: str, spec: str, summary: str, head: str, confli
         who, check = WHO_EKI.format(head=head[:12]), CHECK_EKI
     else:
         who = WHO_PROJECT.format(name=project["name"], path=project["path"], head=head[:12])
+        from . import workflow, workflowgates
+        wf = workflow.of_project(None, project)
         cmd = check_cmd(project)
-        check = CHECK_PROJECT.format(cmd=cmd) if cmd else CHECK_NONE
+        if wf is not None and wf.rules:
+            check = CHECK_RULES.format(rules=workflowgates.rules_said(wf))
+        else:
+            check = CHECK_PROJECT.format(cmd=cmd) if cmd else CHECK_NONE
     return BRIEF.format(first=FIRST_LINE, who=who, check=check, goal=goal.strip(), title=title,
                         spec=spec.strip() or "(no spec)",
                         summary=(summary or "").strip() or "(nothing said)",

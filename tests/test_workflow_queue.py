@@ -140,3 +140,46 @@ def test_set_autonomy_writes_from_a_build_of_this_home(tmp_path, monkeypatch):
     monkeypatch.setattr(queue, "_here", lambda: here)
     queue.set_autonomy("propose")
     assert workflow.of_project(None, None).merge == "person"
+
+
+RULES = [{"name": "text", "paths": ["*.txt"], "run": "echo each"}]
+
+
+def test_with_rules_gate_two_runs_batch_command_on_the_tip(conn, folder):
+    p = project(conn, folder)
+    card(folder, checks=["self", "command", "batch"], command=RULES, batch_command="echo together")
+    a = item(conn, p, "Line two", {"a.txt": "one\nTWO\nthree\n"})
+    b = item(conn, p, "Bee", {"b.txt": "bee two\n"})
+    projectqueue.tick(conn)
+    B = get(conn, b)
+    assert B["gate2_run"] and not get(conn, a)["gate2_run"]
+    run = run_inline(conn, B["gate2_run"])
+    assert run["prompt"] == json.dumps(["/bin/sh", "-c", "echo together", "eki-judge"])
+    assert store.thread(conn, run["thread_id"])["cwd"] != str(folder)      # the stack's tip, in a gate tree
+    for _ in range(3):
+        projectqueue.tick(conn)
+    assert get(conn, a)["state"] == get(conn, b)["state"] == "applied"
+
+
+def test_with_rules_a_red_batch_bisects_to_the_bad_item(conn, folder):
+    p = project(conn, folder)
+    card(folder, checks=["self", "command", "batch"], command=RULES, batch_command="test ! -f bad.txt")
+    good = item(conn, p, "Good", {"b.txt": "bee two\n"})
+    bad = item(conn, p, "Bad", {"bad.txt": "nope\n"})
+    projectqueue.tick(conn)
+    run_inline(conn, get(conn, bad)["gate2_run"])
+    projectqueue.tick(conn)
+    run_inline(conn, get(conn, good)["gate2_run"])
+    projectqueue.tick(conn)
+    assert get(conn, good)["state"] == "applied"
+    projectqueue.tick(conn)
+    it = get(conn, bad)
+    assert it["state"] == "unfit" and it["gate2"] == "red"
+    assert not (folder / "bad.txt").exists()
+
+
+def test_batch_argv_is_the_string_command_without_batch_command(conn, folder):
+    p = project(conn, folder, check="false")
+    card(folder, checks=["self", "command", "batch"], command="make all")
+    want = json.dumps(["/bin/sh", "-c", "make all", "eki-judge"])
+    assert projects.batch_argv(p) == want == projects.check_argv(p)

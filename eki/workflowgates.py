@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import builds, projectwork, workflow
+from . import builds, pathrules, projectwork, workflow
 
 #: what an item says for the review when the project's card doesn't choose it
 NO_REVIEW = "not in this project's workflow"
@@ -62,14 +62,17 @@ def single(conn: sqlite3.Connection, project: Optional[str]) -> bool:
     return wf is not None and wf.plan == "single"
 
 
-def gate(wf: workflow.Workflow, title: str) -> Optional[Tuple[str, str]]:
+def gate(wf: workflow.Workflow, title: str, touched: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
     """Gate 1 for a project item under its card: (command run argv JSON, what it runs),
-    or None when the card chooses no gate run (self only)."""
-    lines = []
-    if workflow.has(wf, "command") and wf.command.strip():
-        lines.append(wf.command)
+    or None when the card chooses no gate run (self only). A card with path rules runs the
+    rules matching `touched` (the item's changed files) all in one run."""
+    lines, says = [], []
+    if workflow.has(wf, "command") and (wf.command.strip() or wf.rules):
+        lines.append(workflow.check_line(wf, touched or []))
+        says.append(_chosen(wf, touched or []) if wf.rules else wf.command)
     if workflow.has(wf, "playtester"):
         lines.append(f"eki use {shlex.quote(wf.playtester)} {shlex.quote(f'play the change: {title}')}")
+        says.append(lines[-1])
     if len(lines) > 1:                     # the command as written, whatever its own operators
         line = f"( {lines[0]}\n) && {lines[1]}"
     elif lines:
@@ -78,7 +81,22 @@ def gate(wf: workflow.Workflow, title: str) -> Optional[Tuple[str, str]]:
         line = f"echo {shlex.quote(workflow.said(wf))}"
     else:
         return None
-    return json.dumps(["/bin/sh", "-c", line, "eki-judge"]), " && ".join(lines) or workflow.said(wf)
+    return json.dumps(["/bin/sh", "-c", line, "eki-judge"]), " && ".join(says) or workflow.said(wf)
+
+
+def _chosen(wf: workflow.Workflow, touched: List[str]) -> str:
+    """The rules gate 1 runs for these files, as judged_by says them: 'story files: npm run
+    check:story · code: …', or the NOTHING note when none matched."""
+    rules = pathrules.chosen(wf.rules, touched)
+    return " · ".join(f"{pathrules.label(r)}: {r.run}" for r in rules) or pathrules.NOTHING
+
+
+def rules_said(wf: workflow.Workflow) -> str:
+    """A rules card's gate 1 for a builder brief, in the board's words with each rule's paths:
+    'Each change: story files (design/script/**, …) → `npm run check:story` · …'."""
+    return "Each change: " + " · ".join(
+        f"{r.name + ' (' + ', '.join(r.paths) + ')' if r.name else ', '.join(r.paths)} → `{r.run}`"
+        for r in wf.rules)
 
 
 def told(conn: sqlite3.Connection, goal: sqlite3.Row, said: List[str]) -> List[str]:

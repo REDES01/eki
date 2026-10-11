@@ -142,12 +142,22 @@ def base(project: sqlite3.Row) -> str:
     return workspace.git(where, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
 
 
-def check_argv(project: sqlite3.Row) -> Optional[str]:
+def check_argv(project: sqlite3.Row, touched: Optional[List[str]] = None) -> Optional[str]:
     """Gate 1 as a command run's JSON argv, or None when the project has no check.
-    A project's workflow card, when it has one, holds the command (eki/workflow.py)."""
+    A project's workflow card, when it has one, holds the command (eki/workflow.py); a card
+    with path rules runs the rules matching `touched`, the files the change touched."""
     from . import workflow
     card = workflow.of_project(None, project)
-    cmd = (card.command or None) if card is not None else legacy_check(project)
+    cmd = workflow.check_line(card, touched or []) if card is not None else legacy_check(project)
+    return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"]) if cmd else None
+
+
+def batch_argv(project: sqlite3.Row) -> Optional[str]:
+    """Gate 2 as a command run's JSON argv: the card's batch_command (its command when that is
+    text), else the row's own check; None when there is nothing to run."""
+    from . import workflow
+    card = workflow.of_project(None, project)
+    cmd = (card.batch_command or None) if card is not None else legacy_check(project)
     return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"]) if cmd else None
 
 

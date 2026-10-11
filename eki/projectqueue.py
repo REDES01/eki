@@ -132,7 +132,7 @@ def _judge(conn: sqlite3.Connection, project: sqlite3.Row, stack: List[sqlite3.R
     wf = workflow.of_project(conn, project)
     if wf is not None and not workflow.has(wf, "batch"):
         return _not_batched(conn, wf, stack)
-    argv = projects.check_argv(project)
+    argv = projects.batch_argv(project)
     if argv is not None:
         return queue._judge(conn, stack, start=lambda c, s, lo, top: _start_gate2(c, project, argv, s, lo, top))
     said = []

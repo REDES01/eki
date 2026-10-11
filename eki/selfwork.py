@@ -239,7 +239,7 @@ def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sq
     error = None if verdict == "done" else f"partial: {reason}"
     wf = workflow.of_project(conn, project) if project is not None else None
     if wf is not None:                 # the project's workflow card chooses the gates
-        got = workflowgates.gate(wf, it["title"])
+        got = workflowgates.gate(wf, it["title"], touched)
         if got is None:                # checks: self only — the builder's own word stands
             _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
                  verdict=workflow.said(wf), error=error, judged_by=None, review=f"none: {workflowgates.NO_REVIEW}")

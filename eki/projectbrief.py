@@ -103,6 +103,11 @@ another item, or `ITEM: person <why>` if this needs a person's hands.
 
 
 def _check(project) -> str:
+    from . import workflow, workflowgates
+    wf = workflow.of_project(None, project)
+    if wf is not None and wf.rules:
+        return ("run the rules whose paths match the files you touch (each as `eki slot -- <command>`) "
+                f"before you finish and leave them green — {workflowgates.rules_said(wf)}")
     if project["check_cmd"]:
         cmd = project["check_cmd"]
         return f"run `{cmd}` (as `eki slot -- {cmd}`) before you finish and leave it green"

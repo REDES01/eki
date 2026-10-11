@@ -25,6 +25,9 @@ ABOUT = "a persona with its own prompt.md, skills and target, called as a sessio
 #: settings whose values come from a fixed set, and the value used when the key is absent
 CHOICES = {'bare': [False, True]}
 CHOICE_DEFAULTS = {'bare': False}
+CHOICE_HELP = {'bare': {True: 'On: the agent gets only its system prompt — no skills, settings, project files '
+                              'or other tools.',
+                        False: 'Off: the agent gets its skills, settings and project files as usual.'}}
 
 
 def _names(spec: dict, key: str) -> List[str]:

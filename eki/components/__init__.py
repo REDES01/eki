@@ -59,6 +59,10 @@ ACCESS = ('queue', 'exclusive', 'shared')
 #: in its module's CHOICES (and CHOICE_DEFAULTS for the value used when the key is absent)
 CHOICES = {'access': list(ACCESS)}
 CHOICE_DEFAULTS = {'access': 'shared'}
+#: one line per value of a fixed choice, shown on hover; a kind adds its own in CHOICE_HELP
+CHOICE_HELP = {'access': {'queue': 'Calls wait in line and are served in order, a few at a time (slots).',
+                          'exclusive': 'One run holds it from first use until that run ends; others wait.',
+                          'shared': 'Any number of runs can use it at once.'}}
 NAME = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 RESERVED = {'sessions'}
 
@@ -100,6 +104,19 @@ def choices(kind: str) -> Dict[str, list]:
 def choice_defaults(kind: str) -> Dict[str, Any]:
     """Setting key -> the value used when a spec of `kind` lacks the key. Never raises."""
     return _merged(kind, 'CHOICE_DEFAULTS', CHOICE_DEFAULTS)
+
+
+def _json_key(v: Any) -> str:
+    return ('true' if v else 'false') if isinstance(v, bool) else str(v)
+
+
+def choice_help(kind: str) -> Dict[str, Dict[str, str]]:
+    """Setting key -> value (as JSON writes it: true/false) -> one line on what it means. Never raises."""
+    out: Dict[str, Dict[str, str]] = {}
+    for key, texts in _merged(kind, 'CHOICE_HELP', CHOICE_HELP).items():
+        if isinstance(texts, dict):
+            out[key] = {_json_key(v): str(t) for v, t in texts.items()}
+    return out
 
 
 def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[Path]:

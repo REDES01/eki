@@ -20,6 +20,8 @@ ABOUT = "files every agent of the project reads: always, or when relevant"
 #: settings whose values come from a fixed set (read has no default: it is required)
 CHOICES = {'read': ['always', 'when-relevant']}
 READ = tuple(CHOICES['read'])
+CHOICE_HELP = {'read': {'always': 'Every run in this project reads it before starting.',
+                        'when-relevant': 'Runs are told it exists and read it only when their work touches it.'}}
 
 
 def _bad_pattern(p) -> str:

@@ -100,7 +100,8 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
            "error": "", "notes": components._notes(c), "spec": _shown(c.kind, c.spec), "prompt": prompt,
            "instructions": None, "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
            "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c),
-           "choices": components.choices(c.kind), "choice_defaults": components.choice_defaults(c.kind)}
+           "choices": components.choices(c.kind), "choice_defaults": components.choice_defaults(c.kind),
+           "choice_help": components.choice_help(c.kind)}
     if c.kind == "skills":
         from .components import skillcard
         good, broken = skillcard.held(c.folder)
@@ -122,7 +123,8 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
             "folder": where, "error": why, "notes": [], "spec": _shown(kind, spec), "prompt": None,
             "instructions": None, "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
             "last_use": uses.last_use(conn, name, root), "links": [], "size": "",
-            "choices": components.choices(kind), "choice_defaults": components.choice_defaults(kind)}
+            "choices": components.choices(kind), "choice_defaults": components.choice_defaults(kind),
+            "choice_help": components.choice_help(kind)}
 
 
 def cards_of(conn: sqlite3.Connection, root: Path) -> List[Dict[str, Any]]:

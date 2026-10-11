@@ -50,3 +50,17 @@ def test_a_single_card_and_an_edited_one_carry_choices(conn, cards):
     assert edited["spec"]["read"] == "when-relevant"
     assert edited["choices"] == {"access": ACCESS, "read": ["always", "when-relevant"]}
     assert edited["choice_defaults"] == {"access": "shared"}
+
+
+def test_every_card_carries_choice_help(conn, cards):
+    got = listed(conn)
+    for name, kind in (("knowledge", "knowledge"), ("agent", "agent"), ("assets", "assets"), ("odd", "nope")):
+        assert got[name]["choice_help"] == components.choice_help(kind)
+    assert got["odd"]["choice_help"] == {"access": components.choice_help("")["access"]}
+    assert set(got["knowledge"]["choice_help"]["read"]) == {"always", "when-relevant"}
+    back = json.loads(json.dumps(got["agent"]))
+    assert set(back["choice_help"]["bare"]) == {"true", "false"}
+    one = api_cards.card_of(conn, "p1", "knowledge")
+    assert one["choice_help"] == components.choice_help("knowledge")
+    edited = call(conn, "POST", "/api/projects/p1/cards/knowledge", {"settings": {"read": "always"}})["card"]
+    assert edited["choice_help"] == components.choice_help("knowledge")

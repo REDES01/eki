@@ -1426,9 +1426,33 @@ items tables; it holds nothing. Where a goal or item is drawn:
   before it finishes; always on), `review` (a second reader agent,
   docs/self-build.md "The review"), `command` (the project's check command,
   the card's `command` field, as gate 1), `batch` (the queue checks queued
-  changes together and bisects on red; needs `command`), `playtester` (the
+  changes together on the stack's tip and bisects on red, running
+  `batch_command`), `playtester` (the
   project's playtester card, `playtester` naming it, plays the change),
   `train` (build + drills + swap — only eki's own project has it).
+- `command`: gate 1's check, either one line of text (run as it is) or a
+  list of path rules, so a change runs only the checks for what it touched:
+  `[{"name": "story files", "paths": ["design/script/**", "slice/data/**"],
+  "run": "npm run check:story"}, {"name": "code", "paths": ["slice/src/**",
+  "tools/**"], "run": "npm run typecheck && npm run build"}]`. `name` is
+  optional (a rule's label is its name, else its paths joined with ", ");
+  `paths` is a non-empty list of patterns, `run` the command; any other key
+  is a card problem. Patterns follow .gitignore (`eki/pathrules.py`): one
+  with no `/` (but a trailing one) matches a file name at any depth, one
+  with a `/` is anchored to the project root (a leading `/` is dropped);
+  `*` and `?` stay in one folder, `**/` is zero or more folders, and a
+  trailing `/**` or `/` is everything under that folder; `!` patterns
+  aren't supported. Gate 1 matches them against the item's touched files
+  and runs every matching rule, each once, in card order, in one command
+  run: each rule's output sits under its own `== <label>: <run>` line, a
+  red rule doesn't stop the later ones, and the run is red when any rule
+  was, so the retry brief shows every failure at once. When no rule
+  matches, the run still happens: it prints "nothing to check for these
+  files" and is green. `judged_by` names the chosen rules.
+- `batch_command`: optional text, what gate 2 runs on the stack's tip.
+  It defaults to `command` when that is text, so a text-command card
+  behaves as before; a card with rules and `batch` must set it. eki's own
+  card has neither rules nor `batch_command`: its gates are `bin/check`.
 - `merge`: `auto` — eki lands it on the branch · `pr` — a pull request on
   GitHub (needs a GitHub repo) · `person` — waits for the person.
 - `after_merge`: an optional shell command (e.g. `npm run build`) eki runs

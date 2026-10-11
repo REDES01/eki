@@ -11,7 +11,9 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from . import pathrules
 
 #: the checks a change can go through, in the order they run
 CHECKS = ("self", "review", "command", "batch", "playtester", "train")
@@ -31,6 +33,8 @@ class Workflow:
     playtester: str
     card: str              # the card's folder
     after_merge: str = ""  # shell command run in the person's folder after eki lands ('' when none)
+    rules: Tuple[pathrules.Rule, ...] = ()  # gate 1 by path when `command` is a list ('' command then)
+    batch_command: str = ""  # gate 2: the card's batch_command, else command when it is text
 
 
 _eki: Dict[Tuple[str, str, str], bool] = {}   # (root, source, home) -> is_eki, for the process
@@ -67,16 +71,22 @@ def _of(comp) -> Workflow:
     from .components import workflow as kind
     s = comp.spec
     t = s.get("target")
+    cmd = s.get("command")
+    rules = pathrules.parse(cmd) if isinstance(cmd, list) else ()
+    cmd = cmd if isinstance(cmd, str) else ""
+    batch = s.get("batch_command")
     return Workflow(router=s.get("router", kind.CHOICE_DEFAULTS["router"]),
                     target=targets.key(t) if t else "",
                     plan=s.get("plan", kind.CHOICE_DEFAULTS["plan"]),
                     parallel=s.get("parallel", kind.PARALLEL),
                     checks=tuple(s.get("checks") or ("self",)),
-                    command=s.get("command") or "",
+                    command=cmd,
                     merge=s.get("merge", kind.CHOICE_DEFAULTS["merge"]),
                     playtester=s.get("playtester") or kind.PLAYTESTER,
                     card=str(comp.folder),
-                    after_merge=s.get("after_merge") if isinstance(s.get("after_merge"), str) else "")
+                    after_merge=s.get("after_merge") if isinstance(s.get("after_merge"), str) else "",
+                    rules=rules,
+                    batch_command=batch if isinstance(batch, str) and batch.strip() else cmd)
 
 
 def of_root(root: Optional[Path]) -> Optional[Workflow]:
@@ -134,6 +144,32 @@ def said(wf: Workflow) -> str:
     head = f"router off → {wf.target}; " if wf.router == "off" else ""
     head += "plan single; " if wf.plan == "single" else ""
     return head + checks
+
+
+def check_line(wf: Workflow, touched: List[str]) -> Optional[str]:
+    """Gate 1's shell text: the string command, else the rules matching `touched` run together
+    (pathrules.script; the NOTHING note when none match), else None (no command at all)."""
+    if wf.command:
+        return wf.command
+    if wf.rules:
+        return pathrules.script(pathrules.chosen(wf.rules, touched))
+    return None
+
+
+def each_said(wf: Workflow) -> str:
+    """What gate 1 runs, in plain words: 'Each change: story files → npm run check:story · …'."""
+    if wf.rules:
+        return "Each change: " + " · ".join(f"{pathrules.label(r)} → {r.run}" for r in wf.rules)
+    if wf.command:
+        return f"Each change: {wf.command}"
+    return "Each change: bin/check" if "train" in wf.checks else "Each change: no check command"  # train: eki's own
+
+
+def together_said(wf: Workflow) -> str:
+    """What gate 2 runs on the stack's tip: 'Together, before merging: …'."""
+    if "batch" not in wf.checks:
+        return "Together, before merging: nothing (batch is off)"
+    return f"Together, before merging: {wf.batch_command or 'bin/check'}"   # none: eki's own
 
 
 def from_settings(conn: Optional[sqlite3.Connection], project: Optional[sqlite3.Row]) -> dict:

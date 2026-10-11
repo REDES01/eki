@@ -1,5 +1,8 @@
 """The `workflow` kind: how this project's work runs — router, plan, parallel, checks, merge.
 
+`command` is gate 1's check: text, or a list of path rules (eki/pathrules.py) so a change runs
+only the checks for what it touched; `batch_command` is gate 2's, defaulting to a text command.
+
 A passive card the engine reads through eki/workflow.py; at most one per project. `checks`
 always holds `self`; `train` belongs to eki's own project only, and there the stages in
 workflow.LOCKED can't be dropped: they protect eki itself.
@@ -72,6 +75,37 @@ def _checks(spec: dict, eki: bool) -> List[str]:
     return errs
 
 
+def _command(spec: dict, checks: list, eki: bool) -> List[str]:
+    """`command` (text, or path rules: eki/pathrules.py) and `batch_command`, gate 2's command."""
+    from .. import pathrules
+    cmd, batch = spec.get('command'), spec.get('batch_command')
+    errs, rules = [], isinstance(cmd, list)
+    if 'batch_command' in spec and not isinstance(batch, str):
+        errs.append('batch_command must be text')
+    if eki:   # eki's own gates are fixed: bin/check
+        if rules:
+            errs.append("command: eki's own check is bin/check; rules are for projects")
+        elif 'command' in spec and not isinstance(cmd, str):
+            errs.append('command must be text')
+        if batch:
+            errs.append("batch_command: eki's own gate 2 is bin/check")
+        return errs
+    if rules:
+        try:
+            pathrules.parse(cmd)
+        except ValueError as e:
+            errs.append(str(e) if str(e).startswith('command') else f'command: {e}')
+    elif cmd is not None and not isinstance(cmd, str):
+        errs.append('command must be text or a list of rules')
+    text = isinstance(cmd, str) and bool(cmd.strip())
+    if 'command' in checks and not (text or rules) or 'batch' in checks and not (text or rules or batch):
+        errs.append('command is required for the command and batch checks: the project\'s check command')
+    elif 'batch' in checks and rules and not (isinstance(batch, str) and batch.strip()):
+        errs.append('batch_command is required for the batch check when command is a list of rules: '
+                    'what runs on the changes together')
+    return errs
+
+
 def validate(spec: dict, folder: Path) -> List[str]:
     from .. import github, targets
     from ..workflow import is_eki
@@ -86,12 +120,7 @@ def validate(spec: dict, folder: Path) -> List[str]:
     eki = is_eki(root)
     errs += _checks(spec, eki)
     checks = spec.get('checks', ['self']) if isinstance(spec.get('checks', []), list) else []
-    if ('command' in checks or 'batch' in checks) and not eki:   # eki's own check is fixed: bin/check
-        cmd = spec.get('command')
-        if not isinstance(cmd, str) or not cmd.strip():
-            errs.append('command is required for the command and batch checks: the project\'s check command')
-    elif 'command' in spec and not isinstance(spec['command'], str):
-        errs.append('command must be text')
+    errs += _command(spec, checks, eki)
     if 'after_merge' in spec and not isinstance(spec['after_merge'], str):
         errs.append('after_merge must be text')
     if 'playtester' in checks:

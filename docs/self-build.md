@@ -308,6 +308,17 @@ train behind it. Cheap, parallel, keeps junk out of the predicted futures. A
 `docs/` — runs no tests: its judge is `python -m eki.doccheck <base>..<sha>`
 (`eki/doccheck.py`), which checks that every changed file is UTF-8 text and
 that nothing outside the lane changed. Its board line says "docs only".
+On a project, gate 1 is the card's `command`: one line of text run as it
+is, or a list of path rules (docs/design.md "Workflows"). With rules, the
+item's touched files (`workspace.changed(worktree, base)`, as in
+`items.touched`; after a resolve, the files changed on top of the new head)
+pick every rule with a matching .gitignore-style path, each once, in card
+order, and all of them run in one command run, each under its own
+`== <label>: <run>` line. A red rule doesn't stop the next; the run is red
+when any was, and its tail — every failure — is the retry brief and the
+`unfit` verdict. No match is still a run: it prints "nothing to check for
+these files" and is green. The builder is told to run the rules for the
+files it touches.
 
 **Gate 2 — in company, as a batch.** On the tip of the stack, in a fresh
 detached worktree: the fast tests only, `EKI_CHECK_FAST=1 bin/check` — the
@@ -315,6 +326,10 @@ suite minus the tests marked `drill` (the ones that start a real engine or
 launcher). A batch of only docs-only items gets the doccheck over its range
 instead. Green: the batch lands. Red: bisect, as above; the bad change is
 unfit and the changes behind it are judged again in the next batch.
+On a project, gate 2 runs the card's `batch_command` on the stack's tip,
+bisecting the same way; it defaults to `command` when that is text, and a
+card whose `command` is a list of rules must set it (gate 1 checks what
+changed; gate 2 runs the build).
 
 **Gate 3 — before the swap, then live.** The train (`eki/train.py`,
 `eki/traincheck.py`) runs one command run on the very build it is about to

@@ -161,3 +161,78 @@ def test_the_workflow_kind_has_no_access(proj):
         assert "access" not in got and "router" in got
     for old in ("shared", "whatever"):
         assert components.load(card(proj, access=old), "project").kind == "workflow"
+
+
+GAME = [{"name": "story files", "paths": ["design/script/**", "design/quests/**", "slice/data/**"],
+         "run": "npm run check:story"},
+        {"name": "code", "paths": ["slice/src/**", "slice/tools/**", "tools/**"],
+         "run": "npm run typecheck && npm run build"}]
+
+
+def test_a_rule_list_is_accepted_and_read(proj):
+    comp = components.load(card(proj, checks=["self", "command", "batch"], command=GAME,
+                                batch_command="npm run build"), "project")
+    wf = workflow._of(comp)
+    assert wf.command == "" and [r.name for r in wf.rules] == ["story files", "code"]
+    assert wf.batch_command == "npm run build"
+    assert workflow.each_said(wf) == ("Each change: story files → npm run check:story · "
+                                      "code → npm run typecheck && npm run build")
+    assert workflow.together_said(wf) == "Together, before merging: npm run build"
+    line = workflow.check_line(wf, ["design/script/a.yaml"])
+    assert "npm run check:story" in line and "typecheck" not in line
+    assert workflow.check_line(wf, ["README.md"]) == "echo 'nothing to check for these files'"
+
+
+@pytest.mark.parametrize("command, reason", [
+    ([{"paths": ["a/**"]}], "command: rule 1 needs run"),
+    ([{"run": "x"}], "paths: rule 1 needs paths"),
+    ([{"paths": ["a/**"], "run": "x", "when": "always"}], "unknown keys: when"),
+    ([{"paths": ["!a/**"], "run": "x"}], "paths: `!` patterns aren't supported"),
+    ([], "command needs at least one rule"),
+    (3, "command must be text or a list of rules"),
+])
+def test_bad_rules_break_the_card(proj, command, reason):
+    assert reason in why(card(proj, checks=["self", "command"], command=command))
+
+
+def test_rules_errors_sit_beside_the_command_field(proj):
+    got = api_cardedit.problems({**json.loads((card(proj) / "component.json").read_text()),
+                                 "checks": ["self", "command"], "command": [{"run": "x"}],
+                                 "batch_command": 3}, proj / "components" / "workflow")
+    assert set(got) == {"command", "batch_command"}
+    assert got["batch_command"] == "batch_command must be text"
+
+
+def test_rules_and_batch_need_a_batch_command(proj):
+    assert ("batch_command is required for the batch check when command is a list of rules: "
+            "what runs on the changes together") in why(card(proj, checks=["self", "command", "batch"], command=GAME))
+
+
+def test_a_text_command_with_batch_needs_no_batch_command(proj):
+    wf = workflow._of(components.load(card(proj, checks=["self", "command", "batch"], command="make test"), "project"))
+    assert wf.batch_command == "make test" and wf.rules == ()
+    assert workflow.check_line(wf, ["anything"]) == "make test"
+    assert workflow.each_said(wf) == "Each change: make test"
+    assert workflow.together_said(wf) == "Together, before merging: make test"
+
+
+def test_batch_off_and_no_command_say_so(proj):
+    wf = workflow._of(components.load(card(proj), "project"))
+    assert workflow.check_line(wf, ["a"]) is None
+    assert workflow.together_said(wf) == "Together, before merging: nothing (batch is off)"
+
+
+def test_eki_refuses_rules_and_a_batch_command(tmp_path, monkeypatch):
+    committed = builds.source() / "components" / "workflow"
+    eki = tmp_path / "eki"
+    shutil.copytree(committed, eki / "components" / "workflow")
+    monkeypatch.setenv("EKI_SOURCE", str(eki))
+    folder = eki / "components" / "workflow"
+    spec = json.loads((folder / "component.json").read_text())
+    assert "command: eki's own check is bin/check; rules are for projects" in \
+        api_cardedit.problems({**spec, "command": GAME}, folder)["command"]
+    assert api_cardedit.problems({**spec, "batch_command": "make"}, folder)["batch_command"] == \
+        "batch_command: eki's own gate 2 is bin/check"
+    wf = workflow.of_project(None, None)
+    assert workflow.each_said(wf) == "Each change: bin/check"
+    assert workflow.together_said(wf) == "Together, before merging: bin/check"

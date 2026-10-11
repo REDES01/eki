@@ -39,6 +39,15 @@ def test_files_answers_each_document(conn, shelf):
     assert notes["files"][2]["missing"] and notes["size"] == 2 + 4
     assert notes["changed"] == max(f["changed"] for f in notes["files"][:2])
     assert {f["path"]: f["doc"] for f in got["files"]}["notes/b.md"] == "notes"
+    assert [d["patterns"] for d in got["docs"]] == [d["files"] for d in DOCS]    # saved back as they are
+
+
+def test_a_glob_matching_nothing_keeps_its_pattern(conn, shelf):
+    docs = DOCS + [{"name": "later", "files": ["drafts/*.md"], "about": "", "read": "when-relevant"}]
+    (shelf / "components" / "knowledge" / "component.json").write_text(json.dumps(
+        {"kind": "knowledge", "about": "the shelf", "docs": docs}))
+    later = call(conn, "GET", URL + "/files")["docs"][2]
+    assert later["patterns"] == ["drafts/*.md"] and later["files"][0]["missing"]
 
 
 def test_a_file_of_the_second_document_reads_and_writes(conn, shelf):

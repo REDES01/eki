@@ -60,12 +60,13 @@ def _doc(comp: components.Component, d: dict) -> Dict[str, Any]:
     fs = knowledge.doc_files(comp, d)
     real = [f for f in fs if not f["missing"]]
     changed = [f["changed"] for f in real if f["changed"] is not None]
-    return {"name": d["name"], "about": d["about"], "read": d["read"], "files": fs,
+    return {"name": d["name"], "about": d["about"], "read": d["read"], "patterns": list(d["files"]), "files": fs,
             "size": sum(f["size"] or 0 for f in real), "changed": max(changed) if changed else None}
 
 
 def files(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:
-    """{"docs": [{name, about, read, files, size, changed}], "files": every file, each with its "doc"}."""
+    """{"docs": [{name, about, read, patterns, files, size, changed}], "files": every file, each with its "doc"}.
+    `patterns` is the document's own "files" as stored (what a save sends back), `files` what they match."""
     comp = _comp(conn, m.group(1), m.group(2))
     docs = [_doc(comp, d) for d in knowledge.docs(comp)]
     return {"docs": docs, "files": [{**f, "doc": d["name"]} for d in docs for f in d["files"]]}

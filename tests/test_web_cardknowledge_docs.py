@@ -25,6 +25,7 @@ const docs = [
   { name: "decisions", about: "what we decided", read: "always", size: 12, changed: 0,
     files: [{ path: "design/DECISIONS.md", pattern: "design/DECISIONS.md", size: 12, changed: 0, missing: false }] },
   { name: "notes", about: "loose notes", read: "when-relevant", size: 0, changed: null,
+    patterns: ["notes/*.md", "gone.md", "drafts/*.md"],
     files: [{ path: "notes/a.md", pattern: "notes/*.md", size: 2, changed: 0, missing: false },
             { path: "notes/b.md", pattern: "notes/*.md", size: 2, changed: 0, missing: false },
             { path: "gone.md", pattern: "gone.md", missing: true }] }];
@@ -83,8 +84,9 @@ def test_a_pool_card_is_read_only(tmp_path):
 
 
 def test_remove_saves_the_list_without_it_and_drops_the_old_keys(tmp_path):
+    # the saved patterns are the stored ones, so drafts/*.md (matching nothing, no file entry) stays
     got = draw(tmp_path, act="remove")
-    assert got["saved"] == [{"docs": [{"name": "notes", "files": ["notes/*.md", "gone.md"], "about": "loose notes",
+    assert got["saved"] == [{"docs": [{"name": "notes", "files": ["notes/*.md", "gone.md", "drafts/*.md"], "about": "loose notes",
                                        "read": "when-relevant"}], "files": None, "read": None}]
 
 

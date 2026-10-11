@@ -13,8 +13,10 @@
   const choices = (h) => ((h.card.choices || {}).read || READ);
   const helps = (h) => ((h.card.choice_help || {}).read || {});
 
-  // the list as the card stores it: each document's own patterns, in order, once each
-  const patterns = (d) => (d.files || []).map((f) => f.pattern || f.path).filter((p, i, a) => p && a.indexOf(p) === i);
+  // the list as the card stores it: each document's patterns exactly as saved (a glob matching nothing
+  // today stays); from its file entries only when an older server didn't send them
+  const patterns = (d) => Array.isArray(d.patterns) ? d.patterns.slice()
+    : (d.files || []).map((f) => f.pattern || f.path).filter((p, i, a) => p && a.indexOf(p) === i);
   const specs = (docs) => (docs || []).map((d) => ({ name: d.name, files: patterns(d), about: d.about || "", read: d.read }));
 
   // what the server said, by document ("document NAME: …" or "document N: …"); the rest under "" (the part's top)

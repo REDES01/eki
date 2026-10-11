@@ -66,8 +66,8 @@ def test_templates_validate(name):
 
 def test_images_template_is_the_comfyui_queue():
     spec = components.load(components.templates_dir() / "images", "pool").spec
-    assert (spec["provider"], spec["access"], spec["slots"], spec["memory_gb"], spec["idle_stop"]) == \
-        ("comfyui", "queue", 1, 20, 5)
+    assert (spec["target"], spec["access"], spec["slots"], spec["memory_gb"], spec["idle_stop"]) == \
+        ("comfyui:draft", "queue", 1, 20, 5)
 
 
 def test_validate_picks_one_form_and_rejects_incomplete_ones(tmp_path):
@@ -152,7 +152,7 @@ def test_provider_form_paths_are_the_pictures_it_emits(tmp_path, monkeypatch):
             return Outcome("done", finished=True)
 
     monkeypatch.setattr(providers, "get", lambda name: Drawer())
-    c = comp(tmp_path / "components", {"provider": "comfyui"})
+    c = comp(tmp_path / "components", {"provider": "drawer"})        # comfyui itself is a picture card now
     got = service.call(c, a_call(tmp_path, ["a", "red", "fox"], run_id="r9")[0])
     assert got.paths == [str(pic)] and seen == {"prompt": "a red fox", "run": "r9", "cwd": str(tmp_path)}
 
@@ -172,6 +172,6 @@ def test_picture_card_form_validates(tmp_path):
     for out in ("../elsewhere", "/abs/path", "", "~/pics"):
         assert any('"out"' in e for e in service.validate({**ok, "out": out}, tmp_path)), out
     c = comp(tmp_path / "components", {"target": "comfyui:hq", "out": "assets/generated/card/"})
-    assert service.call(c, a_call(tmp_path)[0]).error == "picture cards: not callable yet"
+    assert service.call(c, a_call(tmp_path, ["--nope", "x"])[0]).error.startswith("unknown input --nope")
     assert "draws with comfyui:hq, saves into assets/generated/card/" in service.notes(c)
     assert "runs on eki's comfyui provider" in service.notes(c)

@@ -13,8 +13,10 @@
     {"kind": "service", "about": "…", "provider": "comfyui"}
         one turn of that eki provider; the pictures it makes are the paths.
     {"kind": "service", "about": "…", "target": "comfyui:<workflow>", "out": "assets/generated/<card>/"}
-        a picture card: a ComfyUI workflow (eki/providers/comfyui_workflows.py)
+        a picture card (picture.py): a ComfyUI workflow (eki/providers/comfyui_workflows.py)
         and the folder, relative to the project, its pictures are saved in.
+        An old `"provider": "comfyui"` card is read as `"target": "comfyui:draft"`
+        (components.load).
 Any form may add `"mcp": {"command", "args", "env"}` or `{"url"}` (an mcp card's
 "server"): this project's runs get that server under the card's name, and a run
 using a command server holds the card like a call does (mcpserver.servers_of).
@@ -25,7 +27,7 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import Call, Component, Result, servers
 
@@ -132,9 +134,14 @@ def _command(comp: Component, argv: List[str], c: Call, env_extra: Dict[str, str
 
 
 def _provider(comp: Component, c: Call) -> Result:
+    return provider_turn(comp, c, comp.spec["provider"], " ".join(c.args))
+
+
+def provider_turn(comp: Component, c: Call, name: str, prompt: str, extra: Optional[Dict[str, Any]] = None,
+                  images: Optional[List[str]] = None) -> Result:
+    """One turn of eki's provider `name` for this call; the pictures it emits are the paths."""
     from .. import models, providers
     from ..providers.base import Turn
-    name = comp.spec["provider"]
     try:
         prov = providers.get(name)
     except KeyError:
@@ -152,9 +159,10 @@ def _provider(comp: Component, c: Call) -> Result:
         if c.emit:
             c.emit(kind, data)
 
-    turn = Turn(prompt=" ".join(c.args), history=[], run_id=c.run_id,
+    turn = Turn(prompt=prompt, history=[], run_id=c.run_id,
                 thread_id=str((c.extra or {}).get("thread_id") or ""), cwd=c.caller_dir,
-                extra={k: v for k, v in (c.extra or {}).items() if k != "thread_id"})
+                extra={**{k: v for k, v in (c.extra or {}).items() if k != "thread_id"}, **(extra or {})},
+                images=list(images or []))
     out = prov.take(turn, emit)
     text = "\n".join(t for t in texts if t)
     if out.state != "done" or out.error:
@@ -167,7 +175,8 @@ def call(comp: Component, c: Call) -> Result:
     if "provider" in spec:
         return _provider(comp, c)
     if "target" in spec and "run" not in spec and "serve" not in spec:
-        return Result(error="picture cards: not callable yet")
+        from . import picture
+        return picture.call(comp, c)
     if "run" in spec:
         argv = _argv(spec["run"])
         why = _placeholder(comp, argv, "run")

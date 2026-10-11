@@ -200,6 +200,30 @@ def _check_common(spec: dict) -> List[str]:
     return errs
 
 
+def _comfyui(provider: str) -> bool:
+    try:
+        from ..providers import config
+        cfg = config().get(provider) if paths.config('providers').exists() else None
+    except Exception:  # unreadable providers.json: only the shipped name counts
+        cfg = None
+    return cfg.get('kind') == 'comfyui' if isinstance(cfg, dict) else provider == 'comfyui'
+
+
+def migrate(spec: dict, name: str) -> dict:
+    """An old `"provider": "<a comfyui provider>"` service card, read as a picture card:
+    target '<provider>:draft', out 'assets/generated/<name>/'. In memory only: the file
+    changes when the card is saved."""
+    p = spec.get('provider')
+    if spec.get('kind') != 'service' or not isinstance(p, str) or not p.strip() \
+            or any(k in spec for k in ('run', 'serve', 'target')) or not _comfyui(p.strip()):
+        return spec
+    from ..providers.comfyui_workflows import DEFAULT
+    out = {k: v for k, v in spec.items() if k != 'provider'}
+    out['target'] = f'{p.strip()}:{DEFAULT}'
+    out.setdefault('out', f'assets/generated/{name}/')
+    return out
+
+
 def load(folder: Path, scope: str) -> Component:
     """The component in `folder`; raises ValueError with the reason when it's broken."""
     name = folder.name
@@ -214,6 +238,7 @@ def load(folder: Path, scope: str) -> Component:
         raise ValueError(f'component.json unreadable: {e}')
     if not isinstance(spec, dict):
         raise ValueError('component.json must hold an object')
+    spec = migrate(spec, name)
     errs = _check_common(spec)
     if not errs:
         try:

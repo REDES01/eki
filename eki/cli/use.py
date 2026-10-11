@@ -5,6 +5,9 @@ pinned), priority 'now', parent the caller's run (EKI_RUN), on a thread
 of its own titled `use <name>` with no folder (eki's own, not a chat).
 While it can't start, each new reason (runs.why) goes to stderr; at the
 end the result text and each output path go to stdout.
+
+`eki use <picture card> --help` prints what the card takes (picture.help_text)
+without starting a run.
 """
 from __future__ import annotations
 
@@ -70,15 +73,26 @@ def wait(conn, rid: str, name: str, poll: float = POLL) -> int:
     return 0
 
 
+def help_text(comp) -> str:
+    """What a card takes; a picture card lists its workflow's inputs."""
+    from ..components import picture
+    if comp.kind == "service" and "target" in comp.spec and not any(k in comp.spec for k in ("run", "serve")):
+        return picture.help_text(comp)
+    return f"{comp.name} — {comp.spec.get('about', '')}\n({comp.kind}: its words are passed as they are)\n"
+
+
 def run(args) -> int:
     conn = db.connect()
     here = os.getcwd()
     if args.name:
         try:
-            components.get(args.name, here, conn)
+            comp = components.get(args.name, here, conn)
         except KeyError as e:
             common.err(f"eki use {args.name}: {e.args[0] if e.args else e}")
             return 1
+        if list(args.args) in (["--help"], ["-h"]):
+            sys.stdout.write(help_text(comp))
+            return 0
         rid = create(conn, args.name, args.args, os.path.abspath(here),
                      os.environ.get("EKI_RUN") or None)
         common.ensure_engine(quiet=True)

@@ -5,7 +5,12 @@ Nothing is kept in memory: queues and holds are read from the runs table and
 component.json every time, so they are the same after a restart.
 
 - access "queue": at most `slots` calls in starting/running, in created_at
-  order; with `"provider"` (e.g. comfyui) that provider's active runs count too.
+  order. A card on one of eki's providers (a picture card's target
+  `comfyui:<workflow>`, or the old `"provider"`) shares that provider: every
+  working call of any card on it and the provider's own starting/running runs
+  count, for slots, memory and conflicts alike, so two picture cards on
+  different workflows wait for each other. A picture card is a queue unless it
+  says otherwise.
 - access "exclusive": the caller run that first used it holds it until that
   run ends; a call with no caller holds it only while it runs.
 - "memory_gb": a call that would start it waits while the Mac has less free.
@@ -18,7 +23,7 @@ import json
 import sqlite3
 from typing import Dict, List, Optional, Set, Tuple
 
-from .. import components, db, machine, store
+from .. import components, db, machine, store, targets
 
 ACTIVE = ("queued", "starting", "running", "interrupted")
 WORKING = ("starting", "running")
@@ -55,8 +60,60 @@ def holders(conn: sqlite3.Connection, name: str) -> List[str]:
     return out
 
 
-def _working(conn: sqlite3.Connection, name: str) -> List[sqlite3.Row]:
-    return _calls(conn, name, "c.state IN ('starting','running')")
+def provider_of(spec: Optional[dict]) -> str:
+    """The eki provider a card runs on: its "provider", or its picture target's; "" for the others."""
+    spec = spec or {}
+    if isinstance(spec.get("provider"), str):
+        return spec["provider"].strip()
+    if "target" in spec and not any(k in spec for k in ("run", "serve")):
+        try:
+            return targets.parse(spec["target"]).provider
+        except ValueError:
+            return ""
+    return ""
+
+
+def _access(spec: dict) -> str:
+    if "access" in spec:
+        return spec["access"]
+    return "queue" if "target" in spec and provider_of(spec) else "shared"
+
+
+Specs = Dict[str, Dict[str, components.Component]]
+
+
+def _on(conn: sqlite3.Connection, call: dict, specs: Specs) -> str:
+    """The provider of the component a call names, found from the call's folder (cached in `specs`)."""
+    folder = call.get("caller_dir")
+    key = str(folder or "")
+    if key not in specs:
+        try:
+            specs[key] = components.find(folder, conn)[0]
+        except Exception:
+            specs[key] = {}
+    c = specs[key].get(call["component"])
+    return provider_of(c.spec) if c is not None else ""
+
+
+def _peers(conn: sqlite3.Connection, name: str, provider: str, where: str, params: tuple = (),
+           specs: Optional[Specs] = None) -> List[sqlite3.Row]:
+    """Call runs of `name`, and of any component on the same provider, matching `where`."""
+    if not provider:
+        return _calls(conn, name, where, params)
+    specs = {} if specs is None else specs
+    rows = conn.execute("SELECT c.*, p.state AS parent_state FROM runs c LEFT JOIN runs p ON p.id=c.parent "
+                        f"WHERE c.provider='component' AND ({where}) ORDER BY c.created_at", params).fetchall()
+    out = []
+    for r in rows:
+        call = _call(r)
+        if call and (call["component"] == name or _on(conn, call, specs) == provider):
+            out.append(r)
+    return out
+
+
+def _working(conn: sqlite3.Connection, name: str, provider: str = "",
+             specs: Optional[Specs] = None) -> List[sqlite3.Row]:
+    return _peers(conn, name, provider, "c.state IN ('starting','running')", (), specs)
 
 
 def _provider_busy(conn: sqlite3.Connection, provider: Optional[str]) -> int:
@@ -66,17 +123,19 @@ def _provider_busy(conn: sqlite3.Connection, provider: Optional[str]) -> int:
                         (provider,)).fetchone()[0]
 
 
-def in_use(conn: sqlite3.Connection, comp_name: str, spec: Optional[dict] = None) -> str:
+def in_use(conn: sqlite3.Connection, comp_name: str, spec: Optional[dict] = None,
+           specs: Optional[Specs] = None) -> str:
     """'' when idle, else who is using it."""
-    w = _working(conn, comp_name)
+    prov = provider_of(spec)
+    w = _working(conn, comp_name, prov, specs)
     if w:
         return f"in use by {w[0]['parent'] or w[0]['id']}"
     if (spec or {}).get("access") == "exclusive":
         h = holders(conn, comp_name)
         if h:
             return f"held by {h[0]}"
-    if _provider_busy(conn, (spec or {}).get("provider")):
-        return f"{spec['provider']} busy"
+    if _provider_busy(conn, prov):
+        return f"{prov} busy"
     return ""
 
 
@@ -107,14 +166,16 @@ def gate(conn: sqlite3.Connection, run) -> Tuple[bool, str]:
     except Exception:
         return True, ""
     spec = comp.spec
-    access = spec.get("access", "shared")
+    prov = provider_of(spec)
+    specs: Specs = {str(folder or ""): found}
+    access = _access(spec)
     if access == "queue":
         slots = int(spec.get("slots", 1))
-        busy = len(_working(conn, name)) + _provider_busy(conn, spec.get("provider"))
+        busy = len(_working(conn, name, prov, specs)) + _provider_busy(conn, prov)
         if busy >= slots:
             return False, f"{WAITS}{name}: {busy} of {slots} slot{'s' if slots > 1 else ''} busy"
-        ahead = [r for r in _calls(conn, name, "c.state='queued' AND c.created_at < ?", (run["created_at"],))
-                 if r["id"] != run["id"]]
+        ahead = [r for r in _peers(conn, name, prov, "c.state='queued' AND c.created_at < ?",
+                                   (run["created_at"],), specs) if r["id"] != run["id"]]
         if ahead:
             return False, f"{WAITS}{name}: queued behind {ahead[0]['id']}"
     elif access == "exclusive":
@@ -123,7 +184,7 @@ def gate(conn: sqlite3.Connection, run) -> Tuple[bool, str]:
             return False, f"{WAITS}{name}: held by {held[0]}"
     conflicts = _conflicting(comp, found)
     for other in sorted(conflicts):
-        busy = in_use(conn, other, found[other].spec if other in found else None)
+        busy = in_use(conn, other, found[other].spec if other in found else None, specs)
         if busy:
             return False, f"{WAITS}{name}: conflicts with {other}, {busy}"
     for other in sorted(conflicts):
@@ -135,7 +196,7 @@ def gate(conn: sqlite3.Connection, run) -> Tuple[bool, str]:
             if not stopped or _is_up(found[other]):
                 return False, f"{WAITS}{name}: conflicts with {other}, which won't stop"
     need = spec.get("memory_gb")
-    if need and (spec.get("run") or not _working(conn, name) and not _is_up(comp)):
+    if need and (spec.get("run") or not _working(conn, name, prov, specs) and not _is_up(comp)):
         free = machine.free_gb()
         if free < need:
             return False, f"{WAITS}{name}: needs {need:g} GB, {free:.0f} free"

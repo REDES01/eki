@@ -4,6 +4,7 @@
   "access": "queue",
   "slots": 1,
   "memory_gb": 20,
-  "provider": "comfyui",
+  "target": "comfyui:draft",
+  "out": "assets/generated/images/",
   "idle_stop": 5
 }

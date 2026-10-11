@@ -39,7 +39,8 @@ def spawned(monkeypatch):
 def comp(name, **spec):
     d = components.pool_dir() / name
     d.mkdir(parents=True, exist_ok=True)
-    served = {} if "provider" in spec else {"serve": "x", "url": "http://127.0.0.1:1", "health": "y", "call": "z"}
+    served = {} if "provider" in spec or "target" in spec else \
+        {"serve": "x", "url": "http://127.0.0.1:1", "health": "y", "call": "z"}
     (d / "component.json").write_text(json.dumps({"kind": "service", "about": name, **served, **spec}))
 
 
@@ -88,6 +89,61 @@ def test_queue_shares_slots_with_its_provider(conn, spawned, up):
     end(conn, pic)
     engine.spawn_ready(conn)
     assert c in spawned
+
+
+def picture(name, workflow, **spec):
+    comp(name, target=f"comfyui:{workflow}", out=f"assets/generated/{name}/", **spec)
+
+
+def test_two_picture_cards_on_different_workflows_share_one_queue(conn, spawned, up):
+    picture("portrait", "hq")
+    picture("draft", "draft")                       # no access written: a picture card queues
+    p = use(conn, "portrait")
+    engine.spawn_ready(conn)
+    start(conn, p)
+    d = use(conn, "draft")
+    engine.spawn_ready(conn)
+    assert spawned == [p] and store.run(conn, d)["why"] == "waits for draft: 1 of 1 slot busy"
+    end(conn, p)
+    engine.spawn_ready(conn)
+    assert spawned == [p, d]
+
+
+def test_a_routing_comfyui_run_makes_a_picture_card_wait(conn, spawned, up):
+    picture("portrait", "hq", access="queue")
+    with db.tx(conn):
+        pic = store.create_run(conn, store.create_thread(conn, "draw a cat", None), "draw", provider="comfyui")
+    store.update_run(conn, pic, state="starting")
+    c = use(conn, "portrait")
+    engine.spawn_ready(conn)
+    assert c not in spawned and "1 of 1 slot busy" in store.run(conn, c)["why"]
+    end(conn, pic)
+    engine.spawn_ready(conn)
+    assert c in spawned
+
+
+def test_a_picture_card_conflicting_with_voice_waits_while_voice_is_in_use(conn, spawned, up):
+    comp("voice", access="exclusive")
+    picture("portrait", "hq", conflicts=["voice"])
+    picture("backdrop", "draft")
+    v = use(conn, "voice")
+    engine.spawn_ready(conn)
+    start(conn, v)
+    p = use(conn, "portrait")
+    engine.spawn_ready(conn)
+    assert p not in spawned and "conflicts with voice" in store.run(conn, p)["why"]
+    end(conn, v)
+    b = use(conn, "backdrop")                       # another card on ComfyUI drawing: voice waits for it
+    engine.spawn_ready(conn)
+    assert p in spawned and b not in spawned       # one queue: the backdrop waits behind the portrait
+    start(conn, p)
+    v2 = use(conn, "voice")
+    engine.spawn_ready(conn)
+    assert v2 not in spawned and "conflicts with portrait" in store.run(conn, v2)["why"]
+    end(conn, p)
+    start(conn, b)
+    engine.spawn_ready(conn)
+    assert v2 not in spawned and "conflicts with portrait" in store.run(conn, v2)["why"]   # backdrop draws
 
 
 def test_exclusive_held_for_the_caller_run_and_freed_at_its_end(conn, spawned, up):

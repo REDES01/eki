@@ -166,3 +166,11 @@ def test_brief_line_when_reachable(proj, conn):
 def test_no_components_leaves_the_turn_as_today(proj, conn):
     turn = _turn_for(conn, proj)
     assert "note" not in turn.extra
+
+
+def test_help_says_what_a_card_is_without_a_run(proj, conn, monkeypatch, calls, capsys):
+    put_pool("stub", "says hello")
+    monkeypatch.chdir(proj)
+    assert main(["use", "stub", "--help"]) == 0
+    assert capsys.readouterr().out.startswith("stub — says hello\n")
+    assert component_runs(conn) == [] and calls[0] == []

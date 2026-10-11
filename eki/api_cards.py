@@ -80,10 +80,14 @@ def _waiting(conn: sqlite3.Connection, name: str, state: str) -> str:
 
 
 def _shown(kind: str, spec: Any) -> Any:
-    """What of a card's spec may leave the server: an mcp card's env values masked."""
+    """What of a card's spec may leave the server: an mcp card's server.env values masked, and a
+    service card's mcp.env values the same way."""
     if kind == "mcp" and isinstance(spec, dict):
         from .components import mcpserver
         return mcpserver.public(spec)
+    if kind == "service" and isinstance(spec, dict) and isinstance(spec.get("mcp"), dict):
+        from .components import mcpserver
+        return {**spec, "mcp": mcpserver.public({"server": spec["mcp"]})["server"]}
     return spec
 
 

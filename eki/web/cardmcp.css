@@ -1,7 +1,9 @@
-/* The mcp card's Server part (cardmcp.js): its command or url, env keys, Test and the tools. */
+/* The mcp card's Server part (cardmcp.js): its command or url, env keys, Test and the tools; a
+   service card's script and MCP lines use the same. */
 .cm-server { margin-bottom: 6px; }
 .cm-line { margin: 2px 0; overflow-wrap: anywhere; }
 .cm-line code { margin-right: 6px; }
 .cm-result { margin-top: 6px; }
 .cm-ok { margin-bottom: 4px; }
 .cm-tool b { margin-right: 8px; white-space: nowrap; }
+.cm-script, .cm-mcp { white-space: normal; }

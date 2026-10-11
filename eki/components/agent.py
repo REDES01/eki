@@ -22,6 +22,9 @@ from typing import Any, Dict, List, Optional
 from . import Call, Component, Result, NAME, journal
 
 ABOUT = "a persona with its own prompt.md, skills and target, called as a session"
+#: settings whose values come from a fixed set, and the value used when the key is absent
+CHOICES = {'bare': [False, True]}
+CHOICE_DEFAULTS = {'bare': False}
 
 
 def _names(spec: dict, key: str) -> List[str]:

@@ -17,7 +17,9 @@ from . import Call, Component, Result
 from .. import components
 
 ABOUT = "files every agent of the project reads: always, or when relevant"
-READ = ('always', 'when-relevant')
+#: settings whose values come from a fixed set (read has no default: it is required)
+CHOICES = {'read': ['always', 'when-relevant']}
+READ = tuple(CHOICES['read'])
 
 
 def _bad_pattern(p) -> str:
@@ -37,8 +39,8 @@ def validate(spec: dict, folder: Path) -> List[str]:
         errs.append('files must be a non-empty list of paths in the project (globs and folders allowed)')
     else:
         errs += [e for e in (_bad_pattern(p) for p in fs) if e][:1]
-    if spec.get('read') not in READ:
-        errs.append(f'read must be one of {", ".join(READ)} (got {spec.get("read")!r})')
+    if spec.get('read') not in CHOICES['read']:
+        errs.append(f'read must be one of {", ".join(CHOICES["read"])} (got {spec.get("read")!r})')
     return errs
 
 

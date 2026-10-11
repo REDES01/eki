@@ -16,7 +16,7 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .. import paths
 
@@ -55,6 +55,10 @@ KINDS = {'service': 'eki.components.service', 'assets': 'eki.components.assets',
 #: kinds that are read or attached, never called with `eki use`
 PASSIVE = ('knowledge', 'mcp')
 ACCESS = ('queue', 'exclusive', 'shared')
+#: settings every kind has whose values come from a fixed set; a kind adds its own
+#: in its module's CHOICES (and CHOICE_DEFAULTS for the value used when the key is absent)
+CHOICES = {'access': list(ACCESS)}
+CHOICE_DEFAULTS = {'access': 'shared'}
 NAME = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 RESERVED = {'sessions'}
 
@@ -75,6 +79,27 @@ def kind_module(kind: str):
     if kind not in KINDS:
         raise KeyError(f'unknown component kind {kind!r} (kinds: {", ".join(KINDS)})')
     return importlib.import_module(KINDS[kind])
+
+
+def _merged(kind: str, attr: str, common: Dict[str, Any]) -> Dict[str, Any]:
+    out = {k: list(v) if isinstance(v, list) else v for k, v in common.items()}
+    try:
+        own_ = getattr(kind_module(kind), attr, None) if kind in KINDS else None
+    except Exception:  # a kind that won't import still gets the common ones
+        own_ = None
+    if isinstance(own_, dict):
+        out.update({k: list(v) if isinstance(v, (list, tuple)) else v for k, v in own_.items()})
+    return out
+
+
+def choices(kind: str) -> Dict[str, list]:
+    """Setting key -> its allowed values for `kind`: the common ones and the kind's own. Never raises."""
+    return _merged(kind, 'CHOICES', CHOICES)
+
+
+def choice_defaults(kind: str) -> Dict[str, Any]:
+    """Setting key -> the value used when a spec of `kind` lacks the key. Never raises."""
+    return _merged(kind, 'CHOICE_DEFAULTS', CHOICE_DEFAULTS)
 
 
 def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[Path]:
@@ -114,7 +139,7 @@ def _check_common(spec: dict) -> List[str]:
         errs.append(f'kind must be one of {", ".join(KINDS)} (got {spec.get("kind")!r})')
     if not isinstance(spec.get('about'), str) or not spec.get('about').strip():
         errs.append('about is required: one line on what it does')
-    if spec.get('access', 'shared') not in ACCESS:
+    if spec.get('access', CHOICE_DEFAULTS['access']) not in CHOICES['access']:
         errs.append(f'access must be one of {", ".join(ACCESS)}')
     slots = spec.get('slots', 1)
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:

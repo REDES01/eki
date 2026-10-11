@@ -79,6 +79,7 @@ eki follow <run>  ◄── events table
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `projectchats` | projects you work inside: a `projects` row or the built-in `eki` (`SELF`, no row); `folder_of`, `listing`, `adopt`, `create`, `set_folder`, `find`, `home_clone` |
 | `projectqueue` | a local project's own queue (autonomy `apply`): its fit items rebased onto the predicted head of its branch, conflicts to a resolve run, gate 2 in batch with the project's check, then landed; one project per batch |
+| `aftermerge` | the workflow card's `after_merge` after eki lands in the person's folder: a `command` run, one per project at a time, changes landing close together coalesced into one run after the last; a failure on the board and the goal and a needs-you notice, the landing kept |
 | `projectland` | landing on a person's branch: `refs/heads/<branch>` moves forward only, the folder follows by `git merge --ff-only` when the branch is checked out there and no tracked file the change touches has local changes, else it waits naming the files; pure git, safe to call again |
 | `github` | the only way to GitHub: one function per `gh` call (a subprocess, 60 s), plain `git push`/`git fetch` against origin, which path a project is on, the in-memory interval of the GitHub steps |
 | `issues` | issues labelled `eki` in: a new one becomes a goal or a standing goal, a closed one drops the unfinished work |
@@ -97,7 +98,7 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
-| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `servebuild` (a serve card's `build` before serving, when the folder changed since the last one), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
 | `components/knowledge`, `components/mcpserver` | the passive kinds: a project's shared files (`files`, `brief`) and its own MCP servers (`public`, `servers_of`, `run_config`, which `worker.build_turn` hands each run) |
 | `api_cardknowledge`, `api_cardmcp` | a knowledge card's files and an mcp card's server and Test on the project page (with `web/cardknowledge.js`, `web/cardmcp.js`, registered in `window.projectCardKinds`) |
 | `docs`, `api_doc` | a local text file in the side panel: the policy (under the person's home by real path, never eki's internals or a credential folder/file, edit only .md/.markdown/.txt, 2 MB), read with who last wrote it, an atomic save over the hash it was loaded from (else a conflict), and the `eki open` queue (`doc_open` events the window polls) |
@@ -1006,7 +1007,15 @@ of its own; the CLI is the integration.
   <name>` starts it for the caller's checkout and prints the URL. The
   playtester called from such a run plays its caller's link; its own `url`
   is the default only when there is none. The card shows each link that is
-  up (folder → URL).
+  up (folder → URL). `"build"` is an optional shell command run in the
+  served folder before its server is (re)started, and when `eki use <card>`
+  or the playtester is called and the folder changed since the last build
+  (`components/servebuild.py`). The check is cheap: the newest mtime of the
+  folder's tracked files (and untracked ones that aren't ignored) against
+  the last good build, recorded under `~/.eki/component-state/`. Built
+  output should be git-ignored, so a build doesn't count as a change. A
+  failed build fails the call with the tail of its output, so the
+  playtester never plays a broken build.
 - **`agent`** — a persona: `prompt.md`, optional `skills/`, `uses` (the
   components it may call), `mcp` (the MCP servers it gets) and a `target`
   (provider → model → effort). Each call is a session; it can be called many
@@ -1132,6 +1141,16 @@ per stage, each choice with its one-line explanation, as the other cards.
   `train` (build + drills + swap — only eki's own project has it).
 - `merge`: `auto` — eki lands it on the branch · `pr` — a pull request on
   GitHub (needs a GitHub repo) · `person` — waits for the person.
+- `after_merge`: an optional shell command (e.g. `npm run build`) eki runs
+  in the person's folder, where the branch is checked out, right after it
+  lands a change there under merge `auto`. It is a `provider="command"` run,
+  so its output is kept and it can be resumed. It never blocks or undoes
+  the landing. A failure shows on the item's board line and the goal
+  ("landed; after-merge build failed: <tail>") and sends the needs-you
+  notification. One runs at a time per project; changes that land close
+  together get one run after the last. Merge `person` and `pr` never run
+  it: eki didn't land there. `eki/aftermerge.py` does it; its state is on
+  disk, so a restart loses nothing.
 
 **A stage not chosen is skipped**, and said once on the board: the card's
 line (`workflow.said`) is e.g. "checks: self only", or "router off →

@@ -11,7 +11,7 @@ from typing import List, Optional
 
 COMMANDS = ["ask", "answer", "follow", "runs", "show", "cancel", "threads", "engine", "route", "roles",
             "providers", "models", "skills", "mcp", "open", "drill", "swap", "builds", "self", "observe",
-            "pictures", "goal", "project", "notify", "schedule", "use", "component", "mcphold", "machine", "slot"]
+            "pictures", "goal", "project", "notify", "schedule", "use", "component", "mcphold", "machine", "slot", "sync"]
 
 
 def parser() -> argparse.ArgumentParser:

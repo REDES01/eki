@@ -112,6 +112,7 @@ eki follow <run>  ◄── events table
 | `docsearch`, `api_docsearch` | the window's "Open file…" search: a project's markdown files, or the projects' folders when no project is open |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
 | `api_components` | the Settings page's read-only Components section: the pool and each project's, one line each, details on click |
+| `api_sync`, `cli/sync`, `web/settingssync.js` | the Claude sync, read-only: `eki sync` prints one line per direction (`syncstate.DIRECTIONS`: last run, count, clashes, each clash under it) and `--diff` the instructions drift; GET /api/sync and Settings → Claude sync show the same, one folded line per direction and the diff in a pre block |
 | `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use, an instructions card's summary), the suggestion to add an instructions card, and the library (templates and the pool); the helpers the card leaves share |
 | `api_cardadd`, `api_cardedit`, `api_cardrun`, `api_cardsessions` | a card added (template or pool card) and removed (to the Trash); its settings and prompt edited; run through the engine and its uses; an agent card's sessions |
 | `api_cardinstructions` | an instructions card's file saved, CLAUDE.md linked to it (`@AGENTS.md`), and a "Read first" file read (inside the project folder only) |

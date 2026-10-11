@@ -1,13 +1,16 @@
 """The eki skill names every command, so agents know what they can ask for."""
 from __future__ import annotations
 
+import importlib
 import re
 from pathlib import Path
 
 import pytest
 
-from eki.cli import COMMANDS
+from eki.cli import COMMANDS as MODULES
 
+# what a person types: each module's NAME (eki/cli/mcphold.py is `eki mcp-hold`)
+COMMANDS = [importlib.import_module(f"eki.cli.{m}").NAME for m in MODULES]
 SKILL = Path(__file__).resolve().parents[1] / "skills/eki/SKILL.md"
 
 

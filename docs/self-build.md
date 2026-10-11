@@ -254,6 +254,12 @@ each beside the queue; a conflict never holds anyone else up. `git rerere`
 records every resolution so a change that must rebase twice doesn't ask
 twice for the same hunk.
 
+Build output a project took out of git (no longer tracked at the head, and
+its root `.gitignore` there ignores it) is never a conflict: a rebase drops
+the change's copy of it, and a check that rebuilt it in the worktree doesn't
+block the rebase (`eki/rebase.py`, `generated`). The project's build makes it
+again; only the real sources go to a resolver.
+
 A change behind one that failed is rebased without it and judged again in
 the next batch. That's the price of speculating, and it's paid only on
 failures.

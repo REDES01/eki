@@ -146,3 +146,52 @@ def test_marked_hunks_is_bounded(tmp_path):
     out = rebase.marked_hunks(tmp_path, [f"f{n}.txt" for n in range(6)])
     assert "more lines)" in out and "line 50" not in out
     assert len(out.splitlines()) <= rebase.HUNKS_LINES + 1
+
+
+def _untrack(repo, name):
+    """The project takes build output out of git: ignored and no longer tracked."""
+    (repo / ".gitignore").write_text((repo / ".gitignore").read_text() + f"/{name}\n")
+    git(repo, "rm", "-q", "--cached", name)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", f"untrack {name}")
+    return workspace.head(repo)
+
+
+def test_build_output_the_head_untracked_never_stops_a_rebase(repo):
+    commit(repo, "gen.json", '{"v": 1}\n', "build output, tracked")
+    wt = item(repo)
+    (wt / "src.txt").write_text("the item's source\n")
+    (wt / "gen.json").write_text('{"v": 2}\n')                # the item rebuilt it
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", "item")
+    (wt / "gen.json").write_text('{"v": 3}\n')                # and its check rebuilt it again
+    head = _untrack(repo, "gen.json")
+    assert rebase.generated(wt, head) == ["gen.json"]
+    assert rebase.onto(wt, head) == []                         # no conflict, no "unstaged changes"
+    assert not rebase.in_progress(wt)
+    assert git(wt, "rev-parse", "HEAD^") == head
+    assert git(wt, "ls-files", "gen.json") == ""               # the head's side: out of git
+    assert (wt / "src.txt").read_text() == "the item's source\n"
+
+
+def test_a_real_conflict_still_stops_beside_dropped_build_output(repo):
+    commit(repo, "gen.json", '{"v": 1}\n', "build output, tracked")
+    wt = item(repo)
+    (wt / "gen.json").write_text('{"v": 2}\n')
+    commit(wt, "a.txt", "one\nmine\nthree\n")
+    commit(repo, "a.txt", "one\ntheirs\nthree\n")
+    head = _untrack(repo, "gen.json")
+    assert rebase.onto(wt, head) == ["a.txt"]                  # only the source is the resolver's
+    (wt / "a.txt").write_text("one\nboth\nthree\n")
+    assert rebase.proceed(wt) == []
+    assert git(wt, "ls-files", "gen.json") == ""
+    assert (wt / "a.txt").read_text() == "one\nboth\nthree\n"
+
+
+def test_tracked_files_the_head_keeps_are_not_build_output(repo):
+    wt = item(repo)
+    commit(wt, "b.txt", "mine\n")
+    head = commit(repo, ".gitignore", ".venv/\nb.txt\n")       # ignored but still tracked there
+    assert rebase.generated(wt, head) == []
+    assert rebase.onto(wt, head) == []
+    assert (wt / "b.txt").read_text() == "mine\n"

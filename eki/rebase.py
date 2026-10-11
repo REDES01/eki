@@ -54,11 +54,54 @@ def conflicted(worktree: str | Path) -> List[str]:
     return sorted(set(f for f in out.splitlines() if f))
 
 
+def generated(worktree: str | Path, head: str, files: List[str] | None = None) -> List[str]:
+    """Files tracked here (of `files`, or all) that `head` no longer tracks and its root
+    .gitignore ignores: build output a project took out of git. A rebase onto `head` drops
+    them instead of stopping on them, and their uncommitted rewrites (a check that ran the
+    build) don't block it; the project's build makes them again. [] when there are none."""
+    if files is not None and not files:
+        return []
+    ignore = _run(worktree, "show", f"{head}:.gitignore")
+    if ignore.returncode != 0 or not ignore.stdout.strip():
+        return []
+    tmp = _git_path(worktree, "eki-head-gitignore")
+    try:
+        tmp.write_text(ignore.stdout)
+        mine = _run(worktree, "ls-files", "-c", "-i", f"--exclude-from={tmp}", "--", *(files or []))
+    finally:
+        tmp.unlink(missing_ok=True)
+    found = sorted(set(f for f in mine.stdout.splitlines() if f)) if mine.returncode == 0 else []
+    if not found:
+        return []
+    kept = _run(worktree, "ls-tree", "-r", "--name-only", head, "--", *found)
+    return [f for f in found if f not in set(kept.stdout.splitlines())]
+
+
+def _onto(worktree: str | Path) -> str:
+    """The commit a stopped rebase is moving onto; "" when it can't be read."""
+    for n in ("rebase-merge", "rebase-apply"):
+        try:
+            return (_git_path(worktree, n) / "onto").read_text().strip()
+        except OSError:
+            continue
+    return ""
+
+
+def _settle(worktree: str | Path, files: List[str]) -> List[str]:
+    """Conflicts on build output the head took out of git are removed (the head's side);
+    the conflicted files that are left."""
+    onto = _onto(worktree)
+    drop = generated(worktree, onto, files) if onto else []
+    if drop:
+        _run(worktree, "rm", "-q", "-f", "--", *drop)
+    return [f for f in files if f not in drop]
+
+
 def _stopped(worktree: str | Path, out: subprocess.CompletedProcess, what: str) -> List[str]:
     """After a rebase command that failed: the conflicted files, or on with the rebase."""
     if not in_progress(worktree):
         raise WorkspaceError(f"git {what}: {out.stderr.strip() or out.stdout.strip()}")
-    files = conflicted(worktree)
+    files = _settle(worktree, conflicted(worktree))
     return files if files else proceed(worktree)
 
 
@@ -69,6 +112,9 @@ def onto(worktree: str | Path, head: str, since: str | None = None) -> List[str]
     old head carried (an item that failed since) is left behind."""
     abort(worktree)
     sha = git(worktree, "rev-parse", "--verify", f"{head}^{{commit}}")
+    stale = generated(worktree, sha)
+    if stale:                                   # a check rebuilt them: the build makes them again
+        _run(worktree, "checkout", "-q", "HEAD", "--", *stale)
     old = git(worktree, "rev-parse", "--verify", "-q", f"{since}^{{commit}}", check=False) if since else ""
     if old and old != sha and _run(worktree, "merge-base", "--is-ancestor", old, "HEAD").returncode == 0:
         out = _run(worktree, "rebase", "--onto", sha, old)
@@ -100,13 +146,18 @@ def proceed(worktree: str | Path) -> List[str]:
             return []
         if not in_progress(worktree):
             raise WorkspaceError(f"git rebase --continue: {out.stderr.strip() or out.stdout.strip()}")
-        files = conflicted(worktree)
+        stopped_on = conflicted(worktree)
+        files = _settle(worktree, stopped_on)
         if files:
             return files
+        if stopped_on:
+            continue                            # only build output conflicted: dropped, on with the rest
         if out.returncode != 0:                 # the step became empty: skip it
             skip = _run(worktree, "rebase", "--skip")
             if skip.returncode != 0 and in_progress(worktree) and conflicted(worktree):
-                return conflicted(worktree)
+                left = _settle(worktree, conflicted(worktree))
+                if left:
+                    return left
     raise WorkspaceError("git rebase: not moving")
 
 

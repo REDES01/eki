@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -272,14 +273,28 @@ def _judged_by(project: sqlite3.Row, judge: str) -> str:
     return f"{cmd} ({source})" if source == "set" or source.startswith("guessed: ") else cmd
 
 
+#: what a builder is shown of a failed check (its retry brief) and the item keeps as its verdict
+FAILURE_LINES = 40
+FAILURE_CHARS = 2500
+_FRAME = re.compile(r"^\s+at \S.*(:\d+|\))\s*$|^Node\.js v\d")
+
+
+def failure_tail(text: str, lines: int = FAILURE_LINES) -> str:
+    """The end of a check's output a builder can act on. Stack frames (a JS `    at …` line,
+    Node's version line) are dropped first: a build tool that prints its errors and then
+    throws would otherwise fill the tail with the trace and hide the errors themselves."""
+    kept = [ln for ln in (text or "").strip().splitlines() if not _FRAME.match(ln)]
+    return "\n".join(kept[-lines:])[-FAILURE_CHARS:]
+
+
 def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     """Move a `judging` item once gate 1 and its review (if any) have both ended."""
     run = store.run(conn, it["run_id"])
     if run is None or run["state"] in store.ACTIVE or not review.ended(conn, it):
         return []
-    tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-25:])
+    tail = failure_tail(store.answer(conn, run["id"]))
     if run["state"] != "done":
-        tail = (tail + f"\n(checks {run['state']}: {run['error'] or ''})").strip()
+        tail = (tail + f"\n(checks {run['state']}: {failure_tail(run['error'] or '', 6)})").strip()
     with db.tx(conn):
         cur = conn.execute("SELECT state, reviews FROM items WHERE id=?", (it["id"],)).fetchone()
         if cur is None or cur["state"] != "judging":
@@ -291,10 +306,10 @@ def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if run["state"] == "done":
             return _judged(conn, it, tail, seen, cur["reviews"])
         if it["tries"] - (cur["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
-            _set(conn, it["id"], state="waiting", verdict=tail[-800:], review=seen,
+            _set(conn, it["id"], state="waiting", verdict=tail[-FAILURE_CHARS:], review=seen,
                  error="checks failed; trying once more")
             return [f"item {it['id']}: checks failed; one more try"]
-        _set(conn, it["id"], state="unfit", verdict=tail[-800:], review=seen, error=f"checks {run['state']}")
+        _set(conn, it["id"], state="unfit", verdict=tail[-FAILURE_CHARS:], review=seen, error=f"checks {run['state']}")
     return [f"item {it['id']}: unfit — left for you"]
 
 

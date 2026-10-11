@@ -296,9 +296,9 @@ def _start_gate2(conn: sqlite3.Connection, stack: List[sqlite3.Row], lo: int, to
 
 
 def _unfit(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:
-    tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-25:])
+    tail = selfwork.failure_tail(store.answer(conn, run["id"]))
     tail = (tail + f"\n(gate 2 {run['state']}: {run['error'] or ''})").strip()
-    if not _set_if(conn, it, "queued", state="unfit", gate2="red", verdict=tail[-800:], error="gate 2 failed"):
+    if not _set_if(conn, it, "queued", state="unfit", gate2="red", verdict=tail[-selfwork.FAILURE_CHARS:], error="gate 2 failed"):
         return []
     return [f"item {it['id']}: unfit — gate 2 failed"]
 

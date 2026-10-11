@@ -204,7 +204,7 @@ def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     run = store.run(conn, it["run_id"]) if it["run_id"] else None
     if run is not None and run["state"] in store.ACTIVE:
         return []
-    tail = "\n".join(store.answer(conn, run["id"]).strip().splitlines()[-25:]) if run else ""
+    tail = selfwork.failure_tail(store.answer(conn, run["id"])) if run else ""
     if run is None or run["state"] != "done":
         state = run["state"] if run else "missing"
         tail = (tail + f"\n(checks {state}: {(run['error'] if run else '') or ''})").strip()
@@ -218,8 +218,8 @@ def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             # item has since failed gate 2 and left the queue.
             selfwork._set(conn, it["id"], state="queued", queued_at=db.now(),
                           head=it["head"], rebased=it["commit_sha"],
-                          verdict=tail[-800:], error=None)
+                          verdict=tail[-selfwork.FAILURE_CHARS:], error=None)
             return [f"item {it['id']}: resolved and green; back in the queue"]
-        selfwork._set(conn, it["id"], state="unfit", verdict=tail[-800:],
+        selfwork._set(conn, it["id"], state="unfit", verdict=tail[-selfwork.FAILURE_CHARS:],
                       error=f"checks {run['state'] if run else 'missing'} after resolving")
     return [f"item {it['id']}: unfit after resolving — left for you"]

@@ -67,10 +67,20 @@ def test_the_instructions_card(web):
     knowledge = get(web + "/ui/cardknowledge.js")[1]
     assert "ck-beside" not in knowledge and "Open in panel" not in knowledge
     grid = get(web + "/ui/projectcards.js")[1]
-    for name in ("suggest", "Add instructions card", "projectinstructions.js", "lines", " missing"):
+    for name in ("suggest", "Add instructions card", "projectinstructions.js"):
         assert name in grid, name
     assert "projectInstructions" in get(web + "/ui/projectcardpanel.js")[1]
     assert "Have an agent write instructions" not in get(web + "/ui/project.js")[1]
+
+
+def test_the_grid_is_light_and_the_open_card_fetches_its_details(web):
+    js = get(web + "/ui/projectcards.js")[1]
+    assert 'base() + "/" + encodeURIComponent(' in js and "Loading…" in js
+    assert "got.card" in js and "projectCardPanel.open(" in js and "projectCardPanel.update(" in js
+    tile = js[js.index("function tile("):js.index("function library(")]
+    for heavy in ("c.links", "c.size", "c.instructions"):
+        assert heavy not in tile and heavy not in js, heavy
+    assert "held|busy" in tile and '"up"' not in tile
 
 
 def test_project_js_still_mounts_it(web):

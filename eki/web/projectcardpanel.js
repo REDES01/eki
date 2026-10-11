@@ -1,4 +1,5 @@
-// An open card in the side panel (projectcards.js hosts it there; the panel's header has its name,
+// An open card in the side panel (projectcards.js hosts it there and hands it the full card from
+// GET …/cards/<name> on open, each reload and after every action; the panel's header has its name,
 // kind and about): its state, settings as a form built from component.json (each change saved and
 // checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
 // fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice in its open list,

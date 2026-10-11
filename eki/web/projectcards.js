@@ -2,13 +2,16 @@
 // cards in a grid — name, kind (by its title: "Preview links", not serve), about line, state, last use, a × that moves it to the Trash — and a
 // last "+ Add card" tile that opens the library below the grid (templates, then the pool's components).
 // The header row's type filter (projectcardfilter.js) sorts the grid by kind then name and can narrow it.
-// A click on a card opens it in the side panel (panel.host, drawn by projectcardpanel.js); the grid stays
-// put with the open card marked. Everything comes from /api/projects/<id>/cards (eki/api_cards.py); it
-// reloads every 5 s while mounted and keeps nothing else.
+// The grid comes from the light call, GET /api/projects/<id>/cards (eki/api_cards.py: name, title, kind,
+// about, ref, error, state, last_use — nothing slow). A click on a card opens it in the side panel
+// (panel.host, drawn by projectcardpanel.js) at once with the light card and "Loading…", and fetches its
+// details, GET …/cards/<name> → {card}: links, pool size, notes, Used by and the rest live there. The grid
+// stays put with the open card marked; both reload every 5 s while mounted (the open card's details too)
+// and nothing else is kept.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const S = { el: null, pid: null, timer: null, data: null, lib: null, open: null, owner: null, err: "", last: {},
-    filter: null };
+    filter: null, full: null };     // full: the open card's details, once they came
   const PF = () => window.projectCardFilter;
   // the type filter for this project, made once its script is in
   function filter() {
@@ -46,33 +49,15 @@
     return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
-  // an instructions card shows its file's first heading and length in place of the about line
-  function about(c) {
-    const f = c.kind === "instructions" && c.instructions;
-    if (!f) return c.about ? `<div class="pc-about">${esc(c.about)}</div>` : "";
-    if (!f.exists) return `<div class="pc-about dim">${esc(f.file)} missing</div>`;
-    return `<div class="pc-about">${esc(f.heading || f.file)}</div><div class="dim">${esc(f.lines)} lines</div>`;
-  }
-
-  // a serve card's links that are up ("folder → URL", the folder cut to its last two parts) and
-  // an assets card's pool size; nothing when there are none
-  function serving(c) {
-    const short = (f) => String(f || "").split("/").filter(Boolean).slice(-2).join("/");
-    const links = (c.links || []).map((l) => `<div class="dim">${esc(short(l.folder))} → ` +
-      `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a></div>`).join("");
-    return links + (c.size ? `<div class="dim">pool: ${esc(c.size)}</div>` : "");
-  }
-
   function tile(c, ro) {
     const broken = !!c.error;
     const state = broken ? c.state || "broken" : c.state || "idle";
-    const cls = broken ? "broken" : /^in use|waiting/.test(state) ? "busy" : state === "up" ? "up" : "";
+    const cls = broken ? "broken" : /^(in use|waiting|held|busy)/.test(state) ? "busy" : "";
     return `<div class="pc-tile${broken ? " pc-broken" : ""}${S.open === c.name ? " on" : ""}" data-card="${esc(c.name)}" role="button" tabindex="0">
       ${ro ? "" : `<button type="button" class="pc-x" data-rm="${esc(c.name)}" title="Remove (moves it to the Trash)">×</button>`}
       <div class="pc-name">${esc(c.name)}</div>
       <div class="pc-kind dim">${esc(c.title || c.kind || "?")}${c.ref ? " · from the pool" : ""}</div>
-      ${about(c)}
-      ${serving(c)}
+      ${c.about ? `<div class="pc-about">${esc(c.about)}</div>` : ""}
       ${broken ? `<div class="pj-err pc-about">${esc(c.error)}</div>` : ""}
       <div class="pc-foot"><span class="pc-state ${cls}">${esc(state)}</span>
         <span class="dim">${c.last_use ? esc(ago(c.last_use)) : "never used"}</span></div></div>`;
@@ -113,7 +98,6 @@
     const open = cards.find((c) => c.name === S.open);
     if (S.open && !open) closeCard();
     else if (open && ours()) {
-      if (window.projectCardPanel) projectCardPanel.update(open, ro);
       const sub = subOf(open);
       if (sub !== S.owner.sub) { S.owner.sub = sub; panel.retitle(open.name, sub); }
     }
@@ -131,6 +115,22 @@
     if (S.err.startsWith("Can't read")) S.err = "";
     if (S.open && !ours() && !lent()) forget();   // the panel went to something else meanwhile
     draw();
+    if (S.open) details();
+  }
+
+  // the open card's details: the panel opened (or updated) with them; an answer for a card that is
+  // no longer open is dropped
+  async function details() {
+    const pid = S.pid, name = S.open, o = S.owner;
+    let got;
+    try { got = await api(base() + "/" + encodeURIComponent(name)); } catch (e) {
+      if (S.pid === pid && S.open === name && S.owner === o && o && !S.full) o.failed(e.message);
+      return;
+    }
+    if (S.pid !== pid || S.open !== name || S.owner !== o || !o || !got.card) return;
+    const first = !S.full;
+    S.full = got.card;
+    if (ours()) o.show(first);
   }
 
   async function openLib() {
@@ -171,16 +171,32 @@
     return !!(S.owner && p && b && !p.hidden && !b.hidden && b.textContent === "← back to " + S.owner.name);
   }
   function regrid() { S.last[".pc-grid"] = null; draw(); }
-  function forget() { S.open = null; S.owner = null; regrid(); }
+  function forget() { S.open = null; S.owner = null; S.full = null; regrid(); }
 
-  // one owner per open card: panel.js draws it, swaps it for another, lends the panel to a file, closes it
+  // one owner per open card: panel.js draws it, swaps it for another, lends the panel to a file, closes it.
+  // Until its details come it shows "Loading…"; then projectcardpanel.js draws the full card, and is
+  // handed it again on each reload
   function owner(c) {
+    const ro = () => (S.data || {}).readonly || "";
     const o = {
-      name: c.name, sub: subOf(c),
+      name: c.name, sub: subOf(c), body: null, drawn: false,
       draw(body) {
+        o.body = body; o.drawn = false;
+        if (S.full && S.full.name === o.name) return o.show(true);
         const now = cardOf(o.name) || c;
-        if (window.projectCardPanel) projectCardPanel.open(body, S.pid, now, (S.data || {}).readonly || "",
-          { api, ago, reload: load, close: () => panel.close() });
+        body.innerHTML = `<div class="pj-card pp"><span class="pc-state">${esc(now.error ? "broken" : now.state || "idle")}</span>
+          ${now.error ? `<div class="pj-err">${esc(now.error)}</div>` : ""}<div class="dim pc-loading">Loading…</div></div>`;
+      },
+      show(first) {
+        if (!o.body || !window.projectCardPanel) return;
+        if (first || !o.drawn) {
+          o.drawn = true;
+          projectCardPanel.open(o.body, S.pid, S.full, ro(), { api, ago, reload: load, close: () => panel.close() });
+        } else projectCardPanel.update(S.full, ro());
+      },
+      failed(why) {
+        const l = o.body && o.body.querySelector(".pc-loading");
+        if (l) { l.className = "pj-err pc-loading"; l.textContent = "Can't read the card: " + why; }
       },
       close(why) {
         window.projectCardPanel && projectCardPanel.close();
@@ -195,10 +211,11 @@
     if (S.open === name && ours()) return panel.close();
     const c = cardOf(name);
     if (!c) return;
-    if (S.open !== name || !S.owner) S.owner = owner(c);   // the same card, lent to a file: hosted again
+    if (S.open !== name || !S.owner) { S.owner = owner(c); S.full = null; }   // the same card, lent to a file: hosted again
     S.open = name;
     regrid();
     panel.host(S.owner);
+    details();
   }
 
   // ours closes through the panel (its close passes "close" back); otherwise only the mark goes
@@ -249,7 +266,7 @@
       el.addEventListener("click", onClick);
       el.addEventListener("keydown", onKey);
     }
-    if (S.pid !== pid) { closeCard(); S.open = null; S.owner = null; S.lib = null; S.err = ""; S.filter = null; }
+    if (S.pid !== pid) { closeCard(); S.open = null; S.owner = null; S.full = null; S.lib = null; S.err = ""; S.filter = null; }
     S.el = el; S.pid = pid; S.data = null; S.last = {};
     load();
     clearInterval(S.timer);
@@ -260,7 +277,7 @@
     clearInterval(S.timer);
     S.timer = null;
     if (ours()) panel.close();
-    S.pid = null; S.data = null; S.open = null; S.owner = null; S.lib = null; S.err = ""; S.filter = null;
+    S.pid = null; S.data = null; S.open = null; S.owner = null; S.full = null; S.lib = null; S.err = ""; S.filter = null;
     if (S.el) put(".pc-grid", "");
   }
 

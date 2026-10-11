@@ -1,13 +1,15 @@
-"""The `knowledge` kind: files every agent of the project reads — decisions, design rules,
+"""The `knowledge` kind: files the agents of the project read — decisions, design rules,
 contracts, notes. Read or opened, never called with `eki use`.
 
 `"files"` are paths relative to the project root (globs and folders allowed, no absolute
-path, no ".."); `"read"` is "always" (read first) or "when-relevant" (look there when the
-`about` line fits). A pattern that matches nothing is shown missing and left out of the brief.
+path, no ".."); `"read"` is "always" (every run reads it first, planned or not) or
+"when-relevant" (the planner picks it per item; other runs look there when the `about` line
+fits). A pattern that matches nothing is shown missing and left out of the brief.
 """
 from __future__ import annotations
 
 import glob
+import json
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -16,12 +18,14 @@ from typing import List, Optional
 from . import Call, Component, Result
 from .. import components
 
-ABOUT = "files every agent of the project reads: always, or when relevant"
+ABOUT = "files the project's agents read: always, or when the planner picks it for an item"
 #: settings whose values come from a fixed set (read has no default: it is required)
 CHOICES = {'read': ['always', 'when-relevant']}
 READ = tuple(CHOICES['read'])
-CHOICE_HELP = {'read': {'always': 'Every run in this project reads it before starting.',
-                        'when-relevant': 'Runs are told it exists and read it only when their work touches it.'}}
+CHOICE_HELP = {'read': {'always': 'Every run in this project reads it first, planned or not: '
+                                  'keep it for the few cards that apply to all work.',
+                        'when-relevant': 'The planner picks it for the items that need it; other runs are '
+                                         'told it exists and open it when their work touches it.'}}
 
 
 def _bad_pattern(p) -> str:
@@ -138,14 +142,63 @@ def _brief_paths(root: Path, pattern: str) -> List[str]:
     return out
 
 
-def _line(comp: Component, root: Path) -> str:
+def _found(comp: Component, root: Path) -> List[str]:
     found: List[str] = []
     for pattern in comp.spec.get('files') or []:
         found += [p for p in _brief_paths(root, pattern) if p not in found]
+    return found
+
+
+def _line(comp: Component, root: Path, first: Optional[bool] = None) -> str:
+    found = _found(comp, root)
     if not found:
         return ''
-    how = 'read first' if comp.spec.get('read') == 'always' else 'look here when relevant'
+    first = comp.spec.get('read') == 'always' if first is None else first
+    how = 'read first' if first else 'look here when relevant'
     return f'- {how}: {", ".join(found)} — {comp.spec.get("about", "")}'
+
+
+def names(raw) -> Optional[List[str]]:
+    """The card names in an items.context value (JSON [{name, why}]); None for NULL or unreadable."""
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+    except ValueError:
+        return None
+    if not isinstance(data, list):
+        return None
+    out = [str(e.get('name') if isinstance(e, dict) else e).strip() for e in data
+           if (e.get('name') if isinstance(e, dict) else e)]
+    return [n for n in out if n]
+
+
+def _instructions(found: dict, top: Path) -> List[str]:
+    """'read first' lines for the project's instructions cards whose file exists in the checkout."""
+    out = []
+    for c in sorted((c for c in found.values() if c.kind == 'instructions'), key=lambda c: c.name):
+        f = c.spec.get('file') or 'AGENTS.md'
+        if not isinstance(f, str) or _bad_pattern(f):
+            continue
+        r = _inside(top, top / f)
+        if r is not None and r.is_file():
+            about = c.spec.get('about') or "the project's instructions"
+            line = f'- read first: {r.relative_to(top)} — {about}'
+            if line not in out:
+                out.append(line)
+    return out
+
+
+def _chosen(cards: List[Component], found: dict, top: Path, context: List[str]) -> List[str]:
+    """The lines for a planned item: always-cards, its chosen cards and the instructions read
+    first; the rest named once as available."""
+    picked = set(context)
+    first = [c for c in cards if c.spec.get('read') == 'always' or c.name in picked]
+    lines = [ln for ln in (_line(c, top, True) for c in first) if ln] + _instructions(found, top)
+    rest = [c.name for c in cards if c not in first and _found(c, top)]
+    if rest:
+        lines.append(f'Also available if you need them: {", ".join(rest)} (see components/).')
+    return lines
 
 
 def _own_top(folder, root: Path) -> Path:
@@ -160,10 +213,12 @@ def _own_top(folder, root: Path) -> Path:
     return Path(top).resolve() if top else root.resolve()
 
 
-def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
+def brief(folder, conn: Optional[sqlite3.Connection] = None, *,
+          context: Optional[List[str]] = None) -> str:
     """What a run in `folder` is told of the project's knowledge cards ('' when none). The cards
     come from the project; their files are named relative to the run's own checkout and kept
-    only when they exist there."""
+    only when they exist there. `context` (card names a planner picked for the item) narrows
+    'read first' to always-cards, those names and the instructions; None is the full brief."""
     try:
         root = components.project_root(folder, conn)
         if root is None or not components.is_project(root, conn):
@@ -171,8 +226,13 @@ def brief(folder, conn: Optional[sqlite3.Connection] = None) -> str:
         found, _ = components.own(root)
         cards = sorted((c for c in found.values() if c.kind == 'knowledge'),
                        key=lambda c: (c.spec.get('read') != 'always', c.name))
+        if not cards:
+            return ''
         top = _own_top(folder, root)
-        lines = [ln for ln in (_line(c, top) for c in cards) if ln]
+        if context is None:
+            lines = [ln for ln in (_line(c, top) for c in cards) if ln]
+        else:
+            lines = _chosen(cards, found, top, list(context))
     except Exception:  # a brief never breaks a run
         return ''
     if not lines:

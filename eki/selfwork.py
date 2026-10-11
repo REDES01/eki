@@ -95,12 +95,13 @@ def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: boo
 
 
 def new_item(conn: sqlite3.Connection, gid: str, title: str, spec: str, files: List[str],
-             deps: List[str], independent: bool) -> str:
+             deps: List[str], independent: bool, context: Optional[List[dict]] = None) -> str:
     iid = store.new_id()
     now = db.now()
-    conn.execute("INSERT INTO items(id, goal_id, title, spec, files, deps, independent, created_at, "
-                 "updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                 (iid, gid, title, spec, db.dumps(files), db.dumps(deps), int(independent), now, now))
+    conn.execute("INSERT INTO items(id, goal_id, title, spec, files, deps, independent, context, "
+                 "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                 (iid, gid, title, spec, db.dumps(files), db.dumps(deps), int(independent),
+                  db.dumps(context) if context is not None else None, now, now))
     return iid
 
 

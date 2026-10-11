@@ -292,6 +292,7 @@ ADDED = [
     ("projects", "description", "TEXT"),   # what you're trying to achieve; eki's is fixed
     ("projects", "autonomy", "TEXT"),   # apply | propose; NULL: the default (eki/projects.py)
     ("items", "landed_on", "TEXT"),     # the project branch eki landed it on; NULL otherwise
+    ("items", "context", "TEXT"),       # JSON [{name, why}] knowledge cards the planner picked; NULL: all
 ]
 
 

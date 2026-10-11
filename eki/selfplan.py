@@ -35,7 +35,7 @@ def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
         ids: Dict[str, str] = {}
         for it in planned:
             ids[it["title"]] = selfwork.new_item(conn, g["id"], it["title"], it["spec"], it["files"], [],
-                                                 it["independent"])
+                                                 it["independent"], context=it.get("context"))
         for it in planned:
             deps = [ids[d] for d in it["deps"] if d in ids and ids[d] != ids[it["title"]]]
             selfwork._set(conn, ids[it["title"]], deps=db.dumps(deps))

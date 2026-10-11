@@ -11,8 +11,10 @@ ACCESS_HELP = {"queue": "Calls wait in line and are served in order, a few at a 
 def test_knowledge_explains_read():
     assert components.choice_help("knowledge") == {
         "access": ACCESS_HELP,
-        "read": {"always": "Every run in this project reads it before starting.",
-                 "when-relevant": "Runs are told it exists and read it only when their work touches it."}}
+        "read": {"always": "Every run in this project reads it first, planned or not: "
+                 "keep it for the few cards that apply to all work.",
+                 "when-relevant": ("The planner picks it for the items that need it; other runs are "
+                                   "told it exists and open it when their work touches it.")}}
 
 
 def test_agent_explains_bare_with_json_keys():

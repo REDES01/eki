@@ -105,8 +105,10 @@ process.stdout.write(JSON.stringify({ html, picked, log, state: state(), api: Ob
 """
 
 READ = ["always", "when-relevant"]
-READ_HELP = {"always": "Every run in this project reads it before starting.",
-             "when-relevant": "Runs are told it exists and read it only when their work touches it."}
+READ_HELP = {"always": "Every run in this project reads it first, planned or not: "
+                       "keep it for the few cards that apply to all work.",
+             "when-relevant": "The planner picks it for the items that need it; other runs are "
+                              "told it exists and open it when their work touches it."}
 ACCESS = ["queue", "exclusive", "shared"]
 ACCESS_HELP = {"queue": "Calls wait in line and are served in order, a few at a time (slots).",
                "exclusive": "One run holds it from first use until that run ends; others wait.",

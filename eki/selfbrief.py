@@ -287,9 +287,24 @@ def items_in(answer: str, allow_empty: bool = False) -> List[Dict[str, Any]]:
                     "spec": str(it.get("spec") or "").strip(),
                     "files": [str(f).strip() for f in (it.get("files") or []) if str(f).strip()],
                     "deps": [str(d).strip() for d in (it.get("deps") or []) if str(d).strip()],
-                    "independent": bool(it.get("independent"))})
+                    "independent": bool(it.get("independent")),
+                    "context": context_in(it.get("context"))})
     if not out and not allow_empty:
         raise ValueError("the plan has no items")
+    return out
+
+
+def context_in(raw: Any) -> Optional[List[Dict[str, str]]]:
+    """An item's `context` as [{name, why}]: None when it isn't a list; a plain string is a name
+    with no why; empty names dropped, each name kept once."""
+    if not isinstance(raw, list):
+        return None
+    out: List[Dict[str, str]] = []
+    for e in raw:
+        name, why = (e.get("name"), e.get("why")) if isinstance(e, dict) else (e, "")
+        name = str(name or "").strip() if isinstance(name, (str, int, float)) else ""
+        if name and name not in [c["name"] for c in out]:
+            out.append({"name": name, "why": str(why or "").strip()[:200]})
     return out
 
 

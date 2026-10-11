@@ -1,7 +1,8 @@
-"""A knowledge card on the project page: its files (name, size, last change, who changed it)
-and one file opened to read and edit. Routes come with the card's web part (cardknowledge.js).
+"""A knowledge card on the project page: its documents (name, about, read mode, total size, newest
+change) with their files (name, size, last change, who changed it), and one file opened to read and
+edit. An old one-document card answers one document named after the card. Routes come with the card's web part (cardknowledge.js).
 
-Only a path the card's `files()` lists can be read or written, and only when it resolves inside
+Only a path the card's `files()` lists (any file of any document) can be read or written, and only when it resolves inside
 the project root (a symlink pointing out is refused). Writing needs a project with a folder and a
 card of the project's own (a pool reference card is read-only here, as in api_cardedit). A file
 that isn't UTF-8 text is an error saying so. Writes go to a temp file then replace the old one.
@@ -55,8 +56,19 @@ def _entry(comp: components.Component, rel: Any) -> Tuple[Dict[str, Any], Path]:
     raise ValueError(f"{rel} is not one of {comp.name}'s files")
 
 
+def _doc(comp: components.Component, d: dict) -> Dict[str, Any]:
+    fs = knowledge.doc_files(comp, d)
+    real = [f for f in fs if not f["missing"]]
+    changed = [f["changed"] for f in real if f["changed"] is not None]
+    return {"name": d["name"], "about": d["about"], "read": d["read"], "files": fs,
+            "size": sum(f["size"] or 0 for f in real), "changed": max(changed) if changed else None}
+
+
 def files(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:
-    return {"files": knowledge.files(_comp(conn, m.group(1), m.group(2)))}
+    """{"docs": [{name, about, read, files, size, changed}], "files": every file, each with its "doc"}."""
+    comp = _comp(conn, m.group(1), m.group(2))
+    docs = [_doc(comp, d) for d in knowledge.docs(comp)]
+    return {"docs": docs, "files": [{**f, "doc": d["name"]} for d in docs for f in d["files"]]}
 
 
 def read(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:

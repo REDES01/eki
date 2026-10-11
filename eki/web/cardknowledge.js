@@ -1,6 +1,8 @@
-// The knowledge card's own part in an open card (projectcardpanel.js draws it under "Files", on open
-// and on every 5 s update): each file the card names — name, size, last changed, who changed it last,
-// or "missing". In a project card an existing file's row is a [data-file] row: panel.js opens it in the
+// The knowledge card's own part in an open card (projectcardpanel.js draws it under "Documents", on open
+// and on every 5 s update): each document of the card (cardknowledgedocs.js draws its head — name, read
+// dropdown, about, size, last change, × — and "+ document"), then each file it names — name, size, last
+// changed, who changed it last, or "missing". The card's docs, files and read are drawn here, not in the
+// settings form. In a project card an existing file's row is a [data-file] row: panel.js opens it in the
 // side panel's doc viewer (with its Edit) and a "← back to <card>" link. A missing file opens here, with
 // Edit turning it into a text box saved when you leave it or press ⌘S/Ctrl-S (a save error shows beside
 // it) — the only way to write one. A pool card (no project folder) shows its files here read-only, rendered
@@ -14,8 +16,13 @@
     document.head.appendChild(l);
   }
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const K = { el: null, pid: null, card: null, ro: "", files: null, err: "", loading: false,
-              open: null, mode: "view", file: null, saveErr: "", last: {} };
+  if (document.querySelector && document.createElement && !document.querySelector('script[src="/ui/cardknowledgedocs.js"]')) {
+    const t = document.createElement("script");
+    t.src = "/ui/cardknowledgedocs.js"; t.onload = () => { if (K.el) redraw(); };
+    document.head.appendChild(t);
+  }
+  const K = { el: null, pid: null, card: null, ro: "", ctx: null, docs: null, files: null, err: "", loading: false,
+              again: false, open: null, mode: "view", file: null, saveErr: "", last: {} };
 
   const url = (tail) => "/api/projects/" + encodeURIComponent(K.pid) + "/cards/" + encodeURIComponent(K.card.name) + tail;
   const q = (sel) => K.el && K.el.querySelector(sel);
@@ -23,7 +30,7 @@
     const el = q(sel);
     if (el && K.last[sel] !== html) { el.innerHTML = html; K.last[sel] = html; }
   }
-  const editable = () => !K.ro && !K.card.ref;
+  const editable = () => !K.ro && !K.card.ref && !(K.ctx && K.ctx.editable === false);
   // the project folder: a project card lives in <folder>/components/<name> (the pool's ~/.eki/components isn't one)
   const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(K.card.card || "")); return m && !/\/\.eki$/.test(m[1]) ? m[1] : ""; };
   // an existing file of a project card opens in the side panel; the rest open here
@@ -55,11 +62,23 @@
 
   // ---- the list -------------------------------------------------------------------------------
 
+  const D = () => window.cardKnowledgeDocs;
+  // what cardknowledgedocs.js needs, as it is now
+  const helper = () => ({ esc, size, ago, card: K.card, docs: K.docs, editable: !!K.card && editable(),
+    problems: (K.ctx && K.ctx.problems) || {}, save: (set) => K.ctx ? K.ctx.save(set) : Promise.resolve() });
+
   function list() {
     if (K.err) return `<div class="pj-err">${esc(K.err)}</div>`;
-    if (!K.files) return '<div class="dim">Loading…</div>';
-    if (!K.files.length) return '<div class="dim">No files.</div>';
-    return K.files.map((f) => `<div class="pj-item pp-line ck-row${K.open === f.path ? " on" : ""}${f.missing ? " ck-missing" : ""}"
+    if (!K.docs) return '<div class="dim">Loading…</div>';
+    const h = helper();
+    if (!K.docs.length) return (D() ? D().top(h) : "") + '<div class="dim">No documents.</div>';
+    return (D() ? D().top(h) : "") + K.docs.map((d, i) => `<div class="ck-doc">${D() ? D().head(d, i, h)
+      : `<div class="ck-doc-head"><strong class="ck-doc-name">${esc(d.name)}</strong> <span class="dim">${esc(d.read || "")}</span></div>`}
+      ${(d.files || []).length ? rows(d.files) : '<div class="dim">No files.</div>'}</div>`).join("");
+  }
+
+  function rows(files) {
+    return files.map((f) => `<div class="pj-item pp-line ck-row${K.open === f.path ? " on" : ""}${f.missing ? " ck-missing" : ""}"
         ${panelFile(f) ? `data-file="${esc(panelFile(f))}"` : `data-ck-path="${esc(f.path)}"`} role="button" title="${esc(f.path)}">
         <code class="grow ck-name">${esc(f.path)}</code>
         ${f.missing ? '<span class="pj-err">missing</span>'
@@ -69,18 +88,21 @@
   }
 
   async function load() {
-    if (K.loading) return;
-    K.loading = true;
+    if (K.loading) { K.again = true; return; }
+    K.loading = true; K.again = false;
     const name = K.card.name;
     try {
       const got = await api(url("/files"));
       if (!K.card || K.card.name !== name) return;
-      K.files = got.files || []; K.err = "";
+      // a server without docs answers files only: one document named after the card
+      K.docs = got.docs || [{ name, about: K.card.about || "", read: (K.card.spec || {}).read || "", files: got.files || [] }];
+      K.files = K.docs.flatMap((d) => d.files || []); K.err = "";
     } catch (x) { if (K.card && K.card.name === name) K.err = x.message; }
     finally { K.loading = false; }
+    if (K.again && K.card) return load();      // a save landed while this one was loading
     const now = (K.files || []).find((e) => e.path === K.open);
     if (now && panelFile(now) && K.mode !== "edit") { K.open = null; K.file = null; put(".ck-file", ""); }  // written: the panel has it now
-    put(".ck-list", list());
+    redraw();
   }
 
   // ---- one file -------------------------------------------------------------------------------
@@ -148,6 +170,8 @@
       return;
     }
     if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one in the side panel
+    const d = t.closest("[data-ckd]");
+    if (d && D()) return D().act(d, K.el, helper(), redraw);
     const b = t.closest("[data-ck]");
     if (b && b.dataset.ck === "close") { K.open = null; K.file = null; K.mode = "view"; put(".ck-list", list()); return put(".ck-file", filePart()); }
     if (b && b.dataset.ck === "edit" && editable()) {
@@ -160,31 +184,43 @@
     if (row && K.mode !== "edit") return openFile(row.dataset.ckPath);
   }
 
-  function draw(el, card, pid, ro) {
+  const FRAME = '<div class="ck"><div class="ck-list"></div><div class="ck-add"></div><div class="ck-file"></div></div>';
+
+  // the list and the + document part, from what is known now
+  function redraw() {
+    if (!K.el || !K.card) return;
+    if (D()) D().wire(K.el, helper, redraw);
+    put(".ck-list", list());
+    put(".ck-add", D() ? D().adder(helper()) : "");
+  }
+
+  function draw(el, card, pid, ro, ctx) {
     if (K.el !== el || !K.card || K.card.name !== card.name || K.pid !== pid) {
       close();
       Object.assign(K, { el, pid, card, ro });
-      el.innerHTML = '<div class="ck"><div class="ck-list"></div><div class="ck-file"></div></div>';
+      el.innerHTML = FRAME;
       if (!el.dataset.ckWired) {
         el.dataset.ckWired = "1";
         for (const ev of ["click", "focusout", "keydown"]) el.addEventListener(ev, onEvent);
       }
     }
-    K.card = card; K.ro = ro;
+    K.card = card; K.ro = ro; K.ctx = ctx || null;
     if (!q(".ck")) {                            // the panel framed itself again
-      el.innerHTML = '<div class="ck"><div class="ck-list"></div><div class="ck-file"></div></div>';
+      el.innerHTML = FRAME;
       K.last = {};
     }
     if (!editable() && K.mode === "edit") K.mode = "view";
-    put(".ck-list", list());
+    redraw();
     if (K.mode !== "edit") put(".ck-file", filePart());
     load();
   }
 
   function close() {
-    Object.assign(K, { el: null, card: null, files: null, err: "", open: null, mode: "view", file: null, saveErr: "", last: {} });
+    Object.assign(K, { el: null, card: null, ctx: null, docs: null, files: null, err: "", open: null, mode: "view",
+                       file: null, saveErr: "", last: {} });
+    if (D()) D().reset();
   }
 
-  window.projectCardKinds["knowledge"] = { title: "Files", draw, close };
+  window.projectCardKinds["knowledge"] = { title: "Documents", keys: ["docs", "files", "read"], draw, close };
   if (window.projectCardPanel && projectCardPanel.redraw) projectCardPanel.redraw();
 })();

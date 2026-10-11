@@ -59,6 +59,8 @@ def test_files_lists_real_and_missing(conn, cards):
     assert not real["missing"] and real["size"] == len("# Decisions\n- keep it small\n") and real["changed"]
     assert real["name"] == "DECISIONS.md" and set(real) >= {"pattern", "abs", "author"}
     assert gone["missing"] and gone["size"] is None
+    docs = call(conn, "GET", URL + "/files")["docs"]                  # an old card: one document, its own name
+    assert [d["name"] for d in docs] == ["decisions"] and len(docs[0]["files"]) == 2
     globbed = [f["path"] for f in call(conn, "GET", "/api/projects/p1/cards/notes/files")["files"]]
     assert globbed == ["notes/a.md", "notes/b.md"]
 
@@ -150,6 +152,8 @@ def test_the_web_part_is_served_and_names_its_routes(web):
     with urllib.request.urlopen(web + "/ui/cardknowledge.css", timeout=10) as r:
         assert r.status == 200
     here = os.path.dirname(__file__)
-    for f in ("cardknowledge.js", "cardknowledge.css"):
+    with urllib.request.urlopen(web + "/ui/cardknowledgedocs.js", timeout=10) as r:
+        assert "cardKnowledgeDocs" in r.read().decode()
+    for f in ("cardknowledge.js", "cardknowledgedocs.js", "cardknowledge.css"):
         with open(os.path.join(here, "..", "eki", "web", f)) as fh:
             assert len(fh.read().splitlines()) < 400

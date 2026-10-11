@@ -130,3 +130,12 @@ def test_a_pool_instructions_card_reads_its_files_in_the_card(tmp_path, path):
     html = instructions(tmp_path, path)
     assert "data-file" not in html                            # the doc viewer can't open ~/.eki
     assert 'data-read="docs/design.md"' in html
+
+
+def test_knowledge_draws_documents_and_keeps_its_keys_out_of_the_form():
+    assert 'title: "Documents", keys: ["docs", "files", "read"]' in KNOW
+    assert "/ui/cardknowledgedocs.js" in KNOW and 'class="ck-doc"' in KNOW
+    docs = (WEB / "cardknowledgedocs.js").read_text()
+    for part in ("choiceMenu", "choice_help", "+ document", "data-ckd=\"remove\"", "confirm(",
+                 "files: null, read: null", "stopPropagation"):
+        assert part in docs, part

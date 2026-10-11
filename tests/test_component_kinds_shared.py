@@ -146,7 +146,7 @@ def web(home):
 
 
 def test_the_kind_parts_are_served_and_hooked(web):
-    for f, kind, title in (("cardknowledge.js", "knowledge", "Files"), ("cardmcp.js", "mcp", "Server")):
+    for f, kind, title in (("cardknowledge.js", "knowledge", "Documents"), ("cardmcp.js", "mcp", "Server")):
         with urllib.request.urlopen(web + "/ui/" + f, timeout=10) as r:
             body = r.read().decode()
         assert r.status == 200 and f'projectCardKinds["{kind}"]' in body and title in body

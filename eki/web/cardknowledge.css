@@ -1,4 +1,4 @@
-/* The knowledge card's Files part (cardknowledge.js): its file rows (an existing project file opens in the
+/* The knowledge card's Documents part (cardknowledge.js): its file rows (an existing project file opens in the
    side panel) and, opened here, a missing file to write or a pool card's file. */
 .ck-row { display: flex; gap: 10px; align-items: baseline; }
 .ck-row .ck-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -8,3 +8,13 @@
 .ck-md { max-height: 60vh; overflow: auto; padding: 6px 2px; }
 .ck-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 .ck-err .pj-err { display: inline; margin-left: 8px; }
+/* its documents (cardknowledgedocs.js): a head per document — name, read dropdown, size and change, × — its
+   about line and file rows, then "+ document" and its form. */
+.ck-doc + .ck-doc { margin-top: 12px; }
+.ck-doc-head { display: flex; gap: 8px; align-items: center; }
+.ck-doc-head .cm { flex: none; }
+.ck-doc-meta { flex: 1; white-space: nowrap; font-size: 12px; }
+.ck-doc-about { font-size: 12px; margin: 2px 0 4px; overflow-wrap: anywhere; }
+.ck-x { padding: 0 8px; }
+.ck-add:not(:empty) { margin-top: 10px; }
+.ck-addform { display: flex; flex-direction: column; gap: 6px; }

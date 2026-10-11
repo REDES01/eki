@@ -60,7 +60,7 @@ def test_cards_carry_title_explain_live_and_overview(conn, proj):
     shutil.copytree(components.templates_dir() / "voice", base / "voice")
     (base / "bad").mkdir(parents=True)
     (base / "bad" / "component.json").write_text('{"kind": "serve"')
-    cards = {c["name"]: c for c in get(conn, "/api/projects/p1/cards")["cards"]}
+    cards = {n: get(conn, f"/api/projects/p1/cards/{n}")["card"] for n in ("voice", "bad")}
     v = cards["voice"]
     assert v["title"] == "Tool" and v["explain"] == kindtext.explain("service")
     assert isinstance(v["live"], dict)
@@ -79,7 +79,7 @@ def test_a_kinds_live_is_used_and_its_trouble_is_empty(conn, proj, monkeypatch):
     mod = components.kind_module("service")
     monkeypatch.setattr(mod, "live", lambda c, conn_, root: {"busy": c.name}, raising=False)
     assert cardview.live(conn, proj, comp) == {"busy": "voice"}
-    assert get(conn, "/api/projects/p1/cards")["cards"][0]["live"] == {"busy": "voice"}
+    assert get(conn, "/api/projects/p1/cards/voice")["card"]["live"] == {"busy": "voice"}
 
     def boom(c, conn_, root):
         raise RuntimeError("no")

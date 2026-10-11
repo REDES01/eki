@@ -28,7 +28,7 @@ def cards(conn, proj):
 
 
 def listed(conn):
-    return {c["name"]: c for c in call(conn, "GET", "/api/projects/p1/cards")["cards"]}
+    return {c["name"]: api_cards.card_of(conn, "p1", c["name"]) for c in call(conn, "GET", "/api/projects/p1/cards")["cards"]}
 
 
 def test_project_cards_carry_choices(conn, cards):

@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from eki import apiroutes, components
+from eki import api_cards, apiroutes, components
 
 
 def project(conn, folder, pid="p1"):
@@ -18,7 +18,7 @@ def call(conn, method, path, body=None):
 
 
 def card(conn, name):
-    return {c["name"]: c for c in call(conn, "GET", "/api/projects/p1/cards")["cards"]}[name]
+    return api_cards.card_of(conn, "p1", name)
 
 
 def skill(where, name, desc="does a thing"):

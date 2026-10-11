@@ -201,5 +201,5 @@ def test_no_access_on_the_workflow_kind(conn, proj):
     assert "access" in components.choices("knowledge")
     _card(proj, access="exclusive")                    # an old card with access stays good
     _project(conn, "game", proj)
-    cards = {c["name"]: c for c in call(conn, "GET", "/api/projects/game/cards")["cards"]}
+    cards = {"workflow": call(conn, "GET", "/api/projects/game/cards/workflow")["card"]}
     assert cards["workflow"]["error"] == "" and "access" not in cards["workflow"]["choices"]

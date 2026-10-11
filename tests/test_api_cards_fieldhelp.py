@@ -59,7 +59,7 @@ def test_the_card_payload_carries_field_help(conn, proj, monkeypatch):
     conn.execute("INSERT INTO projects(id, name, path, branch, created_at, folder) VALUES (?,?,?,?,?,?)",
                  ("game", "game", str(proj), "trunk", 0, str(proj)))
     conn.commit()
-    cards = {c["name"]: c for c in call(conn, "GET", "/api/projects/game/cards")["cards"]}
+    cards = {n: call(conn, "GET", f"/api/projects/game/cards/{n}")["card"] for n in ("notes", "broken")}
     assert cards["notes"]["field_help"] == {"extra": "one line"}
     assert cards["broken"]["error"] and cards["broken"]["field_help"] == {"extra": "one line"}
 

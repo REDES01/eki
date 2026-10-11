@@ -23,7 +23,7 @@ def cards(conn, proj, tmp_path):
 
 
 def _card(conn, name):
-    return {c["name"]: c for c in call(conn, "GET", "/api/projects/p1/cards")["cards"]}[name]
+    return call(conn, "GET", f"/api/projects/p1/cards/{name}")["card"]
 
 
 def test_a_service_cards_mcp_server_is_probed_and_no_env_value_leaves(conn, cards):

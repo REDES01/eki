@@ -51,8 +51,12 @@ def test_listing_for_a_project(conn, proj):
     put(base, "bad", "{nope")
     got = get(conn, "/api/projects/p1/cards")
     assert got["project"] == "p1" and got["readonly"] == "" and got["folder"]
-    cards = {c["name"]: c for c in got["cards"]}
-    assert list(cards) == ["bad", "helper", "images", "voice"]
+    grid = {c["name"]: c for c in got["cards"]}
+    assert list(grid) == ["bad", "helper", "images", "voice"]
+    assert all(set(c) == {"name", "title", "kind", "about", "ref", "error", "state", "last_use"}
+               for c in grid.values())
+    assert grid["voice"]["state"] == "idle" and grid["bad"]["state"] == "broken" and grid["images"]["ref"] == "images"
+    cards = {n: get(conn, f"/api/projects/p1/cards/{n}")["card"] for n in grid}
     keys = {"name", "kind", "about", "scope", "ref", "card", "folder", "error", "notes", "spec", "prompt",
             "instructions", "editable", "state", "last_use", "links", "size", "choices",
             "choice_defaults", "choice_help", "field_help", "title", "explain", "live", "overview"}
@@ -68,7 +72,7 @@ def test_listing_for_a_project(conn, proj):
     assert i["about"] == "pool images" and i["spec"]["run"] == "echo hi"
     b = cards["bad"]
     assert b["state"] == "broken" and "unreadable" in b["error"] and b["spec"] is None and not b["editable"]
-    json.dumps(got)
+    json.dumps(got), json.dumps(cards)
 
 
 def test_state_and_last_use_from_runs(conn, proj):

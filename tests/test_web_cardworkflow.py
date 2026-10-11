@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import api_workflow, apiroutes, builds, components, workflow
+from eki import api_cards, api_workflow, apiroutes, builds, components, workflow
 from test_web_choicemenu import DOM
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
@@ -32,7 +32,7 @@ def _project(conn, pid, folder):
 
 
 def _card(conn, pid, name):
-    return {c["name"]: c for c in call(conn, "GET", f"/api/projects/{pid}/cards")["cards"]}[name]
+    return api_cards.card_of(conn, pid, name)
 
 
 def test_the_card_json_carries_locked_on_eki_and_none_elsewhere(conn, proj, tmp_path, monkeypatch):

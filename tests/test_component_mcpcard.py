@@ -92,9 +92,9 @@ def test_many_cards_and_a_card_wins_a_clash(conn, proj):
 def test_card_api_masks_secrets_and_saving_masked_keeps_them(conn, proj):
     _project(conn, proj)
     card = _card(proj, "game-db", {"command": "dbtool", "env": {"TOKEN": SECRET, "MODE": "ro-mode"}})
-    listed = _call(conn, "GET", "/api/projects/p1/cards")
+    listed = _call(conn, "GET", "/api/projects/p1/cards/game-db")
     assert SECRET not in json.dumps(listed)
-    shown = {c["name"]: c for c in listed["cards"]}["game-db"]["spec"]
+    shown = listed["card"]["spec"]
     assert shown["server"]["env"]["TOKEN"] == "••••42"
     server = dict(shown["server"], env=dict(shown["server"]["env"], MODE="rw-mode"), args=["--v"])
     got = _call(conn, "POST", "/api/projects/p1/cards/game-db", {"settings": {"server": server}})

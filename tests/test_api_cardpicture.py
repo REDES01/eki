@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from eki import api_cardpicture, apiroutes, store
+from eki import api_cardpicture, api_cards, apiroutes, store
 
 
 def project(conn, folder, pid="p1"):
@@ -21,7 +21,7 @@ def card(proj, name, spec):
 
 def cards(conn):
     fn, m = apiroutes.match("GET", "/api/projects/p1/cards")
-    return {c["name"]: c for c in fn(conn, m, {}, {})["cards"]}
+    return {c["name"]: api_cards.card_of(conn, "p1", c["name"]) for c in fn(conn, m, {}, {})["cards"]}
 
 
 def call_run(conn, proj, name, args, caller=None, paths=(), t=None):

@@ -1,8 +1,8 @@
-"""The project page's cards show a serve card's links that are up and an assets card's pool size."""
+"""An opened card shows a serve card's links that are up and an assets card's stored pool size."""
 import json
 
-from eki import apiroutes
-from eki.components import serve
+from eki import api_cards, apiroutes
+from eki.components import assets, serve
 
 
 def put(base, name, spec):
@@ -20,7 +20,7 @@ def project(conn, folder, pid="p1"):
 
 def cards(conn):
     fn, m = apiroutes.match("GET", "/api/projects/p1/cards")
-    return {c["name"]: c for c in fn(conn, m, {}, {})["cards"]}
+    return {c["name"]: api_cards.card_of(conn, "p1", c["name"]) for c in fn(conn, m, {}, {})["cards"]}
 
 
 def test_serve_card_lists_its_links(conn, proj, monkeypatch):
@@ -47,6 +47,9 @@ def test_assets_card_shows_its_pool_size(conn, proj):
     put(proj / "components", "media", {"kind": "assets", "about": "media", "path": "assets"})
     (proj / "assets").mkdir()
     (proj / "assets" / "a.bin").write_bytes(b"12345")
+    assert cards(conn)["media"]["size"] == ""              # never measured: nothing, and no walk
+    assets.measure([proj])                                 # what housekeeping does in the background
+    (proj / "assets" / "b.bin").write_bytes(b"123")        # read from the stored value, not walked again
     got = cards(conn)["media"]
     assert got["size"] == "5 B" and got["links"] == []
 

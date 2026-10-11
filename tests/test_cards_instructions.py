@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from eki import apiroutes
+from eki import api_cards, apiroutes
 
 
 def project(conn, folder, pid="p1"):
@@ -18,7 +18,7 @@ def call(conn, method, path, body=None, q=None):
 
 
 def card(conn, name, pid="p1"):
-    return next(c for c in call(conn, "GET", f"/api/projects/{pid}/cards")["cards"] if c["name"] == name)
+    return api_cards.card_of(conn, pid, name)
 
 
 def with_card(conn, tmp_path, agents=None, claude=None):

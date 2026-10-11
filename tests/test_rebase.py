@@ -126,3 +126,23 @@ def test_gate_tree_is_detached_fresh_and_links_the_venv(repo):
     assert not git(t2, "status", "--porcelain", "--", ".", *workspace.NOT_LINKED)
     assert workspace.remove(repo, "gate-x")
     assert not t.exists()
+
+
+def test_marked_hunks_names_each_hunk_with_its_lines(tmp_path):
+    (tmp_path / "log.md").write_text("a\n<<<<<<< HEAD\nh1\n=======\nm1\n>>>>>>> mine\nb\n"
+                                     "<<<<<<< HEAD\nh2\n=======\n>>>>>>> mine\n")
+    (tmp_path / "clean.md").write_text("fine\n")
+    out = rebase.marked_hunks(tmp_path, ["log.md", "clean.md"])
+    assert out.startswith("log.md:") and "lines 2–6:" in out and "lines 8–11:" in out
+    assert "h1" in out and "m1" in out and "h2" in out and "clean.md" not in out
+    assert rebase.marked_lines(tmp_path, "log.md") == "2–6, 8–11"
+    assert rebase.marked_hunks(tmp_path, ["clean.md"]) == ""
+
+
+def test_marked_hunks_is_bounded(tmp_path):
+    body = "\n".join(f"line {i}" for i in range(100))
+    for n in range(6):
+        (tmp_path / f"f{n}.txt").write_text(f"<<<<<<< HEAD\n{body}\n=======\nx\n>>>>>>> mine\n")
+    out = rebase.marked_hunks(tmp_path, [f"f{n}.txt" for n in range(6)])
+    assert "more lines)" in out and "line 50" not in out
+    assert len(out.splitlines()) <= rebase.HUNKS_LINES + 1

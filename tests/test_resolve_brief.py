@@ -154,3 +154,22 @@ def test_resolve_runs_counts_eki_and_project_runs(conn, repo):
         store.create_run(conn, it["thread_id"], eki)
         store.create_run(conn, it["thread_id"], "something else")
     assert resolve.resolve_runs(conn, it) == 2
+
+
+def test_the_brief_says_edit_the_files_and_the_append_only_rule():
+    text = " ".join(resolvebrief.resolve(goal="g", title="t", spec="s", summary="", head="abc",
+                                         conflicted=["x"], head_changes="", landed="").split())
+    assert "Edit the conflicted files yourself" in text and "Describing the fix" in text
+    assert "Append-only files" in text and "changelogs" in text and "the head's first" in text
+    assert "no `SUMMARY:` and `ITEM:` line counts as a failed resolve" in text
+
+
+def test_retry_starts_like_a_resolve_and_says_what_went_wrong():
+    kw = dict(goal="g", title="t", spec="s", summary="", head="abc", conflicted=["notes.md"],
+              head_changes="", landed="")
+    text = resolvebrief.retry(previous_failure="you described the fix but the file still has markers "
+                              "at lines 3–7 of notes.md; edit the files",
+                              hunks="notes.md:\n  lines 3–7:\n<<<<<<< HEAD\nhead line", **kw)
+    assert text.splitlines()[:2] == [resolvebrief.FIRST_LINE, resolvebrief.RETRY_LINE]
+    assert "lines 3–7 of notes.md; edit the files" in text and "head line" in text
+    assert resolvebrief.resolve(**kw)[len(resolvebrief.FIRST_LINE):] in text      # the whole brief follows

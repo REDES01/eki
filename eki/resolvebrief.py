@@ -13,6 +13,9 @@ from . import projects
 #: the brief's first line, the same for eki and for projects: eki/resolve.py
 #: resolve_runs counts a thread's runs whose prompt starts with it
 FIRST_LINE = "You are resolving a rebase conflict in a change stopped mid-rebase."
+#: the second line of a retry's brief: eki/resolve.py reads a run's prompt for it
+#: to know the run was the second try
+RETRY_LINE = "This is your second and last try at this conflict."
 
 WHO_EKI = """\
 The change is to eki — the program that is running you right now. This folder
@@ -69,6 +72,14 @@ Resolve the conflicts so every intent survives: what this change is for, and
 what each landed change above is for — not only the text of the head. Leave no
 conflict markers (<<<<<<<, =======, >>>>>>>) in any file. {check}
 
+Edit the conflicted files yourself. Describing the fix in your answer is not
+enough: eki checks the files for markers right after your turn, and a file
+that still has them is a failed resolve.
+
+Append-only files — logs, notes, decision logs, changelogs — where both sides
+added lines: keep both sides' lines, the head's first, then this change's,
+and remove the markers.
+
 If two intents truly contradict — no file can do both — do not pick one
 silently: say what contradicts and end with `ITEM: person <what contradicts>`.
 
@@ -81,7 +92,17 @@ End your answer with a `SUMMARY:` paragraph in plain words (how you resolved
 each file, how each intent — this change's and each landed one's — survived,
 what to check) and then one last line:
 `ITEM: done` — or `ITEM: person <why>` if this needs a person's hands.
+An answer with no `SUMMARY:` and `ITEM:` line counts as a failed resolve.
 """
+
+RETRY = """What went wrong on the first try: {failure}.
+
+The hunks still marked:
+
+{hunks}
+"""
+
+NO_HUNKS = "(none — no file has markers left; the answer is what failed)"
 
 NOTHING_LANDED = "(nothing known beyond the diff above: no landed change on record touched these files)"
 
@@ -109,3 +130,11 @@ def resolve(*, goal: str, title: str, spec: str, summary: str, head: str, confli
                         conflicted=", ".join(conflicted) or "(none named)",
                         head_changes=head_changes.strip() or "(nothing found)",
                         landed=(landed or "").strip() or NOTHING_LANDED)
+
+
+def retry(*, previous_failure: str, hunks: str, **kw) -> str:
+    """The brief for the second and last resolve run: the first's failure and what is still marked."""
+    text = resolve(**kw)
+    rest = text[len(FIRST_LINE) + 1:]
+    told = RETRY.format(failure=previous_failure.strip().rstrip("."), hunks=hunks.strip() or NO_HUNKS)
+    return f"{FIRST_LINE}\n{RETRY_LINE}\n\n{told}\n{rest}"

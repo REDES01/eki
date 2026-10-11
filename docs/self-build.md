@@ -231,7 +231,9 @@ for, what A and B did in the conflicted files and what A and B were *for*
 (their goals, specs and builders' summaries; a person's own commit by its
 message). It must keep every intent and say in its summary how each survived;
 when two truly contradict it stops with `ITEM: person` rather than pick one,
-and C is left for you. When it's done, eki
+and C is left for you. A resolver that leaves conflict markers in a file, or
+ends without an `ITEM:` line, gets one more run, told what was wrong and shown
+the hunks still marked; a second failure leaves C for you. When it's done, eki
 continues the rebase, refuses a result with markers left or not on top of
 the head it resolved against, runs gate 1 on it again, and C rejoins at the
 back — cleanly now, since it contains A and B. Many changes resolve at once,

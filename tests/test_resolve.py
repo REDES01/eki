@@ -116,17 +116,60 @@ def test_a_resolved_item_does_not_carry_its_old_head_along(conn, repo, conflicte
     assert asked == [(other, head)]                    # `rebase --onto other head`: only its own commits move
 
 
-def test_markers_left_are_refused(conn, conflicted, tmp_path, monkeypatch):
+def test_markers_left_get_a_second_try_then_are_refused(conn, conflicted, tmp_path, monkeypatch):
+    it, head = conflicted
+    rid = resolve.start(conn, it, head, ["a.txt"])
+    says(tmp_path, monkeypatch, "Both sides change line two; keep both.\nSUMMARY: sure.\nITEM: done\n")
+    run_inline(conn, rid)
+    said = resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "resolving" and cur["run_id"] != rid, (cur["error"], said)
+    assert any("second try" in s and "a.txt" in s for s in said), said
+    wt = Path(cur["worktree"])
+    assert rebase.in_progress(wt) and resolve.resolve_runs(conn, cur) == 2
+    prompt = store.run(conn, cur["run_id"])["prompt"]
+    assert prompt.splitlines()[:2] == [resolvebrief.FIRST_LINE, resolvebrief.RETRY_LINE]
+    assert "markers at lines 2–6 of a.txt" in prompt and "edit the files" in prompt
+    assert "lines 2–6:" in prompt and "<<<<<<<" in prompt and "\nmine\n" in prompt and "\ntheirs\n" in prompt
+    assert resolve.tick(conn) == []                                  # the retry hasn't ended
+    run_inline(conn, cur["run_id"])                                  # it leaves the markers too
+    resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "left" and "a.txt" in cur["error"] and "marker" in cur["error"]
+    assert "second resolve run" in cur["error"]
+    assert not rebase.in_progress(wt)
+    assert workspace.head(wt) == it["commit_sha"] and (wt / "a.txt").read_text() == "one\nmine\nthree\n"
+
+
+def test_no_item_line_gets_a_second_try(conn, conflicted, tmp_path, monkeypatch):
+    it, head = conflicted
+    rid = resolve.start(conn, it, head, ["a.txt"])
+    says(tmp_path, monkeypatch, "Kept both.\n")
+    monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
+    run_inline(conn, rid)
+    said = resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "resolving" and cur["run_id"] != rid, (cur["error"], said)
+    prompt = store.run(conn, cur["run_id"])["prompt"]
+    assert resolvebrief.RETRY_LINE in prompt and "no ITEM: line" in prompt
+    assert "a.txt" in prompt and resolvebrief.NO_HUNKS in prompt
+    run_inline(conn, cur["run_id"])                                  # no ITEM line again
+    resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "left" and cur["error"] == "no ITEM line after a second resolve run"
+
+
+def test_a_good_second_try_goes_on_to_gate_one(conn, conflicted, tmp_path, monkeypatch):
     it, head = conflicted
     rid = resolve.start(conn, it, head, ["a.txt"])
     says(tmp_path, monkeypatch, "SUMMARY: sure.\nITEM: done\n")
     run_inline(conn, rid)
     resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "left" and "a.txt" in cur["error"] and "marker" in cur["error"]
-    wt = Path(cur["worktree"])
-    assert not rebase.in_progress(wt)
-    assert workspace.head(wt) == it["commit_sha"] and (wt / "a.txt").read_text() == "one\nmine\nthree\n"
+    monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
+    run_inline(conn, cur["run_id"])
+    resolve.tick(conn)
+    assert selfwork.store_item(conn, it["id"])["state"] == "rechecking"
 
 
 def test_a_person_is_asked_for(conn, conflicted, tmp_path, monkeypatch):
@@ -191,3 +234,15 @@ def test_the_brief():
                                 conflicted=["eki/x.py"], head_changes="$ git log\nabc fix", landed="")
     assert "Do the thing" in text and "abcdef123456" in text and "conflict" in text
     assert "eki/x.py" in text and "ITEM: done" in text and "--continue" in text
+
+
+def test_retry_brief():
+    kw = dict(goal="g", title="Do the thing", spec="s", summary="", head="abcdef1234567890",
+              conflicted=["log.md"], head_changes="", landed="")
+    text = resolvebrief.retry(previous_failure="the file still has markers at lines 12–30 of log.md",
+                              hunks="log.md:\n  lines 12–30:\n<<<<<<< HEAD", **kw)
+    lines = text.splitlines()
+    assert lines[0] == resolvebrief.FIRST_LINE and lines[1] == resolvebrief.RETRY_LINE
+    assert "lines 12–30 of log.md" in text and "<<<<<<< HEAD" in text and "Do the thing" in text
+    assert resolvebrief.retry(previous_failure="your answer had no ITEM: line", hunks="", **kw).count(
+        resolvebrief.NO_HUNKS) == 1

@@ -15,9 +15,10 @@ safe to repeat, so a restart at any point loses nothing.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import subprocess
-from typing import List
+from typing import List, Optional, Tuple
 
 from . import db, landed, projects, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
@@ -39,12 +40,14 @@ def start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List
 
 
 def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List[str],
-           changes: str, intents: str) -> str:
+           changes: str, intents: str, retry: Optional[Tuple[str, str]] = None) -> str:
+    """`retry`: (what went wrong, the hunks still marked) — the second and last try."""
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-    prompt = resolvebrief.resolve(goal=goal["text"] if goal else "", title=it["title"], spec=it["spec"],
-                                  summary=it["summary"] or "", head=head, conflicted=conflicted,
-                                  head_changes=changes, landed=intents,
-                                  project=projectwork.project_of(conn, goal))
+    kw = dict(goal=goal["text"] if goal else "", title=it["title"], spec=it["spec"],
+              summary=it["summary"] or "", head=head, conflicted=conflicted,
+              head_changes=changes, landed=intents, project=projectwork.project_of(conn, goal))
+    prompt = (resolvebrief.retry(previous_failure=retry[0], hunks=retry[1], **kw) if retry
+              else resolvebrief.resolve(**kw))
     owner = goal["owner"] if goal else "eki"
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if owner == "you" else "background")
@@ -126,10 +129,9 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return _leave(conn, it, reason or "the resolver asked for a person", person=True)
     wt, head = it["worktree"], it["head"]
     try:
-        if rebase.in_progress(wt):
-            left = rebase.markers(wt, head)
-            if left:
-                return _leave(conn, it, f"conflict markers left in {', '.join(left)}")
+        left = rebase.markers(wt, head) if rebase.in_progress(wt) else []
+        if left or not _has_item(store.answer(conn, run["id"])):
+            return _failed(conn, it, run, left)
         stopped = rebase.proceed(wt)
     except WorkspaceError as e:
         return _leave(conn, it, f"the rebase would not go on: {e}")
@@ -164,6 +166,38 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
                                priority=run["priority"])
         selfwork._set(conn, it["id"], state="rechecking", run_id=rid, commit_sha=sha, error=None)
     return [f"item {it['id']}: resolved onto {head[:12]}; gate 1 again"]
+
+
+def _has_item(answer: str) -> bool:
+    """The answer has an `ITEM:` line (the regex of selfbrief.outcome)."""
+    return re.search(r"^\s*`?ITEM:\s*(done|partial|person)\b", answer or "", re.M | re.I) is not None
+
+
+def _failed(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, left: List[str]) -> List[str]:
+    """A resolver that left markers, or no ITEM line: one more run told what was wrong,
+    or — when this was already that run (its prompt says so) — left for a person."""
+    wt, head = it["worktree"], it["head"]
+    what = f"conflict markers left in {', '.join(left)}" if left else "no ITEM line"
+    if resolvebrief.RETRY_LINE in (run["prompt"] or ""):
+        return _leave(conn, it, f"{what} after a second resolve run")
+    try:
+        files = left or rebase.conflicted(wt)
+        hunks = rebase.marked_hunks(wt, left)
+    except WorkspaceError as e:
+        return _leave(conn, it, f"{what} (and {e})")
+    if left:
+        where = "; ".join(f"lines {rebase.marked_lines(wt, f)} of {f}" for f in left)
+        failure = f"you described the fix but the file still has markers at {where}; edit the files"
+    else:
+        failure = "your answer had no ITEM: line; end with a SUMMARY: paragraph and an ITEM: line"
+    changes = head_changes(it, head, files)
+    intents = landed.intents(conn, it, head, files)
+    with db.tx(conn):
+        if not _still(conn, it, "resolving"):
+            return []
+        rid = _start(conn, it, head, files, changes, intents, retry=(failure, hunks))
+    who = f"left markers in {', '.join(left)}" if left else "gave no ITEM line"
+    return [f"item {it['id']}: resolver {who}; second try ({rid[:8]})"]
 
 
 def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:

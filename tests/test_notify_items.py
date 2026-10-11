@@ -159,6 +159,8 @@ def test_markers_left_are_no_notice(conn, conflicted, lit, tmp_path, monkeypatch
     rid = resolve.start(conn, it, head, ["a.txt"])
     says(tmp_path, monkeypatch, "SUMMARY: sure.\nITEM: done\n")
     run_inline(conn, rid)
+    resolve.tick(conn)                                   # a second try first
+    run_inline(conn, selfwork.store_item(conn, it["id"])["run_id"])
     resolve.tick(conn)
     assert selfwork.store_item(conn, it["id"])["state"] == "left"
     assert notices(conn) == []

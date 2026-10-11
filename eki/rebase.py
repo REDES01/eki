@@ -136,6 +136,59 @@ def markers(worktree: str | Path, since: str) -> List[str]:
                   and not (root / f).is_symlink() and _has_marker(root / f))
 
 
+#: lines of one marked hunk, and of all of them, that `marked_hunks` shows
+HUNK_LINES = 40
+HUNKS_LINES = 200
+
+
+def _hunks(lines: List[str]) -> List[tuple]:
+    """(start, end) 1-based of each `<<<<<<<` … `>>>>>>>` hunk; an unclosed one runs to the end."""
+    out, start = [], None
+    for i, line in enumerate(lines, 1):
+        if start is None and line.startswith("<<<<<<<"):
+            start = i
+        elif start is not None and line.startswith(">>>>>>>"):
+            out.append((start, i))
+            start = None
+    if start is not None:
+        out.append((start, len(lines)))
+    return out
+
+
+def marked_hunks(worktree: str | Path, files: List[str]) -> str:
+    """The hunks still marked in `files`, each with its line numbers; "" when none is."""
+    root, out = Path(worktree), []
+    for f in files:
+        path = root / f
+        if not path.is_file() or not _has_marker(path):
+            continue
+        lines = path.read_text(errors="replace").splitlines()
+        hunks = _hunks(lines)
+        out.append(f"{f}:")
+        if not hunks:
+            out.append("  (a marker line without a `<<<<<<<` opening)")
+        for start, end in hunks:
+            body = lines[start - 1:end]
+            out.append(f"  lines {start}–{end}:")
+            out += body[:HUNK_LINES]
+            if len(body) > HUNK_LINES:
+                out.append(f"  … ({len(body) - HUNK_LINES} more lines)")
+        out.append("")
+    if len(out) > HUNKS_LINES:
+        out = out[:HUNKS_LINES] + [f"… ({len(out) - HUNKS_LINES} more lines)"]
+    return "\n".join(out).strip()
+
+
+def marked_lines(worktree: str | Path, f: str) -> str:
+    """'12–30, 41–50': where `f`'s marked hunks are, for a one-line message."""
+    path = Path(worktree) / f
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return ""
+    return ", ".join(f"{s}–{e}" for s, e in _hunks(lines))
+
+
 def gate_tree(repo: str | Path, key: str, sha: str) -> Path:
     """A fresh detached worktree of `repo` at `sha` under EKI_HOME/work/<key>,
     the linked folders symlinked from `repo`. Removal: workspace.remove(repo, key)."""

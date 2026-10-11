@@ -1,11 +1,3 @@
-/* The workflow card's part (cardworkflow.js): the checks as toggles in the order they run, each with its
-   one line; self and eki's locked checks fixed; then the command, the target picker and parallel. */
-.cw-checks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-.cw-check { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
-.cw-check .cw-name { min-width: 76px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-.cw-check .cw-what { font-size: 12px; }
-.cw-fixed { cursor: default; }
-.cw-fixed .cw-name { opacity: 0.75; }
-.cw-lock { font-style: italic; }
-.cw-parallel { width: 6em; }
-.cw-command { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; }
+/* The workflow card's part (cardworkflow.js): its one line and the link to the Workflow page. */
+.cw-line { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin-bottom: 8px; }
+.cw-open { font-weight: 600; }

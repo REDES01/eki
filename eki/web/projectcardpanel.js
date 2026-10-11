@@ -9,7 +9,8 @@
 // A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro, ctx), close(), keys},
 // from cardknowledge.js, cardmcp.js, cardworkflow.js) gets a section under its title; the settings it lists in
 // `keys` are drawn there, not in the form, and saved with ctx.save({key: value, …}) (ctx.problems: what the
-// server said, by key); passive kinds have no Run or Uses.
+// server said, by key); a part with form: false keeps every setting and there's no Settings section;
+// passive kinds have no Run or Uses.
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
   const PASSIVE = ["knowledge", "mcp", "workflow"];                    // eki/components PASSIVE: read or attached, never called
@@ -263,7 +264,7 @@
     P.el.innerHTML = `<div class="pj-card pp pp-cardview">
       <div class="pp-head"></div>
       ${part ? `<h4 class="pp-h">${esc(part.title)}</h4><div class="pp-kind"></div>` : ""}
-      <h4 class="pp-h">Settings</h4><div class="pp-settings"></div>
+      ${part && part.form === false ? "" : '<h4 class="pp-h">Settings</h4><div class="pp-settings"></div>'}
       ${agent ? '<h4 class="pp-h">Prompt</h4><div class="pp-prompt"></div><div class="pp-prompt-err"></div>' : ""}
       ${P.card.kind === "skills" ? '<h4 class="pp-h">Skills</h4><div class="pp-skills"></div>' : ""}
       ${passive() ? "" : `<h4 class="pp-h">Run</h4>

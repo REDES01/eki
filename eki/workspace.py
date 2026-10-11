@@ -5,7 +5,8 @@ A piece of work on a repo gets a checkout of its own under `EKI_HOME/work/
 agents in two worktrees of one repo never overwrite each other; what each
 did is a branch, brought together by the queue (docs/self-build.md), not by
 luck. Ignored folders a checkout needs to run (`.venv`, `node_modules`) are
-linked from the source repo rather than rebuilt.
+linked from the source repo rather than rebuilt. On APFS the checkout's
+files are clones of the source checkout's (eki/clonetree.py): almost no disk.
 
 Nothing here is specific to eki's own source: any repo, any base, any key.
 """
@@ -86,6 +87,8 @@ def add(repo: str | Path, key: str, *, base: str = "HEAD", branch: Optional[str]
     Already there: returned as it is."""
     dest = path_for(key)
     if (dest / ".git").exists():
+        if not _has_index(dest):          # killed between `worktree add` and fill: finish it
+            populate(repo, dest, head(dest))
         return dest
     if dest.exists():
         shutil.rmtree(dest)
@@ -93,10 +96,11 @@ def add(repo: str | Path, key: str, *, base: str = "HEAD", branch: Optional[str]
     sha = git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
     branch = branch or f"eki/{key}"
     if git(repo, "branch", "--list", branch):
-        git(repo, "worktree", "add", "--force", str(dest), branch)
-        git(dest, "reset", "--hard", sha)
+        git(repo, "worktree", "add", "--force", "--no-checkout", str(dest), branch)
+        git(dest, "reset", "-q", "--soft", sha)
     else:
-        git(repo, "worktree", "add", "-b", branch, str(dest), sha)
+        git(repo, "worktree", "add", "--no-checkout", "-b", branch, str(dest), sha)
+    populate(repo, dest, sha)
     for name in LINKED:
         src = Path(repo) / name
         if src.is_dir() and not (dest / name).exists():
@@ -104,6 +108,30 @@ def add(repo: str | Path, key: str, *, base: str = "HEAD", branch: Optional[str]
     _link_assets(dest)
     _mark(key).write_text(f"{time.time()}\n")
     return dest
+
+
+def populate(repo: str | Path, dest: str | Path, sha: str) -> str:
+    """The tracked files of `sha` in the `--no-checkout` worktree `dest`: clones
+    of `repo`'s checkout where it can (eki/clonetree.py). Never fails for that:
+    a plain checkout instead."""
+    from . import clonetree
+    start = time.monotonic()
+    try:
+        mode = clonetree.fill(repo, dest, sha)
+    except Exception as e:
+        log.warning("worktree %s: filling failed (%s); a plain checkout", dest, e)
+        git(dest, "reset", "-q", "--hard", sha)
+        mode = "checkout"
+    log.info("worktree %s: %s in %.2fs", Path(dest).name, mode, time.monotonic() - start)
+    return mode
+
+
+def _has_index(dest: Path) -> bool:
+    where = git(dest, "rev-parse", "--git-path", "index", check=False)
+    if not where:                         # not a worktree git knows: leave it as it is
+        return True
+    p = Path(where)
+    return (p if p.is_absolute() else dest / p).exists()
 
 
 def _link_assets(dest: Path) -> None:

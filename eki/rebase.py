@@ -196,7 +196,8 @@ def gate_tree(repo: str | Path, key: str, sha: str) -> Path:
     workspace.remove(repo, key)
     git(repo, "worktree", "prune", check=False)
     commit = git(repo, "rev-parse", "--verify", f"{sha}^{{commit}}")
-    git(repo, "worktree", "add", "--force", "--detach", str(dest), commit)
+    git(repo, "worktree", "add", "--force", "--no-checkout", "--detach", str(dest), commit)
+    workspace.populate(repo, dest, commit)
     for name in LINKED:
         src = Path(repo) / name
         if src.is_dir() and not (dest / name).exists():

@@ -1,0 +1,34 @@
+/* A setting's fixed choices as a small dropdown (choicemenu.js): a button, a list whose hovered or
+   highlighted option shows its one-line explanation, and a short tooltip on the button (and on a switch
+   wrapped in .cm-tipped). Only style.css's variables. */
+
+.cm, .cm-tipped { position: relative; }
+.cm { display: block; }
+.cm-tipped:not(.cm) { display: inline-block; }
+.pp .cm-btn { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; cursor: pointer; }
+.pp .cm-btn:disabled { cursor: default; }
+.pp .cm-btn:focus-visible { outline: none; border-color: var(--teal); }
+.pp .cm-btn.invalid { border-color: var(--red); color: var(--red); }
+.cm-val { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-caret { color: var(--dim); font-size: 11px; }
+
+.cm-list { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 3px); margin: 0; padding: 4px;
+  list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .16); max-height: 280px; overflow: auto; }
+.cm-list:focus { outline: none; }
+.cm-list[hidden] { display: none; }
+.cm-opt { padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.cm-opt.on .cm-name { font-weight: 600; }
+.cm-opt.on .cm-name::after { content: " ✓"; color: var(--teal); }
+.cm-opt.hi { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.cm-help { display: none; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--dim); white-space: normal; }
+.cm-opt.hi .cm-help { display: block; }
+
+/* the tooltip: under the control, as wide as it, after a short pause */
+.cm-tip { position: absolute; z-index: 19; left: 0; right: 0; top: calc(100% + 4px); padding: 5px 8px;
+  border-radius: 6px; background: var(--text); color: var(--bg); font-size: 12px; line-height: 1.35;
+  font-weight: normal; text-transform: none; letter-spacing: 0; white-space: normal; pointer-events: none;
+  opacity: 0; visibility: hidden; transition: opacity .12s; }
+.cm-tipped:not(.cm) .cm-tip { right: auto; width: max-content; max-width: 260px; }
+.cm-tipped:hover > .cm-tip { opacity: 1; visibility: visible; transition-delay: .35s; }
+.cm.open > .cm-tip { display: none; }

@@ -1,7 +1,8 @@
 // An open card in the side panel (projectcards.js hosts it there; the panel's header has its name,
 // kind and about): its state, settings as a form built from component.json (each change saved and
 // checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
-// fixed choices, card.choices from its kind, is a dropdown), an agent's prompt.md and its bare switch,
+// fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice on hover,
+// card.choice_help), an agent's prompt.md and its bare switch,
 // Run (eki use <name> <args> through the engine, polled every second), its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
 // read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
 // A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro), close()},
@@ -15,6 +16,17 @@
       t.src = "/ui/" + f; t.async = false;
       document.head.appendChild(t);
     }
+  }
+  if (document.querySelector && !document.querySelector('script[src="/ui/choicemenu.js"]')) {
+    const t = document.createElement("script");
+    t.src = "/ui/choicemenu.js"; t.async = false;
+    t.onload = () => redraw();                // a card opened before it arrived is drawn again with it
+    document.head.appendChild(t);
+  }
+  if (document.querySelector && !document.querySelector('link[href="/ui/choicemenu.css"]')) {
+    const l = document.createElement("link");
+    l.rel = "stylesheet"; l.href = "/ui/choicemenu.css";
+    document.head.appendChild(l);
   }
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const P = { el: null, pid: null, card: null, ro: "", ctx: null, last: {}, problems: {}, err: {},
@@ -48,19 +60,22 @@
     return keys.map((k) => ({ key: k, value: k in spec ? spec[k] : k in defs ? defs[k] : k === "bare" ? false : undefined }));
   }
 
-  // a value outside the choices stays: the first option, selected and marked, until another is picked
-  function choice(f, cs, at) {
-    const bad = !cs.some((c) => c === f.value);
-    const shown = f.value == null ? "" : typeof f.value === "object" ? JSON.stringify(f.value) : f.value;
-    const opt = (c, on) => `<option value="${esc(c)}"${on ? " selected" : ""}>${esc(c)}</option>`;
-    return `<select class="set-in${bad ? " invalid" : ""}" ${at} data-type="${bools(cs) ? "boolchoice" : "choice"}">${bad ? opt(shown, true) : ""}${
-      cs.map((c) => opt(c, !bad && c === f.value)).join("")}</select>${bad ? `<div class="pj-err set-bad">not one of: ${esc(cs.join(", "))}</div>` : ""}`;
+  const help = (key) => (P.card.choice_help || {})[key] || {};
+
+  // a value outside the choices stays shown on the button, marked, until another is picked
+  function choice(f, cs, off) {
+    const bad = !cs.some((c) => c === f.value), cm = window.choiceMenu;
+    return (cm ? cm.html(f.key, cs, f.value, help(f.key), off) : `<code>${esc(f.value)}</code>`) +
+      (bad ? `<div class="pj-err set-bad">not one of: ${esc(cs.join(", "))}</div>` : "");
   }
 
   function control(f, off) {
     const v = f.value, dis = off ? " disabled" : "", at = `data-key="${esc(f.key)}"${dis}`, cs = choices()[f.key];
-    if (Array.isArray(cs) && cs.length && !(bools(cs) && typeof v === "boolean")) return choice(f, cs, at);
-    if (typeof v === "boolean") return `<label class="set-check"><input type="checkbox" ${at} data-type="bool"${v ? " checked" : ""}> ${v ? "true" : "false"}</label>`;
+    if (Array.isArray(cs) && cs.length && !(bools(cs) && typeof v === "boolean")) return choice(f, cs, off);
+    if (typeof v === "boolean") {
+      const t = help(f.key)[String(v)], box = `<label class="set-check"><input type="checkbox" ${at} data-type="bool"${v ? " checked" : ""}> ${v ? "true" : "false"}</label>`;
+      return t && window.choiceMenu ? `<span class="cm-tipped">${box}${choiceMenu.tip(t)}</span>` : box;
+    }
     if (typeof v === "number") return `<input class="set-in" type="number" step="any" ${at} data-type="number" value="${esc(v)}">`;
     if (Array.isArray(v)) return `<textarea class="set-in pp-list" rows="${Math.min(8, Math.max(2, v.length + 1))}" ${at} data-type="list" spellcheck="false">${esc(v.join("\n"))}</textarea>`;
     if (v && typeof v === "object") return `<textarea class="set-in pp-list" rows="4" ${at} data-type="json" spellcheck="false">${esc(JSON.stringify(v, null, 2))}</textarea>`;
@@ -84,17 +99,20 @@
   function valueOf(el) {
     const t = el.dataset.type;
     if (t === "bool") return el.checked;
-    if (t === "boolchoice") return el.value === "true" ? true : el.value === "false" ? false : el.value;
     if (t === "number") return el.value.trim() === "" ? null : Number(el.value);
     if (t === "list") return el.value.split("\n").map((s) => s.trim()).filter(Boolean);
     if (t === "json") return JSON.parse(el.value);
     return el.value;
   }
 
-  async function saveSetting(el) {
+  function saveSetting(el) {
     const key = el.dataset.key;
     let value;
     try { value = valueOf(el); } catch (x) { P.problems[key] = "not valid JSON: " + x.message; return redrawSettings(); }
+    return saveValue(key, value);
+  }
+  async function saveValue(key, value) {
+    if (!P.card) return;
     delete P.problems[key]; delete P.err.settings;
     try {
       const got = await P.ctx.api(url(), { settings: { [key]: value } });
@@ -256,10 +274,14 @@
   function draw() {
     if (kindPart() !== P.framed) frame();         // a kind's part registered after the card opened
     put(".pp-head", head());
+    if (window.choiceMenu && !P.el.dataset.cmWired) {   // a picked choice is saved like any other setting
+      P.el.dataset.cmWired = "1";
+      choiceMenu.attach(P.el, (key, value) => saveValue(key, value));
+    }
     const part = kindPart(), box = q(".pp-kind");
     if (part && box) part.draw(box, P.card, P.pid, P.ro);
     const a = document.activeElement;
-    const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea, select");
+    const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea, select, .cm-list");
     if (!(typing && a.closest(".pp-settings"))) put(".pp-settings", settings());
     if (!(typing && a.closest(".pp-prompt"))) put(".pp-prompt", prompt());
     put(".pp-runout", runPart());

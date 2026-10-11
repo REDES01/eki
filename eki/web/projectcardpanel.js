@@ -1,7 +1,7 @@
 // An open card in the side panel (projectcards.js hosts it there; the panel's header has its name,
 // kind and about): its state, settings as a form built from component.json (each change saved and
 // checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
-// fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice on hover,
+// fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice in its open list,
 // card.choice_help), an agent's prompt.md and its bare switch,
 // Run (eki use <name> <args> through the engine, polled every second), its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
 // read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
@@ -73,8 +73,7 @@
     const v = f.value, dis = off ? " disabled" : "", at = `data-key="${esc(f.key)}"${dis}`, cs = choices()[f.key];
     if (Array.isArray(cs) && cs.length && !(bools(cs) && typeof v === "boolean")) return choice(f, cs, off);
     if (typeof v === "boolean") {
-      const t = help(f.key)[String(v)], box = `<label class="set-check"><input type="checkbox" ${at} data-type="bool"${v ? " checked" : ""}> ${v ? "true" : "false"}</label>`;
-      return t && window.choiceMenu ? `<span class="cm-tipped">${box}${choiceMenu.tip(t)}</span>` : box;
+      return `<label class="set-check"><input type="checkbox" ${at} data-type="bool"${v ? " checked" : ""}> ${v ? "true" : "false"}</label>`;
     }
     if (typeof v === "number") return `<input class="set-in" type="number" step="any" ${at} data-type="number" value="${esc(v)}">`;
     if (Array.isArray(v)) return `<textarea class="set-in pp-list" rows="${Math.min(8, Math.max(2, v.length + 1))}" ${at} data-type="list" spellcheck="false">${esc(v.join("\n"))}</textarea>`;

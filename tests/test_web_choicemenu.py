@@ -1,7 +1,8 @@
 """choicemenu.js draws a setting's fixed choices as a small dropdown with each choice's one-line
-explanation (card.choice_help): every option's text in the html and its title, the current value's text
-on the button, the bare switch carrying its on or off text, no help meaning no tooltip, and the keyboard
-(ArrowDown opens and moves, Enter picks, Esc closes) through a tiny stubbed DOM. It is served with its look."""
+explanation (card.choice_help) in its open list only: every option's text beside it in the html, no
+title or tooltip anywhere, the button showing just the value, the bare switch a plain checkbox, missing
+help meaning no explanation, and the keyboard (ArrowDown opens and moves, Enter picks, Esc closes)
+through a tiny stubbed DOM. It is served with its look."""
 import json
 import re
 import shutil
@@ -100,7 +101,7 @@ for (const s of steps) {
   else fire(root, "keydown", document.activeElement || btn, { key: s[1] });
   log.push(state());
 }
-process.stdout.write(JSON.stringify({ html, picked, log, state: state() }));
+process.stdout.write(JSON.stringify({ html, picked, log, state: state(), api: Object.keys(choiceMenu).sort() }));
 """
 
 READ = ["always", "when-relevant"]
@@ -130,25 +131,31 @@ def esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def test_every_option_carries_its_explanation_and_the_button_its_values(tmp_path):
+def test_every_option_carries_its_explanation_in_the_list_and_nothing_else_does(tmp_path):
     for key, cs, value, help in (("read", READ, "always", READ_HELP), ("access", ACCESS, "exclusive", ACCESS_HELP)):
-        html = menu(tmp_path, key, cs, value, help)["html"]
+        got = menu(tmp_path, key, cs, value, help)
+        html = got["html"]
         for c in cs:
-            assert f'title="{esc(help[c])}"' in html and f'<span class="cm-help">{esc(help[c])}</span>' in html
-        assert f'<span class="cm-tip" role="tooltip">{esc(help[value])}</span>' in html
-        assert html.count('class="cm-tip"') == 1
-        assert f'<span class="cm-val">{value}</span>' in html
+            assert f'<span class="cm-name">{c}</span><span class="cm-help">{esc(help[c])}</span>' in html
+        assert html.count('class="cm-help"') == len(cs)
+        assert "title=" not in html and "cm-tip" not in html and 'role="tooltip"' not in html
+        assert html.startswith('<div class="cm">')
+        inner = re.search(r"<button[^>]*>(.*?)</button>", html, re.S).group(1)
+        assert inner == f'<span class="cm-val">{value}</span><span class="cm-caret" aria-hidden="true">▾</span>'
+        assert got["api"] == ["attach", "html"]
         assert 'role="listbox"' in html and html.count('role="option"') == len(cs)
         assert 'aria-haspopup="listbox"' in html and 'aria-expanded="false"' in html
 
 
-def test_missing_help_draws_no_tooltip_and_still_works(tmp_path):
+def test_missing_help_draws_no_explanation_and_still_works(tmp_path):
     for help in (None, {}, {"always": "only one"}):
         got = menu(tmp_path, "read", READ, "when-relevant", help,
                    steps=[("click", "button"), ("click", "always")])
-        assert 'class="cm-tip"' not in got["html"]
+        assert '<span class="cm-name">when-relevant</span></li>' in got["html"]
+        assert "cm-tip" not in got["html"] and "title=" not in got["html"]
         assert got["picked"] == [["read", "always"]]
-    assert 'title="only one"' in menu(tmp_path, "read", READ, "always", {"always": "only one"})["html"]
+    html = menu(tmp_path, "read", READ, "always", {"always": "only one"})["html"]
+    assert html.count('class="cm-help"') == 1 and '<span class="cm-help">only one</span>' in html
 
 
 def test_keyboard_opens_moves_picks_and_escape_closes(tmp_path):
@@ -181,7 +188,7 @@ def test_booleans_come_back_as_booleans_and_a_bad_value_is_marked(tmp_path):
     got = menu(tmp_path, "bare", [False, True], "yes", {"true": "on", "false": "off"},
                steps=[("click", "button"), ("click", "true")])
     assert 'class="set-in cm-btn invalid"' in got["html"] and 'data-type="boolchoice"' in got["html"]
-    assert '<span class="cm-val">yes</span>' in got["html"] and 'class="cm-tip"' not in got["html"]
+    assert '<span class="cm-val">yes</span>' in got["html"] and "cm-tip" not in got["html"]
     assert got["picked"] == [["bare", True]]
 
 
@@ -208,17 +215,15 @@ def test_served_small_and_loaded_by_the_panel(web):
     assert "/ui/choicemenu.js" in panel and "/ui/choicemenu.css" in panel
 
 
-def test_the_bare_switch_carries_its_on_or_off_text(tmp_path):
+def test_the_bare_switch_is_a_plain_checkbox_without_a_tooltip(tmp_path):
     from test_web_cardchoices import AGENT, run
     help = {"bare": {"true": "On: the agent gets only its system prompt.", "false": "Off: as usual."},
             "access": {"shared": "Any number of runs can use it at once."}}
-    for bare, text, other in ((True, help["bare"]["true"], help["bare"]["false"]),
-                              (False, help["bare"]["false"], help["bare"]["true"])):
-        card = dict(AGENT, spec={"kind": "agent", "bare": bare}, choice_help=help)
-        html = run(tmp_path, card)["settings"]
-        assert re.search(r'<span class="cm-tipped"><label class="set-check"><input type="checkbox" data-key="bare"[^>]*>'
-                         r'[^<]*</label><span class="cm-tip" role="tooltip">' + re.escape(esc(text)) + "</span></span>", html), html
-        assert esc(other) not in html
-        assert f'<span class="cm-tip" role="tooltip">{esc(help["access"]["shared"])}</span>' in html
-    html = run(tmp_path, dict(AGENT, spec={"kind": "agent", "bare": True}))["settings"]       # no choice_help
-    assert 'class="cm-tip"' not in html and 'data-key="bare"' in html and 'class="set-in cm-btn" data-key="access"' in html
+    for bare in (True, False):
+        for card_help in (help, None):
+            card = dict(AGENT, spec={"kind": "agent", "bare": bare}, **({"choice_help": card_help} if card_help else {}))
+            html = run(tmp_path, card)["settings"]
+            assert re.search(r'<label class="set-check"><input type="checkbox" data-key="bare"[^>]*>', html), html
+            assert "cm-tip" not in html and 'role="tooltip"' not in html and "title=" not in html
+            assert esc(help["bare"]["true"]) not in html and esc(help["bare"]["false"]) not in html
+            assert 'class="set-in cm-btn" data-key="access"' in html

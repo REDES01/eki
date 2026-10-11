@@ -1,18 +1,16 @@
 // A small dropdown for a setting with fixed choices (projectcardpanel.js draws one per card.choices key):
 // a button showing the current value, a list of the choices, and each choice's one-line explanation
-// (card.choice_help, from its kind) beside the hovered or highlighted option and on the button as a short
-// tooltip. A native <select> can't show per-option tooltips in WKWebView, hence this.
+// (card.choice_help, from its kind) shown in the open list beside the hovered or highlighted option; the
+// closed button shows just the value. A native <select> can't explain its options in WKWebView, hence this.
 //   html(key, choices, value, help, disabled) -> the markup; help is {value as string: text}, may be missing
-//   tip(text)                                 -> a tooltip for any control wrapped in .cm-tipped
 //   attach(rootEl, onPick(key, value))        -> wires every dropdown drawn inside rootEl, once
-// Keyboard: Enter, Space or ArrowDown opens; ArrowUp/ArrowDown move; Enter picks; Esc closes. A value
+// Keyboard: Enter, Space or ArrowDown opens; ArrowUp/ArrowDown move; Home/End jump; Enter or Space picks;
+// Esc closes and refocuses the button; Tab closes. A value
 // picked from true/false choices comes back as a real boolean.
 (function () {
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const str = (v) => v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
   const id = (key) => "cm-" + String(key).replace(/[^\w-]/g, "_");
-
-  const tip = (text) => text ? `<span class="cm-tip" role="tooltip">${esc(text)}</span>` : "";
 
   function html(key, choices, value, help, disabled) {
     const h = help || {}, cs = choices || [], n = id(key);
@@ -20,13 +18,11 @@
     const bad = !cs.some((c) => c === value), shown = str(value);
     const opts = cs.map((c, i) => {
       const t = h[str(c)], on = !bad && c === value;
-      return `<li class="cm-opt${on ? " on" : ""}" role="option" id="${n}-${i}" data-value="${esc(str(c))}" aria-selected="${on}"${
-        t ? ` title="${esc(t)}"` : ""}><span class="cm-name">${esc(str(c))}</span>${t ? `<span class="cm-help">${esc(t)}</span>` : ""}</li>`;
+      return `<li class="cm-opt${on ? " on" : ""}" role="option" id="${n}-${i}" data-value="${esc(str(c))}" aria-selected="${on}"><span class="cm-name">${esc(str(c))}</span>${t ? `<span class="cm-help">${esc(t)}</span>` : ""}</li>`;
     }).join("");
-    return `<div class="cm cm-tipped"><button type="button" class="set-in cm-btn${bad ? " invalid" : ""}" data-key="${esc(key)}"
+    return `<div class="cm"><button type="button" class="set-in cm-btn${bad ? " invalid" : ""}" data-key="${esc(key)}"
       data-type="${bools ? "boolchoice" : "choice"}" data-value="${esc(shown)}" aria-haspopup="listbox" aria-expanded="false"
-      aria-controls="${n}"${disabled ? " disabled" : ""}><span class="cm-val">${esc(shown)}</span><span class="cm-caret" aria-hidden="true">▾</span></button>${
-      bad ? "" : tip(h[shown])}<ul class="cm-list" role="listbox" id="${n}" tabindex="-1" aria-label="${esc(key)}" hidden>${opts}</ul></div>`;
+      aria-controls="${n}"${disabled ? " disabled" : ""}><span class="cm-val">${esc(shown)}</span><span class="cm-caret" aria-hidden="true">▾</span></button><ul class="cm-list" role="listbox" id="${n}" tabindex="-1" aria-label="${esc(key)}" hidden>${opts}</ul></div>`;
   }
 
   // ---- behaviour ------------------------------------------------------------------------------
@@ -113,5 +109,5 @@
     }
   }
 
-  window.choiceMenu = { html, tip, attach };
+  window.choiceMenu = { html, attach };
 })();

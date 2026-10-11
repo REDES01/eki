@@ -55,9 +55,11 @@ def test_stages_in_order_with_titles_from_the_card(conn, proj):
     assert g["error"] == "" and g["editable"] is True and g["eki"] is False and g["locked"] == []
     assert all(s["on"] for s in g["stages"]) and not any(s["locked"] for s in g["stages"])
     by = stages(g)
-    assert by["build"]["summary"] == "4 in parallel" and by["command"]["summary"] == "make test"
+    assert by["build"]["summary"] == "4 in parallel" and by["command"]["summary"] == "Each change: make test"
     assert by["merge"]["summary"].startswith("auto") and by["after_merge"]["summary"] == "npm run build"
     assert by["router"]["keys"] == ["router", "target"] and by["command"]["keys"] == ["checks", "command"]
+    assert by["batch"]["keys"] == ["checks", "batch_command"]
+    assert by["batch"]["summary"] == "Together, before merging: make test"
     assert by["playtester"]["keys"] == ["checks", "playtester"] and by["self"]["keys"] == ["checks"]
     assert by["after_merge"]["keys"] == ["after_merge"] and by["request"]["keys"] == []
     assert all(len(s["what"].split("\n")) == 2 for s in g["stages"])
@@ -101,7 +103,7 @@ def test_cards_feed_their_stages(conn, proj):
     assert feeds["serve"]["to"] == ["build", "playtester"]
     assert feeds["playtester"]["kind"] == "agent" and feeds["playtester"]["to"] == ["playtester"]
     assert "critic" not in feeds and "workflow" not in feeds
-    assert feeds[""] == {"card": "", "kind": "command", "label": "make test", "to": ["command"], "note": ""}
+    assert feeds[""] == {"card": "", "kind": "command", "label": "Each change: make test", "to": ["command"], "note": ""}
 
 
 def _goal(conn, gid, state, project="game", text="make the cards shine\nmore"):
@@ -190,7 +192,7 @@ def test_ekis_own_project_has_train_and_its_locked_stages(conn, tmp_path, monkey
     assert g["eki"] is True and g["name"] == "eki" and g["locked"] == list(workflow.LOCKED)
     assert [s["id"] for s in g["stages"]] == ORDER[:9] + ["train"] + ORDER[9:]
     assert by["train"]["on"] and by["train"]["locked"] and by["batch"]["locked"]
-    assert not by["review"]["locked"] and by["command"]["summary"] == "bin/check"
+    assert not by["review"]["locked"] and by["command"]["summary"] == "Each change: bin/check"
     assert sorted(i["id"] for i in by["train"]["items"]) == ["n", "rb"] and by["train"]["alert"]
 
 
@@ -203,3 +205,48 @@ def test_no_access_on_the_workflow_kind(conn, proj):
     _project(conn, "game", proj)
     cards = {"workflow": call(conn, "GET", "/api/projects/game/cards/workflow")["card"]}
     assert cards["workflow"]["error"] == "" and "access" not in cards["workflow"]["choices"]
+
+
+GAME = [{"name": "story files", "paths": ["design/script/**", "design/quests/**", "slice/data/**"],
+         "run": "npm run check:story"},
+        {"name": "code", "paths": ["slice/src/**", "slice/tools/**", "tools/**"],
+         "run": "npm run typecheck && npm run build"}]
+EACH = "Each change: story files → npm run check:story · code → npm run typecheck && npm run build"
+
+
+def test_a_rules_card_says_each_change_and_together_in_plain_words(conn, proj):
+    _card(proj, checks=["self", "command", "batch"], command=GAME, batch_command="npm run build")
+    _project(conn, "game", proj)
+    g = graph(conn)
+    by = stages(g)
+    assert g["error"] == "" and g["editable"] is True
+    assert by["command"]["summary"] == EACH and by["command"]["on"]
+    assert by["batch"]["summary"] == "Together, before merging: npm run build"
+    side = {f["card"]: f for f in g["feeds"]}[""]
+    assert side["label"] == EACH and side["to"] == ["command"]
+    assert g["spec"]["command"] == GAME and g["spec"]["batch_command"] == "npm run build"
+
+
+def test_unnamed_rules_are_their_paths_and_batch_off_says_so(conn, proj):
+    _card(proj, checks=["self", "command"], command=[{"paths": ["docs/**", "*.md"], "run": "make docs"}])
+    _project(conn, "game", proj)
+    by = stages(graph(conn))
+    assert by["command"]["summary"] == "Each change: docs/**, *.md → make docs"
+    assert by["batch"]["summary"] == "Together, before merging: nothing (batch is off)"
+
+
+def test_a_string_command_says_it_for_both(conn, proj):
+    _card(proj, checks=["self", "command", "batch"], command="make test")
+    _project(conn, "game", proj)
+    by = stages(graph(conn))
+    assert by["command"]["summary"] == "Each change: make test"
+    assert by["batch"]["summary"] == "Together, before merging: make test"
+
+
+def test_values_carry_the_rules_and_the_lines():
+    from eki import api_workflow
+    v = api_workflow._values({"checks": ["self", "command", "batch"], "command": GAME, "batch_command": "b"}, False)
+    assert v["command"] == "" and v["batch_command"] == "b"
+    assert v["rules"] == GAME and v["each"] == EACH and v["together"] == "Together, before merging: b"
+    v = api_workflow._values({"checks": ["self"]}, False)
+    assert v["rules"] == [] and v["each"] == "Each change: no check command"

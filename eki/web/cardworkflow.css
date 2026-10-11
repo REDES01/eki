@@ -1,3 +1,5 @@
-/* The workflow card's part (cardworkflow.js): its one line and the link to the Workflow page. */
+/* The workflow card's part (cardworkflow.js): its line, what the checks run, and the link to the Workflow page. */
 .cw-line { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin-bottom: 8px; }
 .cw-open { font-weight: 600; }
+.cw-each, .cw-together { font-size: 12px; margin-bottom: 4px; overflow-wrap: anywhere; }
+.cw-together { margin-bottom: 8px; }

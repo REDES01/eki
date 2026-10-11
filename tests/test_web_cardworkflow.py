@@ -15,7 +15,7 @@ from test_web_choicemenu import DOM
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
 JS = (WEB / "cardworkflow.js").read_text()
 PANEL = (WEB / "projectcardpanel.js").read_text()
-KEYS = ["router", "target", "plan", "parallel", "checks", "command", "merge", "playtester", "after_merge", "access"]
+KEYS = ["router", "target", "plan", "parallel", "checks", "command", "batch_command", "merge", "playtester", "after_merge", "access"]
 
 
 # ---- the API --------------------------------------------------------------------------------------
@@ -199,3 +199,26 @@ process.stdout.write(JSON.stringify({ frame: box.innerHTML, settings: settings ?
   head: box.querySelector(".pp-head").innerHTML,
   kind: box.querySelector(".pp-kind").innerHTML }));
 """
+
+
+GAME = [{"name": "story files", "paths": ["design/script/**", "design/quests/**", "slice/data/**"],
+         "run": "npm run check:story"},
+        {"name": "code", "paths": ["slice/src/**", "slice/tools/**", "tools/**"],
+         "run": "npm run typecheck && npm run build"}]
+
+
+@pytest.mark.parametrize("spec, each, together", [
+    ({"checks": ["self", "command", "batch"], "command": GAME, "batch_command": "npm run build"},
+     "Each change: story files → npm run check:story · code → npm run typecheck &amp;&amp; npm run build",
+     "Together, before merging: npm run build"),
+    ({"checks": ["self", "command"], "command": [{"paths": ["docs/**", "*.md"], "run": "make docs"}]},
+     "Each change: docs/**, *.md → make docs", "Together, before merging: nothing (batch is off)"),
+    ({"checks": ["self", "command", "batch"], "command": "make test"},
+     "Each change: make test", "Together, before merging: make test"),
+    ({}, "Each change: no check command", "Together, before merging: nothing (batch is off)"),
+])
+def test_the_panel_says_what_each_change_and_the_batch_run(tmp_path, spec, each, together):
+    html = run(tmp_path, card(**spec))["html"]
+    assert f'<div class="cw-each">{each}</div><div class="cw-together">{together}</div>' in html
+    v = api_workflow._values(spec, False)                              # the server's words, the same
+    assert (v["each"], v["together"]) == (each.replace("&amp;", "&"), together)

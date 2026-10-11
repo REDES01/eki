@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import components, projectchats, selfview, workflow
+from . import components, pathrules, projectchats, selfview, workflow
 
 #: a check's stage title, one-line summary and what it does
 _CHECKS = {
@@ -22,7 +22,7 @@ _CHECKS = {
                "A second reader agent reads the change and says fit or not.\nA failed review sends it back."),
     "command": ("Check command", "",
                 "The project's check command runs on the change (gate 1).\nRed means unfit."),
-    "batch": ("Batch", "queued changes checked together",
+    "batch": ("Batch", "",
               "The queue checks queued changes together on top of each other\nand bisects on red."),
     "playtester": ("Playtester", "", "The project's playtester card plays the change\nand says what it found."),
     "train": ("Train", "build + drills + swap",
@@ -68,13 +68,26 @@ def _values(spec: dict, eki: bool) -> Dict[str, Any]:
     t = spec.get("target")
     checks = spec.get("checks") if isinstance(spec.get("checks"), list) else ["self"]
     am = spec.get("after_merge")
-    return {"router": spec.get("router", kind.CHOICE_DEFAULTS["router"]), "target": targets.key(t) if t else "",
-            "plan": spec.get("plan", kind.CHOICE_DEFAULTS["plan"]), "parallel": spec.get("parallel", kind.PARALLEL),
-            "checks": [c for c in checks if isinstance(c, str)] or ["self"],
-            "command": spec.get("command") or ("bin/check" if eki else ""),
-            "merge": spec.get("merge", kind.CHOICE_DEFAULTS["merge"]),
-            "playtester": spec.get("playtester") or kind.PLAYTESTER,
-            "after_merge": am.strip() if isinstance(am, str) else ""}
+    cmd, batch = spec.get("command"), spec.get("batch_command")
+    try:
+        rules = pathrules.parse(cmd) if isinstance(cmd, list) and not eki else ()
+    except ValueError:
+        rules = ()
+    cmd = (cmd if isinstance(cmd, str) else "") or ("bin/check" if eki else "")
+    batch = batch if isinstance(batch, str) and batch.strip() and not eki else cmd
+    out = {"router": spec.get("router", kind.CHOICE_DEFAULTS["router"]), "target": targets.key(t) if t else "",
+           "plan": spec.get("plan", kind.CHOICE_DEFAULTS["plan"]), "parallel": spec.get("parallel", kind.PARALLEL),
+           "checks": [c for c in checks if isinstance(c, str)] or ["self"],
+           "command": cmd, "rules": [{"name": r.name, "paths": list(r.paths), "run": r.run} for r in rules],
+           "batch_command": batch,
+           "merge": spec.get("merge", kind.CHOICE_DEFAULTS["merge"]),
+           "playtester": spec.get("playtester") or kind.PLAYTESTER,
+           "after_merge": am.strip() if isinstance(am, str) else ""}
+    wf = workflow.Workflow(router=out["router"], target=out["target"], plan=out["plan"], parallel=out["parallel"],
+                           checks=tuple(out["checks"]), command=cmd, merge=out["merge"],
+                           playtester=out["playtester"], card="", rules=rules, batch_command=batch)
+    out["each"], out["together"] = workflow.each_said(wf), workflow.together_said(wf)
+    return out
 
 
 def line(v: Dict[str, Any]) -> str:
@@ -114,10 +127,13 @@ def stages(v: Dict[str, Any], eki: bool) -> List[Dict[str, Any]]:
             continue
         title, summary, what = _CHECKS[c]
         if c == "command":
-            summary = v["command"] or "no command set"
+            summary = v["each"]
+        elif c == "batch":
+            summary = v["together"]
         elif c == "playtester":
             summary = f"{v['playtester']} plays it"
-        keys = ["checks"] + (["command"] if c == "command" else ["playtester"] if c == "playtester" else [])
+        keys = ["checks"] + {"command": ["command"], "batch": ["batch_command"],
+                             "playtester": ["playtester"]}.get(c, [])
         out.append(_stage(c, title, summary, what, c in v["checks"], keys,
                           locked=eki and c in workflow.LOCKED))
     out.append(_stage("merge", "Merge", _MERGE.get(v["merge"], v["merge"]),
@@ -131,7 +147,7 @@ def stages(v: Dict[str, Any], eki: bool) -> List[Dict[str, Any]]:
 
 
 def feeds(found: Dict[str, components.Component], v: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The cards that feed a stage, as side nodes; the check command last."""
+    """The cards that feed a stage, as side nodes; the check command ("Each change: …") last."""
     to = {"knowledge": ["plan", "build"], "instructions": ["plan", "build"], "skills": ["build"],
           "mcp": ["build"], "serve": ["build", "playtester"]}
     out = []
@@ -141,8 +157,8 @@ def feeds(found: Dict[str, components.Component], v: Dict[str, Any]) -> List[Dic
         if stages_:
             out.append({"card": name, "kind": c.kind, "label": name, "to": stages_,
                         "note": "picked per item" if c.kind == "knowledge" else ""})
-    if v["command"]:
-        out.append({"card": "", "kind": "command", "label": v["command"], "to": ["command"], "note": ""})
+    if v["command"] or v["rules"]:
+        out.append({"card": "", "kind": "command", "label": v["each"], "to": ["command"], "note": ""})
     return out
 
 

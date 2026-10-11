@@ -31,7 +31,7 @@ def test_the_file_is_small_parses_and_loads_its_look():
 
 STUB = r"""
 const fs = require("fs");
-const [, , cm, st, wi, args] = process.argv;
+const [, , cm, st, wr, wi, args] = process.argv;
 const [data, stageId, steps, scene] = JSON.parse(args);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function el() {
@@ -46,6 +46,7 @@ global.document = { querySelector: () => ({}), createElement: el, head: el(), ac
 const out = { posts: [], html: [], picks: 0, title: null, reloads: 0 };
 eval(fs.readFileSync(cm, "utf8"));
 eval(fs.readFileSync(st, "utf8"));
+eval(fs.readFileSync(wr, "utf8"));
 let onPick = null;
 const attach = choiceMenu.attach;
 choiceMenu.attach = (root, fn) => { onPick = fn; out.picks++; };
@@ -57,6 +58,9 @@ global.fetch = async (url, opts) => {
   if (url === "/api/models") return { ok: true, json: async () => ({ providers: { claude: { listed: null, lists: false } } }) };
   out.posts.push([url, JSON.parse(opts.body)]);
   if (scene.refuse) return { ok: false, statusText: "Bad", json: async () => ({ error: "no", problems: scene.refuse }) };
+  const set = JSON.parse(opts.body).settings;                 // saved as the server does: null removes
+  data.spec = Object.assign({}, data.spec, set);
+  for (const k of Object.keys(set)) if (set[k] === null) delete data.spec[k];
   return { ok: true, json: async () => ({ card: { spec: data.spec } }) };
 };
 eval(fs.readFileSync(wi, "utf8"));
@@ -79,6 +83,11 @@ const reload = () => { out.reloads++; return Promise.resolve(scene.after || data
     } else if (s.item || s.back) {
       const hit = s.item ? { cls: ".wi-item", dataset: { wiItem: s.item } } : { cls: ".wi-back", dataset: { wiBack: "1" } };
       await r.listeners.click[0]({ target: { closest: (q) => (q === hit.cls ? hit : null) }, preventDefault() {} });
+    } else if (s.click) {
+      const hit = { dataset: s.click[1] };
+      await r.listeners.click[0]({ target: { closest: (q) => (q === s.click[0] ? hit : null) }, preventDefault() {} });
+    } else if (s.row) {
+      await r.listeners.change[0]({ target: { dataset: { wrRow: String(s.row[0]), wrKey: s.row[1] }, value: s.row[2] } });
     } else if (s.update) workflowInspect.update(s.update);
     else if (s.close) workflowInspect.close();
     await tick();
@@ -117,7 +126,7 @@ def run(tmp_path, data, stage, steps=(), **scene):
     stub = tmp_path / "stub.js"
     stub.write_text(STUB)
     got = subprocess.run(["node", str(stub), str(WEB / "choicemenu.js"), str(WEB / "settingstarget.js"),
-                          str(WEB / "workflowinspect.js"), json.dumps([data, stage, list(steps), scene])],
+                          str(WEB / "workflowrules.js"), str(WEB / "workflowinspect.js"), json.dumps([data, stage, list(steps), scene])],
                          capture_output=True, text=True, timeout=20)
     assert got.returncode == 0, got.stderr
     return json.loads(got.stdout)
@@ -242,3 +251,91 @@ def test_update_redraws_with_fresh_data_and_close_lets_go(tmp_path):
     got = run(tmp_path, wf(), "build", [{"update": fresh}, {"close": True}])
     assert "nothing here now" in got["html"][0] and "item b7" in got["html"][1]
     assert got["current"] is None
+
+
+# ---- the command as rules by path, and batch_command ----------------------------------------------
+
+GAME = [{"name": "story files", "paths": ["design/script/**", "design/quests/**", "slice/data/**"],
+         "run": "npm run check:story"},
+        {"name": "code", "paths": ["slice/src/**", "slice/tools/**", "tools/**"],
+         "run": "npm run typecheck && npm run build"}]
+
+
+def test_rules_files_are_small_parse_and_load_before_the_panel():
+    rules = WEB / "workflowrules.js"
+    assert len(rules.read_text().splitlines()) < 400
+    page = (WEB / "index.html").read_text()
+    assert page.index("/ui/workflowrules.js") < page.index("/ui/workflowinspect.js")
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    out = subprocess.run(["node", "--check", str(rules)], capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+
+
+def test_a_rules_card_draws_its_rows(tmp_path):
+    html = run(tmp_path, wf(checks=["self", "command"], command=GAME), "command")["html"][0]
+    assert 'class="wr-mode wr-on" data-wr-mode="rules"' in html and 'data-wr-mode="text"' in html
+    assert 'data-wr-row="0" data-wr-key="name" value="story files"' in html
+    assert "design/script/**\ndesign/quests/**\nslice/data/**</textarea>" in html
+    assert 'data-wr-row="1" data-wr-key="run" value="npm run typecheck &amp;&amp; npm run build"' in html
+    assert 'data-wr-del="1"' in html and "data-wr-add" in html and 'data-wi="command"' not in html
+    html = run(tmp_path, wf(checks=["self", "command"], command="make test"), "command")["html"][0]
+    assert 'class="wr-mode wr-on" data-wr-mode="text"' in html and 'data-wi="command" value="make test"' in html
+
+
+def test_editing_a_row_saves_the_rules_as_a_list_without_blank_names(tmp_path):
+    rules = [{"paths": ["docs/**"], "run": "make docs"}]
+    got = run(tmp_path, wf(checks=["self", "command"], command=rules), "command",
+              [{"row": [0, "paths", "docs/**, *.md\n README"]}, {"row": [0, "name", "docs"]}])
+    assert got["posts"] == [
+        [SAVE, {"settings": {"command": [{"paths": ["docs/**", "*.md", "README"], "run": "make docs"}]}}],
+        [SAVE, {"settings": {"command": [{"name": "docs", "paths": ["docs/**", "*.md", "README"], "run": "make docs"}]}}]]
+
+
+def test_switching_between_text_and_rules(tmp_path):
+    got = run(tmp_path, wf(checks=["self", "command"], command="make test"), "command",
+              [{"click": ["[data-wr-mode]", {"wrMode": "rules"}]}, {"row": [0, "paths", "src/**"]},
+               {"click": ["[data-wr-mode]", {"wrMode": "text"}]}])
+    first = got["html"][1]
+    assert 'data-wr-row="0" data-wr-key="run" value="make test"' in first
+    assert "give each rule its paths and its command to save" in first
+    assert got["posts"][0] == [SAVE, {"settings": {"command": [{"paths": ["src/**"], "run": "make test"}]}}]
+    assert got["posts"][1] == [SAVE, {"settings": {"command": "make test"}}]
+    assert 'data-wi="command" value="make test"' in got["html"][-1]
+
+
+def test_add_and_remove_a_row(tmp_path):
+    got = run(tmp_path, wf(checks=["self", "command"], command=GAME), "command",
+              [{"click": ["[data-wr-add]", {"wrAdd": "1"}]}, {"row": [2, "paths", "*.md"]},
+               {"row": [2, "run", "npm run lint:md"]}, {"click": ["[data-wr-del]", {"wrDel": "0"}]}])
+    assert 'data-wr-row="2"' in got["html"][1] and got["posts"][0][1]["settings"]["command"][2] == \
+        {"paths": ["*.md"], "run": "npm run lint:md"}
+    assert got["posts"][-1] == [SAVE, {"settings": {"command": [GAME[1], {"paths": ["*.md"], "run": "npm run lint:md"}]}}]
+    assert len(got["posts"]) == 2                                      # the half-typed row wasn't sent
+
+
+def test_batch_command_saves_and_batch_on_a_rules_card_waits_for_it(tmp_path):
+    got = run(tmp_path, wf(checks=["self", "command", "batch"], command=GAME, batch_command="npm run build"), "batch",
+              [{"field": "batch_command", "value": " npm run build:all "}, {"field": "batch_command", "value": ""}])
+    assert 'data-wi="batch_command" value="npm run build"' in got["html"][0]
+    assert got["posts"] == [[SAVE, {"settings": {"batch_command": "npm run build:all"}}],
+                            [SAVE, {"settings": {"batch_command": None}}]]
+    got = run(tmp_path, wf(checks=["self", "command"], command=GAME), "batch",
+              [{"check": "batch", "on": True}, {"field": "batch_command", "value": "npm run build"}])
+    assert "type what runs on the changes together to turn batch on" in got["html"][1]
+    assert got["posts"] == [[SAVE, {"settings": {"batch_command": "npm run build",
+                                                 "checks": ["self", "command", "batch"]}}]]
+    html = run(tmp_path, wf(checks=["self", "command", "batch"], command="make test"), "batch")["html"][0]
+    assert 'placeholder="same as each change: make test"' in html
+    assert 'data-wi="batch_command"' not in run(tmp_path, wf(eki=True, checks=["self", "batch", "train"]), "batch")["html"][0]
+
+
+def test_the_servers_objection_shows_beside_the_rules_and_batch_command(tmp_path):
+    got = run(tmp_path, wf(checks=["self", "command"], command=GAME), "command",
+              [{"row": [0, "paths", "!design/**"]}], refuse={"": "paths: `!` patterns aren't supported"})
+    assert re.search(r'data-wr-add.*?paths: `!` patterns aren&#39;t supported|data-wr-add.*?paths: `!` patterns aren\'t supported',
+                     got["html"][-1], re.S)
+    assert got["html"][-1].count("patterns aren") == 1
+    got = run(tmp_path, wf(checks=["self", "command", "batch"], command=GAME, batch_command="x"), "batch",
+              [{"field": "batch_command", "value": "y"}], refuse={"batch_command": "batch_command must be text"})
+    assert re.search(r'data-wi="batch_command".*?batch_command must be text', got["html"][-1], re.S)

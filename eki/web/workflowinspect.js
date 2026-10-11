@@ -2,11 +2,13 @@
 // GET /api/projects/<pid>/workflow (eki/api_workflow.py): what the stage does, its settings with the
 // workflow card's controls and one-line explanations (choicemenu.js for router / plan / merge, the
 // settingstarget.js picker when router is off, a number for parallel, a switch per check, the command,
-// the playtester card, after_merge), then "Now here": the project's items at that stage, each opening its
+// the command as one line or path rules in rows (workflowrules.js) and batch_command, the playtester card,
+// after_merge), then "Now here": the project's items at that stage, each opening its
 // detail with a way back. Each change is saved at once into the workflow card (POST …/cards/<card>
 // {"settings": …}; checks always the whole list in order), then reload() and redraw; what the server objects
 // to shows beside its field, and nothing is redrawn under a box being typed in. Ticking command or batch
-// with no command saved waits for the command, as cardworkflow.js does.
+// with no command saved waits for the command; ticking batch on a rules card with no batch_command waits
+// for that.
 //   window.workflowInspect = { open(pid, data, stageId, reload), update(data), close(), current() }
 (function () {
   if (document.querySelector && !document.querySelector('link[href="/ui/workflowinspect.css"]')) {
@@ -19,7 +21,8 @@
   const LOCKED = "protects eki itself: the train, the drills and locked files can't be turned off here";
   const PARALLEL = 4, PLAYTESTER = "playtester";                                  // eki/components/workflow.py
   const W = { pid: null, data: null, stage: null, reload: null, owner: null, el: null, item: null, itemData: null,
-              pending: null, problems: {}, models: null, loading: false, last: "" };
+              pending: null, problems: {}, models: null, loading: false, last: "", cmd: null };
+  const FIELDS = ["command", "paths", "batch_command"];                         // a "" problem naming one goes there
 
   function ago(t) {
     if (!t) return "";
@@ -75,11 +78,36 @@
       ${why ? `<div class="dim wi-lock">${c === "self" ? "" : "🔒 "}${esc(why)}</div>` : ""}`, "", "checks");
   }
 
+  // what the ticked checks still need before they can be saved: "command", "batch_command" or ""
+  function needs(list) {
+    if (eki()) return "";
+    const c = spec().command;
+    if (list.some((x) => x === "command" || x === "batch") && !c) return "command";
+    const b = spec().batch_command;
+    return list.includes("batch") && Array.isArray(c) && !(typeof b === "string" && b.trim()) ? "batch_command" : "";
+  }
+  const cmdState = () => W.cmd || (W.cmd = window.workflowRules ? workflowRules.start(spec().command)
+                                                               : { mode: "text", rows: [], text: spec().command || "" });
+
   function command() {
-    const wait = W.pending && !spec().command ? '<div class="dim wi-wait">type the project\'s check command to turn it on</div>' : "";
-    return field("command", `<input class="set-in wi-text" data-wi="command" value="${esc(spec().command || "")}"
-      placeholder="${eki() ? "bin/check" : "the project's check command"}" spellcheck="false"${dis()}>${wait}`,
-      eki() ? "eki's own check is bin/check, whatever is typed here" : "a shell command run in the change's folder; it must pass");
+    const wait = W.pending && needs(W.pending) === "command" ? '<div class="dim wi-wait">type the project\'s check command to turn it on</div>' : "";
+    const st = cmdState(), wr = window.workflowRules;
+    const ctl = wr ? wr.html(st, { dis: dis(), eki: eki(), wait })
+      : `<input class="set-in wi-text" data-wi="command" value="${esc(st.text)}" spellcheck="false"${dis()}>${wait}`;
+    const help = eki() ? "eki's own check is bin/check, whatever is typed here"
+      : st.mode === "rules" ? "each change runs every rule whose paths match a file it touched (.gitignore patterns: " +
+        "design/**, *.md, tools/), each under its own heading; none matching: nothing to check"
+      : "a shell command run in the change's folder; it must pass";
+    return field("command", ctl + problem("paths"), help);
+  }
+
+  function batchCommand() {
+    if (eki() || !window.workflowRules) return "";
+    const wait = W.pending && needs(W.pending) === "batch_command"
+      ? '<div class="dim wi-wait">type what runs on the changes together to turn batch on</div>' : "";
+    return field("batch_command", workflowRules.batch(spec(), { dis: dis() }) + wait,
+      Array.isArray(spec().command) ? "what runs on the queued changes together, on the stack's tip (e.g. the build)"
+        : "what runs on the queued changes together; empty: the check command");
   }
 
   function settings(st) {
@@ -96,7 +124,8 @@
         "how many items build at once");
     } else if (CHECKS.includes(id)) {
       h = toggle(id);
-      if (id === "command" || (id === "batch" && (ticked().includes("batch") || !spec().command))) h += command();
+      if (id === "command" || (id === "batch" && !spec().command)) h += command();
+      if (id === "batch") h += batchCommand();
       if (id === "playtester") {
         h += field("playtester", `<input class="set-in wi-text" data-wi="playtester" value="${esc(spec().playtester || PLAYTESTER)}"
           spellcheck="false"${dis()}>`, "the project's playtester card that plays the change");
@@ -170,7 +199,7 @@
   async function save(set, el) {
     if (!editable()) return;
     const keys = Object.keys(set);
-    for (const k of keys.concat("", "target")) delete W.problems[k];
+    for (const k of keys.concat("", "target", keys.includes("command") ? ["paths"] : [])) delete W.problems[k];
     const url = `/api/projects/${encodeURIComponent(W.pid)}/cards/${encodeURIComponent(D().card)}`;
     try {
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Eki": "1" },
@@ -179,7 +208,12 @@
       if (!r.ok) {
         const pr = got.problems || {};
         if (Object.keys(pr).length) Object.assign(W.problems, pr); else W.problems[keys[0]] = got.error || r.statusText || "not saved";
-      } else if (got.card && got.card.spec && W.data) W.data = Object.assign({}, W.data, { spec: got.card.spec });
+        const k = ((W.problems[""] || "").match(/^\w+/) || [""])[0];
+        if (FIELDS.includes(k) && !W.problems[k]) { W.problems[k] = W.problems[""]; delete W.problems[""]; }
+      } else {
+        if (got.card && got.card.spec && W.data) W.data = Object.assign({}, W.data, { spec: got.card.spec });
+        if (keys.includes("command")) W.cmd = null;                       // the rows again from what was saved
+      }
     } catch (x) { W.problems[keys[0]] = x.message; }
     const pid = W.pid;
     if (W.reload) {
@@ -188,13 +222,19 @@
     paint(true, el);
   }
 
+  // the checks waiting for this setting go with it once it's the one they wait for
+  function pend(set) {
+    if (W.pending && needs(W.pending) === Object.keys(set)[0]) { set.checks = W.pending; W.pending = null; }
+    return set;
+  }
+
   function onChange(e) {
     const t = e.target, ds = (t && t.dataset) || {};
     if (!editable()) return;
     if (ds.wiCheck) {
       const c = ds.wiCheck, now = ticked();
       const list = CHECKS.filter((x) => x === "self" || locked().includes(x) || (x === c ? t.checked : now.includes(x)));
-      if (list.some((x) => x === "command" || x === "batch") && !spec().command && !eki()) {
+      if (needs(list)) {
         W.pending = list;                                   // the server wants a command first: wait for it
         return paint(true);
       }
@@ -202,11 +242,14 @@
       return save({ checks: list }, t);
     }
     if (ds.wi === "command") {
-      const set = { command: t.value.trim() };
-      if (W.pending) set.checks = W.pending;
-      W.pending = null;
-      return save(set, t);
+      cmdState().text = t.value;
+      return save(pend({ command: t.value.trim() }), t);
     }
+    if (ds.wrRow != null && window.workflowRules) {
+      const set = workflowRules.change(cmdState(), ds, t.value);
+      return set ? save(pend(set), t) : paint(true, t);
+    }
+    if (ds.wi === "batch_command") return save(pend({ batch_command: t.value.trim() || null }), t);
     if (ds.wi === "after_merge" || ds.wi === "playtester") return save({ [ds.wi]: t.value.trim() }, t);
     if (ds.wi === "parallel") return save({ parallel: t.value.trim() === "" ? null : Number(t.value) }, t);
     const wrap = t.closest && t.closest("[data-tgt]");
@@ -220,7 +263,12 @@
 
   function onClick(e) {
     const t = e.target, at = (sel) => t && t.closest && t.closest(sel);
-    const item = at(".wi-item"), back = at(".wi-back");
+    const item = at(".wi-item"), back = at(".wi-back"), wr = at("[data-wr-mode]") || at("[data-wr-add]") || at("[data-wr-del]");
+    if (wr && window.workflowRules && editable()) {
+      if (e.preventDefault) e.preventDefault();
+      const set = workflowRules.click(cmdState(), wr.dataset);
+      return set ? save(pend(set)) : paint(true);
+    }
     if (item) {
       if (e.preventDefault) e.preventDefault();
       W.item = item.dataset.wiItem;
@@ -237,12 +285,12 @@
   // ---- the interface ------------------------------------------------------------------------------
 
   function reset() {
-    Object.assign(W, { el: null, owner: null, stage: null, item: null, itemData: null, pending: null, problems: {}, last: "" });
+    Object.assign(W, { el: null, owner: null, stage: null, item: null, itemData: null, pending: null, problems: {}, last: "", cmd: null });
   }
 
   function open(pid, data, stageId, reload) {
     const same = W.owner && W.pid === pid && W.stage === stageId;
-    if (!same) { W.item = null; W.itemData = null; W.pending = null; W.problems = {}; }
+    if (!same) { W.item = null; W.itemData = null; W.pending = null; W.problems = {}; W.cmd = null; }
     Object.assign(W, { pid, data, stage: stageId, reload: reload || null });
     if (same && W.el) return paint(true);
     const st = stage() || { title: stageId };

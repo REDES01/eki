@@ -27,3 +27,15 @@
 .wi-back { display: inline-block; font-size: 12px; margin-bottom: 6px; }
 .wi-note { white-space: pre-wrap; margin: 8px 0; font-size: 12px; }
 .wi-thread { display: inline-block; margin-top: 6px; }
+/* the check command as one line or rules by path (workflowrules.js) */
+.wr-modes { display: inline-flex; gap: 0; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.wr-mode { border: 0; background: none; color: inherit; font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+.wr-mode.wr-on { background: var(--panel); font-weight: 600; }
+.wr-rows { display: flex; flex-direction: column; gap: 8px; }
+.wr-row { display: grid; grid-template-columns: 1fr auto; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+.wr-row > :not(.wr-del) { grid-column: 1; }
+.wr-del { grid-column: 2; grid-row: 1; border: 0; background: none; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; opacity: 0.6; }
+.wr-del:hover { opacity: 1; color: var(--red); }
+.wr-name, .wr-paths { width: 100%; box-sizing: border-box; font-size: 12px; }
+.wr-paths { font-family: ui-monospace, Menlo, monospace; resize: vertical; }
+.wr-add { margin-top: 6px; border: 1px dashed var(--line); background: none; color: inherit; border-radius: 8px; padding: 3px 10px; cursor: pointer; font-size: 12px; }

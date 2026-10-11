@@ -101,6 +101,20 @@ dependency chain, width the most items on one level, `chained` the deps
 between disjoint write-sets — and stores it in `goals.shape`; the `eki self`
 board shows it on the goal line as "5 items · 2 deep · 4 wide".
 
+**Each item's context is the planner's pick.** When the project has
+knowledge cards, the plan brief lists them (name, about line, read mode,
+files) and each `ITEMS` entry carries a `"context"` list — the cards that
+item needs, by name, one short reason each (`selfbrief.context_in`), stored
+as `items.context`. The build brief then reads first only the always-cards,
+those chosen cards and the instructions card (`AGENTS.md`), and names the
+rest in one "Also available if you need them" line; the item's fix-up
+rebuild, resolve run and review get the same context. An item with no
+context (old plans, `single`-plan or `--one` items, a planner that left it
+out) gets the full brief, as chats do. A project build brief's last
+sentence says how the work lands — auto, pr or person, from the workflow
+card's `merge`, else the project's landing path (docs/design.md, Components
+→ knowledge, and Projects you work inside).
+
 **The scheduler** (`eki/scheduler.py`) starts ready items across all goals
 at once. Waiting items are taken goal by goal, round-robin: the goal with the
 fewest items building goes first, then the older goal, then the older item.

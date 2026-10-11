@@ -887,6 +887,17 @@ as any other; nothing in `workspace` or the scheduler changes.
   `git merge --ff-only` only when no tracked file the change touches has
   local changes; untracked and ignored files are never touched. A GitHub
   project keeps its PR path.
+- **The plan and build briefs** (`eki/projectbrief.py`). The plan brief
+  lists the project's knowledge cards (name, about line, read mode, files)
+  and asks for each item's `context` — the cards it needs, by name with a
+  reason (Components → knowledge). The build brief carries the item's spec,
+  its write-set, the knowledge brief narrowed to that context, and one
+  sentence on how the work lands, from `projectbrief.landing`: the workflow
+  card's `merge` when there is one, else `pr` for a GitHub project, `auto`
+  for an `apply` project and `person` otherwise — "lands it on the
+  project's branch itself" (auto), "opens a pull request from the branch …
+  for the person to review and merge" (pr), or waits on the branch for the
+  person to merge (person).
 - **Instructions are the project's own file.** The offer is the Cards
   area's suggestion to add an `instructions` card (one click) whenever the
   project has no such card: "This project has AGENTS.md" (or CLAUDE.md)
@@ -1012,13 +1023,30 @@ of its own; the CLI is the integration.
   (never overwrites without `--replace`) and `eki component skills remove
   <project> <name>`; `eki use <card>` lists what it holds. The rule:
   project skills live in the project's card; ~/.eki/skills is only for skills every run should have.
-- **`knowledge`** — files every agent of the project reads: `"files"` (paths
+- **`knowledge`** — files the project's agents read: `"files"` (paths
   relative to the project root; globs and folders allowed, no absolute path,
-  no `..`) and `"read"`: `"always"` (the brief says "read first: <files> —
-  <about>") or `"when-relevant"` ("look here when …"). A project has as many
-  as it needs (decisions, design rules, contracts, owner memory, playtest
-  notes). `knowledge.files` lists each file with its size, last change and
-  last author; a missing one shows on the card and is left out of the brief.
+  no `..`) and `"read"`: `"always"` — every run in the project, planned or
+  not, reads it first ("read first: <files> — <about>"); keep it for the few
+  cards that apply to all work (holo-cards: only `decisions`) — or
+  `"when-relevant"` — the planner decides per item, and a chat sees it as
+  available ("look here when relevant"). A project has as many as it needs
+  (decisions, design rules, contracts, owner memory, playtest notes).
+  `knowledge.files` lists each file with its size, last change and last
+  author; a missing one shows on the card and is left out of the brief.
+  **The planner picks an item's context.** It already writes each item's
+  spec (cause, files to touch), so it also names the knowledge cards the
+  item needs, each with a short reason: the `"context"` key of an `ITEMS`
+  entry (`[{"name", "why"}]`), stored as `items.context` (JSON) and shown on
+  the board and in `eki self show` ("context: architecture, voices"). That
+  keeps a one-line fix from being briefed on the story core and the owner's
+  memory. For such an item `knowledge.brief(folder, context=…)` reads first
+  only the always-cards, the chosen cards and the instructions card
+  (`AGENTS.md`, which Claude Code reads anyway), and names the rest in one
+  line: "Also available if you need them: <names> (see components/)". The
+  item's fix-up rebuild, resolve run and review get the same context. An
+  item with no context (old plans, `single`-plan and `--one` items, a
+  planner that left it out) gets the full brief, and chats keep the full
+  brief: there is no planner in the loop.
 - **`mcp`** — an MCP server only this project's runs get: `"server"` is
   `{"command", "args", "env"}` or `{"url"}`. `mcpserver.run_config` gives a
   run its `--mcp-config` file (eki's registry merged with the project's

@@ -54,7 +54,8 @@ def test_listing_for_a_project(conn, proj):
     cards = {c["name"]: c for c in got["cards"]}
     assert list(cards) == ["bad", "helper", "images", "voice"]
     keys = {"name", "kind", "about", "scope", "ref", "card", "folder", "error", "notes", "spec", "prompt",
-            "instructions", "editable", "state", "last_use", "links", "size", "choices", "choice_defaults"}
+            "instructions", "editable", "state", "last_use", "links", "size", "choices",
+            "choice_defaults", "choice_help"}
     assert all(set(c) == keys for c in cards.values())
     v = cards["voice"]
     assert v["kind"] == "service" and v["scope"] == "project" and v["ref"] == "" and v["editable"]

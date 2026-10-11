@@ -92,6 +92,9 @@ class ProgramProvider(Provider):
     def answer(self, ch: Channel, key: Any, response: Dict[str, Any]) -> None:
         """Hand your answer to an ask back to the program."""
 
+    def ended(self, out: Outcome, ch: Channel) -> None:
+        """The program's output ended: a last look at the outcome."""
+
     def env(self, turn: Turn) -> Dict[str, str]:
         env = dict(os.environ)
         env["EKI_RUN"] = turn.run_id
@@ -162,6 +165,7 @@ class ProgramProvider(Provider):
                 if turn.extra.get("retract"):
                     turn.extra["retract"](aid)
             stop(proc)
+        self.ended(out, ch)
         code = proc.returncode
         if out.state == "done" and not out.finished and code not in (0, None) and not out.error:
             tail = b"".join(err_tail).decode("utf-8", "replace").strip()

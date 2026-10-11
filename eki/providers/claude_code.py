@@ -121,6 +121,8 @@ class ClaudeCode(ProgramProvider):
                 elif btype == "thinking" and block.get("thinking"):
                     emit("thinking", {"text": block["thinking"]})
                 elif btype == "tool_use":
+                    if block.get("id"):
+                        ch.state.setdefault("open_tools", {})[block["id"]] = block.get("name", "")
                     inp = block.get("input") or {}
                     tool = {"name": block.get("name", ""), "detail": short(inp)}
                     path = inp.get("file_path") or inp.get("notebook_path")
@@ -129,6 +131,11 @@ class ClaudeCode(ProgramProvider):
                     if isinstance(inp.get("url"), str):
                         tool["url"] = inp["url"]  # whole, for the journal's check of where it went
                     emit("tool", tool)
+        elif kind == "user":
+            content = (event.get("message") or {}).get("content")
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    ch.state.get("open_tools", {}).pop(block.get("tool_use_id"), None)
         elif kind == "rate_limit_event":
             info = event.get("rate_limit_info") or {}
             windows = info.get("unifiedWindows") or {}
@@ -143,9 +150,21 @@ class ClaudeCode(ProgramProvider):
         elif kind == "result":
             if event.get("usage"):
                 emit("usage", {"usage": event["usage"], "cost": event.get("total_cost_usd")})
+            if ch.state.get("open_tools"):
+                # a tool call of this turn still waits for its result: this `result` came
+                # from elsewhere (a background task of an earlier turn) — the turn goes on
+                return
             if event.get("is_error"):
                 out.error = str(event.get("result") or event.get("subtype") or "error")[:400]
             out.finished = True
+
+    def ended(self, out: Outcome, ch: Channel) -> None:
+        """The program exited: if a tool call never got its result, the turn was cut off."""
+        open_tools = ch.state.get("open_tools") or {}
+        if open_tools and not out.finished and out.state == "done":
+            names = ", ".join(sorted(set(n or "?" for n in open_tools.values())))
+            out.state = "failed"
+            out.error = f"the turn was cut off mid tool call ({names}): it never got its result"
 
     def _asked(self, event: Dict[str, Any], ch: Channel) -> None:
         req = event.get("request") or {}

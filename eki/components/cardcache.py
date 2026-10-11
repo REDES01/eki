@@ -41,12 +41,13 @@ def _copy(c):
 def _load(d: Path) -> Tuple[Optional[str], Union[object, str]]:
     """(pool name when `d` is a pool card, the Component or the reason it's broken)."""
     from .. import components as C
+    pool = None
     try:
         ref = C._ref(d)
         pool = ref.get('pool') if ref is not None and isinstance(ref.get('pool'), str) else None
         return pool, (C.load_card(d, ref) if ref is not None else C.load(d, 'project'))
-    except Exception as e:
-        return None, str(e)
+    except Exception as e:   # a broken pool card still keys on its pool component: adding or fixing it clears this
+        return pool, str(e)
 
 
 def scan(base: Path, found: dict, errors: List[Tuple[str, str]]) -> None:

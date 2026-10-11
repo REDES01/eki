@@ -11,7 +11,7 @@ from eki import components, workflow
 def card(root, name, about='does a thing'):
     d = root / 'components' / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / 'component.json').write_text(json.dumps({'kind': 'service', 'about': about, 'command': ['true']}))
+    (d / 'component.json').write_text(json.dumps({'kind': 'service', 'about': about, 'run': ['true']}))
     return d
 
 
@@ -78,15 +78,15 @@ def test_broken_card_reported_each_call(project):
 def test_returned_spec_is_a_copy(project):
     found, _ = components.own(project)
     found['c01'].spec['about'] = 'changed by a caller'
-    found['c01'].spec['command'].append('x')
+    found['c01'].spec['run'].append('x')
     again, _ = components.own(project)
-    assert again['c01'].spec['about'] == 'does a thing' and again['c01'].spec['command'] == ['true']
+    assert again['c01'].spec['about'] == 'does a thing' and again['c01'].spec['run'] == ['true']
 
 
 def test_pool_card_follows_its_pool_component(tmp_path, loads):
     pool = components.pool_dir() / 'shared'
     pool.mkdir(parents=True)
-    (pool / 'component.json').write_text(json.dumps({'kind': 'service', 'about': 'old', 'command': ['true']}))
+    (pool / 'component.json').write_text(json.dumps({'kind': 'service', 'about': 'old', 'run': ['true']}))
     root = tmp_path / 'p2'
     d = root / 'components' / 'shared'
     d.mkdir(parents=True)
@@ -96,7 +96,7 @@ def test_pool_card_follows_its_pool_component(tmp_path, loads):
     loads.clear()
     components.own(root)
     assert loads == []
-    (pool / 'component.json').write_text(json.dumps({'kind': 'service', 'about': 'newer one', 'command': ['true']}))
+    (pool / 'component.json').write_text(json.dumps({'kind': 'service', 'about': 'newer one', 'run': ['true']}))
     found, _ = components.own(root)
     assert loads == ['shared'] and found['shared'].spec['about'] == 'newer one'
 
@@ -128,3 +128,17 @@ def test_is_eki_fresh_when_source_moves(tmp_path, monkeypatch):
     assert workflow.is_eki(repo) is False
     monkeypatch.setenv('EKI_SOURCE', str(repo))
     assert workflow.is_eki(repo) is True
+
+
+def test_broken_pool_card_clears_when_pool_component_appears(tmp_path):
+    root = tmp_path / 'p3'
+    d = root / 'components' / 'later'
+    d.mkdir(parents=True)
+    (d / 'component.json').write_text(json.dumps({'pool': 'later'}))
+    found, errors = components.own(root)
+    assert 'later' not in found and errors
+    pool = components.pool_dir() / 'later'
+    pool.mkdir(parents=True)
+    (pool / 'component.json').write_text(json.dumps({'kind': 'service', 'about': 'here now', 'run': ['true']}))
+    found, errors = components.own(root)
+    assert found['later'].spec['about'] == 'here now' and not errors

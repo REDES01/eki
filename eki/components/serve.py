@@ -200,6 +200,12 @@ def links(comp: Component) -> List[dict]:
     return out
 
 
+def live(comp: Component, conn, root) -> dict:
+    """The card's running copies with their tasks, and the person's own copy (servelive.py). Never raises."""
+    from . import servelive
+    return servelive.live(comp, conn, root)
+
+
 def call(comp: Component, c: Call) -> Result:
     if c.args:
         return Result(error=f"{comp.name}: `eki use {comp.name}` takes no arguments; it prints your link")

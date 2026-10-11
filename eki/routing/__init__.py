@@ -92,6 +92,9 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
 
     thread = store.thread(conn, run["thread_id"])
     cwd = thread["cwd"] if thread else None
+    off = _router_off(conn, cwd, can)
+    if off is not None:
+        return off
     atts = store.attachments(run)
     prev = None if run["row"] else _previous_answer(conn, run)
     pic = None if run["row"] else previous_picture(conn, run["thread_id"], run["seq"])
@@ -151,6 +154,22 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
         refused.append(f"{targeting.key(target)}: {why}")
     return Decision(None, entry["key"], f"{note}{reason} → {entry['key']}: waiting — "
                     + ", ".join(refused))
+
+
+def _router_off(conn: sqlite3.Connection, cwd: Optional[str], can) -> Optional[Decision]:
+    """The project's workflow card says router off: straight to its target, no rule or
+    model asked. None when there's no card, router is on, or the card can't be read."""
+    from .. import workflow
+    wf = workflow.of_folder(conn, cwd)
+    if wf is None or wf.router != "off" or not wf.target:
+        return None
+    name = targeting.provider_of(wf.target)
+    ok, why = can(name)
+    if not ok:
+        return Decision(None, "workflow", f"router off (workflow card) → {wf.target}: waiting — {why}")
+    c, shown = resolve(conn, wf.target)
+    tail = f"; {c.note}" if c.note else ""
+    return Decision(name, "workflow", f"router off (workflow card) → {shown}{tail}", c.model, c.effort)
 
 
 def _narrowed(conn: sqlite3.Connection, key: str, reason: str, prompt: str, cwd: Optional[str],

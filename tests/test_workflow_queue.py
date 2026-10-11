@@ -81,7 +81,7 @@ def test_parallel_caps_a_project_s_live_items(conn, tmp_path, monkeypatch):
     states = {i: conn.execute("SELECT state, why FROM items WHERE id=?", (i,)).fetchone() for i in (first, second)}
     assert states[first]["state"] == "building"
     assert states[second]["state"] == "waiting"
-    assert states[second]["why"] == "1 live in its project (its workflow: parallel 1)"
+    assert states[second]["why"] == "1 live in proj (its workflow)"
     selfwork._set(conn, first, state="judging")                     # judging is live too
     scheduler.start_ready(conn)
     assert conn.execute("SELECT state FROM items WHERE id=?", (second,)).fetchone()[0] == "waiting"

@@ -93,7 +93,7 @@ def test_a_fifth_build_waits_for_parallel_while_a_chat_starts(home, conn, spawne
     state = {i: tuple(conn.execute("SELECT state, why FROM items WHERE id=?", (i,)).fetchone())
              for i in items}
     assert sum(1 for s in state.values() if s[0] == "building") == 4
-    assert ("waiting", "4 building (self.parallel)") in state.values()
+    assert ("waiting", "4 agents working (machine)") in state.values()
     with db.tx(conn):
         chat = plain(conn, "chat")
     engine.spawn_ready(conn)

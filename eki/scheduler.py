@@ -2,10 +2,14 @@
 
 Waiting items are taken goal by goal, round-robin: the goal with the fewest
 items building goes first, then the older goal, then the older item. An item
-starts once its deps are fit, up to `self.parallel` building at once —
-judging and review are held elsewhere. A project whose workflow card says
-`parallel: n` (eki/workflow.py) has at most n of its items live (building,
-judging, reviewing) besides; with no card nothing more caps it. Items whose write-sets overlap build
+starts once its deps are fit and two caps allow it. The machine cap
+(eki/machinecaps.py, routing.json machine.agents) holds the items building
+across all projects, eki's and every person's — judging and review are held
+elsewhere; it is checked first and wins. Then each project's own workflow card
+`parallel: n` (eki/workflow.py) caps only that project's live items (building,
+judging, reviewing): eki's own card for eki's items (selfwork.settings()'s
+`parallel` when eki has no card), a project with no card has no cap of its own.
+eki's card never caps another project. Items whose write-sets overlap build
 at the same time: the queue merges them (a resolve run on conflict). Only an
 item with no write-set waits, until nothing else builds in its repo.
 An item left waiting says why in `items.why`, written only when it changes.
@@ -20,7 +24,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from . import db, projects, workflow, workspace
+from . import db, machinecaps, projects, workflow, workflowgates, workspace
 
 NO_WRITE_SET = "no write-set: waits until its repo is quiet"
 
@@ -29,7 +33,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
     from . import selfwork              # selfwork calls this from its tick: import it late
     _tracked.clear()
     settings = selfwork.settings()
-    parallel = int(settings["parallel"])
+    agents = int(machinecaps.settings()["agents"])
     fit = selfwork.FIT.get(settings["autonomy"], selfwork.FIT["propose"])
     done_ids = {r["id"] for r in selfwork.items_in(conn, fit)}
     goals: Dict[str, Optional[sqlite3.Row]] = {}
@@ -49,15 +53,17 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
                 repos[gid] = None
         return repos[gid]
 
-    caps: Dict[str, Optional[int]] = {}                  # project id -> its card's parallel
+    caps: Dict[Optional[str], Tuple[str, Optional[int]]] = {}   # project id -> (its name, its card's parallel)
 
-    def cap_of(pid: Optional[str]) -> Optional[int]:
-        if pid is None:
-            return None                                   # eki itself: self.parallel
+    def cap_of(pid: Optional[str]) -> Tuple[str, Optional[int]]:
         if pid not in caps:
-            row = projects.get(conn, pid)
-            wf = workflow.of_project(conn, row) if row is not None else None
-            caps[pid] = wf.parallel if wf is not None else None
+            if pid is None:                               # eki itself: its own card
+                wf = workflowgates.own()
+                caps[pid] = ("eki", wf.parallel if wf is not None else int(settings["parallel"]))
+            else:
+                row = projects.get(conn, pid)
+                wf = workflow.of_project(conn, row) if row is not None else None
+                caps[pid] = (row["name"] if row is not None else pid, wf.parallel if wf is not None else None)
         return caps[pid]
 
     def project_of(gid: str) -> Optional[str]:
@@ -65,11 +71,10 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         return g["project"] if g is not None and "project" in g.keys() else None
 
     live = selfwork.items_in(conn, selfwork.LIVE)
-    live_in: Dict[str, int] = {}                          # project id -> its items live
+    live_in: Dict[Optional[str], int] = {}                # project id (None: eki) -> its items live
     for x in live:
         pid = project_of(x["goal_id"])
-        if pid is not None:
-            live_in[pid] = live_in.get(pid, 0) + 1
+        live_in[pid] = live_in.get(pid, 0) + 1
     taken: Dict[str, List[Tuple[str, Set[str]]]] = {}     # repo -> [(item id, its files)]
     for x in live:
         r = repo_of(x["goal_id"])
@@ -92,10 +97,13 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         r = repo_of(it["goal_id"])
         if r is None:
             return "its project is gone"
+        n = sum(building.values())
+        if n >= agents:
+            return f"{n} agents working (machine)"
         pid = project_of(it["goal_id"])
-        cap = cap_of(pid)
+        name, cap = cap_of(pid)
         if cap is not None and live_in.get(pid, 0) >= cap:
-            return f"{live_in[pid]} live in its project (its workflow: parallel {cap})"
+            return f"{live_in[pid]} live in {name} (its workflow)"
         if it["independent"]:
             return None
         files = json.loads(it["files"] or "[]")
@@ -105,12 +113,12 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
 
     said = []
     started = True
-    while started and sum(building.values()) < parallel:
+    while started and sum(building.values()) < agents:
         started = False
         order = sorted((g for g in waiting if waiting[g] and goal_of(g) is not None),
                        key=lambda g: (building.get(g, 0), goal_of(g)["created_at"], g))
         for gid in order:
-            if sum(building.values()) >= parallel:
+            if sum(building.values()) >= agents:
                 break
             it = next((x for x in waiting[gid] if blocker(x) is None), None)
             if it is None:
@@ -126,8 +134,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
             taken.setdefault(str(r), []).append((now["id"], claims(now, r)))
             building[gid] = building.get(gid, 0) + 1
             pid = project_of(gid)
-            if pid is not None:
-                live_in[pid] = live_in.get(pid, 0) + 1
+            live_in[pid] = live_in.get(pid, 0) + 1
             waiting[gid] = [x for x in waiting[gid] if x["id"] != it["id"]]
             said.append(f"item {it['id']}: building ({it['title'][:50]})")
             started = True
@@ -135,7 +142,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
     n = sum(building.values())
     for items in waiting.values():
         for it in items:
-            why = blocker(it) or f"{n} building (self.parallel)"
+            why = blocker(it) or f"{n} agents working (machine)"
             if why != it["why"]:
                 conn.execute("UPDATE items SET why=? WHERE id=? AND state='waiting'", (why, it["id"]))
     return said

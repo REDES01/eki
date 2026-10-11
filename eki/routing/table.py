@@ -11,9 +11,12 @@ Migration: an existing routing.json is never rewritten or reordered.
 The defaults here (needs, the cheapest-first general row) only reach a
 file eki writes for the first time; what a person wrote stays as written.
 The one exception is the picture rows (PICTURE_ROWS): rows() adds any the
-file lacks, in memory only, so an older table can still draw; their
-targets are the providers that can do what the row needs. So is the
-`code-easy` row (CODE_EASY), when a codex_local provider exists: its first
+file lacks, in memory only, so an older table can still draw; each names
+its ComfyUI workflow as a target (`comfyui:hq`, like `claude:opus`) on
+each provider that can do what the row needs, cheapest first. A row
+target that is a bare ComfyUI provider draws with the row's own workflow
+(comfyui_workflows.for_row). The `code-easy` row (CODE_EASY) is added the
+same way, when a codex_local provider exists: its first
 target is that provider, then Claude and Codex.
 """
 from __future__ import annotations
@@ -49,19 +52,19 @@ DEFAULT_ROWS: List[Dict[str, Any]] = [
      "needs": ["web"], "targets": ["claude", "codex"]},
     {"key": "image", "title": "A quick draft picture",
      "examples": ["draw a lighthouse at dusk", "a picture of a cat on a windowsill", "sketch a red bicycle"],
-     "needs": ["image"], "targets": ["comfyui"]},
+     "needs": ["image"], "targets": ["comfyui:draft"]},
     {"key": "image-hq", "title": "A high-quality, detailed picture",
      "examples": ["draw a detailed photorealistic lighthouse", "a high quality 4k portrait of an old sailor"],
-     "needs": ["image"], "targets": ["comfyui"]},
+     "needs": ["image"], "targets": ["comfyui:hq"]},
     {"key": "image-anime", "title": "An anime-style picture",
      "examples": ["draw an anime girl with silver hair", "a chibi fox in manga style"],
-     "needs": ["image"], "targets": ["comfyui"]},
+     "needs": ["image"], "targets": ["comfyui:anime"]},
     {"key": "image-edit", "title": "Change the previous or attached picture from an instruction",
      "examples": ["make it bluer", "remove the hat", "turn the sky into a sunset"],
-     "needs": ["image-edit"], "targets": ["comfyui"]},
+     "needs": ["image-edit"], "targets": ["comfyui:edit"]},
     {"key": "image-upscale", "title": "Upscale a picture",
      "examples": ["upscale it", "make a bigger version of this picture"],
-     "needs": ["image-edit"], "targets": ["comfyui"]},
+     "needs": ["image-edit"], "targets": ["comfyui:upscale"]},
     {"key": "general", "title": "Anything (used when the prompt check can't run)",
      "examples": [],
      "needs": [], "targets": cheapest_first(
@@ -79,6 +82,12 @@ CODE_EASY: Dict[str, Any] = {
     "examples": ["rename parse to parse_line", "add a --verbose flag", "fix the typo in README",
                  "write a test for parse_date"],
     "needs": ["tools"], "targets": ["claude", "codex"]}
+
+
+def _workflow(name: str, r: Dict[str, Any]) -> str:
+    """`<name>:<workflow>`, the workflow the row's default target names."""
+    part = targeting.key(r["targets"][0]).partition(":")[2]
+    return f"{name}:{part}" if part else name
 
 
 def settings() -> Dict[str, Any]:
@@ -102,7 +111,8 @@ def rows() -> List[Dict[str, Any]]:
     Only the picture rows are added, not other missing defaults, so a
     table someone trimmed keeps routing the way they left it. An added
     row goes to the providers that can do what it needs, cheapest first,
-    or to its default targets when none can.
+    a ComfyUI one naming the row's workflow; or to its default targets
+    when none can.
     """
     out = list(settings().get("rows") or DEFAULT_ROWS)
     have = {r.get("key") for r in out}
@@ -117,7 +127,8 @@ def rows() -> List[Dict[str, Any]]:
         for r in missing:
             able = [n for n, c in cfgs.items()
                     if set(r["needs"]) <= set(providers.capabilities(n, c))]
-            out.append({**r, "targets": cheapest_first(able, kinds) if able else list(r["targets"])})
+            able = [_workflow(n, r) if kinds[n] == "comfyui" else n for n in cheapest_first(able, kinds)]
+            out.append({**r, "targets": able or list(r["targets"])})
     return out
 
 

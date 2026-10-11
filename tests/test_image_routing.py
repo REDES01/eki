@@ -131,3 +131,49 @@ def test_draw_then_edit_end_to_end(station, conn):
     graph = station.posted[-1]["prompt"]
     assert [n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"] == [name]
     assert store.last_picture(conn, tid, r["seq"] + 1) != pic      # the edit is now the last picture
+
+
+def rows(home, **targets):
+    """routing.json with the picture rows given, each to its targets."""
+    (home / "routing.json").write_text(json.dumps({"checker": "none", "rows": [
+        {"key": "general", "title": "all", "targets": ["fake"]},
+        *({"key": k.replace("_", "-"), "title": k, "needs": ["image"], "targets": t}
+          for k, t in targets.items())]}))
+
+
+def test_a_run_routed_to_image_hq_draws_with_hq(station, conn):
+    _, rid = ask(conn, "draw a detailed photorealistic lighthouse")
+    r = run_inline(conn, rid)
+    assert r["state"] == "done" and r["row"] == "image-hq" and r["model"] == "hq"
+    assert "→ image-hq → comfyui · Qwen-Image 2.1 — high quality" in r["why"]
+    drew = [json.loads(e["data"]) for e in store.events_after(conn, rid) if e["kind"] == "tool"]
+    assert {d["workflow"] for d in drew} == {"hq"}
+
+
+def test_a_row_set_to_anime_draws_with_anime(station, conn, home):
+    rows(home, image=["comfyui:anime"])
+    _, rid = ask(conn, "draw a fox")
+    r = run_inline(conn, rid)
+    assert r["state"] == "done" and r["row"] == "image" and r["model"] == "anime"
+    assert "→ image → comfyui · NoobAI-XL — anime" in r["why"]
+    drew = [json.loads(e["data"]) for e in store.events_after(conn, rid) if e["kind"] == "tool"]
+    assert {d["workflow"] for d in drew} == {"anime"}
+
+
+def test_a_bare_comfyui_target_uses_the_row_s_workflow(station, conn, home):
+    rows(home, image=["comfyui"], image_hq=["comfyui"])
+    d = decide(conn, ask(conn, "draw a detailed photorealistic lighthouse")[1])
+    assert (d.row, d.model) == ("image-hq", "hq")
+    assert d.why.endswith("→ image-hq → comfyui · Qwen-Image 2.1 — high quality")
+    d = decide(conn, ask(conn, "draw a fox")[1])
+    assert (d.row, d.model) == ("image", "draft")
+    t = routing.explain(conn, "draw a fox")["targets"][0]
+    assert (t["model"], t["label"]) == ("draft", "comfyui · FLUX.2 klein — draft")
+
+
+def test_an_unknown_workflow_falls_back_to_draft_with_the_note(station, conn, home):
+    rows(home, image_hq=["comfyui:gone"])
+    d = decide(conn, ask(conn, "draw a detailed photorealistic lighthouse")[1])
+    assert (d.row, d.model) == ("image-hq", "draft")
+    assert d.why.endswith("→ image-hq → comfyui · FLUX.2 klein — draft; "
+                          "gone isn't in comfyui's list any more; its default")

@@ -118,7 +118,7 @@ def test_draw_goes_to_comfyui_with_the_default_table(home, conn, tmp_path, monke
     (home / "providers.json").write_text(json.dumps({"fake": {"kind": "fake"}}))
     e = routing.explain(conn, "draw a lighthouse")
     assert e["row"] == "image" and e["needs"] == ["image"]
-    assert [t["name"] for t in e["targets"]] == ["comfyui"]
+    assert [t["name"] for t in e["targets"]] == ["comfyui:draft"]
     assert "comfyui" in e["providers"]
     _, rid = _run(conn, "draw a lighthouse")
     d = routing.decide(conn, store.run(conn, rid))
@@ -132,7 +132,7 @@ def test_a_table_without_an_image_row_derives_one(home, conn):
     before = (home / "routing.json").read_bytes()
     e = routing.explain(conn, "draw a lighthouse")
     assert e["row"] == "image" and e["needs"] == ["image"]
-    assert [t["name"] for t in e["targets"]] == ["pics"]
+    assert [t["name"] for t in e["targets"]] == ["pics:draft"]
     assert (home / "routing.json").read_bytes() == before
 
 

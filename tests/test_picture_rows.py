@@ -4,6 +4,8 @@ import json
 from eki.routing import needs, table
 
 PICTURES = ["image", "image-hq", "image-anime", "image-edit", "image-upscale"]
+WORKFLOWS = {"image": "draft", "image-hq": "hq", "image-anime": "anime",
+             "image-edit": "edit", "image-upscale": "upscale"}
 
 
 def test_an_old_table_gets_all_five_and_stays_byte_for_byte(home):
@@ -12,10 +14,22 @@ def test_an_old_table_gets_all_five_and_stays_byte_for_byte(home):
     rows = {r["key"]: r for r in table.rows()}
     assert table.PICTURE_ROWS == PICTURES
     assert set(PICTURES) <= set(rows)
-    assert all(rows[k]["targets"] == ["comfyui"] and rows[k]["examples"] for k in PICTURES)
+    assert all(rows[k]["targets"] == [f"comfyui:{WORKFLOWS[k]}"] and rows[k]["examples"] for k in PICTURES)
     assert rows["image-edit"]["title"] == "Change the previous or attached picture from an instruction"
     assert path.read_bytes() == before
     assert table.row("image-anime")["title"] == "An anime-style picture"
+
+
+def test_default_rows_name_their_workflow():
+    rows = {r["key"]: r for r in table.DEFAULT_ROWS}
+    assert {k: rows[k]["targets"] for k in PICTURES} == {k: [f"comfyui:{w}"] for k, w in WORKFLOWS.items()}
+
+
+def test_added_rows_name_the_workflow_on_each_comfyui_provider(home):
+    (home / "providers.json").write_text(json.dumps({
+        "fake": {"kind": "fake"}, "art": {"kind": "comfyui", "base_url": "http://127.0.0.1:1"}}))
+    rows = {r["key"]: r for r in table.rows()}
+    assert {k: rows[k]["targets"] for k in PICTURES} == {k: [f"art:{w}"] for k, w in WORKFLOWS.items()}
 
 
 def test_a_persons_own_image_row_wins(home):

@@ -21,7 +21,9 @@ needs and capacity are checked by the target's provider, the decision
 carries the model and effort the target resolves to (targets.choose, against
 the program's read list), and the why names them with the program's own
 label: "→ answer → claude · Opus 5.5 · high". A model or effort the program
-no longer offers falls back to its default, and the note says so. The check
+no longer offers falls back to its default, and the note says so. The
+picture rows name ComfyUI workflows the same way ("→ image-hq → comfyui ·
+Qwen-Image 2.1 — high quality"); a bare `comfyui` draws with the row's. The check
 and narrow are asked of the router role (eki/roles.py); each call's time
 goes into role_calls.
 """
@@ -52,16 +54,24 @@ def checker_name() -> str:
     return roles.get("router")
 
 
-def resolve(conn: sqlite3.Connection, target: Any) -> Tuple[targeting.Choice, str]:
+def resolve(conn: sqlite3.Connection, target: Any, row: Optional[str] = None) -> Tuple[targeting.Choice, str]:
     """(the choice, its label) for a row target, against providers.json and
     the read model list: `claude · Opus 5.5 · high`; a bare provider
-    whose list was never read is just its name."""
+    whose list was never read is just its name. A ComfyUI target always
+    names its workflow: a bare one the row's (`row`), one no longer listed
+    the default — "→ image → comfyui · FLUX.2 klein — draft"."""
     name = targeting.provider_of(target)
     listed = modellist.listed(conn, name)
+    cfg = providers.config().get(name) or {}
     try:
-        c = targeting.choose(target, providers.config().get(name) or {}, listed)
+        c = targeting.choose(target, cfg, listed)
     except ValueError as e:                  # a hand-written target settings would refuse
         c = targeting.Choice(None, None, str(e))
+    if cfg.get("kind") == "comfyui" and c.model is None:
+        from ..providers import comfyui_workflows
+        wid = comfyui_workflows.for_row(row if not c.note else None)
+        c = targeting.Choice(wid, c.effort, c.note)
+        return c, targeting.label(name, wid, c.effort, listed)
     if ":" not in targeting.key(target) and not listed:   # a bare provider, no list read: its name
         return c, name
     return c, targeting.label(name, c.model, c.effort, listed)
@@ -146,7 +156,7 @@ def decide(conn: sqlite3.Connection, run: sqlite3.Row) -> Decision:
         lack = [] if name in skip else needs.lacking(target, want)
         ok, why = (False, needs.cant(lack)) if lack else can(name)
         if ok:
-            c, shown = resolve(conn, target)
+            c, shown = resolve(conn, target, entry["key"])
             tail = f"; skipped {', '.join(refused)}" if refused else ""
             tail += f"; {c.note}" if c.note else ""
             return Decision(name, entry["key"],
@@ -229,7 +239,7 @@ def explain(conn: sqlite3.Connection, prompt: str, *, cwd: Optional[str] = None,
         lack = needs.lacking(t, want)
         ok, why = (False, needs.cant(lack)) if lack else avail.get(name, (False, "no such provider"))
         cfg = cfgs.get(name)
-        c, shown = resolve(conn, t) if cfg is not None else (targeting.Choice(None, None, ""), targeting.key(t))
+        c, shown = resolve(conn, t, entry["key"]) if cfg is not None else (targeting.Choice(None, None, ""), targeting.key(t))
         targets.append({"name": targeting.key(t), "provider": name, "model": c.model, "effort": c.effort,
                         "label": shown, "note": c.note,
                         "ok": bool(ok), "why": why,

@@ -9,6 +9,13 @@ from eki import cardusedby, cardview, components, db, store
 from eki.components import servers
 
 
+@pytest.fixture(autouse=True)
+def noon(monkeypatch):
+    """"today" starts 12 hours ago: the runs these tests make minutes ago are today even
+    when the suite runs just after midnight (cardusedby._midnight is the wall clock's)."""
+    monkeypatch.setattr(cardusedby, "_midnight", lambda now: now - 12 * 3600)
+
+
 @pytest.fixture
 def root(conn, proj):
     r = proj.resolve()

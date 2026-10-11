@@ -1,6 +1,6 @@
 """Paths in tool lines and on cards open in the side panel: app.js runs a tool line's detail through
 md.linkPaths (only when md.js has it), and the knowledge and instructions cards carry data-file
-buttons with the file's absolute path, which panel.js's document click opens beside the chat."""
+rows with the file's absolute path, which panel.js's document click opens in the side panel."""
 import json
 import shutil
 import subprocess
@@ -21,11 +21,11 @@ def test_tool_lines_link_paths_behind_a_guard(web):  # noqa: F811
     assert 'data-file="${md.esc(p)}"' in js                      # the files under an answer stay
 
 
-def test_cards_render_open_beside_buttons(web):  # noqa: F811
+def test_cards_render_data_file_rows(web):  # noqa: F811
     for f in ("cardknowledge.js", "projectinstructions.js"):
         code, js = get(web + "/ui/" + f)
         assert code == 200
-        assert "data-file=" in js and "Open beside the chat" in js, f
+        assert "data-file=" in js and "Open beside the chat" not in js, f
         assert 't.closest("[data-file]")' in js, f               # the card's own row click stays out
 
 
@@ -67,10 +67,10 @@ def test_a_knowledge_row_carries_its_absolute_path(tmp_path, card, want):
     html = out.stdout
     assert "design/DECISIONS.md" in html
     if want:
-        assert f'data-file="{want}"' in html and "Open beside the chat" in html
-        assert html.count("data-file=") == 1                    # a missing file gets no button
+        assert f'data-file="{want}"' in html
+        assert html.count("data-file=") == 1                    # a missing file opens in the card
     else:
-        assert "data-file" not in html                          # no project folder known: no button
+        assert "data-file" not in html                          # no project folder known: read here
 
 
 def test_small():

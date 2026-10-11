@@ -1,7 +1,9 @@
 // An open instructions card (projectcardpanel.js hands it over): the project's AGENTS.md rendered
 // with md.js, Edit to turn it into a text box (saved when you leave it or on ⌘S, then rendered
-// again), the files it points at under "Read first" (each opens read-only here, with a way back),
-// and a "Link CLAUDE.md" fix when CLAUDE.md doesn't include the file. Routes: eki/api_cards.py.
+// again), the files it points at under "Read first", and a "Link CLAUDE.md" fix when CLAUDE.md doesn't
+// include the file. In a project card the file's name and each Read first file are [data-file]: panel.js
+// opens them in the side panel with "← back to <card>". A card without a project folder reads them here,
+// read-only, with a way back. The side panel's ✕ closes the card. Routes: eki/api_cards.py.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const I = { el: null, pid: null, card: null, ro: "", ctx: null, mode: "view", read: null, err: "", saving: false, last: {} };
@@ -16,15 +18,15 @@
   const editable = () => !I.ro && !I.card.ref;
   // the project folder: a project card lives in <folder>/components/<name>
   const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(I.card.card || "")); return m ? m[1] : ""; };
-  const beside = (rel) => root() ? `<button type="button" class="pj-btn pi-beside" data-file="${esc(root() + "/" + rel)}"
-      title="Open beside the chat">Open in panel</button>` : "";
+  const file = (rel) => root() ? ` data-file="${esc(root() + "/" + rel)}"` : "";
 
   function head() {
     const c = I.card, f = info();
     const edit = editable() && I.mode === "view" ? '<button type="button" class="pj-btn" data-pi="edit">Edit</button>' : "";
     return `<div class="pj-row"><b class="pc-pname">${esc(c.name)}</b><span class="dim">instructions</span>
-        <code class="pi-file">${esc(f.file)}</code>${f.exists ? `<span class="dim">${esc(f.lines)} lines</span>${beside(f.file)}` : ""}
-        <span class="grow"></span>${edit}<button type="button" class="pj-btn" data-pi="close">Close</button></div>
+        ${f.exists && root() ? `<a href="#" class="pi-file"${file(f.file)} title="Open in the side panel"><code>${esc(f.file)}</code></a>`
+          : `<code class="pi-file">${esc(f.file)}</code>`}${f.exists ? `<span class="dim">${esc(f.lines)} lines</span>` : ""}
+        <span class="grow"></span>${edit}</div>
       ${c.about ? `<div class="pj-sub">${esc(c.about)}</div>` : ""}
       ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}
       ${c.ref ? `<div class="pj-sub">From the pool component <b>${esc(c.ref)}</b> — read-only here.</div>`
@@ -60,7 +62,8 @@
     const list = info().read_first || [];
     if (!list.length) return "";
     return `<h4 class="pp-h">Read first</h4>${list.map((p) =>
-      `<div class="pj-item pp-line${I.mode === "read" && I.read && I.read.path === p ? " on" : ""}" data-read="${esc(p)}" role="button"><code class="grow">${esc(p)}</code>${beside(p)}</div>`).join("")}`;
+      `<div class="pj-item pp-line${I.mode === "read" && I.read && I.read.path === p ? " on" : ""}"${file(p) || ` data-read="${esc(p)}"`}
+        role="button"><code class="grow">${esc(p)}</code></div>`).join("")}`;
   }
 
   function frame() {
@@ -137,12 +140,11 @@
       }
       return;
     }
-    if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one beside the chat
+    if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one in the side panel
     const b = t.closest("[data-pi]");
     if (b) {
       e.preventDefault();
       const act = b.dataset.pi;
-      if (act === "close") return I.ctx.close();
       if (act === "edit") return edit();
       if (act === "link") return link();
       if (act === "back") { I.mode = "view"; I.read = null; return draw(); }

@@ -1,9 +1,11 @@
 // The knowledge card's own part in an open card (projectcardpanel.js draws it under "Files", on open
 // and on every 5 s update): each file the card names — name, size, last changed, who changed it last,
-// or "missing" — and a click opens one rendered with md.js, with Edit turning it into a text box saved
-// when you leave it or press ⌘S/Ctrl-S (a save error shows beside it). The 5 s reload redraws the list
-// only, never the box you're typing in. Read-only when the project has no folder or the card is a pool
-// reference. Routes: eki/api_cardknowledge.py (GET …/cards/<name>/files, GET/POST …/cards/<name>/file).
+// or "missing". In a project card an existing file's row is a [data-file] row: panel.js opens it in the
+// side panel's doc viewer (with its Edit) and a "← back to <card>" link. A missing file opens here, with
+// Edit turning it into a text box saved when you leave it or press ⌘S/Ctrl-S (a save error shows beside
+// it) — the only way to write one. A pool card (no project folder) shows its files here read-only, rendered
+// with md.js, since the doc viewer can't open ~/.eki. The 5 s reload redraws the list only, never the box
+// you're typing in. Read-only when the project has no folder or the card is a pool reference. Routes: eki/api_cardknowledge.py (GET …/cards/<name>/files, GET/POST …/cards/<name>/file).
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
   if (document.querySelector && !document.querySelector('link[href="/ui/cardknowledge.css"]')) {
@@ -22,10 +24,10 @@
     if (el && K.last[sel] !== html) { el.innerHTML = html; K.last[sel] = html; }
   }
   const editable = () => !K.ro && !K.card.ref;
-  // the project folder: a project card lives in <folder>/components/<name>
-  const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(K.card.card || "")); return m ? m[1] : ""; };
-  const beside = (rel) => root() && !/[*?[]/.test(rel) ? `<button type="button" class="pj-btn ck-beside"
-      data-file="${esc(root() + "/" + rel)}" title="Open beside the chat">Open in panel</button>` : "";
+  // the project folder: a project card lives in <folder>/components/<name> (the pool's ~/.eki/components isn't one)
+  const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(K.card.card || "")); return m && !/\/\.eki$/.test(m[1]) ? m[1] : ""; };
+  // an existing file of a project card opens in the side panel; the rest open here
+  const panelFile = (f) => !f.missing && root() && !/[*?[]/.test(f.path) ? root() + "/" + f.path : "";
 
   async function api(path, body) {
     const r = await fetch(path, body === undefined ? {} : {
@@ -58,12 +60,12 @@
     if (!K.files) return '<div class="dim">Loading…</div>';
     if (!K.files.length) return '<div class="dim">No files.</div>';
     return K.files.map((f) => `<div class="pj-item pp-line ck-row${K.open === f.path ? " on" : ""}${f.missing ? " ck-missing" : ""}"
-        data-ck-path="${esc(f.path)}" role="button" title="${esc(f.path)}">
+        ${panelFile(f) ? `data-file="${esc(panelFile(f))}"` : `data-ck-path="${esc(f.path)}"`} role="button" title="${esc(f.path)}">
         <code class="grow ck-name">${esc(f.path)}</code>
         ${f.missing ? '<span class="pj-err">missing</span>'
           : `<span class="dim ck-size">${esc(size(f.size))}</span>
              <span class="dim ck-when">${esc(ago(f.changed))}</span>
-             <span class="dim ck-who">${esc(f.author || "")}</span>${beside(f.path)}`}</div>`).join("");
+             <span class="dim ck-who">${esc(f.author || "")}</span>`}</div>`).join("");
   }
 
   async function load() {
@@ -76,6 +78,8 @@
       K.files = got.files || []; K.err = "";
     } catch (x) { if (K.card && K.card.name === name) K.err = x.message; }
     finally { K.loading = false; }
+    const now = (K.files || []).find((e) => e.path === K.open);
+    if (now && panelFile(now) && K.mode !== "edit") { K.open = null; K.file = null; put(".ck-file", ""); }  // written: the panel has it now
     put(".ck-list", list());
   }
 
@@ -143,7 +147,7 @@
       }
       return;
     }
-    if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one beside the chat
+    if (e.type !== "click" || t.closest("[data-file]")) return;   // panel.js opens that one in the side panel
     const b = t.closest("[data-ck]");
     if (b && b.dataset.ck === "close") { K.open = null; K.file = null; K.mode = "view"; put(".ck-list", list()); return put(".ck-file", filePart()); }
     if (b && b.dataset.ck === "edit" && editable()) {

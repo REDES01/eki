@@ -306,6 +306,8 @@ keys that are set when there is (`{"provider": "claude", "model": "opus",
 `role_calls.target` column; it is never parsed back. Rows may mix targets
 (`answer → ["local", "claude:haiku"]`, the same provider twice with
 different models); needs, capacity and `excluded` go by the provider.
+`comfyui:<workflow>` is a target like `claude:<model>`: `comfyui:hq` names
+the workflow `hq` in ComfyUI's list.
 
 `choose` turns a target into a model and an effort against the provider's
 read list (`modellist.listed()`); a list never read is trusted as written.
@@ -356,7 +358,11 @@ never blocking the engine. A model is `floating` when it is an alias whose
 default marked) and "follows the newest" for floating ones. Settings has
 one picker (`eki/web/settingstarget.js`) for every row target and role:
 provider, then model ("its default", floating names, pinned ids, each with
-the program's description), then effort when the model offers any; a saved
+the program's description), then effort when the model offers any. ComfyUI's
+models are its workflows, read from `workflows.json` rather than asked of
+the program: ComfyUI → "FLUX.2 klein — draft" reads like Claude → Opus, with
+the workflow's models, steps and size as its description and no effort. A
+saved
 choice no longer offered shows in amber with `choose`'s wording. It writes
 `fmt`'s shortest form, saved through `/api/settings/routing`.
 
@@ -386,11 +392,16 @@ comes to "no tools". A timeout kills the process, a non-zero exit raises,
 and a limit message raises `Limited`, which the caller turns into a limit.
 
 **Picture rows.** `image` (a quick draft), `image-hq`, `image-anime`
-(need `image`), `image-edit` and `image-upscale` (need `image-edit`) all go
-to `comfyui`, which `KIND_ORDER` counts as cheap as `local`. A table
-without them gets them in memory from `table.rows()`, aimed at whichever
-providers can do what they need; `routing.json` isn't rewritten. The why
-reads "rule: asks for a picture → image → comfyui".
+(need `image`), `image-edit` and `image-upscale` (need `image-edit`) each
+pick a ComfyUI workflow through the same picker as any row: by default
+`comfyui:draft`, `comfyui:hq`, `comfyui:anime`, `comfyui:edit` and
+`comfyui:upscale`. A bare `comfyui` target (an older table) uses the
+row's default workflow. `KIND_ORDER` counts ComfyUI as cheap as `local`. A
+table without these rows gets them in memory from `table.rows()`, aimed at
+whichever providers can do what they need; `routing.json` isn't rewritten.
+A workflow no longer in the list falls back to the row's default, with
+`choose`'s note. The why reads "rule: asks for a picture → image → ComfyUI
+· FLUX.2 klein — draft".
 
 **Rung 2: Codex on the local model** (`eki/providers/codex_local.py`, kind
 `codex_local`, can text and tools). The same `codex app-server` as the Codex
@@ -563,7 +574,7 @@ are Codex's.
   provider joining mid-way marks a past picture as `[picture: <path>]`; a
   carry-on resume sends none, the session has them. `/api/file` serves a
   path any run was given, and the thread shows them as thumbnails.
-- **Pictures** (`eki/providers/comfyui.py`, `comfyui_graphs.py`,
+- **Pictures** (`eki/providers/comfyui.py`, `comfyui_workflows.py`,
   `eki/gallery.py`): ComfyUI is a provider kind (`comfyui`, can `image` and
   `image-edit`). When `~/flux/ComfyUI` (or `EKI_COMFYUI_DIR`) holds a
   `main.py` and providers.json has no `comfyui` entry, the default one joins
@@ -572,27 +583,60 @@ are Codex's.
   model (`models.MANAGED_KINDS`): started on demand by the run, stopped
   `idle_stop` minutes after its last run, stepped out under memory pressure
   when nothing uses it, listed and started/stopped by `eki models` and the
-  sidebar; a ComfyUI eki didn't start is never stopped. Five rows, each with
-  its own graph in `comfyui_graphs/`: `image` (draft.json, FLUX.2-klein 4B,
-  4 steps), `image-hq` (hq.json, Qwen-Image 2.1 Q8 GGUF, 30 steps),
-  `image-anime` (anime.json, NoobAI-XL), `image-edit` (edit.json, klein 4B
-  shown the source) and `image-upscale` (upscale.json, 2× then a light klein
-  pass). The worker puts the row in `turn.extra["row"]`; an entry's
-  `"graphs"` can override any of them. Rules pick the row from the words
-  (upscale, edit an attached picture, anime, quality words, "draw …"); a
-  follow-up that isn't a question, in a thread whose last picture is known,
-  edits it — the thread's last picture (`store.last_picture`, drawn or
-  attached) is the source, uploaded to ComfyUI. A comfyui thread never stays
-  by "thread": the rule's row picks the graph, and a text question leaves it
-  for a text model. Everything drawn stays in `~/.eki/images/<run>/` and is
-  browsable: `eki pictures`, `GET /api/pictures?limit=&before=`, and the
-  window's Pictures view (a grid, a picture opens in the side panel).
-- **A drawing run** (`eki/providers/comfyui.py`): eki fills the row's
-  graph (the old single `"workflow"` key still means the `image` graph),
-  posts it to `/prompt`, polls `/history/<id>` and saves each output
-  through `/view`, one `tool` event named `image` per file, shown inline in
-  the thread. The prompt id is the session, so a restarted run polls
-  instead of drawing twice; a ComfyUI error fails the run with its message.
+  sidebar; a ComfyUI eki didn't start is never stopped. The entry keeps
+  what it had: base URL, start script, on demand, idle stop, memory.
+  Rules pick the row from the words (upscale, edit an attached picture,
+  anime, quality words, "draw …"); a follow-up that isn't a question, in a
+  thread whose last picture is known, edits it — the thread's last picture
+  (`store.last_picture`, drawn or attached) is the source, uploaded to
+  ComfyUI. A comfyui thread never stays by "thread": the rule's row picks
+  the workflow, and a text question leaves it for a text model. Everything
+  drawn stays in `~/.eki/images/<run>/` and is browsable: `eki pictures`,
+  `GET /api/pictures?limit=&before=`, and the window's Pictures view (a
+  grid, a picture opens in the side panel).
+- **ComfyUI's workflows are its models** (`eki/providers/comfyui_workflows.py`,
+  `comfyui_read.py`; it replaces `comfyui_graphs.py`). The list is
+  `~/.eki/comfyui/workflows.json` — `{"workflows": [{"id", "label", "file",
+  "inputs", "defaults"}]}` — and the graphs are plain files in
+  `~/.eki/comfyui/workflows/`, ComfyUI's API format. The first time there is
+  no list, eki seeds it once from its five shipped graphs: `draft` "FLUX.2
+  klein — draft" (FLUX.2-klein 4B, 4 steps), `hq` "Qwen-Image 2.1 — high
+  quality" (Q8 GGUF, 30 steps), `anime` "NoobAI-XL — anime", `edit` "klein
+  — edit" (klein 4B shown the source) and `upscale` "klein — upscale" (2×,
+  then a light klein pass). After that the list is the person's; eki never
+  seeds again. A workflow's inputs are what an agent may set: each
+  `{{name}}` placeholder in the JSON is one (`{{prompt}}`, `{{negative}}`,
+  `{{seed}}`, `{{width}}`, `{{height}}`, `{{source}}` …), and an entry's
+  `inputs` may also name a node id + field (`{"name": "steps", "node": "9",
+  "field": "steps"}`) for a graph with no placeholders. `defaults` fills
+  what a call leaves out. From the JSON eki reads, never writes: the models
+  it loads (each checked against ComfyUI's model folders: there or
+  missing), the sampler and its steps, and the size. `eki providers models
+  comfyui` and `/api/models` list the workflows as ComfyUI's models, with
+  those facts as the description. The old entry keys `"graphs"` and
+  `"workflow"` are gone; a workflow is chosen by its id.
+- **Settings → Providers → ComfyUI** lists its workflows the way a model
+  provider lists its models (`eki/web/settingscomfyui.js`): each with its
+  label, file, inputs and defaults, models (missing ones in amber), sampler,
+  steps and size. Per workflow: **Open in ComfyUI** starts ComfyUI on
+  demand, copies the graph to ComfyUI's `user/default/workflows/eki-<id>.json`
+  and opens 127.0.0.1:8188 so it can be seen and edited there; **Reload**
+  reads the file again; **Try** takes the inputs and shows the pictures;
+  **Remove** moves the file to `workflows/removed/` and drops the entry.
+  **Add** takes one exported file or imports every graph in a folder (a
+  game's tools, say); only API format is taken — a UI-format file (with
+  `nodes` and `links`) is refused with a line saying to export with "Save
+  (API)". The endpoints live under `/api/comfyui/workflows`: the list,
+  add or import, and per workflow reload, open, try and remove; POSTs are
+  behind `X-Eki: 1` like every POST.
+- **A drawing run** (`eki/providers/comfyui.py`): a ComfyUI run's model is
+  the workflow (`runs.model` = its id). Its prompt is either the text,
+  which fills `{{prompt}}`, or `{"inputs": {...}}` from a picture card;
+  eki fills only the workflow's declared inputs, plus its defaults, posts
+  it to `/prompt`, polls `/history/<id>` and saves each output through
+  `/view`, one `tool` event named `image` per file, shown inline in the
+  thread. The prompt id is the session, so a restarted run polls instead
+  of drawing twice; a ComfyUI error fails the run with its message.
 
 ## Going live
 
@@ -983,6 +1027,12 @@ by the engine's spawn step. Queues and holds are derived from the runs table
 and the active runs, so they survive a restart. A wait shows on the
 caller's run, with its why: "waits for voice: held by <run>".
 
+A card that runs on a provider shares that provider, not a copy of it.
+ComfyUI is one machine resource: every call of every card that targets it,
+in any project, plus ComfyUI's own runs (routing's picture rows), counts
+against the same slots, the same memory and the same conflicts (voice). Two
+picture cards on different workflows still wait in one queue.
+
 **Using one.** `eki use <name> [args…]`, from any run (an agent in a project
 chat, a goal item, eki's own runs) or by hand. A call is a run with
 provider `component`, its parent the caller's run, on a thread with no cwd,
@@ -998,10 +1048,10 @@ of its own; the CLI is the integration.
 - **`service`** — `"run"`: a command per call, the args appended, cwd the
   caller's folder, env `EKI_CALLER_DIR`. Or `"serve"` + `"health"` +
   `"call"`: a server kept up while used and stopped after `idle_stop`. Or
-  `"provider"`: a call handed to one of eki's providers — the pool template
-  `images` runs on eki's ComfyUI provider, so routing's picture runs and
-  component calls share one queue. The pool template `voice` is exclusive,
-  with a TTS command to fill in. Ableton is one service card (holo-cards'
+  `"target"`: a call handed to one of eki's providers at a target, as a
+  row would name it — a picture card (below); the old `"provider"` key is
+  still read. The pool template `voice` is exclusive, with a TTS command
+  to fill in. Ableton is one service card (holo-cards'
   `ableton`): a script for unattended renders and an MCP server for writing
   MIDI in Live, one exclusive hold for both.
   **A service card can also offer an MCP server:** an optional `"mcp"`, the
@@ -1017,6 +1067,28 @@ of its own; the CLI is the integration.
   wait waits with the same why ("waits for ableton: held by <run>"). A
   `{"url"}` server is not held: eki doesn't sit in its path. The card panel
   shows both uses: "script: <run>" and "MCP: <command or url> · Test".
+- **A picture card** is a `service` with a ComfyUI target:
+  `{"kind": "service", "about": "…", "target": "comfyui:<workflow>",
+  "out": "assets/generated/<card>/"}`. Nothing else is written on the card:
+  its inputs, defaults and models are read from the workflow's entry under
+  the provider. A project may have several, each its own workflow —
+  portrait, card art, backdrop, draft. (A ComfyUI workflow is a graph
+  under the provider, not the `workflow` kind.) Agents call it like any card: `eki
+  use <card> --prompt "…" [--seed N] [--size WxH] [--source <picture>]
+  [--<input> value]`. `--size` sets width and height, `--source` uploads the
+  picture for the workflow's `{{source}}`. Only the workflow's declared
+  inputs are filled; an unknown one is refused with the list of known ones,
+  and nothing runs. `eki use <card> --help` prints the workflow's label, its
+  inputs with their defaults, and its models. The run is a ComfyUI run with
+  the workflow as its model and `{"inputs": {...}}` as its prompt; its
+  pictures are copied into `out` (relative to the project folder) and their
+  paths printed, one per line. The card's panel shows the picker (ComfyUI →
+  workflow, the same `settingstarget.js`), the workflow's inputs and models
+  (missing ones in amber), the output folder, a Try box, and the last
+  pictures, each with the prompt and the task that made it. Migration: the
+  old form `{"provider": "comfyui"}` (the `images` template) is read as
+  `"target": "<provider>:draft"` and written that way the next time the card
+  is saved.
 - **`assets`** — a folder eki manages outside git (`"path"`): managed, never
   versioned like code. Every worktree of the project sees it at its relative
   path by symlink (never a copy or a hardlink), so anything written there

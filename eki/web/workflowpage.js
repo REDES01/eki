@@ -42,7 +42,7 @@
 
   function note(d) {
     const parts = [];
-    if (d && d.card === "") parts.push(`<div class="wf-banner"><span class="grow">No workflow card: these are the defaults.</span>
+    if (d && d.card === "" && !d.error) parts.push(`<div class="wf-banner"><span class="grow">No workflow card: these are the defaults.</span>
       <button type="button" class="pj-btn primary" data-wf-add>+ Add workflow card</button></div>`);
     if (d && d.error) parts.push(`<div class="wf-banner wf-broken"><b>${esc(d.card || "workflow")}</b> is broken: ${esc(d.error)}</div>`);
     if (S.err) parts.push(`<div class="pj-err wf-err">${esc(S.err)}</div>`);

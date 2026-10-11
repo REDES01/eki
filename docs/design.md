@@ -1178,8 +1178,49 @@ plan, agents in parallel, each checking its own work, merge; some projects
 don't need the router at all. So the workflow is a card in the project, not
 code eki applies to everyone. A project has at most one (a second is broken:
 "a project has one workflow card: <name> is it"). `eki component add
-workflow -C <folder>` writes the template; the card opens with one dropdown
-per stage, each choice with its one-line explanation, as the other cards.
+workflow -C <folder>` writes the template. The workflow kind has no
+`access` setting (`components/workflow.DROPS`): it isn't a shared resource.
+
+**The workflow is shown as a graph on its own page**, `#project/<id>/workflow`
+(`eki/web/workflowpage.js`, `workflowcanvas.js`, `workflowinspect.js`),
+opened from the workflow card's "Open workflow →" and the project header's
+Workflow link. The card's own panel is one line ("plan split · 4 parallel ·
+checks: self · merge auto") and that link. The page is a dark canvas — pan by
+drag or two-finger scroll, zoom by pinch or ⌘-scroll, fit to view on open —
+with the stages left to right as boxes (a title, a one-line summary) joined
+by arrows: Request in → Router (or "straight to <target>") → Planner / Single
+item → Build ("4 in parallel") → each check in order → Merge → After-merge.
+When one row would be too small to read, fit wraps the stages into rows like
+text (an arrow from a row's end to the next row's start), picking the row
+length that shows the graph largest; it fits again when the side panel opens
+or closes, unless the person has panned or zoomed.
+A stage that is off is drawn faded with a dashed border, still clickable; on
+eki's own project the locked stages (train, batch) carry a lock. Cards that
+feed a stage hang off it as small side nodes on dotted links: knowledge
+("picked per item") and instructions → Planner and Build, skills and mcp →
+Build, serve → Build and Playtester, the playtester card → Playtester, the
+check command → Check command; a click opens that card in the side panel.
+A click on a stage opens it in the side panel: what it does, its settings
+(the card's dropdowns with their explanations, saved into the card as they
+change; locked ones shown but fixed), and the goals and items at it now
+(title, state, age), each opening its detail. The page reloads every 4 s
+while shown: counts on the nodes, a count badge on an arrow when items are
+moving into a stage, a red dot on a stage with a failure or an item left for
+a person. Everything comes from `GET /api/projects/<id>/workflow`
+(`eki/api_workflow.py`), built on each call from the card and the goals and
+items tables; it holds nothing. Where a goal or item is drawn:
+
+| state | stage |
+|---|---|
+| goal `drafting`, `planning`, `failed` (red dot) | Planner |
+| item `waiting`, `building`, `left` (red dot) | Build |
+| `judging` | Review if checked, else Check command if checked, else Self check |
+| `reviewing` | Review if checked, else Self check |
+| `unfit` (red dot) | Check command if checked, else Self check |
+| `queued`, `resolving`, `rechecking` | Batch if checked, else Merge |
+| `landed`, `rolled back` on eki | Train |
+| `proposed`, `locked` (red dot), an open PR | Merge |
+| `applied`, `live`, `dropped`, `landed` elsewhere | not drawn: over |
 
 **The stages and their choices**, in the order they run:
 

@@ -31,7 +31,7 @@ global.fetch = async (url, opt) => {
   log.push(["fetch", url, opt && opt.method ? opt.method : "GET", opt && opt.body ? JSON.parse(opt.body) : null,
             opt && opt.headers ? opt.headers["X-Eki"] || "" : ""]);
   const got = answers[url] || { error: "nope" };
-  return { ok: !got.error, statusText: "bad", json: async () => got };
+  return { ok: url in answers, statusText: "bad", json: async () => got };   // a broken card is a 200 with error
 };
 let handlers = null, selected = "unset";
 let hosted = null;
@@ -137,7 +137,10 @@ def test_no_card_shows_the_defaults_banner_and_adds_the_template(tmp_path):
 
 def test_a_broken_card_and_a_failed_load_say_so(tmp_path):
     got = run(tmp_path, answers={"/api/projects/p1/workflow": {**FLOW, "error": "checks: batch needs command"}})
-    assert "checks: batch needs command" in got["note"]
+    assert "is broken" in got["note"] and "checks: batch needs command" in got["note"]
+    broken = {**FLOW, "card": "", "error": "checks: train is eki's own"}           # a broken card is no card,
+    got = run(tmp_path, answers={"/api/projects/p1/workflow": broken})            # but not "add one"
+    assert "is broken" in got["note"] and "No workflow card" not in got["note"]
     got = run(tmp_path, answers={})
     assert "Can&#x27;t read the workflow" in got["note"] or "Can't read the workflow" in got["note"]
 

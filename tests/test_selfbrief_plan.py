@@ -50,7 +50,8 @@ def test_the_resolver_runs_only_its_own_tests():
     assert "run `bin/check`" not in r.replace("don't run the whole suite (plain `bin/check`)", "")
     assert "leave it green" not in r
     assert "run the tests for the files you touched" in r
-    assert "eki runs the whole check right after your turn" in r
+    assert "eki runs the whole check right after your turn" not in r     # no gate 1 after a resolve
+    assert "the queue's gate 2 checks the result with the changes under it" in r
 
 
 def test_a_project_builder_still_runs_the_projects_check(conn, proj):

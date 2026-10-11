@@ -43,7 +43,7 @@ from .workspace import WorkspaceError, git
 log = logging.getLogger("eki.queue")
 
 #: gate 2, run in a fresh detached worktree of the predicted head plus the item
-GATE2 = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_FAST=1 exec bin/check -q"]'
+GATE2 = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_WIDE=1 EKI_CHECK_FAST=1 exec bin/check -q"]'
 MODES = ("apply", "propose")
 #: states that give the queue something to do
 BUSY = ("proposed", "locked", "queued", "resolving", "rechecking")

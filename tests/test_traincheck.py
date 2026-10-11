@@ -183,6 +183,9 @@ def test_needed_and_command(conn, src):
     argv = json.loads(traincheck.command(builds.root() / "x", "drills"))
     assert "bin/check -q -m drill && " in argv[2] and "bin/check -q && " not in argv[2]
     assert "-m eki.candidate" in argv[2] and "EKI_PYTHON=" in argv[2]
+    for scope in ("full", "drills"):
+        script = json.loads(traincheck.command(builds.root() / "x", scope))[2]
+        assert "EKI_CHECK_WIDE=1" in script and "export EKI_CHECK_WIDE" in script
 
 
 # ---- scope: only the drills on a head gate 2 passed -------------------------------------------

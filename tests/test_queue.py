@@ -270,6 +270,8 @@ def test_gate_two_runs_the_fast_tests_without_the_candidate_checks(conn, src, mo
     prompt = store.run(conn, get(conn, a)["gate2_run"])["prompt"]
     assert "EKI_CHECK_FAST=1" in prompt and "bin/check" in prompt
     assert "eki.candidate" not in prompt
+    assert "EKI_CHECK_WIDE=1" in prompt                # gate 2 uses the machine
+    assert "EKI_CHECK_WIDE" not in selfwork.CHECK       # gate 1 stays at a third
 
 
 def test_a_docs_only_item_gets_the_doccheck(conn, src):

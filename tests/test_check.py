@@ -55,3 +55,29 @@ def test_serial_starts_no_workers():
     out = check("-v", one)
     assert out.returncode == 0, out.stdout + out.stderr
     assert "workers [1 item]" in out.stdout
+
+
+def workers(tmp_path, cores, **env):
+    """The -n bin/check picks on a machine of `cores` (stub sysctl/nproc, and a
+    stub python that has pytest and xdist and prints what it was asked to run)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    for name in ("sysctl", "nproc"):
+        (bindir / name).write_text(f"#!/bin/sh\necho {cores}\n")
+        (bindir / name).chmod(0o755)
+    py = bindir / "stub-python"
+    py.write_text('#!/bin/sh\n[ "$1" = -c ] && exit 0\necho "$@"\n')
+    py.chmod(0o755)
+    out = check(EKI_PYTHON=str(py), PATH=f"{bindir}:{os.environ.get('PATH', '')}", **env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    args = out.stdout.split()
+    return int(args[args.index("-n") + 1])
+
+
+def test_wide_takes_all_but_two_cores_and_workers_always_win(tmp_path):
+    assert workers(tmp_path, 18, EKI_CHECK_WIDE="1") == 16
+    assert workers(tmp_path, 3, EKI_CHECK_WIDE="1") == 2
+    assert workers(tmp_path, 18, EKI_CHECK_WIDE="1", EKI_CHECK_WORKERS="5") == 5
+    assert workers(tmp_path, 18) == 6
+    assert workers(tmp_path, 4) == 2
+    assert workers(tmp_path, 18, EKI_CHECK_WORKERS="5") == 5

@@ -370,6 +370,12 @@ suite minus the tests marked `drill` (the ones that start a real engine or
 launcher). A batch of only docs-only items gets the doccheck over its range
 instead. Green: the batch lands. Red: bisect, as above; the bad change is
 unfit and the changes behind it are judged again in the next batch.
+It runs wide, `EKI_CHECK_WIDE=1`: on cores − 2 xdist workers, not a third.
+Why: gate 2 is the one serial step every landing waits on — one batch at a
+time — so a minute saved there is a minute off every landing behind it,
+while gate 1 and the agents' own runs happen side by side and stay narrow.
+The train's check runs wide too, for the same reason. On 18 cores the fast
+tests took 98 s with 6 workers and 54 s with 16.
 On a project, gate 2 runs the card's `batch_command` on the stack's tip,
 bisecting the same way; it defaults to `command` when that is text, and a
 card whose `command` is a list of rules must set it (gate 1 checks what
@@ -433,10 +439,17 @@ checks only on its tick, so holds won every freed slot. Why the slots: with 4 bu
 cores, mostly test runs — judges and the agents' own — while the agents
 themselves mostly waited on the model. `routing.json`'s old
 `self.check_slots` moved to `machine.checks` once. `bin/check`
-runs the suite on a third of the cores (`EKI_CHECK_WORKERS` overrides), so
+runs the suite on a third of the cores, so
 the judge slots share the cores instead of each taking all of them (with
 `-n auto` each, load went past 100 on 18 cores): a few fast checks beat many
-crawling ones. Agents no longer run the full suite inside their turns —
+crawling ones. Gate 2 and the train's check set `EKI_CHECK_WIDE=1` and take
+cores − 2; `EKI_CHECK_WORKERS` overrides both. A project's command and
+batch_command, the doccheck and `eki slot --` runs stay narrow. A wide run
+counts as ceil((cores − 2) / (cores / 3)) slots — 3 on 18 cores — capped at
+`machine.checks`, so the total stays near the core count instead of
+6 slots × 6 workers = 36 processes on 18 cores. A wide run waiting for its
+slots holds back new gate-1 judges and new `eki slot` holds, so it isn't
+starved by a stream of narrow ones. Agents no longer run the full suite inside their turns —
 only the tests for the files they touched — so the slots are where the
 suite runs: gate 1, gate 2, and the train's drills (or full check).
 

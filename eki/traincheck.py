@@ -100,7 +100,7 @@ def command(build: Path, scope: str = "full") -> str:
     told which build is running. Scope "drills" runs only what gate 2 skips."""
     running = builds.current() or builds.running()
     return json.dumps(["/bin/sh", "-c", f"EKI_PYTHON={shlex.quote(_python())}; export EKI_PYTHON; "
-                       f"{SCOPES.get(scope, SCRIPT)} --running {shlex.quote(str(running))}"])
+                       f"EKI_CHECK_WIDE=1; export EKI_CHECK_WIDE; {SCOPES.get(scope, SCRIPT)} --running {shlex.quote(str(running))}"])
 
 
 def tree_for(build: Path) -> Path:

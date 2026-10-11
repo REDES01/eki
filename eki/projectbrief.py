@@ -104,12 +104,13 @@ another item, or `ITEM: person <why>` if this needs a person's hands.
 
 def _check(project) -> str:
     if project["check_cmd"]:
-        return f"run `eki slot -- {project['check_cmd']}` before you finish and leave it green"
+        cmd = project["check_cmd"]
+        return f"run `{cmd}` (as `eki slot -- {cmd}`) before you finish and leave it green"
     if "repo" in project.keys() and project["repo"]:
         return ("there is no check for this project; run the project's own tests before you finish "
                 "and leave them green")
     if projects.check_argv(project):
-        return "run `eki slot -- bin/check` before you finish and leave it green"
+        return "run `bin/check` (as `eki slot -- bin/check`) before you finish and leave it green"
     return "run the project's own tests before you finish and leave them green"
 
 

@@ -101,6 +101,7 @@ eki builds                      # list eki's builds: current, previous, and how 
 eki observe [--since 24h] [--kind fault|handoff|…] [--full]  # what eki wrote down: faults, handoffs, corrections, limits
 eki notify [topic <name>|off|test]   # pushes to the phone via ntfy: show (topic masked), set or clear the topic, send a test
 eki machine [--agents N] [--checks M]   # how much runs at once on this Mac: agents across all projects, test runs (1–32)
+eki slot -- <cmd...>                    # run a test command (bin/check, npm test) in one of the machine's test slots; waits for a free one
 eki schedule add "…" --every hourly|daily|weekdays|weekly [--at HH:MM] [--minute M] [--day mon] [--project P] [--to T]   # a prompt sent as a new chat on a clock
 eki schedule [list] | pause|resume|drop|run <id>   # list scheduled prompts (next, last, why); run: fire one now
 ```

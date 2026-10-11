@@ -40,7 +40,7 @@ def start(conn: sqlite3.Connection, kind: str, subject: str, prompt: str,
         return None
     tid = store.create_thread(conn, f"chore: {kind} {subject}", None, by="eki")
     rid = store.create_run(conn, tid, prompt, provider=pick.provider, model=pick.model,
-                           effort=pick.effort, priority=priority, row=ROW)
+                           effort=pick.effort, priority=priority, row=ROW, fresh=True)
     why = f"{role} → {roles.shown(pick.target)}"
     if pick.why:                               # a fallback names the role itself; a note doesn't
         why = pick.why if pick.why.startswith(f"{role} ") else f"{why}; {pick.why}"

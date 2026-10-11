@@ -280,6 +280,7 @@ ADDED = [
     ("provider_models", "efforts", "TEXT"),          # JSON list of levels; NULL: it takes no effort
     ("provider_models", "default_effort", "TEXT"),   # NULL: the program doesn't say
     ("runs", "effort", "TEXT"),         # a per-run effort (the model's default when NULL)
+    ("runs", "fresh", "INTEGER NOT NULL DEFAULT 0"),   # 1: a new program session; resumes only its own
     ("threads", "by", "TEXT"),          # NULL: a chat of yours; 'eki': a thread eki made for itself
     ("threads", "title_by", "TEXT DEFAULT 'old'"),   # old (never retitled) | prompt | eki | you
     ("threads", "pinned_at", "REAL"),   # pinned when not NULL

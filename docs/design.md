@@ -166,6 +166,9 @@ States: `queued → running → done | failed | cancelled | handed_off`, and
 `running → interrupted → queued` when a worker dies without finishing.
 A run carries its `attempt`; after 3 interruptions in a row it fails.
 `priority` is `now` (you're waiting) or `background` (gated by the machine).
+A `fresh` run starts a new program session and resumes only its own (after
+a restart cut it off), never the thread's earlier one; resolve runs and
+chores are fresh, so they get their context from the brief alone.
 
 **Chores** (`eki/chores.py`, table `chores`) are text jobs eki gives
 itself: the review between gate 1 and the queue, the digest's patch notes

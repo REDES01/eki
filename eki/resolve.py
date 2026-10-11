@@ -49,7 +49,7 @@ def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: Lis
     prompt = (resolvebrief.retry(previous_failure=retry[0], hunks=retry[1], **kw) if retry
               else resolvebrief.resolve(**kw))
     owner = goal["owner"] if goal else "eki"
-    rid = store.create_run(conn, it["thread_id"], prompt, row="code",
+    rid = store.create_run(conn, it["thread_id"], prompt, row="code", fresh=True,
                            priority="now" if owner == "you" else "background")
     selfwork._set(conn, it["id"], state="resolving", run_id=rid, head=head, gate2_run=None,
                   gate2=None, rebased=None, error=None)

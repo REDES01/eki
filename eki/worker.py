@@ -63,7 +63,11 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         # an edit or upscale with nothing attached works on the thread's last picture
         last = store.last_picture(conn, r["thread_id"], r["seq"])
         turn.images = [last] if last else []
-    if sess:
+    if r["fresh"] and not carry:
+        # a fresh run (a resolve, a chore) never takes over another run's session: its brief
+        # is all the context, and an old session can carry that run's background tasks
+        turn.history = turn.extra["full_history"] = []
+    elif sess:
         turn.resume = sess["session_id"]
         if sess["seen_run"] == r["id"]:
             # this very run was under way in that session: carry on, don't repeat

@@ -56,15 +56,15 @@ def create_run(conn: sqlite3.Connection, tid: str, prompt: str, *, provider: Opt
                priority: str = "now", parent: Optional[str] = None,
                exclude: Optional[List[str]] = None, row: Optional[str] = None,
                attachments: Optional[List[str]] = None, model: Optional[str] = None,
-               effort: Optional[str] = None) -> str:
+               effort: Optional[str] = None, fresh: bool = False) -> str:
     rid = new_id()
     seq = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM runs WHERE thread_id=?",
                        (tid,)).fetchone()[0]
     conn.execute(
         "INSERT INTO runs(id, thread_id, seq, prompt, provider, pinned, priority, parent, exclude,"
-        " row, attachments, model, effort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " row, attachments, model, effort, fresh, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, tid, seq, prompt, provider, 1 if provider else 0, priority, parent,
-         dumps(exclude or []), row, dumps(attachments or []), model, effort, now()))
+         dumps(exclude or []), row, dumps(attachments or []), model, effort, 1 if fresh else 0, now()))
     return rid
 
 

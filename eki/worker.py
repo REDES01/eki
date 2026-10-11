@@ -21,7 +21,8 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import asks, capacity, components, files, db, models, observe, paths, providers, quota, routing, skills, store, transient
+from . import (asks, capacity, components, files, db, memnotes, models, observe, paths, providers, quota, routing,
+               skills, store, syncstate, transient)
 from .components import knowledge, mcpserver, serve, skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
@@ -95,6 +96,7 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
             if line:
                 turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
         _serving_link(conn, r, turn)
+        _owner_notes(r, provider, turn)
     return turn
 
 
@@ -108,6 +110,22 @@ def _item_context(conn: sqlite3.Connection, thread_id: str) -> list[str] | None:
     except Exception as e:                      # noqa: BLE001 — a run never fails for its brief
         log.warning("no item context for thread %s: %s", thread_id, e)
         return None
+
+
+def _owner_notes(r: sqlite3.Row, provider: str, turn: Turn) -> None:
+    """The owner's Claude notes as an index, and — for a program that isn't Claude Code, which reads
+    ~/.claude/CLAUDE.md itself (kept equal to it) — where eki's AGENTS.md is."""
+    lines = []
+    try:
+        lines.append(memnotes.brief())
+        md = syncstate.agents_md()
+        if md.is_file() and (providers.config().get(provider) or {}).get("kind") != "claude":
+            lines.append(f"The owner's instructions for every run: read {md}")
+    except Exception as e:                      # noqa: BLE001 — a run never fails for its brief
+        log.warning("no owner notes for %s: %s", r["id"], e)
+    for line in lines:
+        if line:
+            turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
 
 
 def _serving_link(conn: sqlite3.Connection, r: sqlite3.Row, turn: Turn) -> None:

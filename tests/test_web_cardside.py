@@ -51,6 +51,7 @@ global.fetch = async (url) => {
   out.fetched.push(url);
   let d = {};
   if (/\\/cards$/.test(url)) d = CARDS;
+  else if (/\\/cards\\/(\\w+)$/.test(url)) d = { card: CARDS.cards.find((c) => url.endsWith("/" + c.name)) };
   else if (/\\/uses$/.test(url)) d = { uses: [] };
   else if (/\\/sessions$/.test(url)) d = { sessions: [{ id: "s1", when: 0, review: "Great fun\\nmore", tainted: false }] };
   else if (/\\/sessions\\/s1$/.test(url)) d = { id: "s1", when: 0, review: "Great fun, floaty jump", notes: ["menu hidden"],

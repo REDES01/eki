@@ -9,6 +9,11 @@ gate 2 is the project's check, run on the stack as a batch with queue's
 green/red/bisect rules, one check per project at a time; with no check the
 items aren't judged. Items of different projects never share a batch.
 
+A project with a workflow card (eki/workflow.py) follows it: without `batch`
+in its checks the queue checks nothing together — each item is gate 2 green,
+'not batched', and lands in order; with `batch` the card's command is the
+check. Its merge says whether it lands here at all: only `auto` is admitted.
+
 The front lands through projectland.land: refs/heads/<branch> moves forward,
 and the person's folder fast-forwards when it has the branch checked out and
 no file the change touches has local changes there. When one does, the item
@@ -28,7 +33,7 @@ import sqlite3
 from pathlib import Path
 from typing import List
 
-from . import db, projectland, projects, projectwork, queue, rebase, selfwork, store, workspace
+from . import db, projectland, projects, projectwork, queue, rebase, selfwork, store, workflow, workspace
 from .workspace import WorkspaceError, git
 
 log = logging.getLogger("eki.projectqueue")
@@ -124,6 +129,9 @@ def _walk(conn: sqlite3.Connection, project: sqlite3.Row, again: bool = True) ->
 
 
 def _judge(conn: sqlite3.Connection, project: sqlite3.Row, stack: List[sqlite3.Row]) -> List[str]:
+    wf = workflow.of_project(conn, project)
+    if wf is not None and not workflow.has(wf, "batch"):
+        return _not_batched(conn, wf, stack)
     argv = projects.check_argv(project)
     if argv is not None:
         return queue._judge(conn, stack, start=lambda c, s, lo, top: _start_gate2(c, project, argv, s, lo, top))
@@ -132,6 +140,16 @@ def _judge(conn: sqlite3.Connection, project: sqlite3.Row, stack: List[sqlite3.R
         if it["gate2"] != "green" and queue._set_if(conn, it, "queued", gate2="green",
                                                     verdict=projectwork.not_judged(project)):
             said.append(f"item {it['id']}: gate 2 not judged — {project['name']} has no check")
+    return said
+
+
+def _not_batched(conn: sqlite3.Connection, wf: workflow.Workflow, stack: List[sqlite3.Row]) -> List[str]:
+    """The card has no batch check: nothing is checked together, each item stands green in order."""
+    verdict = "not batched: " + workflow.said(wf)
+    said = []
+    for it in stack:
+        if it["gate2"] != "green" and queue._set_if(conn, it, "queued", gate2="green", verdict=verdict):
+            said.append(f"item {it['id']}: gate 2 skipped — {verdict}")
     return said
 
 

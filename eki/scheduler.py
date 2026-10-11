@@ -3,7 +3,9 @@
 Waiting items are taken goal by goal, round-robin: the goal with the fewest
 items building goes first, then the older goal, then the older item. An item
 starts once its deps are fit, up to `self.parallel` building at once —
-judging and review are held elsewhere. Items whose write-sets overlap build
+judging and review are held elsewhere. A project whose workflow card says
+`parallel: n` (eki/workflow.py) has at most n of its items live (building,
+judging, reviewing) besides; with no card nothing more caps it. Items whose write-sets overlap build
 at the same time: the queue merges them (a resolve run on conflict). Only an
 item with no write-set waits, until nothing else builds in its repo.
 An item left waiting says why in `items.why`, written only when it changes.
@@ -18,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from . import db, projects, workspace
+from . import db, projects, workflow, workspace
 
 NO_WRITE_SET = "no write-set: waits until its repo is quiet"
 
@@ -47,7 +49,27 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
                 repos[gid] = None
         return repos[gid]
 
+    caps: Dict[str, Optional[int]] = {}                  # project id -> its card's parallel
+
+    def cap_of(pid: Optional[str]) -> Optional[int]:
+        if pid is None:
+            return None                                   # eki itself: self.parallel
+        if pid not in caps:
+            row = projects.get(conn, pid)
+            wf = workflow.of_project(conn, row) if row is not None else None
+            caps[pid] = wf.parallel if wf is not None else None
+        return caps[pid]
+
+    def project_of(gid: str) -> Optional[str]:
+        g = goal_of(gid)
+        return g["project"] if g is not None and "project" in g.keys() else None
+
     live = selfwork.items_in(conn, selfwork.LIVE)
+    live_in: Dict[str, int] = {}                          # project id -> its items live
+    for x in live:
+        pid = project_of(x["goal_id"])
+        if pid is not None:
+            live_in[pid] = live_in.get(pid, 0) + 1
     taken: Dict[str, List[Tuple[str, Set[str]]]] = {}     # repo -> [(item id, its files)]
     for x in live:
         r = repo_of(x["goal_id"])
@@ -70,6 +92,10 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         r = repo_of(it["goal_id"])
         if r is None:
             return "its project is gone"
+        pid = project_of(it["goal_id"])
+        cap = cap_of(pid)
+        if cap is not None and live_in.get(pid, 0) >= cap:
+            return f"{live_in[pid]} live in its project (its workflow: parallel {cap})"
         if it["independent"]:
             return None
         files = json.loads(it["files"] or "[]")
@@ -99,6 +125,9 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
             live.append(now)
             taken.setdefault(str(r), []).append((now["id"], claims(now, r)))
             building[gid] = building.get(gid, 0) + 1
+            pid = project_of(gid)
+            if pid is not None:
+                live_in[pid] = live_in.get(pid, 0) + 1
             waiting[gid] = [x for x in waiting[gid] if x["id"] != it["id"]]
             said.append(f"item {it['id']}: building ({it['title'][:50]})")
             started = True

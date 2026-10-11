@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import sqlite3
+from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 from . import db, doccheck, integration, locks, paths, rebase, resolve, selfwork, store, workspace
@@ -63,9 +64,14 @@ def apply(conn: sqlite3.Connection, iid: str, *, yes: bool = False) -> str:
 
 
 def set_autonomy(mode: str) -> None:
-    """self.autonomy in routing.json: 'apply' queues fit items by itself, 'propose' waits for you."""
+    """'apply' queues fit items by itself, 'propose' waits for you: eki's workflow card's merge
+    when it has one (auto / person), and self.autonomy in routing.json, which settings() reads."""
     if mode not in MODES:
         raise ValueError(f"autonomy is one of {', '.join(MODES)}, not {mode!r}")
+    card = _own_card()
+    if card is not None:
+        from . import api_cardedit
+        api_cardedit.save_settings(card, {"merge": "auto" if mode == "apply" else "person"})
     path = paths.config("routing")
     try:
         data = json.loads(path.read_text())
@@ -75,6 +81,18 @@ def set_autonomy(mode: str) -> None:
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     os.replace(tmp, path)
+
+
+def _own_card() -> Optional[Path]:
+    """eki's workflow card folder, when its source is named (the launcher's EKI_SOURCE or a build's
+    record). The checkout this code runs from unnamed is a test or a bare run: its committed card
+    is never rewritten by a setting."""
+    from . import workflow
+    here = Path(__file__).resolve().parent.parent
+    if not os.environ.get("EKI_SOURCE") and not (here / ".eki-build.json").exists():
+        return None
+    wf = workflow.of_project(None, None)
+    return Path(wf.card) if wf is not None else None
 
 
 def order(conn: sqlite3.Connection) -> List[sqlite3.Row]:

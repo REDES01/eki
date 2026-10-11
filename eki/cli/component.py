@@ -1,4 +1,4 @@
-"""`eki component kinds | ls | add | attach | rm | uses | show | knowledge | skills` — the component folders.
+"""`eki component kinds | ls | add | attach | rm | uses | show | knowledge | merge | skills` — the component folders.
 
 `add` copies a template into `components/<name>/` of a project folder (the project of the cwd by
 default, of -C folder, or the machine-wide pool with --pool), under the template's name or the
@@ -6,7 +6,7 @@ next free `-2`, `-3`…. `attach` adds a card reaching a pool component; `rm` mo
 Trash. Nothing is overwritten, deleted, committed or staged: the folder is the person's to keep.
 A template's `mcp_servers` go into eki's MCP registry, switched off, and leave the copy.
 `skills add | remove` puts skills into or takes them out of a project's skills card
-(componentskills.py).
+(componentskills.py). `merge` folds a project's cards into one (cardmerge.py).
 """
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from .. import api_cardadd, components, db
-from ..components import cards, knowledge, uses
+from ..components import cardmerge, cards, knowledge, uses
 from . import componentskills
 
 NAME = "component"
-HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show, knowledge, skills"
+HELP = "the components a project or the pool holds: kinds, ls, add, attach, rm, uses, show, knowledge, merge, skills"
 
 
 def add(p) -> None:
@@ -48,6 +48,13 @@ def add(p) -> None:
     s.add_argument("name")
     k = sub.add_parser("knowledge", help="what a run in the project is told of its knowledge cards")
     k.add_argument("project", nargs="?", help="a project id or name, or a folder (default: here)")
+    m = sub.add_parser("merge", help="fold a project's knowledge cards, or a service and an mcp card, into one")
+    m.add_argument("project", help="a project id or name, or a folder")
+    m.add_argument("kind", choices=["knowledge", "service"])
+    m.add_argument("into", help="the merged card's name")
+    m.add_argument("cards", nargs="*", help="knowledge: the cards (default: all); service: <service card> <mcp card>")
+    m.add_argument("--about", help="the merged card's about line")
+    m.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     componentskills.add(sub)
 
 
@@ -173,6 +180,25 @@ def _knowledge(project: Optional[str]) -> int:
     return 0
 
 
+def _merge(args) -> int:
+    base = componentskills.card_of(args.project).parent
+    if args.kind == "service":
+        if len(args.cards) != 2:
+            raise ValueError("service merge takes <into> <service card> <mcp card>")
+        plan = cardmerge.service(base, args.into, args.cards[0], args.cards[1], args.about)
+    else:
+        plan = cardmerge.knowledge(base, args.into, args.cards, args.about)
+    if args.dry_run:
+        print(f"dry run, nothing written ({base}):")
+        for line in cardmerge.describe(plan):
+            print(f"  {line}")
+        return 0
+    for line in cardmerge.apply(plan):
+        print(line)
+    print("nothing committed: the component.json files are yours to review and commit")
+    return 0
+
+
 def run(args) -> int:
     if args.action == "kinds":
         return _kinds()
@@ -190,9 +216,12 @@ def run(args) -> int:
         return _show(args.name)
     if args.action == "knowledge":
         return _knowledge(args.project)
+    if args.action == "merge":
+        return _merge(args)
     if args.action == "skills":
         return componentskills.run(args)
     print("eki component kinds | ls [folder] | add <kind|template> [--name N] [--pool | -C folder]"
           " | attach <pool-name> [-C folder] | rm <name> [-C folder] | uses <name> [-C folder] | show <name>"
+          " | merge <project> knowledge <into> [<card>…] | merge <project> service <into> <service> <mcp>"
           " | skills add <project> <folder|git URL> [--replace] | skills remove <project> <name>")
     return 0

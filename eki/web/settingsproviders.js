@@ -1,7 +1,9 @@
 // Settings → Providers: providers.json's entries, each folded to one line that opens to its
 // editor (one open at a time), the ComfyUI entry eki adds only in memory shown as such, and the
-// built-in entries as a group of read-only lines. Registers the "providers"
-// section with settings.js; names() is the list every target picker offers.
+// built-in entries as a group of read-only lines. A comfyui entry also lists its workflows
+// (settingscomfyui.js: a count on its line, the list in its open fold, which takes its own clicks
+// and fields first). Registers the "providers" section with settings.js; names() is the list every
+// target picker offers.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const ABILITIES = ["text", "tools", "web", "vision", "image", "image-edit"];   // providers.ABILITIES
@@ -20,6 +22,8 @@
   }
 
   // the editor behind a provider's summary line: runs of one-line settings, Delete in red last
+  const comfy = (cfg) => cfg.kind === "comfyui" && window.settingsComfy;
+
   function provBody(name, cfg, can, byKind, unwritten) {
     const { check, text, line, lines, danger } = settingsForm;
     const kinds = KINDS.includes(cfg.kind) ? KINDS : KINDS.concat([cfg.kind || ""]);
@@ -36,6 +40,7 @@
         + line("Keep up", check(cfg.keep_up, 'data-f="keep_up"', "keep up"), "keep up: start it and keep it running while there's room")
         + line("Base URL", text("base_url", cfg.base_url, "—"))
         + line("Idle stop", idle, "minutes; empty is never"))
+      + (comfy(cfg) ? settingsComfy.body() : "")
       + (other.length || !unwritten ? lines("", (other.length ? line(`<span class="dim set-other">Also: ${other.map((k) => `<code>${esc(k)}</code>`).join(", ")} — edit these in Raw JSON.</span>`, "") : "")
         + (unwritten ? "" : danger("Delete this provider", "delprov"))) : "");
   }
@@ -47,7 +52,7 @@
     const sum = `<b>${esc(name)}</b><span class="dim">${esc(cfg.kind || "")}${cfg.label ? " · " + esc(cfg.label) : ""}</span>
       ${can.map((a) => `<span class="set-pill">${esc(a)}</span>`).join("")}${cfg.off ? '<span class="set-pill">off</span>' : ""}
       ${unwritten ? settingsForm.memo : ""}<span class="grow"></span>
-      ${window.settingsModels && !unwritten ? settingsModels.line(name) : ""}`;
+      ${comfy(cfg) ? settingsComfy.line() : ""}${window.settingsModels && !unwritten ? settingsModels.line(name) : ""}`;
     const html = settingsForm.fold(name, sum, open === name ? provBody(name, cfg, can, byKind, unwritten) : "", open === name);
     return unwritten ? html.replace('class="set-fold', 'class="set-fold added') : html;
   }
@@ -77,6 +82,7 @@
   }
 
   function editProviders(el, d, card, ev) {
+    if (window.settingsComfy && settingsComfy.edit(el, ev)) return false;   // a workflow's field: not providers.json
     if (!card || !card.dataset.fold) return false;
     const f = el.dataset.f;
     if (f === "name") {
@@ -116,6 +122,8 @@
   }
 
   function actProviders(act, btn, card) {
+    const comfyTook = window.settingsComfy && settingsComfy.act(act, btn, card);   // true, a promise of it, or false
+    if (comfyTook) return comfyTook;
     const d = settings.draft("providers");
     if (act === "addprov") {
       let n = 1; while (("provider-" + n) in d) n++;

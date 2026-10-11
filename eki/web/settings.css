@@ -96,3 +96,13 @@ textarea.set-in { resize: vertical; font-size: 13px; }
 #set-rawerr { margin: 10px auto 6px; }
 #set-raw { display: block; width: 100%; min-height: 60vh; margin-top: 12px; resize: vertical; background: var(--code); color: var(--text);
   border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font: 12.5px/1.5 ui-monospace, Menlo, monospace; tab-size: 2; }
+
+/* a ComfyUI entry's workflows (settingscomfyui.js): folds inside the entry's fold, indented */
+.set-wfdir { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.set-wflist { margin: 4px 14px 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.set-wf .set-sum { font-size: 13px; min-height: 34px; padding: 6px 12px; }
+.set-wf code, .set-wfskip code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.set-wftry { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 10px; margin-bottom: 6px; }
+.set-wftry > textarea { grid-column: 1 / -1; }
+.set-wfadd { display: flex; gap: 6px; align-items: center; }
+.set-wfskip { margin: 4px 0 0; padding-left: 20px; font-size: 12px; color: var(--dim); }

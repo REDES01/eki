@@ -2,7 +2,8 @@
 
 eki only ever serves a file a run pointed at — one a tool wrote or edited,
 or a path an answer named that exists, or a file sent with a request — or a page of eki's own daily digest,
-never an arbitrary path. HTML is
+or a file of the person's own the side panel may read (eki/docs.py: under home, no credentials,
+not eki's internals) — never an arbitrary path. HTML is
 served sandboxed, so a page an agent wrote can't act as eki.
 """
 from __future__ import annotations
@@ -48,9 +49,23 @@ def digest_page(path: str) -> bool:
     return real.suffix == ".md" and real.parent == folder
 
 
+def _doc_readable(conn: sqlite3.Connection, path: str) -> bool:
+    from . import docs                     # docs imports this module
+    if not path.lower().endswith(SHOWN):
+        return False
+    try:
+        docs.policy(conn, path)
+    except ValueError:
+        return False
+    return True
+
+
 def read(conn: sqlite3.Connection, path: str) -> Optional[tuple]:
-    """(bytes, content type) for a file a run pointed at or a digest page, else None."""
-    if not path or not (known(conn, path) or digest_page(path)) or not os.path.isfile(path):
+    """(bytes, content type) for a file a run pointed at, a digest page, or one the doc policy
+    lets the window read (docs.policy: the person's own files under home), else None."""
+    if not path or not os.path.isfile(path):
+        return None
+    if not (known(conn, path) or digest_page(path) or _doc_readable(conn, path)):
         return None
     if os.path.getsize(path) > 50 * 1024 * 1024:
         return None

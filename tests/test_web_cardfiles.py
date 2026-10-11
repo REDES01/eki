@@ -88,3 +88,45 @@ def test_a_pool_card_keeps_its_files_in_the_card(tmp_path, path):
     plan, gone = rows(tmp_path, {"name": "notes", "card": path})
     assert "data-file" not in plan + gone
     assert 'data-ck-path="notes/plan.md"' in plan
+
+
+# projectinstructions.js the same way: open a card into a stub box and read back its head and Read first.
+ISTUB = r"""
+const fs = require("fs");
+const [, , file, card] = process.argv;
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const parts = {};
+const box = { innerHTML: "", dataset: {}, addEventListener() {}, contains: () => false,
+  querySelector: (sel) => (parts[sel] = parts[sel] || { innerHTML: "" }) };
+global.window = global; global.md = { esc, render: (t) => t };
+global.document = { activeElement: null };
+eval(fs.readFileSync(file, "utf8"));
+projectInstructions.open(box, "p1", JSON.parse(card), "", { api: async () => ({}), reload() {} });
+console.log(parts[".pi-head"].innerHTML + parts[".pi-first"].innerHTML);
+"""
+
+
+def instructions(tmp_path, path):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "istub.js"
+    stub.write_text(ISTUB)
+    card = {"name": "guide", "card": path, "instructions": {"file": "AGENTS.md", "exists": True, "lines": 3,
+            "text": "# Hi", "read_first": ["docs/design.md"], "claude": "linked"}}
+    out = subprocess.run(["node", str(stub), str(WEB / "projectinstructions.js"), json.dumps(card)],
+                         capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_a_project_instructions_card_opens_its_files_in_the_panel(tmp_path):
+    html = instructions(tmp_path, "/Users/x/proj/components/guide")
+    assert 'data-file="/Users/x/proj/AGENTS.md"' in html and 'data-file="/Users/x/proj/docs/design.md"' in html
+    assert "data-read=" not in html and 'data-pi="close"' not in html
+
+
+@pytest.mark.parametrize("path", ["/Users/x/.eki/components/guide", ""])
+def test_a_pool_instructions_card_reads_its_files_in_the_card(tmp_path, path):
+    html = instructions(tmp_path, path)
+    assert "data-file" not in html                            # the doc viewer can't open ~/.eki
+    assert 'data-read="docs/design.md"' in html

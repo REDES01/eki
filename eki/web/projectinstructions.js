@@ -16,8 +16,8 @@
   }
   const info = () => I.card.instructions || { file: "AGENTS.md", exists: false, heading: "", lines: 0, text: "", read_first: [], claude: "none" };
   const editable = () => !I.ro && !I.card.ref;
-  // the project folder: a project card lives in <folder>/components/<name>
-  const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(I.card.card || "")); return m ? m[1] : ""; };
+  // the project folder: a project card lives in <folder>/components/<name> (the pool's ~/.eki/components isn't one)
+  const root = () => { const m = /^(.*)\/components\/[^/]+\/?$/.exec(String(I.card.card || "")); return m && !/\/\.eki$/.test(m[1]) ? m[1] : ""; };
   const file = (rel) => root() ? ` data-file="${esc(root() + "/" + rel)}"` : "";
 
   function head() {

@@ -6,8 +6,8 @@ the person's own copy. serve.live calls `live`; the card's panel (eki/web/cardse
 
 A copy's task is the run that started or last used its server (its state's last_run / by), else the
 newest run whose thread works in that folder, else the item whose worktree it is. `stops_at` is its
-last use plus the card's idle_stop minutes (servers.tick's default when the card has none); None when
-idle_stop is 0 or a run is using it right now. Nothing here starts a server or allots a port.
+last use plus the card's idle_stop minutes; None when the card sets no idle_stop, sets 0, or a run is
+using the copy right now. Nothing here starts a server or allots a port.
 """
 from __future__ import annotations
 
@@ -18,10 +18,6 @@ from typing import Any, Dict, Optional, Tuple
 from . import Component, ports, serve, servers
 
 log = logging.getLogger("eki.components.servelive")
-
-#: servers.tick's idle_stop when a card has none, in minutes
-IDLE_DEFAULT = 5.0
-
 
 def _title(row) -> str:
     t = (row["title"] or "").strip()
@@ -55,9 +51,9 @@ def task(conn: sqlite3.Connection, st: Dict[str, Any], folder: str) -> Tuple[str
 
 def _idle_minutes(comp: Component) -> float:
     try:
-        return float(comp.spec.get("idle_stop", IDLE_DEFAULT))
+        return float(comp.spec.get("idle_stop") or 0)
     except (TypeError, ValueError):
-        return IDLE_DEFAULT
+        return 0.0
 
 
 def stops_at(conn: sqlite3.Connection, comp: Component, st: Dict[str, Any]) -> Optional[float]:

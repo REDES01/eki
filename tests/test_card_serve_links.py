@@ -77,6 +77,8 @@ def test_an_items_worktree_names_its_task_and_idle_stop_zero_never_stops(conn, c
     up.add(served(card, a, started_at=time.time()))
     (link,) = serve.live(card, conn, proj)["links"]
     assert link["task"] == "Preview links card" and link["run"] == "rx" and link["stops_at"] is None
+    del card.spec["idle_stop"]                                                # absent: no stop time either
+    assert serve.live(card, conn, proj)["links"][0]["stops_at"] is None
 
 
 def test_a_gone_server_is_left_out_and_unknown_task_is_empty(conn, card, proj, tmp_path, up):

@@ -101,9 +101,9 @@ eki follow <run>  ◄── events table
 | `schedule` | prompts sent on a clock (table `schedules`): `next_fire` in the schedule's zone, and the housekeeping `tick` that fires a due one once — a Mac asleep through several firings runs one on wake |
 | `skillsfind` | skills you could add, read from GitHub (`anthropics/skills`) through `gh`, cached a day |
 | `connectors` | MCP servers you could add: a fixed catalog, each with the keys it needs, installed through `mcp.add` |
-| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `servebuild` (a serve card's `build` before serving, when the folder changed since the last one), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table) |
-| `components/knowledge`, `components/mcpserver` | the passive kinds: a project's shared files (`files`, `brief`) and its own MCP servers (`public`, `servers_of`, `run_config`, which `worker.build_turn` hands each run) |
-| `api_cardknowledge`, `api_cardmcp` | a knowledge card's files and an mcp card's server and Test on the project page (with `web/cardknowledge.js`, `web/cardmcp.js`, registered in `window.projectCardKinds`) |
+| `components/*` | pieces any agent can use ("Components" below): `find` (the folders reachable from a run's folder, pool vs project, a broken one reported and skipped), `kinds` (the registry and each kind's checks), `access` (queue, exclusive, memory, conflicts, idle stop, from the runs table), `service`, `servers` (a `serve` kept up on demand, one per card and served folder), `serve` (the serve kind: a link per folder, `for_run`), `servebuild` (a serve card's `build` before serving, when the folder changed since the last one), `static` (eki's own static file server), `ports` (one recorded port per served folder), `assets`, `agent` (and the bare mode), `skillcard` (a project's own skills), `journal` (a playtester session's notes, emotions, review, screenshots), `uses` (a component's calls, last use and waiting count, read from the runs table), `mcphold` (`eki mcp-hold`: a service card's MCP server held like a script call), `cardmerge` (`eki component merge`: cards folded into one) |
+| `components/knowledge`, `components/mcpserver` | the passive kinds: a project's shared documents (`docs`, `files`, `brief`; `knowledgedocs` reads the one-doc and many-doc shapes) and its own MCP servers (`public`, `servers_of`, `run_config`, which `worker.build_turn` hands each run) |
+| `api_cardknowledge`, `api_cardmcp` | a knowledge card's documents and an mcp card's (or a service card's) server and Test on the project page (with `web/cardknowledge.js`, `web/cardmcp.js`, registered in `window.projectCardKinds`) |
 | `docs`, `api_doc` | a local text file in the side panel: the policy (under the person's home by real path, never eki's internals or a credential folder/file, edit only .md/.markdown/.txt, 2 MB), read with who last wrote it, an atomic save over the hash it was loaded from (else a conflict), and the `eki open` queue (`doc_open` events the window polls) |
 | `docsearch`, `api_docsearch` | the window's "Open file…" search: a project's markdown files, or the projects' folders when no project is open |
 | `providers/component` | a component call as a run: `eki use <name> [args…]` goes through the engine like any other run |
@@ -913,9 +913,9 @@ as any other; nothing in `workspace` or the scheduler changes.
   local changes; untracked and ignored files are never touched. A GitHub
   project keeps its PR path.
 - **The plan and build briefs** (`eki/projectbrief.py`). The plan brief
-  lists the project's knowledge cards (name, about line, read mode, files)
-  and asks for each item's `context` — the cards it needs, by name with a
-  reason (Components → knowledge). The build brief carries the item's spec,
+  lists the project's knowledge documents (name, about line, read mode,
+  files) and asks for each item's `context` — the documents it needs, by
+  name with a reason (Components → knowledge). The build brief carries the item's spec,
   its write-set, the knowledge brief narrowed to that context, and one
   sentence on how the work lands, from `projectbrief.landing`: the workflow
   card's `merge` when there is one, else `pr` for a GitHub project, `auto`
@@ -970,7 +970,8 @@ line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
   generation); `"exclusive"` — one agent run holds it from its first use to
-  the end of that run (a TTS model, an Ableton session); `"shared"`.
+  the end of that run (a TTS model, an Ableton session) — whether it calls
+  the card's script or its MCP server; `"shared"`.
 - `memory_gb`: started only when `machine.room` has that much, else wait.
 - `conflicts`: `[names]` never up or in use together (memory or file
   pressure); an idle conflicting one is stopped first, else wait.
@@ -1000,7 +1001,22 @@ of its own; the CLI is the integration.
   `"provider"`: a call handed to one of eki's providers — the pool template
   `images` runs on eki's ComfyUI provider, so routing's picture runs and
   component calls share one queue. The pool template `voice` is exclusive,
-  with a TTS command to fill in.
+  with a TTS command to fill in. Ableton is one service card (holo-cards'
+  `ableton`): a script for unattended renders and an MCP server for writing
+  MIDI in Live, one exclusive hold for both.
+  **A service card can also offer an MCP server:** an optional `"mcp"`, the
+  same shape as an mcp card's `"server"` (`{"command", "args", "env"}` or
+  `{"url"}`). Project runs get that server as they get an mcp card's
+  (`mcpserver.run_config`), and `run`/`serve` stays what `eki use <name>`
+  calls. One card, one `access` rule and one `conflicts` list cover both
+  uses. A command server is wrapped in `eki mcp-hold <card> -- <command…>`
+  (`eki/components/mcphold.py`), a stdio proxy: the agent's first MCP tool
+  call records a hold call run (provider `component`) parented to the
+  agent's run, so the agent holds the card exactly like a script call —
+  until the end of its run for an exclusive card — and a call that must
+  wait waits with the same why ("waits for ableton: held by <run>"). A
+  `{"url"}` server is not held: eki doesn't sit in its path. The card panel
+  shows both uses: "script: <run>" and "MCP: <command or url> · Test".
 - **`assets`** — a folder eki manages outside git (`"path"`): managed, never
   versioned like code. Every worktree of the project sees it at its relative
   path by symlink (never a copy or a hardlink), so anything written there
@@ -1056,30 +1072,45 @@ of its own; the CLI is the integration.
   (never overwrites without `--replace`) and `eki component skills remove
   <project> <name>`; `eki use <card>` lists what it holds. The rule:
   project skills live in the project's card; ~/.eki/skills is only for skills every run should have.
-- **`knowledge`** — files the project's agents read: `"files"` (paths
-  relative to the project root; globs and folders allowed, no absolute path,
-  no `..`) and `"read"`: `"always"` — every run in the project, planned or
-  not, reads it first ("read first: <files> — <about>"); keep it for the few
-  cards that apply to all work (holo-cards: only `decisions`) — or
-  `"when-relevant"` — the planner decides per item, and a chat sees it as
-  available ("look here when relevant"). A project has as many as it needs
-  (decisions, design rules, contracts, owner memory, playtest notes).
+- **`knowledge`** — the documents the project's agents read, one card
+  holding many: `"docs"` is a list of documents, each `{"name", "files",
+  "about", "read"}`. `"files"` are paths relative to the project root
+  (globs and folders allowed, no absolute path, no `..`); `"read"` is
+  `"always"` — every run in the project, planned or not, reads it first
+  ("read first: <files> — <about>"); keep it for the few documents that
+  apply to all work — or `"when-relevant"` — the planner picks per item,
+  and a chat sees it as available ("look here when relevant"). E.g.
+  `{"kind": "knowledge", "about": "…", "docs": [{"name": "decisions",
+  "files": ["design/DECISIONS.md"], "about": "…", "read": "always"}, …]}`.
+  The old shape — `"files"` and `"read"` at the top level — still loads, as
+  a one-doc card whose document is named after the card, so nothing breaks.
+  holo-cards keeps one `knowledge` card (decisions, design rules,
+  contracts, owner memory, playtest notes …) in which only `decisions` is
+  always. Everything works per **document**, not per card: the run brief
+  (always-docs under "read first", the others "also available"), the
+  planner's context, `eki component knowledge` and the board's item detail.
   `knowledge.files` lists each file with its size, last change and last
   author; a missing one shows on the card and is left out of the brief.
+  The card panel (`web/cardknowledge.js`) lists the documents — name, a
+  read-mode dropdown with its explanation, about, files, size, last change
+  — each opening in the side panel's doc viewer / editor, with
+  "+ document" and × per document.
   **The planner picks an item's context.** It already writes each item's
-  spec (cause, files to touch), so it also names the knowledge cards the
-  item needs, each with a short reason: the `"context"` key of an `ITEMS`
-  entry (`[{"name", "why"}]`), stored as `items.context` (JSON) and shown on
-  the board and in `eki self show` ("context: architecture, voices"). That
-  keeps a one-line fix from being briefed on the story core and the owner's
-  memory. For such an item `knowledge.brief(folder, context=…)` reads first
-  only the always-cards, the chosen cards and the instructions card
-  (`AGENTS.md`, which Claude Code reads anyway), and names the rest in one
-  line: "Also available if you need them: <names> (see components/)". The
-  item's fix-up rebuild, resolve run and review get the same context. An
-  item with no context (old plans, `single`-plan and `--one` items, a
-  planner that left it out) gets the full brief, and chats keep the full
-  brief: there is no planner in the loop.
+  spec (cause, files to touch), so it also names the knowledge documents
+  the item needs, each with a short reason: the `"context"` key of an
+  `ITEMS` entry (`[{"name", "why"}]`), stored as `items.context` (JSON) and
+  shown on the board and in `eki self show` ("context: architecture,
+  voices"). A name is a document's; an old card name still resolves and
+  picks all of that card's documents. That keeps a one-line fix from being
+  briefed on the story core and the owner's memory. For such an item
+  `knowledge.brief(folder, context=…)` reads first only the always-docs,
+  the chosen documents and the instructions card (`AGENTS.md`, which Claude
+  Code reads anyway), and names the rest in one line: "Also available if
+  you need them: <names> (see components/)". The item's fix-up rebuild,
+  resolve run and review get the same context. An item with no context
+  (old plans, `single`-plan and `--one` items, a planner that left it out)
+  gets the full brief, and chats keep the full brief: there is no planner
+  in the loop.
 - **`mcp`** — an MCP server only this project's runs get: `"server"` is
   `{"command", "args", "env"}` or `{"url"}`. `mcpserver.run_config` gives a
   run its `--mcp-config` file (eki's registry merged with the project's
@@ -1127,6 +1158,12 @@ eki's MCP registry switched off, so only the agent that lists them gets
 them. eki never commits to a project's branches. The Settings page has one
 folded, read-only "Components" section — the pool and each project's, one
 line each, details on click. Nothing else in the window.
+`eki component merge` (`eki/components/cardmerge.py`) makes fewer cards: it
+folds a project's knowledge cards into one (each keeping its files, about
+and read mode as a document) and an mcp card into a service card (its
+`server` becoming the service's `mcp`), moves the old folders to the Trash
+and rewrites every `conflicts` list that named them. holo-cards went from
+18 cards to 10 this way.
 
 Not in scope yet: a project page of components. A project-level router
 switch is the `workflow` card's `router` stage (below); per-project routing

@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, testslots, train, webproc
+from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -135,8 +135,7 @@ def spawn_ready(conn) -> int:
     cap = ceiling()
     slots = None if cap is None else cap - len(active)
     # agents' own test runs (`eki slot --`) hold check slots too
-    judging = sum(1 for r in active if checkslots.is_judge(r)) + testslots.held()
-    judge_slots = checkslots.limit()
+    judges = checkslots.Tick(conn, active)
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()
@@ -150,7 +149,7 @@ def spawn_ready(conn) -> int:
             busy_threads.add(r["thread_id"])        # later runs of this thread wait their turn
             continue
         judge = checkslots.is_judge(r)
-        if judge and judging >= judge_slots:
+        if judge and not judges.fits(r):
             busy_threads.add(r["thread_id"])        # waiting for a check slot
             continue
         if r["priority"] == "background":
@@ -163,7 +162,8 @@ def spawn_ready(conn) -> int:
         if folder:
             busy_folders.add(folder)
         spawn(conn, r["id"])
-        judging += judge
+        if judge:
+            judges.took(r)
         if slots is not None:
             slots -= 1
         started += 1

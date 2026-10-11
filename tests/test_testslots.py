@@ -89,3 +89,30 @@ def test_both_build_briefs_name_eki_slot(conn, proj):
     b = projectbrief.build(**kw, project=p)
     assert "eki slot -- " in b
     assert "eki slot -- " in projectbrief._check(p) or not projects.check_argv(p)
+
+
+def test_a_hold_waits_while_a_wide_judge_is_reserved(home, conn, monkeypatch):
+    slots(home, 3)
+    monkeypatch.setattr(checkslots.os, "cpu_count", lambda: 18)
+    with db.tx(conn):
+        w = store.create_run(conn, store.create_thread(conn, "gate 2: w", None),
+                             '["/bin/sh", "-c", "EKI_CHECK_WIDE=1 exec bin/check -q"]',
+                             provider="command")
+    assert checkslots.reserved(conn) == 3
+    got = threading.Event()
+
+    def holder():
+        c = db.connect()
+        with testslots.hold(c, wait=0.02):
+            got.set()
+        c.close()
+    t = threading.Thread(target=holder)
+    t.start()
+    time.sleep(0.2)
+    assert not got.is_set()                         # queued: its slots stay free
+    store.update_run(conn, w, state="running")
+    time.sleep(0.2)
+    assert not got.is_set()                         # running: it fills them
+    store.update_run(conn, w, state="done")
+    t.join(5)
+    assert got.is_set()

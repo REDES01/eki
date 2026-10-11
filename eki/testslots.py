@@ -4,6 +4,7 @@ A build turn's agent runs its tests too (bin/check, npm test, pytest) — on
 every core, like a judge. `eki slot -- <cmd>` (eki/cli/slot.py) runs such a
 test inside a hold: it waits until a check slot is free (checkslots.py:
 running judge runs plus holds, against `machine.checks`), then takes one.
+While a wide judge run waits for its slots, no new hold starts.
 A hold is an flock on EKI_HOME/slots/<i>.lock, so it dies with its process
 — a restart, a crash or a kill loses nothing and leaks no slot.
 """
@@ -64,10 +65,11 @@ def hold(conn, wait: float = 1.0) -> Iterator[None]:
     """Wait for a free check slot, then keep it until the block ends."""
     fd: Optional[int] = None
     while fd is None:
-        if checkslots.busy(conn) < checkslots.limit():
+        # a waiting wide judge (gate 2, the train's check) goes first: its slots stay free
+        if checkslots.busy(conn) + checkslots.reserved(conn) < checkslots.limit():
             fd = _take()
             # two holders may have looked at once: the count with ours in it decides
-            if checkslots.busy(conn) > checkslots.limit():
+            if checkslots.busy(conn) + checkslots.reserved(conn) > checkslots.limit():
                 os.close(fd)
                 fd = None
         if fd is None:

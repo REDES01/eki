@@ -79,3 +79,67 @@ def test_an_agents_test_run_takes_a_slot_from_the_judges(home, conn):
         assert checkslots.busy(conn) == 1
         assert checkslots.waiting(conn, store.run(conn, a))
     assert not checkslots.waiting(conn, store.run(conn, a))
+
+
+WIDE = '["/bin/sh", "-c", "EKI_CHECK_WIDE=1 EKI_CHECK_FAST=1 exec bin/check -q"]'
+
+
+def wide(conn, title):
+    return store.create_run(conn, store.create_thread(conn, title, None), WIDE, provider="command")
+
+
+def cores(monkeypatch, n):
+    monkeypatch.setattr(checkslots.os, "cpu_count", lambda: n)
+
+
+def test_a_wide_run_weighs_its_workers_over_a_narrow_runs(home, conn, monkeypatch):
+    slots(home, 6)
+    with db.tx(conn):
+        w, n = wide(conn, "w"), judge(conn, "n")
+    assert checkslots.is_wide(store.run(conn, w))
+    assert not checkslots.is_wide(store.run(conn, n))
+    for count, expected in ((18, 3), (4, 1), (None, 2)):
+        cores(monkeypatch, count)
+        assert checkslots.weight(store.run(conn, w)) == expected
+        assert checkslots.weight(store.run(conn, n)) == 1
+    cores(monkeypatch, 18)
+    slots(home, 2)
+    assert checkslots.weight(store.run(conn, w)) == 2      # never more than the limit
+
+
+def test_busy_sums_weights(home, conn, monkeypatch):
+    slots(home, 6)
+    cores(monkeypatch, 18)
+    with db.tx(conn):
+        w, n = wide(conn, "w"), judge(conn, "n")
+    store.update_run(conn, w, state="running")
+    store.update_run(conn, n, state="running")
+    assert checkslots.busy(conn) == 4
+
+
+def test_reserved_is_the_first_ready_wide_run(home, conn, monkeypatch):
+    slots(home, 6)
+    cores(monkeypatch, 18)
+    with db.tx(conn):
+        cancelled, later, w = wide(conn, "c"), wide(conn, "l"), wide(conn, "w")
+    store.update_run(conn, cancelled, cancel=1)
+    store.update_run(conn, later, retry_at=db.now() + 3600)
+    store.update_run(conn, w, state="running")
+    assert checkslots.reserved(conn) == 0
+    store.update_run(conn, later, retry_at=db.now() - 1)
+    assert checkslots.reserved(conn) == 3
+
+
+def test_a_narrow_judge_waits_while_a_wide_one_is_reserved(home, conn, monkeypatch):
+    slots(home, 6)
+    cores(monkeypatch, 18)
+    with db.tx(conn):
+        running = [judge(conn, f"r{i}") for i in range(3)]
+        w, n = wide(conn, "w"), judge(conn, "n")
+    for rid in running:
+        store.update_run(conn, rid, state="running")
+    assert checkslots.reserved(conn) == 3
+    assert not checkslots.waiting(conn, store.run(conn, w))     # 3 + 3 fits in 6
+    assert checkslots.waiting(conn, store.run(conn, n))         # 3 + 1 + 3 doesn't
+    store.update_run(conn, w, cancel=1)
+    assert not checkslots.waiting(conn, store.run(conn, n))

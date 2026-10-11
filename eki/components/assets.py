@@ -7,19 +7,31 @@ relative path through a symlink — never a copy or hardlink — so anything
 written there lands in the pool at once. Only a pool git-ignored as a whole,
 with nothing inside tracked, is linked; otherwise the card says why. Calls: `ls [sub]`, `info <path>`,
 `rm <path>` (to the Trash, never a real delete).
+
+A pool's size is never walked during a request: housekeeping measures every
+pool at most every POOL_EVERY seconds on a thread of its own (`tick`) and
+writes it to paths.home()/poolsizes.json; `stored_size`, `size_text` and
+`notes` read that.
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import shutil
+import sqlite3
 import stat
 import subprocess
+import tempfile
+import threading
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .. import paths
-from . import Call, Component, Result, find, project_root
+from . import Call, Component, Result, find, own, project_root
+
+log = logging.getLogger("eki.assets")
 
 ABOUT = "the project's pictures, sounds and other big files, kept in one place every agent sees"
 #: the kind's name and what it is, in plain words, for the person (kindtext.py)
@@ -186,8 +198,119 @@ def pool_size(comp: Component) -> int:
         return 0
 
 
+def sizes_file() -> Path:
+    return paths.home() / 'poolsizes.json'
+
+
+def _key(comp: Component) -> str:
+    return str((root_of(comp) / comp.spec['path']).resolve())
+
+
+def _stored() -> Dict[str, dict]:
+    try:
+        got = json.loads(sizes_file().read_text())
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def stored_size(comp: Component) -> Optional[int]:
+    """The pool's bytes as housekeeping last measured them; None when never measured."""
+    try:
+        n = _stored().get(_key(comp), {}).get('bytes')
+    except (AttributeError, KeyError, TypeError, OSError):
+        return None
+    return n if isinstance(n, int) and not isinstance(n, bool) else None
+
+
+def size_text(comp: Component) -> str:
+    """The stored pool size in words; '' when never measured or not an assets card."""
+    if comp.kind != 'assets':
+        return ''
+    n = stored_size(comp)
+    return '' if n is None else _human(n)
+
+
+def _write(sizes: Dict[str, dict]) -> None:
+    f = sizes_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix='.poolsizes.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as out:
+            json.dump(sizes, out, indent=1, sort_keys=True)
+        os.replace(tmp, f)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+#: how often housekeeping measures the pools
+POOL_EVERY = 300.0
+_last_measure = [0.0]
+_measuring = threading.Lock()
+
+
+def _pools(roots: List[Path]) -> List[Component]:
+    """Every assets card of the given project roots, and every assets component in the pool."""
+    out: List[Component] = []
+    for root in roots:
+        out += [c for c in own(root)[0].values() if c.kind == 'assets']
+    out += [c for c in find(None)[0].values() if c.kind == 'assets']
+    return out
+
+
+def measure(roots: List[Path]) -> Dict[str, dict]:
+    """Walk each pool once and write all the sizes; what was written."""
+    sizes: Dict[str, dict] = {}
+    for comp in _pools(roots):
+        try:
+            key = _key(comp)
+            if key not in sizes:
+                sizes[key] = {'bytes': pool_size(comp), 'at': time.time()}
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+    _write(sizes)
+    return sizes
+
+
+def _measure_thread(roots: List[Path]) -> None:
+    try:
+        measure(roots)
+    except Exception as e:                               # noqa: BLE001 — a size is never worth a fault
+        log.info("pool sizes not measured: %s", e)
+    finally:
+        _measuring.release()
+
+
+#: the measuring thread last started (tests join it)
+_thread: List[Optional[threading.Thread]] = [None]
+
+
+def tick(conn: sqlite3.Connection) -> List[str]:
+    """Housekeeping: start one thread measuring every pool, at most every POOL_EVERY s, never waiting."""
+    if time.time() - _last_measure[0] < POOL_EVERY:
+        return []
+    if not _measuring.acquire(blocking=False):           # one still running: never two at once
+        return []
+    _last_measure[0] = time.time()
+    try:
+        roots = [Path(r['path']) for r in conn.execute('SELECT path FROM projects')]
+        roots = [r for r in roots if r.is_dir()]
+        t = threading.Thread(target=_measure_thread, args=(roots,), name='eki-poolsizes', daemon=True)
+        t.start()
+    except BaseException:
+        _measuring.release()
+        raise
+    _thread[0] = t
+    return [f'pool sizes: measuring {len(roots)} project{"" if len(roots) == 1 else "s"} and the pool']
+
+
 def notes(comp: Component) -> List[str]:
-    return problems(comp) + [f'pool: {_human(pool_size(comp))}']
+    text = size_text(comp)
+    return problems(comp) + [f'pool: {text}' if text else 'pool: not measured yet']
 
 
 def linked(worktree, conn=None) -> List[str]:

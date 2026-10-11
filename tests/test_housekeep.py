@@ -117,3 +117,15 @@ def test_engine_tick_calls_housekeeping_on_its_duty_pass(conn, monkeypatch):
 def test_an_interrupted_project_delete_is_finished_before_the_projects_step():
     names = [name for name, _ in housekeep.STEPS]
     assert names.index("projectdelete") < names.index("projects")
+
+
+def test_pool_sizes_are_a_housekeeping_step_that_never_waits(conn, monkeypatch):
+    from eki.components import assets
+    assert ("poolsizes", assets.tick) in housekeep.STEPS
+    started = []
+    monkeypatch.setattr(assets, "_last_measure", [0.0])
+    monkeypatch.setattr(assets, "measure", lambda roots: started.append(roots))
+    lines = [ln for ln in housekeep.tick(conn) if ln.startswith("pool sizes")]
+    assert len(lines) == 1
+    assets._thread[0].join(10)
+    assert started == [[]]

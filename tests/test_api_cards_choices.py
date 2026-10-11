@@ -64,3 +64,11 @@ def test_every_card_carries_choice_help(conn, cards):
     assert one["choice_help"] == components.choice_help("knowledge")
     edited = call(conn, "POST", "/api/projects/p1/cards/knowledge", {"settings": {"read": "always"}})["card"]
     assert edited["choice_help"] == components.choice_help("knowledge")
+
+
+def test_the_workflow_card_carries_no_access(conn, cards):
+    shutil.copytree(components.templates_dir() / "workflow", cards / "workflow")
+    got = listed(conn)["workflow"]
+    assert got["error"] == "" and "access" not in got["choices"]
+    assert "access" not in got["choice_defaults"] and "access" not in got["choice_help"]
+    assert got["choices"]["plan"] == ["split", "single"]

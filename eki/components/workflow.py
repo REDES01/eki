@@ -25,6 +25,8 @@ CHOICE_HELP = {
     'merge': {'auto': 'eki lands it on the branch.',
               'pr': 'A pull request on GitHub.',
               'person': 'Waits for the person to merge.'}}
+#: a workflow card isn't a shared resource: the common `access` setting doesn't apply
+DROPS = ('access',)
 PARALLEL = 4
 PLAYTESTER = 'playtester'
 

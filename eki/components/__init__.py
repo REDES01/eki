@@ -85,8 +85,19 @@ def kind_module(kind: str):
     return importlib.import_module(KINDS[kind])
 
 
+def dropped(kind: str) -> Tuple[str, ...]:
+    """The common settings a kind says don't apply to it (its module's DROPS): left out of its
+    choices and never checked (an old card that still has one stays good). Never raises."""
+    try:
+        drops = getattr(kind_module(kind), 'DROPS', ()) if isinstance(kind, str) and kind in KINDS else ()
+    except Exception:
+        drops = ()
+    return tuple(d for d in drops if isinstance(d, str)) if isinstance(drops, (list, tuple)) else ()
+
+
 def _merged(kind: str, attr: str, common: Dict[str, Any]) -> Dict[str, Any]:
-    out = {k: list(v) if isinstance(v, list) else v for k, v in common.items()}
+    drops = dropped(kind)
+    out = {k: list(v) if isinstance(v, list) else v for k, v in common.items() if k not in drops}
     try:
         own_ = getattr(kind_module(kind), attr, None) if kind in KINDS else None
     except Exception:  # a kind that won't import still gets the common ones
@@ -168,7 +179,8 @@ def _check_common(spec: dict) -> List[str]:
         errs.append(f'kind must be one of {", ".join(KINDS)} (got {spec.get("kind")!r})')
     if not isinstance(spec.get('about'), str) or not spec.get('about').strip():
         errs.append('about is required: one line on what it does')
-    if spec.get('access', CHOICE_DEFAULTS['access']) not in CHOICES['access']:
+    if ('access' not in dropped(spec.get('kind'))
+            and spec.get('access', CHOICE_DEFAULTS['access']) not in CHOICES['access']):
         errs.append(f'access must be one of {", ".join(ACCESS)}')
     slots = spec.get('slots', 1)
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:

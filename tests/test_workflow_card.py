@@ -151,3 +151,13 @@ def test_projects_follow_a_card_and_are_unchanged_without(conn, proj):
     assert json.loads(projects.check_argv(p)) == ["/bin/sh", "-c", "npm test", "eki-judge"]
     conn.execute("UPDATE projects SET repo='o/r' WHERE id=?", (pid,))
     assert projects.autonomy(projects.get(conn, pid)) == "propose"
+
+
+def test_the_workflow_kind_has_no_access(proj):
+    """A workflow card isn't a shared resource: no access choice, and an old card's access is ignored."""
+    assert components.dropped("workflow") == ("access",) and components.dropped("knowledge") == ()
+    for got in (components.choices("workflow"), components.choice_defaults("workflow"),
+                components.choice_help("workflow")):
+        assert "access" not in got and "router" in got
+    for old in ("shared", "whatever"):
+        assert components.load(card(proj, access=old), "project").kind == "workflow"

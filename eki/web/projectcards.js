@@ -1,12 +1,20 @@
 // The project page's Cards area (project.js mounts it into #pj-cards): the project's components as
 // cards in a grid — name, kind, about line, state, last use, a × that moves it to the Trash — and a
 // last "+ Add card" tile that opens the library below the grid (templates, then the pool's components).
+// The header row's type filter (projectcardfilter.js) sorts the grid by kind then name and can narrow it.
 // A click on a card opens it in the side panel (panel.host, drawn by projectcardpanel.js); the grid stays
 // put with the open card marked. Everything comes from /api/projects/<id>/cards (eki/api_cards.py); it
 // reloads every 5 s while mounted and keeps nothing else.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const S = { el: null, pid: null, timer: null, data: null, lib: null, open: null, owner: null, err: "", last: {} };
+  const S = { el: null, pid: null, timer: null, data: null, lib: null, open: null, owner: null, err: "", last: {},
+    filter: null };
+  const PF = () => window.projectCardFilter;
+  // the type filter for this project, made once its script is in
+  function filter() {
+    if (!S.filter && PF() && S.pid) S.filter = PF().state(S.pid);
+    return S.filter;
+  }
 
   async function api(path, body, method) {
     const r = await fetch(path, body === undefined && !method ? {} : {
@@ -95,7 +103,9 @@
     const sg = !ro && d.suggest;
     put(".pc-suggest", sg ? `<div class="pj-card pj-row pc-suggest-row"><span class="grow">${esc(sg.why || "")}</span>
         <button type="button" class="pj-btn primary" data-suggest="${esc(sg.template)}">Add instructions card</button></div>` : "");
-    put(".pc-grid", cards.map((c) => tile(c, ro)).join("") +
+    const F = filter();
+    put(".pc-filter", F && cards.length ? PF().html(F, cards) : "");
+    put(".pc-grid", (F ? PF().shown(F, cards) : cards).map((c) => tile(c, ro)).join("") +
       (ro ? "" : `<div class="pc-tile pc-add" data-lib="open" role="button" tabindex="0">+ Add card</div>`));
     put(".pc-note", (ro ? `<div class="dim">Cards are read-only here: ${esc(ro)}.</div>` : "") +
       (S.err ? `<div class="pj-err">${esc(S.err)}</div>` : ""));
@@ -199,6 +209,9 @@
 
   function onClick(e) {
     const t = e.target;
+    const F = filter();
+    if (F && PF().click(F, t, (S.data || {}).cards || [])) return draw();
+    if (F) put(".pc-filter", PF().html(F, (S.data || {}).cards || []));   // a list left open closes
     if (t.closest("a[href]")) return;                 // a serving link opens in its own tab
     const rm = t.closest("[data-rm]");
     if (rm) { e.stopPropagation(); return remove(rm.dataset.rm); }
@@ -215,6 +228,13 @@
   }
 
   function onKey(e) {
+    const F = filter();
+    if (F && PF().key(F, e, (S.data || {}).cards || [])) {
+      draw();
+      const b = q(".pc-fbtn");
+      if (b && b.focus) b.focus();
+      return;
+    }
     if (e.key !== "Enter" || !e.target.matches || !e.target.matches(".pc-tile")) return;
     e.preventDefault();
     onClick(e);
@@ -223,12 +243,13 @@
   function mount(el, pid) {
     if (!el) return;
     if (S.el !== el) {
-      el.innerHTML = `<section class="pc-area"><h3 class="pc-h">Cards <span class="pj-sum dim pc-sum"></span></h3>
+      el.innerHTML = `<section class="pc-area"><h3 class="pc-h">Cards <span class="pj-sum dim pc-sum"></span>
+        <span class="pc-filter"></span></h3>
         <div class="pc-note"></div><div class="pc-suggest"></div><div class="pc-grid"></div><div class="pc-libbox"></div></section>`;
       el.addEventListener("click", onClick);
       el.addEventListener("keydown", onKey);
     }
-    if (S.pid !== pid) { closeCard(); S.open = null; S.owner = null; S.lib = null; S.err = ""; }
+    if (S.pid !== pid) { closeCard(); S.open = null; S.owner = null; S.lib = null; S.err = ""; S.filter = null; }
     S.el = el; S.pid = pid; S.data = null; S.last = {};
     load();
     clearInterval(S.timer);
@@ -239,12 +260,20 @@
     clearInterval(S.timer);
     S.timer = null;
     if (ours()) panel.close();
-    S.pid = null; S.data = null; S.open = null; S.owner = null; S.lib = null; S.err = "";
+    S.pid = null; S.data = null; S.open = null; S.owner = null; S.lib = null; S.err = ""; S.filter = null;
     if (S.el) put(".pc-grid", "");
   }
 
   // the panels and the look come with this file (project.js only mounts it)
-  for (const src of ["/ui/projectcardpanel.js", "/ui/projectinstructions.js"]) {
+  // a press outside the open type list closes it
+  if (document.addEventListener) document.addEventListener("pointerdown", (e) => {
+    if (S.filter && S.filter.open && !(e.target.closest && e.target.closest(".pc-filter"))) {
+      S.filter.open = false;
+      draw();
+    }
+  });
+
+  for (const src of ["/ui/projectcardfilter.js", "/ui/projectcardpanel.js", "/ui/projectinstructions.js"]) {
     if (!document.querySelector || document.querySelector(`script[src="${src}"]`)) continue;
     const t = document.createElement("script");
     t.src = src; t.async = false;

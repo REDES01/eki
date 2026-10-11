@@ -73,3 +73,17 @@
 .pi-md pre { padding: 6px 8px; border-radius: 8px; background: var(--panel); overflow: auto; }
 .pp textarea.pi-text { font-size: 13px; }
 .pi-back { font-size: 13px; }
+
+/* the type filter at the right of the header row (projectcardfilter.js) */
+.pc-filter { position: relative; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pc-fbtn { font: inherit; font-size: 12px; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 2px 8px; cursor: pointer; }
+.pc-fbtn:hover, .pc-fbtn:focus-visible { border-color: var(--dim); }
+.pc-fcaret { color: var(--dim); font-size: 10px; }
+.pc-flist { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 150px; margin: 0; padding: 4px;
+  list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+.pc-fopt { display: flex; justify-content: space-between; gap: 12px; padding: 4px 8px; border-radius: 6px; font-size: 13px;
+  color: var(--text); cursor: pointer; white-space: nowrap; }
+.pc-fopt:hover, .pc-fopt.active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.pc-fopt.on { font-weight: 600; }

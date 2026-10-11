@@ -11,7 +11,8 @@ import pytest
 from eki import server
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
-FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "cardsessions.js", "projectcards.css")
+FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "cardsessions.js", "projectcardfilter.js",
+         "projectcards.css")
 
 
 @pytest.fixture
@@ -84,6 +85,6 @@ def test_small_and_valid():
         assert len((WEB / f).read_text().splitlines()) < 400, f
     if not shutil.which("node"):
         pytest.skip("node is not installed")
-    for f in FILES[:4]:
+    for f in FILES[:5]:
         out = subprocess.run(["node", "--check", str(WEB / f)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr

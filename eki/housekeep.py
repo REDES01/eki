@@ -119,8 +119,8 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("schedule", schedule.tick),
     ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),
-    ("notify", notify.tick),
     ("worktrees", worktreegc.tick),
+    ("notify", notify.tick),
 ]
 
 

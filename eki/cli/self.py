@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, projects, queue, score, selfdraft, selfwork, train
+from .. import asks, builds, digest, projectchats, projects, queue, score, selfdraft, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 from .selfloop import loop, pick
@@ -25,6 +25,7 @@ def add(p) -> None:
     p.add_argument("--bg", action="store_true", help="don't follow the plan run")
     p.add_argument("--yes", action="store_true", help="with apply: queue it even if it touches locked files")
     p.add_argument("--long", action="store_true", help="with digest: the long page, every item with its id")
+    p.add_argument("-p", "--project", help="the goal is work on this project (a name, id or OWNER/REPO), not on eki")
 
 
 def run(args) -> int:
@@ -56,7 +57,13 @@ def run(args) -> int:
         return undo(c, words[1])
     text = " ".join(words)
     files = [f.strip() for f in (args.files or "").split(",") if f.strip()]
-    gid = selfwork.submit(c, text, plan=not args.one, draft=not (args.as_is or args.one), files=files)
+    pid = None
+    if args.project:
+        pid = projectchats.find(c, args.project)
+        if pid == projectchats.SELF:
+            pid = None
+    gid = selfwork.submit(c, text, plan=not args.one, draft=not (args.as_is or args.one), files=files,
+                          project=pid)
     ensure_engine(quiet=True)
     g = c.execute("SELECT * FROM goals WHERE id=?", (gid,)).fetchone()
     if g["state"] == "drafting":

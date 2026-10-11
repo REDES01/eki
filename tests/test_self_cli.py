@@ -303,3 +303,18 @@ def test_pick_names_the_same_gate_tick_uses(conn, capsys):
     assert "(but 3 wait for you (review_max 3) stops it)" in out
     assert selfpick.stopped(conn) == "3 wait for you (review_max 3)"
     assert conn.execute("SELECT COUNT(*) FROM goals WHERE pick_key IS NOT NULL").fetchone()[0] == 0
+
+
+def test_a_goal_can_be_work_on_a_project(conn, monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setattr(self_cmd.projectchats, "find", lambda c, key: "p123" if key == "game" else "eki")
+    monkeypatch.setattr(self_cmd.selfwork, "submit",
+                        lambda c, text, **kw: seen.update(text=text, **kw) or "g1")
+    monkeypatch.setattr(self_cmd, "conn", lambda: conn)
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
+                     ("g1", "fix it", "ask", "you", "planned", db.now()))
+    assert main(["self", "--bg", "--as-is", "-p", "game", "fix it"]) == 0
+    assert seen["project"] == "p123" and seen["text"] == "fix it"
+    assert main(["self", "--bg", "--as-is", "-p", "eki", "fix it"]) == 0
+    assert seen["project"] is None

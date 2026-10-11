@@ -4,7 +4,9 @@ A local project whose card says merge auto and names an `after_merge` command
 (e.g. `npm run build`) gets one provider='command' run of it in the folder
 where its branch is checked out (projectland.checked_out), after items land
 there (projectqueue sets `landed_on`). The landing is never blocked or undone:
-this only follows it.
+this only follows it. When any item a run covers touched a package file
+(package.json or a lockfile, at any depth, per its `touched` list), the run is
+`npm install --include=dev && <after_merge>` so the folder's dependencies match.
 
 One run per project at a time. While it runs nothing new starts; when it ends
 and items landed after it started, exactly one more run covers all of them,
@@ -43,6 +45,10 @@ FAILED = "after-merge build failed"
 #: about this much of the output's end is kept as the tail
 TAIL_CHARS = 300
 TAIL_LINES = 6
+#: a change to any of these (at any depth) installs before the build
+PACKAGE_FILES = frozenset({"package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
+                           "pnpm-lock.yaml", "bun.lockb"})
+INSTALL = "npm install --include=dev"
 
 
 def _path(pid: str) -> Path:
@@ -90,6 +96,23 @@ def tail(conn: sqlite3.Connection, run: sqlite3.Row) -> str:
     if not text:
         text = f"the build {run['state']}"
     return text[-TAIL_CHARS:]
+
+
+def packages_changed(items: List[sqlite3.Row]) -> bool:
+    """Did any of the items touch package.json or a lockfile, at any depth?"""
+    for it in items:
+        try:
+            touched = json.loads(it["touched"] or "[]")
+        except ValueError:
+            continue
+        if any(isinstance(f, str) and f.rsplit("/", 1)[-1] in PACKAGE_FILES for f in touched):
+            return True
+    return False
+
+
+def command(items: List[sqlite3.Row], cmd: str) -> str:
+    """What runs in the person's folder: `cmd`, after an install when package files changed."""
+    return f"{INSTALL} && {cmd}" if packages_changed(items) else cmd
 
 
 # ---- the tick --------------------------------------------------------------------------------
@@ -150,6 +173,7 @@ def _adopt(conn: sqlite3.Connection, project: sqlite3.Row, rec: Dict[str, Any]) 
 def _start(conn: sqlite3.Connection, project: sqlite3.Row, rec: Dict[str, Any], pending: List[sqlite3.Row],
            where: Path, cmd: str) -> List[str]:
     upto = float(rec.get("upto") or 0.0)
+    cmd = command(pending, cmd)
     with db.tx(conn):
         tid = store.create_thread(conn, _title(project), str(where), by="eki")
         rid = store.create_run(conn, tid, json.dumps(["/bin/sh", "-c", cmd]), provider="command",

@@ -188,3 +188,48 @@ def test_no_checked_out_folder_no_build(conn, folder):
     from eki.workspace import git
     git(folder, "checkout", "-q", "--detach")
     assert aftermerge.tick(conn) == [] and builds(conn) == []
+
+
+def touch(conn, iid, files):
+    with conn:
+        conn.execute("UPDATE items SET touched=? WHERE id=?", (json.dumps(files), iid))
+
+
+def test_a_changed_package_json_installs_before_the_build(conn, folder):
+    p = project(conn, folder)
+    card(folder, after_merge="npm run build")
+    iid = land(conn, p, "Line two", {"a.txt": "one\nTWO\nthree\n"})
+    touch(conn, iid, ["package.json", "src/app.js"])
+    said = aftermerge.tick(conn)
+    assert json.loads(builds(conn)[0]["prompt"]) == ["/bin/sh", "-c", "npm install --include=dev && npm run build"]
+    assert any("npm install --include=dev && npm run build" in s for s in said)
+
+
+def test_only_source_files_build_as_before(conn, folder):
+    p = project(conn, folder)
+    card(folder, after_merge="npm run build")
+    iid = land(conn, p, "Line two", {"a.txt": "one\nTWO\nthree\n"})
+    touch(conn, iid, ["src/app.js", "src/package.json.bak", "README.md"])
+    aftermerge.tick(conn)
+    assert json.loads(builds(conn)[0]["prompt"]) == ["/bin/sh", "-c", "npm run build"]
+
+
+def test_a_lockfile_in_a_subfolder_counts_and_one_item_is_enough(conn, folder):
+    p = project(conn, folder)
+    card(folder, after_merge="npm run build")
+    a = item(conn, p, "Line two", {"a.txt": "one\nTWO\nthree\n"})
+    b = item(conn, p, "Bee", {"b.txt": "bee two\n"})
+    projectqueue.tick(conn)
+    touch(conn, a, ["src/app.js"])
+    touch(conn, b, ["web/client/pnpm-lock.yaml"])
+    aftermerge.tick(conn)
+    assert json.loads(builds(conn)[0]["prompt"]) == ["/bin/sh", "-c", "npm install --include=dev && npm run build"]
+
+
+def test_package_files_are_matched_by_name():
+    rows = lambda *t: [{"touched": json.dumps(list(t))}]  # noqa: E731
+    for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+                 "bun.lockb", "a/b/yarn.lock"):
+        assert aftermerge.packages_changed(rows(name)), name
+    assert not aftermerge.packages_changed(rows("src/index.js", "mypackage.json", "package.json/x"))
+    assert not aftermerge.packages_changed([{"touched": "[]"}, {"touched": None}])

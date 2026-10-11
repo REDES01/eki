@@ -3,7 +3,7 @@
   "about": "eki's own pipeline: the parts that protect eki are fixed",
   "router": "on",
   "plan": "split",
-  "parallel": 4,
+  "parallel": 8,
   "checks": [
     "self",
     "review",

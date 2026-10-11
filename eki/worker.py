@@ -86,11 +86,24 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
     if r["effort"]:
         turn.extra["effort"] = r["effort"]
     if r["row"] != "chore":                     # which components it can reach, and how to call them
-        for line in (components.brief(turn.cwd, conn), knowledge.brief(turn.cwd, conn)):
+        for line in (components.brief(turn.cwd, conn),
+                     knowledge.brief(turn.cwd, conn, context=_item_context(conn, r["thread_id"]))):
             if line:
                 turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
         _serving_link(conn, r, turn)
     return turn
+
+
+def _item_context(conn: sqlite3.Connection, thread_id: str) -> list[str] | None:
+    """The knowledge cards the planner picked for the item built in this thread (its build,
+    rebuilds, resolve and PR follow-ups); None — the full brief — for a chat or no choice."""
+    try:
+        it = conn.execute("SELECT context FROM items WHERE thread_id=? ORDER BY updated_at DESC LIMIT 1",
+                          (thread_id,)).fetchone()
+        return knowledge.names(it["context"]) if it is not None else None
+    except Exception as e:                      # noqa: BLE001 — a run never fails for its brief
+        log.warning("no item context for thread %s: %s", thread_id, e)
+        return None
 
 
 def _serving_link(conn: sqlite3.Connection, r: sqlite3.Row, turn: Turn) -> None:

@@ -24,7 +24,8 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import chores, db, integration, roles, selfwork, store, workflow, workflowgates, workspace
+from . import chores, db, integration, projects, roles, selfwork, store, workflow, workflowgates, workspace
+from .components import knowledge
 
 GOAL_MAX = 2000
 DIFF_MAX = 40000
@@ -45,7 +46,7 @@ The change: **{title}**
 What its builder said it did:
 
 {summary}
-
+{brief}
 The diff (git diff {base}..{sha}):
 
 ```diff
@@ -110,7 +111,7 @@ def read(conn: sqlite3.Connection, it: sqlite3.Row) -> Tuple[Optional[str], str]
 
 
 def prompt(conn: sqlite3.Connection, it: sqlite3.Row) -> str:
-    goal = conn.execute("SELECT text FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    goal = conn.execute("SELECT text, project FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     base, sha = it["base"] or "", it["commit_sha"] or ""
     where = it["worktree"] if it["worktree"] and Path(it["worktree"]).exists() else integration.repo()
     diff = workspace.git(where, "diff", f"{base}..{sha}", check=False) if base and sha else ""
@@ -119,10 +120,24 @@ def prompt(conn: sqlite3.Connection, it: sqlite3.Row) -> str:
         cut = (f"\n(The diff is {len(diff)} characters; only the first {DIFF_MAX} are shown —"
                f" {len(diff) - DIFF_MAX} were cut.)\n")
         diff = diff[:DIFF_MAX]
+    told = _told(conn, it, goal)
     return PROMPT.format(goal=((goal["text"] if goal else "") or "(no goal text)").strip()[:GOAL_MAX],
                          title=it["title"], spec=(it["spec"] or "").strip() or "(no spec)",
                          summary=(it["summary"] or "").strip() or "(nothing said)",
+                         brief=f"\nWhat the builder was told to read:\n\n{told}\n" if told else "",
                          base=base[:12], sha=sha[:12], diff=diff.strip() or "(empty)", cut=cut)
+
+
+def _told(conn: sqlite3.Connection, it: sqlite3.Row, goal: Optional[sqlite3.Row]) -> str:
+    """The knowledge brief the item's builder got ('' for eki's own items, which have no cards)."""
+    try:
+        where = it["worktree"] if it["worktree"] and Path(it["worktree"]).exists() else None
+        if where is None and goal is not None and goal["project"]:
+            p = projects.get(conn, goal["project"])
+            where = p["path"] if p is not None else None
+        return knowledge.brief(where, conn, context=knowledge.names(it["context"])) if where else ""
+    except Exception:  # noqa: BLE001 — the brief never keeps an item from its review
+        return ""
 
 
 def verdict(answer: str) -> Tuple[Optional[str], str]:

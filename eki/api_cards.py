@@ -123,6 +123,11 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
         good, broken = skillcard.held(c.folder)
         out["skills"] = [{"name": s["name"], "description": s["description"]} for s in good]
         out["broken_skills"] = [{"path": where, "error": why} for where, why in broken]
+    if c.kind == "service":
+        from . import api_cardpicture
+        pic = api_cardpicture.part(conn, root, c)
+        if pic is not None:
+            out["picture"] = pic
     if c.kind == "instructions":
         from .components import instructions
         out["instructions"] = instructions.summary(root, c.spec.get("file", "AGENTS.md"))

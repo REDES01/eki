@@ -13,8 +13,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import components, projectchats
-from .components import access, uses
+from . import cardview, components, projectchats
+from .components import access, kindtext, uses
 
 READONLY = "pick or clone a folder first"
 
@@ -110,7 +110,10 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
            "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c),
            "choices": components.choices(c.kind), "choice_defaults": components.choice_defaults(c.kind),
            "choice_help": components.choice_help(c.kind),
-           "field_help": components.field_help(c.kind), **_locked(c.kind, root)}
+           "field_help": components.field_help(c.kind), **_locked(c.kind, root),
+           "title": kindtext.title(c.kind), "explain": kindtext.explain(c.kind)}
+    out["live"] = cardview.live(conn, root, c)
+    out["overview"] = cardview.overview(conn, root, c, out["live"])
     if c.kind == "skills":
         from .components import skillcard
         good, broken = skillcard.held(c.folder)
@@ -134,7 +137,9 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
             "last_use": uses.last_use(conn, name, root), "links": [], "size": "",
             "choices": components.choices(kind), "choice_defaults": components.choice_defaults(kind),
             "choice_help": components.choice_help(kind),
-            "field_help": components.field_help(kind), **_locked(kind, root)}
+            "field_help": components.field_help(kind), **_locked(kind, root),
+            "title": kindtext.title(kind), "explain": kindtext.explain(kind), "live": {},
+            "overview": cardview.broken(why)}
 
 
 def cards_of(conn: sqlite3.Connection, root: Path) -> List[Dict[str, Any]]:
@@ -185,12 +190,14 @@ def templates() -> List[Dict[str, str]]:
     out = []
     for d in dirs:
         spec = _read(str(d)) or {}
-        out.append({"name": d.name, "kind": str(spec.get("kind", "")), "about": str(spec.get("about", ""))})
+        kind = str(spec.get("kind", ""))
+        out.append({"name": d.name, "kind": kind, "about": str(spec.get("about", "")), "title": kindtext.title(kind)})
     return out
 
 
 def library(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:
-    pool = [{"name": r["name"], "kind": r["kind"], "about": r["about"], "error": r["error"]}
+    pool = [{"name": r["name"], "kind": r["kind"], "about": r["about"], "error": r["error"],
+             "title": kindtext.title(r["kind"])}
             for r in components.listing(None, conn) if r["scope"] == "pool"]
     return {"templates": templates(), "pool": pool}
 

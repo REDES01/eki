@@ -1,6 +1,6 @@
 {
   "kind": "agent",
-  "about": "plays the game through the screen only and writes an honest review",
+  "about": "plays the game the way a player would, by looking at the screen, and writes an honest review",
   "bare": true,
   "target": "claude:opus",
   "access": "shared",

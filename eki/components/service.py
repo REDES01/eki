@@ -23,7 +23,12 @@ from typing import Any, Dict, List
 
 from . import Call, Component, Result, servers
 
-ABOUT = "a command run per call, or a server kept up while it's used"
+ABOUT = "a program the project's agents can call, like making a picture or reading a line aloud"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Tool"
+EXPLAIN = ("A program the project's agents can call to get something done that a model can't do by itself, such "
+           "as making a picture, reading a line aloud or checking a build. It is set up once here, so every "
+           "agent calls it the same way and sees what came out. You can also run it yourself from this card.")
 #: how much of stderr a failed command reports
 TAIL = 800
 

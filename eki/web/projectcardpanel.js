@@ -14,7 +14,8 @@
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
   const PASSIVE = ["knowledge", "mcp", "workflow"];                    // eki/components PASSIVE: read or attached, never called
-  for (const f of ["cardknowledge.js", "cardmcp.js", "cardworkflow.js", "cardsessions.js"]) {
+  for (const f of ["cardknowledge.js", "cardmcp.js", "cardworkflow.js", "cardsessions.js", "cardserve.js",
+                   "cardtool.js"]) {
     if (document.querySelector && !document.querySelector(`script[src="/ui/${f}"]`)) {
       const t = document.createElement("script");
       t.src = "/ui/" + f; t.async = false;

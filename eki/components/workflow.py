@@ -12,7 +12,12 @@ from typing import List
 
 from . import NAME, Call, Component, Result
 
-ABOUT = "how this project's work runs: router, plan, parallel, checks, merge"
+ABOUT = "how work on this project goes: who picks it up, how it is split, checked and kept"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Workflow"
+EXPLAIN = ("How work on this project goes from a request to a finished change: who picks it up, whether it is "
+           "split into smaller pieces, how many run at once, which checks it must pass and whether it is kept on "
+           "its own or waits for you. Change it here to make the project's work faster or more careful.")
 
 CHOICES = {'router': ['on', 'off'], 'plan': ['split', 'single'], 'merge': ['auto', 'pr', 'person']}
 CHOICE_DEFAULTS = {'router': 'on', 'plan': 'split', 'merge': 'auto'}

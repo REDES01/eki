@@ -1,6 +1,6 @@
 {
   "kind": "serve",
-  "about": "your own copy of the project in a browser: a static server per worktree",
+  "about": "a running copy of the project for each agent, so it can test its change without touching yours",
   "path": "/",
   "headers": {"Cache-Control": "no-store"},
   "index": "index.html",

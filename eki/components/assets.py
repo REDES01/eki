@@ -21,7 +21,12 @@ from typing import List, Optional
 from .. import paths
 from . import Call, Component, Result, find, project_root
 
-ABOUT = "a folder of files managed outside git, shared by every worktree of the project"
+ABOUT = "the project's pictures, sounds and other big files, kept in one place every agent sees"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Media pool"
+EXPLAIN = ("The project's pictures, sounds and other big files, kept in one place outside the code history. "
+           "Every agent working on the project sees the same pool, so a picture made by one is there for the "
+           "next. Tools that make media save into it, and the game reads from it.")
 USAGE = 'use: ls [sub] | info <path> | rm <path>'
 
 

@@ -159,5 +159,5 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
 
 def test_template_is_valid(tmp_path):
     spec = json.loads((components.templates_dir() / "assets" / "component.json").read_text())
-    assert spec == {"kind": "assets", "about": "media eki manages outside git", "path": "assets"}
+    assert spec["kind"] == "assets" and spec["path"] == "assets" and "pictures" in spec["about"]
     assert assets.validate(spec, tmp_path) == []

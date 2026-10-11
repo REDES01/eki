@@ -48,7 +48,8 @@ global.confirm = () => true;
 global.CSS = { escape: (s) => s };
 global.document = { getElementById: el, addEventListener(ev, fn) { doc[ev] = fn; }, hidden: false, activeElement: null };
 global.md = { esc: (s) => String(s), render: (t) => t, outline: () => [] };
-const card = (name, kind) => ({ name, kind, about: "", state: "idle", spec: { kind }, editable: true, card: "/p/components/" + name });
+const TITLES = { knowledge: "Documents", service: "Tool" };
+const card = (name, kind) => ({ name, kind, title: TITLES[kind], about: "", state: "idle", spec: { kind }, editable: true, card: "/p/components/" + name });
 const CARDS = { cards: [
   card("zeta", "knowledge"), card("beta", "service"), card("alpha", "knowledge"), card("gamma", "agent"),
   card("mid", "knowledge"), card("odd", ""), card("api", "service"),
@@ -84,6 +85,7 @@ const area = el("pj-cards");
       const grid = area.querySelector(".pc-grid").innerHTML;
       out.log.push({ filter: area.querySelector(".pc-filter").innerHTML,
         tiles: [...grid.matchAll(/data-card="(\\w+)"/g)].map((m) => m[1]),
+        kinds: [...grid.matchAll(/class="pc-kind dim">([^<]*)</g)].map((m) => m[1]),
         on: [...grid.matchAll(/class="pc-tile[^"]*\\bon" data-card="(\\w+)"/g)].map((m) => m[1]),
         add: grid.includes("+ Add card"), hidden: el("panel").hidden, owner: panel.owner() && panel.owner().name,
         store: Object.assign({}, store) });
@@ -117,19 +119,21 @@ def test_the_options_are_the_kinds_present_with_counts(tmp_path):
     closed, opened = run(tmp_path, [["mount", "p1"], ["snap"], ["menu"], ["snap"]])["log"]
     assert "All types" in closed["filter"] and "pc-flist" not in closed["filter"]
     assert options(opened["filter"]) == [("", "All types"), ("?", "? 1"), ("agent", "agent 1"),
-                                         ("knowledge", "knowledge 3"), ("service", "service 2")]
+                                         ("knowledge", "Documents 3"), ("service", "Tool 2")]
     assert "instructions" not in opened["filter"] and "mcp" not in opened["filter"]
 
 
 def test_tiles_are_sorted_by_kind_then_name(tmp_path):
     snap = run(tmp_path, [["mount", "p1"], ["snap"]])["log"][0]
     assert snap["tiles"] == ["odd", "gamma", "alpha", "mid", "zeta", "api", "beta"] and snap["add"]
+    # a tile shows its kind's title, the raw kind when it has none
+    assert snap["kinds"] == ["?", "agent", "Documents", "Documents", "Documents", "Tool", "Tool"]
 
 
 def test_picking_a_kind_narrows_the_grid_and_keeps_the_add_tile(tmp_path):
     snap = run(tmp_path, [["mount", "p1"], ["menu"], ["pick", "knowledge"], ["snap"]])["log"][0]
     assert snap["tiles"] == ["alpha", "mid", "zeta"] and snap["add"]
-    assert "pc-flist" not in snap["filter"] and "knowledge" in snap["filter"]
+    assert "pc-flist" not in snap["filter"] and "Documents" in snap["filter"]
     snap = run(tmp_path, [["mount", "p1"], ["pick", "knowledge"], ["pick", ""], ["snap"]])["log"][0]
     assert len(snap["tiles"]) == 7
 

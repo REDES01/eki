@@ -1,6 +1,6 @@
 {
   "kind": "mcp",
-  "about": "an MCP server only this project's runs get — replace with what it gives them",
+  "about": "gives this project's agents an extra ability — say here what it lets them do",
   "server": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-everything"],

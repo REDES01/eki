@@ -1,5 +1,5 @@
 // The project page's Cards area (project.js mounts it into #pj-cards): the project's components as
-// cards in a grid — name, kind, about line, state, last use, a × that moves it to the Trash — and a
+// cards in a grid — name, kind (by its title: "Preview links", not serve), about line, state, last use, a × that moves it to the Trash — and a
 // last "+ Add card" tile that opens the library below the grid (templates, then the pool's components).
 // The header row's type filter (projectcardfilter.js) sorts the grid by kind then name and can narrow it.
 // A click on a card opens it in the side panel (panel.host, drawn by projectcardpanel.js); the grid stays
@@ -70,7 +70,7 @@
     return `<div class="pc-tile${broken ? " pc-broken" : ""}${S.open === c.name ? " on" : ""}" data-card="${esc(c.name)}" role="button" tabindex="0">
       ${ro ? "" : `<button type="button" class="pc-x" data-rm="${esc(c.name)}" title="Remove (moves it to the Trash)">×</button>`}
       <div class="pc-name">${esc(c.name)}</div>
-      <div class="pc-kind dim">${esc(c.kind || "?")}${c.ref ? " · from the pool" : ""}</div>
+      <div class="pc-kind dim">${esc(c.title || c.kind || "?")}${c.ref ? " · from the pool" : ""}</div>
       ${about(c)}
       ${serving(c)}
       ${broken ? `<div class="pj-err pc-about">${esc(c.error)}</div>` : ""}
@@ -83,7 +83,7 @@
     if (!L) return "";
     if (L.loading) return `<div class="pj-card pc-lib dim">Loading the library…</div>`;
     const row = (x, attr) => `<button type="button" class="pj-item pc-pick" ${attr}="${esc(x.name)}">
-        <span class="pc-pname">${esc(x.name)}</span><span class="dim">${esc(x.kind || "")}</span>
+        <span class="pc-pname">${esc(x.name)}</span><span class="dim">${esc(x.title || x.kind || "")}</span>
         <span class="grow">${x.error ? `<span class="pj-err">${esc(x.error)}</span>` : esc(x.about || "")}</span></button>`;
     return `<div class="pj-card pc-lib"><div class="pj-row"><b class="grow">Add a card</b>
         <button type="button" class="pj-btn" data-lib="close">Close</button></div>
@@ -163,7 +163,7 @@
   // ---- the open card in the side panel ---------------------------------------------------------
 
   const cardOf = (name) => ((S.data || {}).cards || []).find((x) => x.name === name);
-  const subOf = (c) => (c.kind || "?") + (c.about ? " · " + c.about : "");
+  const subOf = (c) => (c.title || c.kind || "?") + (c.about ? " · " + c.about : "");
   const ours = () => !!(S.owner && window.panel && panel.owner() === S.owner);
   // the panel shows a file opened from our card, with "← back to" it
   function lent() {

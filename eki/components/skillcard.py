@@ -22,7 +22,12 @@ from typing import List, Optional, Tuple
 from .. import paths, skills
 from . import Call, Component, Result, find, templates_dir
 
-ABOUT = "skills this project's runs get, kept in the project"
+ABOUT = "know-how this project's agents pick up when a task calls for it"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Skills"
+EXPLAIN = ("Short how-to guides the project's agents pick up when a task calls for them, like how to add a level "
+           "or how to write a scene. They live in the project, so they change with it and every agent gets the "
+           "same ones. Add one when you notice agents keep needing the same advice.")
 
 
 def validate(spec: dict, folder: Path) -> List[str]:

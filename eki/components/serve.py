@@ -36,7 +36,13 @@ from .static import HEALTH
 
 log = logging.getLogger("eki.components.serve")
 
-ABOUT = "your own copy of the project in a browser: a static server per worktree"
+ABOUT = "a running copy of the project for each agent, so it can test its change without touching yours"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Preview links"
+EXPLAIN = ("Every agent working on this project gets its own running copy of it (a preview link), so it can try "
+           "its change in a browser without touching yours. A copy starts when an agent first opens it and stops "
+           "on its own when nobody has looked at it for a while. Your own copy keeps running where it always "
+           "does.")
 DEFAULT_HEADERS = {"Cache-Control": "no-store"}
 #: how long a static server gets to answer after it is started
 START_WAIT = 10.0

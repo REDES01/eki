@@ -13,6 +13,13 @@ from typing import List
 
 from . import Call, Component, Result
 
+ABOUT = "the house rules every agent on the project reads first"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Agent instructions"
+EXPLAIN = ("The project's house rules for agents: what the project is, how it is laid out and what must never "
+           "break. Every agent working on the project reads them first, whichever program runs it. Edit them "
+           "here when you find yourself telling agents the same thing twice.")
+
 CLAUDE = 'CLAUDE.md'
 TICKED = re.compile(r'`([^`\n]+)`')
 HEADING = re.compile(r'^#{1,6}\s+(.*?)\s*#*\s*$')

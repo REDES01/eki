@@ -1,7 +1,8 @@
 // The Cards area's type filter (projectcards.js draws it in the header row): a button that opens a list of
-// "All types" and each kind present with its count. The grid is always sorted by kind, then name; picking a
-// kind leaves only its cards. The choice is kept per project in this viewer's localStorage
-// (eki.cards.type.<project id>); a kept kind no longer present shows as All types. It never closes a card.
+// "All types" and each kind present with its count, labelled by the kind's title ("Preview links" for serve).
+// The grid is always sorted by kind, then name; picking a kind leaves only its cards. The choice is kept per
+// project in this viewer's localStorage (eki.cards.type.<project id>); a kept kind no longer present shows as
+// All types. It never closes a card.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const kindOf = (c) => c.kind || "?";
@@ -12,6 +13,12 @@
   }
   function remember(pid, kind) {
     try { if (kind) localStorage.setItem(slot(pid), kind); else localStorage.removeItem(slot(pid)); } catch (e) {}
+  }
+
+  // a kind's name for people: the title its cards carry, else the kind itself
+  function label(cards, kind) {
+    const c = (cards || []).find((x) => kindOf(x) === kind && x.title);
+    return c ? c.title : kind;
   }
 
   // [[kind, n], …] for the kinds present, by name
@@ -42,10 +49,10 @@
     const k = current(F, cards), list = choices(cards);
     const rows = F.open ? `<ul class="pc-flist" role="listbox" aria-label="Card type">${list.map(([kind, n], i) =>
       `<li class="pc-fopt${i === F.active ? " active" : ""}${kind === k ? " on" : ""}" role="option"
-        aria-selected="${kind === k}" data-fkind="${esc(kind)}">${kind ? `${esc(kind)} <span class="dim">${n}</span>`
+        aria-selected="${kind === k}" data-fkind="${esc(kind)}">${kind ? `${esc(label(cards, kind))} <span class="dim">${n}</span>`
         : "All types"}</li>`).join("")}</ul>` : "";
     return `<button type="button" class="pc-fbtn" data-filter="toggle" aria-haspopup="listbox"
-      aria-expanded="${F.open}">${k ? esc(k) : "All types"} <span class="pc-fcaret">▾</span></button>${rows}`;
+      aria-expanded="${F.open}">${k ? esc(label(cards, k)) : "All types"} <span class="pc-fcaret">▾</span></button>${rows}`;
   }
 
   function pick(F, kind) {
@@ -86,5 +93,5 @@
     return true;
   }
 
-  window.projectCardFilter = { state, counts, sorted, shown, html, pick, click, key, remembered };
+  window.projectCardFilter = { state, counts, sorted, shown, html, pick, click, key, remembered, label };
 })();

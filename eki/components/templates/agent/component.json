@@ -1,6 +1,6 @@
 {
   "kind": "agent",
-  "about": "a persona that answers in its own voice (edit prompt.md)",
+  "about": "a helper with its own voice you can ask for a view — say here who it is and what it is for",
   "target": "claude",
   "bare": false,
   "uses": []

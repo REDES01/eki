@@ -1,6 +1,6 @@
 {
   "kind": "workflow",
-  "about": "how this project's work runs",
+  "about": "how work on this project goes, from a request to a finished change",
   "router": "on",
   "plan": "split",
   "parallel": 4,

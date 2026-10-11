@@ -1,6 +1,6 @@
 {
   "kind": "service",
-  "about": "says back what it is given — replace with what this service does",
+  "about": "repeats back what it is given — say here what this tool does for the project",
   "access": "shared",
   "run": ["echo"]
 }

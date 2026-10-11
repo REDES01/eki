@@ -23,7 +23,12 @@ from typing import Any, Dict, List, Optional
 
 from . import Call, Component, Result, NAME, journal
 
-ABOUT = "a persona with its own prompt.md, skills and target, called as a session"
+ABOUT = "a helper with its own instructions and voice, that you or the project's work can ask for something"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Agent"
+EXPLAIN = ("A helper with its own instructions, voice and tools, such as a playtester or a reviewer. You can "
+           "talk to it from this card, and the project's other agents can ask it for its view while they work. "
+           "Its instructions say who it is and what it may do.")
 #: settings whose values come from a fixed set, and the value used when the key is absent
 CHOICES = {'bare': [False, True]}
 CHOICE_DEFAULTS = {'bare': False}

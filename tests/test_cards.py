@@ -55,7 +55,7 @@ def test_listing_for_a_project(conn, proj):
     assert list(cards) == ["bad", "helper", "images", "voice"]
     keys = {"name", "kind", "about", "scope", "ref", "card", "folder", "error", "notes", "spec", "prompt",
             "instructions", "editable", "state", "last_use", "links", "size", "choices",
-            "choice_defaults", "choice_help", "field_help"}
+            "choice_defaults", "choice_help", "field_help", "title", "explain", "live", "overview"}
     assert all(set(c) == keys for c in cards.values())
     v = cards["voice"]
     assert v["kind"] == "service" and v["scope"] == "project" and v["ref"] == "" and v["editable"]
@@ -168,5 +168,5 @@ def test_library_lists_templates_and_pool(conn):
     assert {"playtester", "voice", "images", "assets", "agent", "service"} <= set(names)
     assert next(t for t in got["templates"] if t["name"] == "agent")["kind"] == "agent"
     pool = {p["name"]: p for p in got["pool"]}
-    assert pool["images"] == {"name": "images", "kind": "service", "about": "pool images", "error": ""}
+    assert pool["images"] == {"name": "images", "kind": "service", "about": "pool images", "error": "", "title": "Tool"}
     assert pool["bad"]["error"]

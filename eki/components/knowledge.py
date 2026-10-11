@@ -18,7 +18,12 @@ from typing import List, Optional
 from . import Call, Component, Result
 from .. import components
 
-ABOUT = "files the project's agents read: always, or when the planner picks it for an item"
+ABOUT = "documents the project's agents read: always, or when a task needs them"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Documents"
+EXPLAIN = ("Documents the project's agents read before they work, such as decisions you made, design rules or "
+           "the story so far. Some are read on every task; others only when a task needs them. Keep them here so "
+           "agents follow what was already decided instead of guessing.")
 #: settings whose values come from a fixed set (read has no default: it is required)
 CHOICES = {'read': ['always', 'when-relevant']}
 READ = tuple(CHOICES['read'])

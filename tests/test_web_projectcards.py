@@ -12,7 +12,7 @@ from eki import server
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
 FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "cardsessions.js", "projectcardfilter.js",
-         "projectcards.css")
+         "cardserve.js", "cardtool.js", "projectcards.css")
 
 
 @pytest.fixture
@@ -39,13 +39,13 @@ def test_the_grid_names_its_routes_and_loads_the_rest(web):
     for name in ('"/api/projects/"', '"/cards"', '"/api/cards/library"', "{ template:", "{ pool:", '"DELETE"',
                  '"X-Eki": "1"', '"Content-Type": "application/json"', "+ Add card", "confirm(", "readonly",
                  "setInterval(load, 5000)", "min ago", "projectcardpanel.js", "projectcards.css",
-                 "window.projectCards = { mount, unmount }"):
+                 "window.projectCards = { mount, unmount }", "c.title || c.kind", "x.title || x.kind"):
         assert name in js, name
 
 
 def test_the_panel_names_its_routes(web):
     js = get(web + "/ui/projectcardpanel.js")[1]
-    for name in ('"/run"', '"/uses"', '"/uses/"', "{ settings:", "cardsessions.js",
+    for name in ('"/run"', '"/uses"', '"/uses/"', "{ settings:", "cardsessions.js", '"cardserve.js"', '"cardtool.js"',
                  "{ prompt:", "problems", "edit in pool", "#settings/components", '"bare"', "setTimeout(() => poll",
                  "slice(0, 20)", "window.projectCardPanel"):
         assert name in js, name
@@ -85,6 +85,6 @@ def test_small_and_valid():
         assert len((WEB / f).read_text().splitlines()) < 400, f
     if not shutil.which("node"):
         pytest.skip("node is not installed")
-    for f in FILES[:5]:
+    for f in FILES[:7]:
         out = subprocess.run(["node", "--check", str(WEB / f)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr

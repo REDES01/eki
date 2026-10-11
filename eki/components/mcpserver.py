@@ -17,7 +17,12 @@ from .. import mcp, paths
 from ..providers.codex import mcp_flags
 from . import Call, Component, Result, own, project_root
 
-ABOUT = "an MCP server only this project's runs get"
+ABOUT = "an outside program that gives only this project's agents extra abilities, like driving a browser"
+#: the kind's name and what it is, in plain words, for the person (kindtext.py)
+TITLE = "Tool connection"
+EXPLAIN = ("A connection to an outside program that gives this project's agents extra abilities, such as driving "
+           "a browser or talking to a music program. Only agents working on this project get it. Agents use it "
+           "on their own while they work; this card shows whether it starts and what it offers.")
 
 
 def validate(spec: dict, folder: Path) -> List[str]:

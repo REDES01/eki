@@ -116,15 +116,25 @@ eki follow <run>  ◄── events table
 | `api_cards` | the project page's Cards area, read side: a project's cards (its own components/ entries, state and last use, an instructions card's summary), the suggestion to add an instructions card, and the library (templates and the pool); the helpers the card leaves share |
 | `api_cardadd`, `api_cardedit`, `api_cardrun`, `api_cardsessions` | a card added (template or pool card) and removed (to the Trash); its settings and prompt edited; run through the engine and its uses; an agent card's sessions |
 | `api_cardinstructions` | an instructions card's file saved, CLAUDE.md linked to it (`@AGENTS.md`), and a "Read first" file read (inside the project folder only) |
+| `syncstate` | the Claude client sync's root: the paths under `~/.eki/sync` (`claude-memory/`, `outbox/skills`, `outbox/memory`, `backups/`), `state.json` (each direction's last run, counts, clashes) and the baselines each direction compares against, written atomically; the housekeeping hook that runs the directions each tick |
+| `skillsync` | skills in: every skill under `~/.claude/skills/synced/*/` imported into the store as source `claude`, refreshed when its folder changes, removed when it's gone there; an eki skill (learned, edited, or a changed claude import) is never overwritten and the clash is recorded |
+| `skillout` | skills out: a skill eki learns or a person edits in eki written to `~/.eki/sync/outbox/skills/<name>/SKILL.md` for the client task |
+| `cardsync` | a project's `skills` card entries that came from the client refreshed the same way, unless the project edited them; an older hand copy backed up first |
+| `memnotes` | memory in: the short index of `~/.eki/sync/claude-memory/` (path + description line of each file) for every non-chore run's brief; missing folder, no notes |
+| `memoutbox` | memory out: the owner's remember, correction and decision messages in an eki chat or card written as one small note each to `~/.eki/sync/outbox/memory/<date>-<slug>.md` |
+| `instrsync` | instructions: `~/.claude/CLAUDE.md` and `~/.eki/AGENTS.md` kept equal from whichever changed last, the other backed up, the diff kept |
+| `api_sync` | the Settings page's folded "Claude sync" section: each direction's line, the same as `eki sync` |
+| `cli/sync` | `eki sync` (one line per direction: last run, counts, clashes) and `eki sync --diff` (the instruction files' last diff) |
 | `cli/*` | one file per command |
 
 **Scheduling.** How much eki runs at once is a machine setting, not a
 number in any project's workflow: `routing.json` `"machine": {"agents",
-"checks"}`, shown and changed in Settings → Machine and with `eki machine`.
+"checks"}` (`eki/machinecaps.py`), shown and changed in Settings → Machine
+and with `eki machine`.
 The engine's spawn step holds each kind of run only by the limit that
 already exists for it.
 
-- `machine.agents` (default 12, 1–32) caps the items building across all
+- `machine.agents` (default 12, 1–64) caps the items building across all
   projects, and it wins. Each project's workflow card `parallel` caps only
   that project's own live items — eki's card for eki's items, the game's
   card for the game's — so eki's card no longer limits anything else. Both
@@ -133,7 +143,7 @@ already exists for it.
   that held it: "12 agents working (machine)" or "4 live in holo-cards (its
   workflow)". An agent mostly waits on the model, so this mostly costs
   subscription quota, not CPU.
-- `machine.checks` (default max(2, cores/6)) is the pool of test slots.
+- `machine.checks` (default max(2, cores/6), 1–32) is the pool of test slots.
   Judge runs — gate 1, gate 2, the train's check, the docs check, a
   project's own check — wait for one (`checkslots.is_judge`,
   `checkslots.limit()`), and so do the agents' own test runs inside build
@@ -149,7 +159,8 @@ The Settings → Machine section shows a live line under the two numbers:
 quota left …". `routing.json`'s old `self.parallel` and `self.check_slots`
 move to `machine.agents` and `machine.checks` once; eki's own workflow card
 keeps its `parallel` as eki's project cap. The local model's own server
-queues its requests, so the engine adds no limit for it. Everything else — chats, drafts, plans,
+queues its requests, so the engine adds no limit for it. Everything else —
+chats, drafts, plans,
 reviews, chores, other command runs — is a light agent turn and isn't held
 by how many other runs are going. Always: one run at a time per thread, one
 per folder, and `priority == "background"` runs wait for `machine.room`.
@@ -1005,7 +1016,10 @@ as any other; nothing in `workspace` or the scheduler changes.
   Claude Code and Codex read one copy. eki keeps no copy and never commits.
 
 Not in scope: knowledge-file uploads, per-project memory, per-project
-routing rows.
+routing rows. Memory stays simple, like Claude's client memory: notes every
+harness can search — the owner's Claude memory mirrored to disk and read on
+demand, and the owner's own durable words sent back ("Sync with the Claude
+client" below).
 
 ### Components
 
@@ -1270,6 +1284,76 @@ and rewrites every `conflicts` list that named them. holo-cards went from
 Not in scope yet: a project page of components. A project-level router
 switch is the `workflow` card's `router` stage (below); per-project routing
 rows are still not in scope.
+
+### Sync with the Claude client
+
+**One system-wide sync between the owner's Claude client (claude.ai, the
+Claude desktop app) and eki** — memory, skills and the instruction file — so
+an agent under eki knows what Claude knows, and the other way round. eki
+integrates: it reads and writes files on this Mac and calls nothing. The
+client's memory lives on claude.ai, where only a Claude client session can
+read or write it, so the client side is a **scheduled Claude task, set up
+outside eki**, that mirrors the memory to disk and reads what eki leaves for
+it. eki never reads a token and never touches claude.ai.
+
+**What eki reads.** `~/.claude/skills/synced/<account>/<skill>/SKILL.md`
+(Claude syncs the account's skills there, a `manifest.json` beside them),
+and the mirror `~/.eki/sync/claude-memory/` that the client task writes,
+with the client's own paths (`/profile.md`, `/preferences.md`,
+`/areas/*.md`, `/topics/*.md`, `/people/*.md`). Plus `~/.claude/CLAUDE.md`.
+
+**What eki writes.** Its own store (`~/.eki/skills`, a project's `skills`
+card), `~/.eki/sync/outbox/skills/` and `~/.eki/sync/outbox/memory/`, which
+the client task reads and proposes to the owner, and `~/.claude/CLAUDE.md`
+when the instruction file changed on eki's side. Nothing is sent anywhere
+else.
+
+**Five directions**, each checked on the housekeeping tick and each with its
+rules:
+
+- **Skills in** (`skillsync`). Every skill under
+  `~/.claude/skills/synced/*/` is imported into the store as source
+  `claude` (`skill-sources.json`), refreshed when its folder changes and
+  removed when it is removed there. eki's own skills always win: a skill
+  eki learned, a skill edited in eki, or a `claude` import changed in eki
+  since its last import is never overwritten; the clash is recorded and
+  shown (`eki sync`, Settings). A project's `skills` card entry that came
+  from the client (holo-cards' `game-design-principles`,
+  `holo-card-maker`, `comfyui-local-api` …) is refreshed the same way
+  (`cardsync`) unless the project edited it; an older hand copy is backed up
+  under `~/.eki/sync/backups/` before the first refresh replaces it.
+- **Skills out** (`skillout`). A skill eki learns, or one a person edits in
+  eki, is also written to `~/.eki/sync/outbox/skills/<name>/SKILL.md` for
+  the client task to propose to the owner.
+- **Memory in** (`memnotes`). Every run that isn't a chore — eki's own,
+  every project's, on every provider — gets a short notes index in its
+  brief: one line per mirror file, its path and the description line from
+  its frontmatter, and where the folder is. The run reads a file when it
+  needs it; the store is never pasted into a prompt. A missing folder means
+  no notes and no error.
+- **Memory out** (`memoutbox`). When the owner states a durable fact or
+  decision in an eki chat or card — asked to remember, corrected, decided,
+  the signals eki's learning already reads — eki writes one small note to
+  `~/.eki/sync/outbox/memory/<date>-<slug>.md` with the owner's words and
+  the project it concerns. eki's own facts about code stay in the repos, not
+  here.
+- **Instructions** (`instrsync`). `~/.claude/CLAUDE.md` (the owner's global
+  Claude Code instructions) and `~/.eki/AGENTS.md` (eki's canonical
+  instructions for every run) are one text. When they drift, eki keeps them
+  equal from whichever changed last against the baseline, backs up the
+  other in `~/.eki/sync/backups/`, and keeps the diff to show.
+
+**All state is files under `~/.eki/sync`** (`syncstate`): `state.json` —
+each direction's last run, counts and clashes — and the baselines each
+direction compares against (what was last imported, written or made
+equal), each written atomically. A direction is a pure step from the
+folders and the baselines, so a restart at any moment loses nothing; the
+next tick does the rest.
+
+**CLI and window.** `eki sync` prints one line per direction: last run,
+counts, clashes. `eki sync --diff` shows the instruction files' last diff.
+The Settings page has the same as a folded "Claude sync" section
+(`api_sync`).
 
 ### Workflows
 

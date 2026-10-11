@@ -185,7 +185,9 @@ A local project's items have a queue of their own (`eki/projectqueue.py`,
 under the project's autonomy `apply`): the same predicted heads, resolve
 runs and bisecting batches, against the project's branch, with the
 project's check as gate 2, landing on `refs/heads/<branch>` fast-forward
-only and moving the person's folder only by `git merge --ff-only`. Each
+only and moving the person's folder only by `git merge --ff-only`. (Which
+of this runs — `batch`, the check, how it lands — is the project's
+`workflow` card when it has one: docs/design.md, "Workflows".) Each
 project is its own stack: items of different projects, or a project's and
 eki's own, never share a batch, so one project's red check never holds
 another's up.
@@ -198,7 +200,11 @@ the measured conflict rate calls for it.
 ## Judging
 
 Three gates, each answering a different question; a fourth for later.
-Judge runs share a few check slots.
+Judge runs share a few check slots. Which of them a project's change goes
+through is its `workflow` card's `checks` (`self`, `review`, `command` =
+gate 1, `batch` = gate 2, `playtester`, `train` = gate 3) and `merge`
+(docs/design.md, "Workflows"); with no card, the defaults there. On eki's
+own project `batch` and `train` are fixed.
 
 **Gate 1 — on its own.** In the change's worktree, on the commit it made,
 before it may join the queue: `bin/check` with `EKI_CHECK_FAST=1` — the

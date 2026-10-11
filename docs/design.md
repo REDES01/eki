@@ -924,11 +924,12 @@ project live in that project as cards — instructions, knowledge, skills,
 assets, services, servers, MCP interfaces, agents like the playtester.
 eki's own global stores (`~/.eki/skills`, `~/.eki/mcp.json`, the pool) hold
 only what every run everywhere needs. Kinds that are read or attached, never
-called (`components.PASSIVE`: `knowledge`, `mcp`), stay out of the `eki use`
+called (`components.PASSIVE`: `knowledge`, `mcp`, `workflow`), stay out of the `eki use`
 line of a run's brief.
 
 **The common keys.** `kind` (`service`, `assets`, `agent`, `skills`,
-`serve`, `knowledge`, `mcp`, `instructions`), `about` (one
+`serve`, `knowledge`, `mcp`, `instructions`, `workflow` — see
+"Workflows" below), `about` (one
 line, shown wherever the component is listed), and how it is shared:
 
 - `access`: `"queue"` — calls served in order, `slots` at a time (image
@@ -1066,7 +1067,73 @@ them. eki never commits to a project's branches. The Settings page has one
 folded, read-only "Components" section — the pool and each project's, one
 line each, details on click. Nothing else in the window.
 
-Not in scope yet: a project page of components, a project-level router.
+Not in scope yet: a project page of components. A project-level router
+switch is the `workflow` card's `router` stage (below); per-project routing
+rows are still not in scope.
+
+### Workflows
+
+**Each project chooses its own workflow with one `workflow` card**
+(`eki/components/workflow.py` checks it, `eki/workflow.py` reads it for the
+engine). eki's own project runs the full pipeline; a game may need only
+plan, agents in parallel, each checking its own work, merge; some projects
+don't need the router at all. So the workflow is a card in the project, not
+code eki applies to everyone. A project has at most one (a second is broken:
+"a project has one workflow card: <name> is it"). `eki component add
+workflow -C <folder>` writes the template; the card opens with one dropdown
+per stage, each choice with its one-line explanation, as the other cards.
+
+**The stages and their choices**, in the order they run:
+
+- `router`: `on` — requests are routed (rules first, a small model for the
+  rest) among the providers and the project's cards · `off` — everything
+  goes to `target` (provider → model → effort, the target picker; required
+  when off). Off really means off: chats and goals in the project never
+  call the prompt check; their runs go to the target directly, and the why
+  says so.
+- `plan`: `split` — a planner turns a request into items with write-sets,
+  built in parallel · `single` — the whole request is one item for one agent.
+- `parallel`: how many items build at once (a whole number ≥ 1).
+- `checks`: an ordered list, each optional but `self`:
+  `self` (the building agent verifies its own work — screenshots, its tests —
+  before it finishes; always on), `review` (a second reader agent,
+  docs/self-build.md "The review"), `command` (the project's check command,
+  the card's `command` field, as gate 1), `batch` (the queue checks queued
+  changes together and bisects on red; needs `command`), `playtester` (the
+  project's playtester card, `playtester` naming it, plays the change),
+  `train` (build + drills + swap — only eki's own project has it).
+- `merge`: `auto` — eki lands it on the branch · `pr` — a pull request on
+  GitHub (needs a GitHub repo) · `person` — waits for the person.
+
+**A stage not chosen is skipped**, and said once on the board: the card's
+line (`workflow.said`) is e.g. "checks: self only", or "router off →
+claude:sonnet; plan single; checks: self, command". A project with
+`checks: [self]` lands an item when its build turn ends, with no gate run.
+
+**No card = today's behaviour for that kind of project**, so nothing changes
+until a card exists. A broken card counts as none (its error is on the card):
+
+| project | no card means |
+|---|---|
+| local | router on, split; checks self, review, and command + batch when it has a check; merge by its autonomy (`apply` → auto, `propose` → person) |
+| GitHub | as local, merge `pr` |
+| eki itself | split, parallel 4; checks self, review, batch, train; merge per `self.autonomy` |
+
+**Adding a card migrates the old settings once** (`workflow.from_settings`):
+the project's check command becomes `command` (with `command` and `batch`
+checked), its autonomy becomes `merge`, `self.review` decides `review`, and
+`self.parallel` is `parallel`. From then on those settings are read from the
+card — one source of truth (`projects` reads the check command and the
+autonomy through it).
+
+**eki's own safety stages are fixed.** On eki's project the card
+(`components/workflow/component.json` in eki's checkout) shows the full
+pipeline, and the stages that protect eki itself — the train and its
+drills, `batch` (`workflow.LOCKED`), and the locked files (docs/self-build.md
+"What eki may not change alone") — are shown but can't be turned off: a card
+there without them is broken with "<stage> protects eki itself: it can't be
+turned off here", and the engine keeps them regardless. `train` on any other
+project is refused.
 
 ## Notifications
 

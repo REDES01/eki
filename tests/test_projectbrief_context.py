@@ -39,18 +39,18 @@ def test_plan_lists_the_cards_and_asks_for_context(conn, proj):
     _knowledge(proj, "architecture", ["ARCH.md", "docs/*.md"], "when-relevant", "how the code hangs together")
     p = projects.get(conn, projects.add(conn, proj))
     text = projectbrief.plan("fix it", "0" * 40, p)
-    assert "- decisions (read: always): owner-approved rules — files: DECISIONS.md" in text
-    assert ("- architecture (read: when-relevant): how the code hangs together — files: ARCH.md, docs/*.md"
+    assert "- decisions (read: always; card decisions): owner-approved rules — files: DECISIONS.md" in text
+    assert ("- architecture (read: when-relevant; card architecture): how the code hangs together — files: ARCH.md, docs/*.md"
             in text)
     assert 'Give each item a "context" list' in text
-    assert '"context": [{"name": "architecture", "why": "touches the scene loader"}]' in text
+    assert '"context": [{"name": "scene-loader", "why": "touches how scenes load"}]' in text
     assert text.rstrip().endswith("}]")
 
 
 def test_no_cards_no_section(conn, proj):
     p = projects.get(conn, projects.add(conn, proj))
     text = projectbrief.plan("fix it", "0" * 40, p)
-    assert "knowledge cards" not in text and '"context"' not in text
+    assert "knowledge documents" not in text and '"context"' not in text
     assert 'ITEMS:\n[{"title": "...",' in text
 
 

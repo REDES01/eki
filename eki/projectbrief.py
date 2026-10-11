@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 from . import projects, selfbrief
 
 #: the `ITEMS:` JSON ending, the shape eki/selfbrief.py items_in reads; {context} is the
-#: `"context"` key when the project has knowledge cards to choose from
+#: `"context"` key when the project has knowledge documents to choose from
 ENDING = """\
 End your answer with a line `ITEMS:` followed by one JSON list, nothing after it:
 
@@ -18,17 +18,18 @@ ITEMS:
 [{{"title": "...", "spec": "...", "files": ["src/x.py", "tests/test_x.py"],
   "deps": ["title of an earlier item"], "independent": false{context}}}]
 """
-CONTEXT_KEY = ',\n  "context": [{"name": "architecture", "why": "touches the scene loader"}]'
+CONTEXT_KEY = ',\n  "context": [{"name": "scene-loader", "why": "touches how scenes load"}]'
 
 KNOWLEDGE = """
-The project's knowledge cards (components/), what each holds and how it is read:
+The project's knowledge documents (knowledge cards in components/), what each
+holds and how it is read:
 
 {cards}
 
-Give each item a "context" list: the knowledge cards that item needs, by name,
-with one short reason each. Cards read `always` reach every run anyway, so
-leave them out. A one-line fix may need none; leaving out what the item doesn't
-need keeps its turn focused.
+Give each item a "context" list: the documents that item needs, by document
+name, with one short reason each. Documents read `always` reach every run
+anyway, so leave them out. A one-line fix may need none; leaving out what the
+item doesn't need keeps its turn focused.
 """
 
 #: how a project's finished work lands, as the build brief tells it
@@ -120,11 +121,18 @@ def _cards(project) -> list:
         return []
 
 
-def _card_line(c) -> str:
-    files = c.spec.get("files")
-    files = ", ".join(str(f) for f in files) if isinstance(files, list) else ""
-    about = str(c.spec.get("about") or "").strip() or "(no about line)"
-    return f"- {c.name} (read: {c.spec.get('read') or 'when-relevant'}): {about} — files: {files}"
+def _doc_lines(cards) -> List[str]:
+    """One line per knowledge document, card by card; an old one-document card is one document
+    named after the card (eki/components/knowledgedocs.py docs)."""
+    from .components import knowledge
+    out = []
+    for c in sorted(cards, key=lambda c: c.name):
+        for d in knowledge.docs(c):
+            files = ", ".join(str(f) for f in d["files"])
+            about = str(d["about"] or "").strip() or "(no about line)"
+            out.append(f"- {d['name']} (read: {d['read'] or 'when-relevant'}; card {c.name}): {about}"
+                       f" — files: {files}")
+    return out
 
 
 def landing(project) -> str:
@@ -145,12 +153,15 @@ def landing(project) -> str:
 
 
 def plan(goal: str, base: str, project, *, standing: bool = False) -> str:
-    cards = _cards(project)
-    known = KNOWLEDGE.format(cards="\n".join(_card_line(c) for c in cards)) if cards else ""
+    try:
+        lines = _doc_lines(_cards(project))
+    except Exception:  # reading the documents never breaks the plan brief
+        lines = []
+    known = KNOWLEDGE.format(cards="\n".join(lines)) if lines else ""
     return (PLAN.format(name=project["name"], path=project["path"], branch=project["branch"],
                         base=base[:12], goal=goal.strip(), split=selfbrief.SPLIT_RULES,
                         rest=REST if standing else "") + known + "\n"
-            + ENDING.format(context=CONTEXT_KEY if cards else ""))
+            + ENDING.format(context=CONTEXT_KEY if lines else ""))
 
 
 def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, base: str,

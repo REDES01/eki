@@ -71,7 +71,8 @@ def _item(c, it) -> Dict[str, Any]:
 
 
 def context(it) -> List[Dict[str, str]]:
-    """The knowledge cards the planner picked for the item ({name, why}); [] when none or unreadable."""
+    """The knowledge the planner picked for the item ({name, why}), as it named it: document names,
+    or card names from older plans (both resolve through knowledge.resolve); [] when none or unreadable."""
     try:
         picked = json.loads(it["context"] or "null")
     except (ValueError, TypeError):

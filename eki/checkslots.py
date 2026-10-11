@@ -4,15 +4,15 @@ A judge run is a command run that checks a change — gate 1's bin/check,
 gate 2's check in company, the docs check, the train's check before a swap,
 a project's own check (eki/projectwork.py).
 With the suite on every core, one check saturates the Mac: two fast checks
-beat five crawling ones. So at most `self.check_slots` (routing.json,
-default 2) run at a time; the rest stay queued. This is the engine's
+beat five crawling ones. So at most `machine.checks` (routing.json,
+eki/machinecaps.py; default max(2, cores/6)) run at a time; the rest stay queued. This is the engine's
 scheduling — the queue and self-work just queue their runs as before.
 """
 from __future__ import annotations
 
 import sqlite3
 
-from . import selfwork
+from . import machinecaps
 
 #: what a judge run's command line carries
 MARKS = ("bin/check", "eki.doccheck", "eki.candidate", "eki-judge")    # eki-judge: a project's check
@@ -23,11 +23,7 @@ def is_judge(run: sqlite3.Row) -> bool:
 
 
 def limit() -> int:
-    try:
-        n = int(selfwork.settings().get("check_slots", 2))
-    except (TypeError, ValueError):
-        n = 2
-    return max(1, n)
+    return machinecaps.settings()["checks"]
 
 
 def busy(conn: sqlite3.Connection) -> int:

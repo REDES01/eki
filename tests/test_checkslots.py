@@ -5,7 +5,7 @@ from eki import checkslots, db, engine, queue, selfwork, store
 
 def slots(home, n):
     routing = json.loads((home / "routing.json").read_text())
-    routing["self"] = {"check_slots": n}
+    routing["machine"] = {"checks": n}
     (home / "routing.json").write_text(json.dumps(routing))
 
 
@@ -49,7 +49,7 @@ def test_one_slot_runs_one_judge_and_keeps_its_threads_order(home, conn, monkeyp
     assert later not in spawned
 
 
-def test_limit_never_below_one(home):
+def test_limit_follows_machine_checks_never_below_one(home):
     slots(home, 0)
     assert checkslots.limit() == 1
     slots(home, 3)

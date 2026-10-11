@@ -15,7 +15,7 @@ import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import notify, paths, providers, queue, roles, targets
+from . import machinecaps, notify, paths, providers, queue, roles, targets
 from .routing import table
 
 NAMES = ("routing", "providers")
@@ -132,6 +132,8 @@ def _check_routing(data: Any, known: set) -> List[str]:
         out.append(f"self.autonomy is one of {', '.join(queue.MODES)}, not {me['autonomy']!r}")
     if "notify" in data:
         out += _check_notify(data["notify"])
+    if "machine" in data:
+        out += machinecaps.problems(data["machine"])
     out += roles.problems(data.get("roles"), known)
     return out
 

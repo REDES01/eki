@@ -34,7 +34,8 @@ def test_both_templates_load(tmp_path):
         comp = components.load(d, "project")
         assert comp.kind == kind
         assert "mcp_servers" not in comp.spec
-    assert components.load(tmp_path / "knowledge", "project").spec["read"] == "always"
+    know = components.load(tmp_path / "knowledge", "project")
+    assert [(d["name"], d["read"]) for d in knowledge.docs(know)] == [("decisions", "always")]
 
 
 @pytest.mark.parametrize("spec,field", [

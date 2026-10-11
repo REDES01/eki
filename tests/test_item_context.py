@@ -77,3 +77,18 @@ def test_all_picked_has_no_available_line_and_none_is_the_full_brief(proj):
     assert knowledge.brief(str(proj), context=None) == full
     assert "AGENTS.md" not in full and "Also available" not in full
     assert full.count("look here when relevant") == 3
+
+
+def test_a_stored_context_can_name_documents_of_one_shelf(proj):
+    (proj / "k").mkdir()
+    for n in ("rules", "voices", "map"):
+        (proj / "k" / f"{n}.md").write_text("x\n")
+    d = proj / "components" / "shelf"
+    d.mkdir(parents=True)
+    (d / "component.json").write_text(json.dumps({"kind": "knowledge", "about": "the shelf", "docs": [
+        {"name": n, "files": [f"k/{n}.md"], "about": f"about {n}", "read": "always" if n == "rules" else "when-relevant"}
+        for n in ("rules", "voices", "map")]}))
+    picked = knowledge.names(json.dumps([{"name": "voices", "why": "dialogue"}]))
+    out = knowledge.brief(str(proj), context=picked)
+    assert _first(out) == ["- read first: k/rules.md — rules: about rules", "- read first: k/voices.md — voices: about voices"]
+    assert out.splitlines()[-1] == "Also available if you need them: map (see components/)."

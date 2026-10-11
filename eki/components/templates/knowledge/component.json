@@ -1,6 +1,8 @@
 {
   "kind": "knowledge",
-  "about": "decisions you have made, newest first; agents follow these over older documents",
-  "files": ["design/DECISIONS.md"],
-  "read": "always"
+  "about": "documents the project's agents read",
+  "docs": [
+    {"name": "decisions", "files": ["design/DECISIONS.md"],
+     "about": "decisions you have made, newest first; agents follow these over older documents", "read": "always"}
+  ]
 }

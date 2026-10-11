@@ -12,7 +12,7 @@ def test_knowledge_explains_read():
     assert components.choice_help("knowledge") == {
         "access": ACCESS_HELP,
         "read": {"always": "Every run in this project reads it first, planned or not: "
-                 "keep it for the few cards that apply to all work.",
+                 "keep it for the few documents that apply to all work.",
                  "when-relevant": ("The planner picks it for the items that need it; other runs are "
                                    "told it exists and open it when their work touches it.")}}
 

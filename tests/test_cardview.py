@@ -133,7 +133,7 @@ def test_now_idle_in_use_held_and_waiting(conn, root):
 
 def test_now_a_busy_provider(conn, root):
     images = card(root, "images")
-    assert images.spec.get("provider") == "comfyui"
+    assert images.spec.get("target") == "comfyui:draft"          # a picture card on ComfyUI
     with db.tx(conn):
         rid = store.create_run(conn, store.create_thread(conn, "pic", None), "a cat", provider="comfyui")
     store.update_run(conn, rid, state="running", started_at=db.now())

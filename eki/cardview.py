@@ -41,8 +41,8 @@ def _state(conn: sqlite3.Connection, comp: components.Component) -> List[str]:
         held = access.holders(conn, comp.name)
         if held:
             out.append(f"{comp.name} is busy: held by {_titled(conn, held[0])}")
-    provider = comp.spec.get("provider")
-    if not working and isinstance(provider, str) and access._provider_busy(conn, provider):
+    provider = access.provider_of(comp.spec)              # a picture card's target's, or the old "provider"
+    if not working and provider and access._provider_busy(conn, provider):
         out.append(f"{_PROVIDER.get(provider, provider)} is busy")
     n = uses.waiting(conn, comp.name)
     if n:

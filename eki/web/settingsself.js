@@ -11,7 +11,7 @@
     return `<div data-self>${group("eki self",
         line("Autonomy", `<select class="set-in" data-f="autonomy">${MODES.map((m) => opt(m, me.autonomy || "propose")).join("")}</select>`,
           "propose waits for you; apply queues fit items by itself") +
-        line("Agents at once", `<input class="set-in" type="number" min="1" max="32" data-f="agents" value="${esc(mach(d).agents == null ? "" : mach(d).agents)}" placeholder="12">`,
+        line("Agents at once", `<input class="set-in" type="number" min="1" max="64" data-f="agents" value="${esc(mach(d).agents == null ? "" : mach(d).agents)}" placeholder="12">`,
           "how many agents may build at the same time across all projects (each project's workflow card can cap its own)") +
         line("Test runs at once", `<input class="set-in" type="number" min="1" max="32" data-f="checks" value="${esc(mach(d).checks == null ? "" : mach(d).checks)}" placeholder="3">`,
           "how many checks / test runs may run at the same time; this is what loads the Mac"))}</div>`;
@@ -29,7 +29,7 @@
       return false;
     }
     if (!d.machine || typeof d.machine !== "object") d.machine = {};
-    const n = Math.max(1, Math.min(32, Math.round(+el.value)));
+    const n = Math.max(1, Math.min(f === "agents" ? 64 : 32, Math.round(+el.value)));
     if (el.value === "" || !isFinite(n)) delete d.machine[f]; else d.machine[f] = n;
     return false;
   }

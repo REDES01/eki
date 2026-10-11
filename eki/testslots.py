@@ -49,7 +49,7 @@ def held() -> int:
 
 def _take() -> int:
     """Take a free lock (a new one if every one is held); its open fd holds it."""
-    for i in range(machinecaps.MOST * 2):
+    for i in range(machinecaps.MOST["checks"] * 2):
         fd = os.open(folder() / f"{i}.lock", os.O_RDWR | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

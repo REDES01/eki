@@ -158,6 +158,14 @@ argv in a folder and records its output as events, done / failed /
 interrupted like any run, resumed by running again — a check is
 idempotent. It's a job runner, not a harness.
 
+When a build run ends and its item moves on to judge (self items and
+project items alike), eki looks for processes still running with their
+working directory inside the item's worktree (`eki/leftover.py`): the brief
+says never to leave background jobs, so any it finds are killed (SIGTERM,
+then SIGKILL) and said on the board and as a note in the item's thread —
+`the build left background tasks running — killed: <pid> <command>` — and
+judging goes on unchanged.
+
 ## Worktrees: made, kept, removed
 
 Every item, draft, plan, gate 2 and train check works in a worktree under

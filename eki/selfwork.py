@@ -20,8 +20,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, db, deplinks, doccheck, integration, notify, paths, projectbrief, projects, projectwork, review,
-               scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates, workspace)
+from . import (builds, db, deplinks, doccheck, integration, leftover, notify, paths, projectbrief, projects,
+               projectwork, review, scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates,
+               workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -194,19 +195,25 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return []
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     project = projectwork.project_of(conn, goal)
+    killed = leftover.kill(leftover.find(it["worktree"])) if it["worktree"] else []
+    left = (f"item {it['id']}: the build left background tasks running — killed: "
+            + ", ".join(f"{p['pid']} {p['cmd']}" for p in killed)) if killed else None
     with db.tx(conn):
         if conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()["state"] != "building":
             return []
+        if left:                                     # said on the board and in the thread; judging goes on
+            store.add_event(conn, run["id"], run["attempt"], "note", {"text": left})
+        said = [left] if left else []
         if run["state"] != "done":
             _set(conn, it["id"], state="left", error=f"the build run ended {run['state']}: {run['error'] or ''}")
-            return [f"item {it['id']}: left — the build run ended {run['state']}"]
+            return said + [f"item {it['id']}: left — the build run ended {run['state']}"]
         relinked = deplinks.restore(it["worktree"], project["path"] if project is not None else repo())
         if not relinked:
-            return _built(conn, it, run, goal, project)
+            return said + _built(conn, it, run, goal, project)
         why = (f"relinked {', '.join(relinked)}: the agent installed inside the worktree;"
                f" dependencies come from the project folder")
         _set(conn, it["id"], why=why)
-        return [f"{line} — {why}" for line in _built(conn, it, run, goal, project)]
+        return said + [f"{line} — {why}" for line in _built(conn, it, run, goal, project)]
 
 
 def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sqlite3.Row,

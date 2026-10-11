@@ -64,7 +64,7 @@ def test_cards_carry_title_explain_live_and_overview(conn, proj):
     v = cards["voice"]
     assert v["title"] == "Tool" and v["explain"] == kindtext.explain("service")
     assert isinstance(v["live"], dict)
-    assert v["overview"] == {"used_by": {"stages": [], "line": "", "runs": []}, "now": ["idle"]}
+    assert v["overview"] == {"used_by": {"stages": [], "line": "not used yet", "runs": []}, "now": ["idle"]}
     b = cards["bad"]
     assert b["title"] == "Card" and b["explain"] == "" and b["live"] == {}
     assert b["overview"]["used_by"] == {"stages": [], "line": "", "runs": []}

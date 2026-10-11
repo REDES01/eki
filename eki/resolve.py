@@ -3,7 +3,8 @@
 
 The queue calls `start` when an item's rebase onto its predicted head stops
 on a conflict: a resolve run starts in the item's own worktree, mid-rebase,
-told what the item is for and what the head changed in the conflicted files.
+told what the item is for, what the head changed in the conflicted files and
+what each landed change was for (eki/landed.py).
 `tick` moves on every item whose resolve or gate-1 run has ended: eki
 continues the rebase, refuses a result with markers left or not on top of
 the head, runs gate 1 again (a project item: its project's check, or none
@@ -18,7 +19,7 @@ import sqlite3
 import subprocess
 from typing import List
 
-from . import db, projects, projectwork, rebase, selfbrief, selfwork, store
+from . import db, landed, projects, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -32,16 +33,18 @@ DIFF_LINES = 150
 def start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List[str]) -> str:
     """A resolve run for `it`, stopped mid-rebase onto `head` on `conflicted`. Returns the run id."""
     changes = head_changes(it, head, conflicted)
+    intents = landed.intents(conn, it, head, conflicted)
     with db.tx(conn):
-        return _start(conn, it, head, conflicted, changes)
+        return _start(conn, it, head, conflicted, changes, intents)
 
 
 def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List[str],
-           changes: str) -> str:
+           changes: str, intents: str) -> str:
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-    prompt = selfbrief.resolve(goal=goal["text"] if goal else "", title=it["title"], spec=it["spec"],
-                               summary=it["summary"] or "", head=head, conflicted=conflicted,
-                               head_changes=changes)
+    prompt = resolvebrief.resolve(goal=goal["text"] if goal else "", title=it["title"], spec=it["spec"],
+                                  summary=it["summary"] or "", head=head, conflicted=conflicted,
+                                  head_changes=changes, landed=intents,
+                                  project=projectwork.project_of(conn, goal))
     owner = goal["owner"] if goal else "eki"
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if owner == "you" else "background")
@@ -107,8 +110,8 @@ def _is_ancestor(where: str, commit: str, of: str) -> bool:
 
 
 def resolve_runs(conn: sqlite3.Connection, it: sqlite3.Row) -> int:
-    first = selfbrief.RESOLVE.splitlines()[0]
-    return sum(1 for r in store.thread_runs(conn, it["thread_id"]) if (r["prompt"] or "").startswith(first))
+    return sum(1 for r in store.thread_runs(conn, it["thread_id"])
+               if (r["prompt"] or "").startswith(resolvebrief.FIRST_LINE))
 
 
 def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
@@ -134,10 +137,11 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if resolve_runs(conn, it) >= MAX_RUNS:
             return _leave(conn, it, f"still conflicted after {MAX_RUNS} resolve runs: {', '.join(stopped)}")
         changes = head_changes(it, head, stopped)
+        intents = landed.intents(conn, it, head, stopped)
         with db.tx(conn):
             if not _still(conn, it, "resolving"):
                 return []
-            rid = _start(conn, it, head, stopped, changes)
+            rid = _start(conn, it, head, stopped, changes, intents)
         return [f"item {it['id']}: stopped again on {', '.join(stopped)}; resolving ({rid[:8]})"]
     left = rebase.markers(wt, head)
     if left:

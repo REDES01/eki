@@ -183,7 +183,11 @@ A change that can't be rebased *mechanically* isn't in the queue. If C's
 rebase onto M+A+B conflicts, C is pulled out of line; the changes behind it
 get their predicted bases recomputed without it and go on. A **resolve run**
 starts for C, in C's own worktree, mid-rebase against M+A+B, told what C is
-for and what A and B did in the conflicted files. When it's done, eki
+for, what A and B did in the conflicted files and what A and B were *for*
+(their goals, specs and builders' summaries; a person's own commit by its
+message). It must keep every intent and say in its summary how each survived;
+when two truly contradict it stops with `ITEM: person` rather than pick one,
+and C is left for you. When it's done, eki
 continues the rebase, refuses a result with markers left or not on top of
 the head it resolved against, runs gate 1 on it again, and C rejoins at the
 back — cleanly now, since it contains A and B. Many changes resolve at once,

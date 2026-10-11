@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import db, rebase, resolve, selfbrief, selfwork, store, workspace
+from eki import db, rebase, resolve, resolvebrief, selfwork, store, workspace
 from eki.workspace import git
 from conftest import run_inline
 
@@ -175,7 +175,7 @@ def test_a_second_stop_gets_another_run_and_three_are_the_most(conn, repo, confl
     assert cur["state"] == "resolving" and cur["run_id"] != rid, said
     assert rebase.in_progress(wt) and resolve.resolve_runs(conn, cur) == 2
     with db.tx(conn):                                                 # pretend two ran already
-        store.create_run(conn, cur["thread_id"], selfbrief.RESOLVE.splitlines()[0])
+        store.create_run(conn, cur["thread_id"], resolvebrief.FIRST_LINE)
     run_inline(conn, cur["run_id"])
     monkeypatch.delenv("EKI_FAKE_TOUCH")
     rebase.abort(wt)
@@ -187,7 +187,7 @@ def test_a_second_stop_gets_another_run_and_three_are_the_most(conn, repo, confl
 
 
 def test_the_brief():
-    text = selfbrief.resolve(goal="g", title="Do the thing", spec="s", summary="", head="abcdef1234567890",
-                             conflicted=["eki/x.py"], head_changes="$ git log\nabc fix")
+    text = resolvebrief.resolve(goal="g", title="Do the thing", spec="s", summary="", head="abcdef1234567890",
+                                conflicted=["eki/x.py"], head_changes="$ git log\nabc fix", landed="")
     assert "Do the thing" in text and "abcdef123456" in text and "conflict" in text
     assert "eki/x.py" in text and "ITEM: done" in text and "--continue" in text

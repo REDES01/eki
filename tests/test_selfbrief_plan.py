@@ -1,6 +1,6 @@
 """The plan and build briefs: wide, shallow plans of short turns, and builders
 that run only their own tests (eki runs the whole check after the turn)."""
-from eki import projectbrief, projects, selfbrief
+from eki import projectbrief, projects, resolvebrief, selfbrief
 
 BASE = "0123456789abcdef"
 
@@ -45,8 +45,8 @@ def test_the_builder_runs_only_its_own_tests():
 
 
 def test_the_resolver_runs_only_its_own_tests():
-    r = _flat(selfbrief.resolve(goal="g", title="t", spec="s", summary="", head=BASE,
-                                conflicted=["eki/x.py"], head_changes=""))
+    r = _flat(resolvebrief.resolve(goal="g", title="t", spec="s", summary="", head=BASE,
+                                   conflicted=["eki/x.py"], head_changes="", landed=""))
     assert "run `bin/check`" not in r.replace("don't run the whole suite (plain `bin/check`)", "")
     assert "leave it green" not in r
     assert "run the tests for the files you touched" in r

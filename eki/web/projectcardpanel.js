@@ -2,7 +2,8 @@
 // kind and about): its state, settings as a form built from component.json (each change saved and
 // checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
 // fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice in its open list,
-// card.choice_help), an agent's prompt.md and its bare switch,
+// card.choice_help), a free-text setting its kind explains (card.field_help) a text field with that line
+// under it even when the spec lacks it, an agent's prompt.md and its bare switch,
 // Run (eki use <name> <args> through the engine, polled every second), its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
 // read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
 // A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro, ctx), close(), keys},
@@ -59,10 +60,12 @@
     const own = (kindPart() && kindPart().keys) || [];      // drawn by the kind's own part
     const keys = Object.keys(spec).filter((k) => k !== "kind" && k !== "pool" && !own.includes(k));
     for (const k of Object.keys(choices())) if (!keys.includes(k) && !own.includes(k) && k in defs) keys.push(k);
+    for (const k of Object.keys(fieldHelp())) if (!keys.includes(k) && !own.includes(k)) keys.push(k);
     if (isAgent() && !keys.includes("bare")) keys.push("bare");
-    return keys.map((k) => ({ key: k, value: k in spec ? spec[k] : k in defs ? defs[k] : k === "bare" ? false : undefined }));
+    return keys.map((k) => ({ key: k, value: k in spec ? spec[k] : k in defs ? defs[k] : k === "bare" ? false : k in fieldHelp() ? "" : undefined }));
   }
 
+  const fieldHelp = () => P.card.field_help || {};
   const help = (key) => (P.card.choice_help || {})[key] || {};
 
   // a value outside the choices stays shown on the button, marked, until another is picked
@@ -93,7 +96,7 @@
       : P.ro ? `<div class="pj-sub">Read-only: ${esc(P.ro)}.</div>` : "";
     const rows = fields().map((f) => `<div class="pp-field">
         <div class="pp-label">${esc(f.key)}${Array.isArray(f.value) ? ' <span class="dim">one per line</span>' : ""}</div>
-        <div class="pp-ctl">${control(f, off)}${P.problems[f.key] ? `<div class="pj-err">${esc(P.problems[f.key])}</div>` : ""}</div></div>`);
+        <div class="pp-ctl">${control(f, off)}${fieldHelp()[f.key] ? `<div class="dim pp-help">${esc(fieldHelp()[f.key])}</div>` : ""}${P.problems[f.key] ? `<div class="pj-err">${esc(P.problems[f.key])}</div>` : ""}</div></div>`);
     return `${note}<div class="pp-field"><div class="pp-label">kind</div><div class="pp-ctl"><code>${esc(c.kind || "?")}</code></div></div>
       ${rows.join("")}${P.err.settings ? `<div class="pj-err">${esc(P.err.settings)}</div>` : ""}`;
   }

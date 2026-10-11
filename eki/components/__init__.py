@@ -119,6 +119,18 @@ def choice_help(kind: str) -> Dict[str, Dict[str, str]]:
     return out
 
 
+def field_help(kind: str) -> Dict[str, str]:
+    """Setting key -> one line on what it means, for the free-text settings a kind declares in its
+    FIELD_HELP (the card shows each as a text field even when the spec lacks it). Never raises."""
+    try:
+        own_ = getattr(kind_module(kind), 'FIELD_HELP', None) if kind in KINDS else None
+    except Exception:
+        own_ = None
+    if not isinstance(own_, dict):
+        return {}
+    return {str(k): str(v) for k, v in own_.items()}
+
+
 def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[Path]:
     """The folder whose components/ a run in `folder` sees: the main checkout of a worktree,
     and for a GitHub clone eki keeps, the person's own folder recorded on its project row."""

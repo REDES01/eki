@@ -2,8 +2,8 @@
 // plan and merge stay dropdowns in its Settings): the checks as toggles in the order they run, each with
 // one line on what it does — self always on; on eki's own project the card's `locked` checks
 // (workflow.LOCKED, from eki/api_cards.py) shown on and fixed; train only for eki — then the check
-// command when command or batch is on, the target picker (settingstarget.js) when router is off, and
-// parallel. Each change is saved like any setting (ctx.save → POST …/cards/<name> {"settings": …}) and
+// command when command or batch is on, the target picker (settingstarget.js) when router is off,
+// after_merge (a build eki runs in the person's folder after it lands) when merge is auto, and parallel. Each change is saved like any setting (ctx.save → POST …/cards/<name> {"settings": …}) and
 // what the server objects to shows beside its field. Ticking command or batch with no command saved
 // waits for the command, and picking a target after "router: off" was refused for want of one turns it off.
 (function () {
@@ -72,6 +72,14 @@
       ${pick}<div class="dim">router off: everything goes here (provider → model → effort)</div>${problem("target")}</div></div>`;
   }
 
+  const AFTER = "a shell command eki runs in your folder after it lands a change (merge auto), e.g. npm run build; empty: none";
+  function afterMerge() {
+    if ((spec().merge || "auto") !== "auto") return "";
+    return `<div class="pp-field"><div class="pp-label">after_merge</div><div class="pp-ctl">
+      <input class="set-in cw-after" data-cw="after_merge" value="${esc(spec().after_merge || "")}" placeholder="npm run build" spellcheck="false"${off() ? " disabled" : ""}>
+      <div class="dim">${esc(AFTER)}</div>${problem("after_merge")}</div></div>`;
+  }
+
   function parallel() {
     const n = spec().parallel == null ? PARALLEL : spec().parallel;
     return `<div class="pp-field"><div class="pp-label">parallel</div><div class="pp-ctl">
@@ -81,7 +89,7 @@
 
   function html() {
     return `<div class="cw"><div class="cw-checks">${checks()}</div>${problem("checks")}${problem("")}
-      ${command()}${target()}${parallel()}</div>`;
+      ${command()}${target()}${afterMerge()}${parallel()}</div>`;
   }
 
   async function loadModels() {
@@ -122,6 +130,7 @@
       W.pending = null;
       return save(set);
     }
+    if (t.dataset && t.dataset.cw === "after_merge") return save({ after_merge: t.value.trim() });
     if (t.dataset && t.dataset.cw === "parallel") return save({ parallel: t.value.trim() === "" ? null : Number(t.value) });
     const wrap = t.closest && t.closest("[data-tgt]");
     if (wrap && window.settingsTarget) {
@@ -145,5 +154,5 @@
 
   function close() { Object.assign(W, { el: null, card: null, pending: null, last: "" }); }
 
-  window.projectCardKinds.workflow = { title: "Workflow", keys: ["checks", "command", "target", "parallel"], draw, close, CHECKS };
+  window.projectCardKinds.workflow = { title: "Workflow", keys: ["checks", "command", "target", "after_merge", "parallel"], draw, close, CHECKS };
 })();

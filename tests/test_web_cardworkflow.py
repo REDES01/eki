@@ -143,7 +143,7 @@ def toggles(html):
 def test_six_checks_in_order_with_self_on_and_fixed(tmp_path):
     got = run(tmp_path, card(checks=["self", "review"]))
     html = got["html"][0]
-    assert got["title"] == "Workflow" and got["keys"] == ["checks", "command", "target", "parallel"]
+    assert got["title"] == "Workflow" and got["keys"] == ["checks", "command", "target", "after_merge", "parallel"]
     assert [t[0] for t in toggles(html)] == ORDER
     assert toggles(html)[:2] == [("self", True, True), ("review", True, False)]
     assert ("command", False, False) in toggles(html)
@@ -207,6 +207,30 @@ def test_parallel_saves_a_number_and_problems_show(tmp_path):
     assert "parallel must be a whole number ≥ 1" in html and "train protects eki itself" in html
 
 
+AFTER = ("a shell command eki runs in your folder after it lands a change (merge auto), "
+         "e.g. npm run build; empty: none")
+
+
+def test_after_merge_shows_with_merge_auto_and_its_help(tmp_path):
+    html = run(tmp_path, card(after_merge="npm run build"))["html"][0]
+    assert 'data-cw="after_merge" value="npm run build"' in html and AFTER in html
+    c = card()
+    del c["spec"]["merge"]                                         # unset is auto
+    assert 'data-cw="after_merge" value=""' in run(tmp_path, c)["html"][0]
+    for merge in ("person", "pr"):
+        html = run(tmp_path, card(merge=merge, after_merge="npm run build"))["html"][0]
+        assert 'data-cw="after_merge"' not in html and AFTER not in html, merge
+
+
+def test_after_merge_saves_trimmed_and_problems_show_beside_it(tmp_path):
+    got = run(tmp_path, card(), {"field": "after_merge", "value": "  npm run build "})
+    assert got["saved"] == [{"after_merge": "npm run build"}]
+    got = run(tmp_path, card(after_merge="x"), {"field": "after_merge", "value": "  "})
+    assert got["saved"] == [{"after_merge": ""}]
+    html = run(tmp_path, card(problems={"after_merge": "after_merge must be a shell command"}))["html"][0]
+    assert re.search(r'data-cw="after_merge".*?after_merge must be a shell command', html, re.S)
+
+
 def test_read_only_disables_everything_and_saves_nothing(tmp_path):
     got = run(tmp_path, card(checks=["self", "command"], command="x", editable=False), {"check": "review", "on": True})
     assert all(dis for _, _, dis in toggles(got["html"][0]))
@@ -226,7 +250,7 @@ def test_the_panel_draws_the_part_and_no_checks_textarea(tmp_path):
     assert got.returncode == 0, got.stderr
     out = json.loads(got.stdout)
     assert '<h4 class="pp-h">Workflow</h4>' in out["frame"] and '<h4 class="pp-h">Run</h4>' not in out["frame"]
-    for k in ("checks", "command", "target", "parallel"):
+    for k in ("checks", "command", "target", "after_merge", "parallel"):
         assert f'data-key="{k}"' not in out["settings"], k
     for k in ("router", "plan", "merge"):
         assert f'data-key="{k}"' in out["settings"], k

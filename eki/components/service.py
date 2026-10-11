@@ -12,6 +12,9 @@
         above with EKI_COMPONENT_URL set; stopped after `idle_stop` minutes.
     {"kind": "service", "about": "…", "provider": "comfyui"}
         one turn of that eki provider; the pictures it makes are the paths.
+    {"kind": "service", "about": "…", "target": "comfyui:<workflow>", "out": "assets/generated/<card>/"}
+        a picture card: a ComfyUI workflow (eki/providers/comfyui_workflows.py)
+        and the folder, relative to the project, its pictures are saved in.
 Any form may add `"mcp": {"command", "args", "env"}` or `{"url"}` (an mcp card's
 "server"): this project's runs get that server under the card's name, and a run
 using a command server holds the card like a call does (mcpserver.servers_of).
@@ -42,6 +45,30 @@ def _argv(v: Any) -> List[str]:
     return [str(a) for a in v] if isinstance(v, list) else []
 
 
+def _picture(spec: dict) -> List[str]:
+    from .. import targets
+    errs = []
+    try:
+        targets.parse(spec.get("target"))
+    except ValueError as e:
+        errs.append(f'"target" must name a workflow, e.g. "comfyui:draft" ({e})')
+    out = spec.get("out")
+    if not isinstance(out, str) or not out.strip() or Path(out).is_absolute() or ".." in Path(out).parts \
+            or out.strip().startswith("~"):
+        errs.append('"out" must be a folder inside the project, e.g. "assets/generated/portrait/"')
+    return errs
+
+
+def provider_name(spec: dict) -> str:
+    """The eki provider a provider-form or picture card runs on ("" for the others)."""
+    if isinstance(spec.get("provider"), str):
+        return spec["provider"]
+    if "target" in spec:
+        from .. import targets
+        return targets.provider_of(spec["target"])
+    return ""
+
+
 def validate(spec: dict, folder: Path) -> List[str]:
     errs = _calls(spec)
     if "mcp" in spec:
@@ -51,9 +78,12 @@ def validate(spec: dict, folder: Path) -> List[str]:
 
 
 def _calls(spec: dict) -> List[str]:
+    if "target" in spec and not any(k in spec for k in ("run", "serve", "provider")):
+        return _picture(spec)
     forms = [k for k in ("run", "serve", "provider") if k in spec]
     if not forms:
-        return ['a service needs "run", or "serve" + "health" + "call", or "provider"']
+        return ['a service needs "run", or "serve" + "health" + "call", or "provider", '
+                'or "target" + "out" (a picture card)']
     form = "provider" if "provider" in forms else forms[0]     # the form a call takes: provider, run, serve
     if form == "provider":
         return [] if isinstance(spec["provider"], str) and spec["provider"].strip() else \
@@ -136,6 +166,8 @@ def call(comp: Component, c: Call) -> Result:
     spec = comp.spec
     if "provider" in spec:
         return _provider(comp, c)
+    if "target" in spec and "run" not in spec and "serve" not in spec:
+        return Result(error="picture cards: not callable yet")
     if "run" in spec:
         argv = _argv(spec["run"])
         why = _placeholder(comp, argv, "run")
@@ -154,19 +186,19 @@ def call(comp: Component, c: Call) -> Result:
 
 def _managed(comp: Component) -> str:
     from .. import models
-    name = comp.spec.get("provider", "")
-    return name if name in models.managed() else ""
+    name = provider_name(comp.spec)
+    return name if name and name in models.managed() else ""
 
 
 def is_up(comp: Component) -> bool:
     spec = comp.spec
-    if "provider" in spec:
+    if provider_name(spec):
         from .. import models, providers
         name = _managed(comp)
         if name:
             return bool(models.status(name)["up"])
         try:
-            return bool(providers.get(spec["provider"]).available()[0])
+            return bool(providers.get(provider_name(spec)).available()[0])
         except KeyError:
             return False
     if "serve" in spec:
@@ -175,7 +207,7 @@ def is_up(comp: Component) -> bool:
 
 
 def stop(comp: Component) -> bool:
-    if "provider" in comp.spec:
+    if provider_name(comp.spec):
         from .. import models
         name = _managed(comp)
         if not name or not models.status(name)["managed"]:
@@ -193,8 +225,10 @@ def notes(comp: Component) -> List[str]:
     for k in ("run", "call", "serve"):
         if k in spec and _placeholder(comp, _argv(spec[k]), k):
             out.append(f'"{k}" is a placeholder: fill it in before calling')
-    if "provider" in spec:
-        out.append(f"runs on eki's {spec['provider']} provider")
+    if provider_name(spec):
+        out.append(f"runs on eki's {provider_name(spec)} provider")
+    if "target" in spec and "out" in spec:
+        out.append(f"draws with {spec['target']}, saves into {spec['out']}")
     m = spec.get("mcp")
     if isinstance(m, dict):
         out.append(f"MCP over url: {m.get('url')}, not held" if "url" in m else

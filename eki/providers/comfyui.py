@@ -6,14 +6,13 @@ module only talks HTTP: it posts a graph in API format to `/prompt`, polls
 `/history/<id>` and fetches what was made through `/view` into
 `~/.eki/images/<run>/`.
 
-There are five graphs, one per row (`comfyui_graphs.py`): a quick draft, a
-high-quality picture, an anime picture, an edit and an upscale. The run's
-row comes in `turn.extra["row"]`. An edit or upscale works on a source
-picture, `turn.images[0]`, which is uploaded to `/upload/image` first. An
-entry may name its own graphs and size:
-
-    {"kind": "comfyui", "base_url": "http://127.0.0.1:8188",
-     "graphs": {"image-hq": "~/my-graph.json"}, "width": 1024, "height": 1024}
+It draws with a workflow from the list under the provider
+(`comfyui_workflows.py`, `~/.eki/comfyui/workflows.json`): the run's target
+names it (`comfyui:hq` → `turn.extra["model"]`), else the run's row picks it
+(`image-hq` → hq). The prompt is the workflow's `prompt` input, or a JSON
+object `{"inputs": {"prompt": ..., "seed": 7}}` sets several; an input the
+workflow doesn't have fails the run. A workflow with an `image` input works
+on a source picture, `turn.images[0]`, uploaded to `/upload/image` first.
 
 The prompt id is the session: a run eki restarted mid-drawing polls it
 again instead of uploading or drawing twice.
@@ -22,7 +21,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import random
 import re
 import uuid
 import time
@@ -33,13 +31,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .. import paths
-from . import comfyui_graphs
+from . import comfyui_workflows as wf
 from .base import Emit, Outcome, Provider, Turn
 
 POLL = 1.0
-SOURCED = ("image-edit", "image-upscale")          # rows that work on a source picture
 NO_SOURCE = "no picture to edit — attach one or draw one first"
-VERBS = {"image-edit": "Edited", "image-upscale": "Upscaled"}
+VERBS = {"edit": "Edited", "upscale": "Upscaled"}           # by workflow id; the rest "Drew"
 # what an upscale request says when it says nothing about the picture itself
 UPSCALE_ONLY = re.compile(r"\b(please|can|could|you|would|it|this|that|the|a|an|picture|image|photo|"
                           r"upscale|upscaled|enlarge|make|higher|resolution|bigger|version|of|to|by|"
@@ -114,40 +111,56 @@ class Comfyui(Provider):
 
     # ---- the workflow --------------------------------------------------------------------
 
-    def graph(self, row: Optional[str], prompt: str, image: Optional[str] = None) -> Dict[str, Any]:
-        """The row's graph, filled in (`image` is the uploaded source's name)."""
-        if row == "image-upscale" and not UPSCALE_ONLY.sub("", prompt).strip(" \t\n.,!?"):
-            prompt = "high detail"
-        values: Dict[str, Any] = {"{{prompt}}": prompt, "{{seed}}": random.randint(0, 2 ** 32 - 1),
-                                  "{{width}}": int(self.cfg.get("width", 1024)),
-                                  "{{height}}": int(self.cfg.get("height", 1024))}
-        if image is not None:
-            values["{{image}}"] = image
-        return comfyui_graphs.load(row, self.cfg, values)
+    def workflow(self, turn: Turn) -> str:
+        """The workflow this turn draws with: the target's, else the row's."""
+        return str(turn.extra.get("model") or "") or wf.for_row(turn.extra.get("row"))
+
+    def graph(self, wid: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """The workflow's graph filled in (`image` is the uploaded source's name)."""
+        prompt = str(inputs.get("prompt") or "")
+        if wid == wf.ROW_WORKFLOWS["image-upscale"] and "prompt" in inputs \
+                and not UPSCALE_ONLY.sub("", prompt).strip(" \t\n.,!?"):
+            inputs = {**inputs, "prompt": "high detail"}
+        return wf.build(wid, inputs)
 
     # ---- a turn --------------------------------------------------------------------------
 
     def take(self, turn: Turn, emit: Emit) -> Outcome:
         from ..worker import CARRY_ON         # the worker imports the providers
         pid: Optional[str] = None
-        row = turn.extra.get("row")
-        kind, model = comfyui_graphs.kind_of(row)
-        detail = turn.prompt
+        wid = self.workflow(turn)
+        inputs = _inputs(turn.prompt)
+        detail = str(inputs.get("prompt") or turn.prompt)
+        try:
+            info = wf.describe(wid, look=False)
+        except KeyError:
+            return Outcome("failed", f"no ComfyUI workflow named {wid!r}")
+        label = info["label"]
         try:
             if turn.resume and (turn.prompt == CARRY_ON or not turn.prompt.strip()):
                 # eki restarted mid-drawing: the same picture, not a second one
                 if self._queued(turn.resume) or self._entry(turn.resume):
-                    pid, detail = turn.resume, "picture"
+                    pid, detail, inputs = turn.resume, "picture", {}
                 else:
                     emit("note", {"text": "ComfyUI no longer knows that drawing; nothing to carry on"})
                     return Outcome("failed", "ComfyUI lost the drawing (was it restarted?)")
             if pid is None:
-                image = None
-                if row in SOURCED:
-                    if not turn.images:
+                if info["error"]:
+                    return Outcome("failed", f"ComfyUI workflow {wid}: {info['error']}")
+                try:
+                    wf.check_inputs(wid, inputs)
+                except ValueError as e:
+                    return Outcome("failed", str(e))
+                if info["needs_source"]:
+                    src = inputs.get("image")
+                    src = src if isinstance(src, str) and Path(src).expanduser().is_file() else \
+                        (turn.images[0] if turn.images else None)
+                    if src is None and "image" not in inputs:
                         return Outcome("failed", NO_SOURCE)
-                    image = self._upload(turn.images[0], turn.run_id or "run")
-                pid = self._post_prompt(self.graph(row, turn.prompt, image))
+                    if src is not None:
+                        inputs = {**inputs, "image": self._upload(str(Path(src).expanduser()),
+                                                                  turn.run_id or "run")}
+                pid = self._post_prompt(self.graph(wid, inputs))
                 emit("session", {"id": pid})
             entry = self._wait(pid, turn)
             if entry is None:
@@ -159,13 +172,12 @@ class Comfyui(Provider):
             return Outcome("failed", f"ComfyUI at {self.base}: {e}")
         if not made:
             return Outcome("failed", "ComfyUI finished but made no picture")
-        what = f"{kind} · {model}"
+        row = turn.extra.get("row")
         for path in made:
-            emit("tool", {"name": "image", "detail": f"{detail} ({what})", "path": str(path),
-                          "prompt": detail, "row": row or comfyui_graphs.DEFAULT_ROW,
-                          "kind": kind, "model": model})
-        verb = VERBS.get(row or "", "Drew")
-        emit("text", {"text": f"{verb} {len(made)} picture{'s' if len(made) > 1 else ''} ({what}):\n"
+            emit("tool", {"name": "image", "detail": f"{detail} ({label})", "path": str(path),
+                          "prompt": detail, "workflow": wid, "inputs": inputs, "row": row or "image"})
+        verb = VERBS.get(wid, "Drew")
+        emit("text", {"text": f"{verb} {len(made)} picture{'s' if len(made) > 1 else ''} ({label}):\n"
                               + "\n".join(str(p) for p in made)})
         return Outcome("done", finished=True)
 
@@ -204,6 +216,19 @@ class Comfyui(Provider):
                 dest.write_bytes(data)
                 made.append(dest.resolve())
         return made
+
+
+def _inputs(prompt: str) -> Dict[str, Any]:
+    """`{"inputs": {...}}` sets several inputs; any other prompt is the prompt."""
+    text = (prompt or "").strip()
+    if text.startswith("{"):
+        try:
+            got = json.loads(text)
+        except ValueError:
+            got = None
+        if isinstance(got, dict) and isinstance(got.get("inputs"), dict):
+            return dict(got["inputs"])
+    return {"prompt": prompt}
 
 
 def _refusal(body: bytes) -> str:

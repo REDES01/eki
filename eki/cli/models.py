@@ -15,9 +15,9 @@ def add(p) -> None:
 
 
 def _pictures() -> list:
-    """One line per picture kind ComfyUI draws, e.g. "draft: flux-2-klein-4b"."""
-    from ..providers.comfyui_graphs import GRAPHS
-    return [f"  {kind}: {model}" for _, kind, model in GRAPHS.values()]
+    """One line per ComfyUI workflow, e.g. "draft: FLUX.2 klein — draft"."""
+    from ..providers import comfyui_workflows
+    return [f"  {e['id']}: {e.get('label') or e['id']}" for e in comfyui_workflows.entries()]
 
 
 def run(args) -> int:

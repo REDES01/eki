@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from eki.providers.base import Turn
-from eki.providers import comfyui_graphs
+from eki.providers import comfyui_workflows as wf
 from eki.providers.comfyui import NO_SOURCE, Comfyui
 from eki.worker import CARRY_ON
 
@@ -128,37 +128,56 @@ def test_draws_a_picture_into_the_run_folder(comfy, home):
     tools = [d for k, d in events if k == "tool"]
     assert len(tools) == 1                                  # the preview isn't kept
     path = tools[0]["path"]
-    assert tools[0]["name"] == "image" and tools[0]["detail"] == "draw a lighthouse (draft · flux-2-klein-4b)"
+    assert tools[0]["name"] == "image" and tools[0]["detail"] == "draw a lighthouse (FLUX.2 klein — draft)"
+    assert tools[0]["workflow"] == "draft" and tools[0]["inputs"] == {"prompt": "draw a lighthouse"}
     assert path == str((home / "images" / "r1" / "eki_00001_.png").resolve())
     assert open(path, "rb").read() == PNG
-    assert any(k == "text" and d["text"].startswith("Drew 1 picture (draft · flux-2-klein-4b)")
+    assert any(k == "text" and d["text"].startswith("Drew 1 picture (FLUX.2 klein — draft)")
                and path in d["text"] for k, d in events)
 
 
 def test_the_placeholders_are_filled(comfy):
-    comfy.provider.cfg["width"] = 768
     run(comfy.provider, Turn(prompt='a "quoted" cat', history=[], run_id="r1"))
     graph = comfy.posted[0]["prompt"]
     assert "{{" not in json.dumps(graph)
     assert graph["4"]["inputs"]["text"] == 'a "quoted" cat'
-    assert graph["9"]["inputs"]["width"] == 768 and graph["9"]["inputs"]["height"] == 1024
+    assert graph["9"]["inputs"]["width"] == 1024 and graph["9"]["inputs"]["height"] == 1024
     assert isinstance(graph["10"]["inputs"]["noise_seed"], int)
 
 
-def test_a_workflow_of_its_own(comfy, tmp_path):
-    wf = tmp_path / "mine.json"
-    wf.write_text(json.dumps({"1": {"class_type": "X", "inputs": {"t": "a {{prompt}}!", "s": "{{seed}}"}}}))
-    comfy.provider.cfg["workflow"] = str(wf)
-    run(comfy.provider, Turn(prompt="fox", history=[], run_id="r1"))
-    assert comfy.posted[0]["prompt"]["1"]["inputs"]["t"] == "a fox!"
+def test_json_inputs_set_several(comfy):
+    out, events = run(comfy.provider, Turn(prompt=json.dumps({"inputs": {"prompt": "fox", "width": 768, "seed": 7}}),
+                                           history=[], run_id="r1"))
+    assert out.state == "done"
+    graph = comfy.posted[0]["prompt"]
+    assert graph["4"]["inputs"]["text"] == "fox" and graph["9"]["inputs"]["width"] == 768
+    assert graph["9"]["inputs"]["height"] == 1024 and graph["10"]["inputs"]["noise_seed"] == 7
+    tool = [d for k, d in events if k == "tool"][0]
+    assert tool["prompt"] == "fox" and tool["inputs"]["seed"] == 7
 
 
-def test_a_graphs_override_is_used(comfy, tmp_path):
-    wf = tmp_path / "hq.json"
-    wf.write_text(json.dumps({"1": {"class_type": "Mine", "inputs": {"t": "{{prompt}}"}}}))
-    comfy.provider.cfg["graphs"] = {"image-hq": str(wf)}
-    run(comfy.provider, Turn(prompt="fox", history=[], run_id="r1", extra={"row": "image-hq"}))
-    assert comfy.posted[0]["prompt"] == {"1": {"class_type": "Mine", "inputs": {"t": "fox"}}}
+def test_an_unknown_input_fails_the_run(comfy):
+    out, events = run(comfy.provider, Turn(prompt=json.dumps({"inputs": {"prompt": "fox", "cfg": 3}}),
+                                           history=[], run_id="r1"))
+    assert out.state == "failed" and "cfg" in out.error and "prompt" in out.error
+    assert comfy.posted == [] and events == []
+
+
+def test_the_target_names_the_workflow(comfy, tmp_path):
+    mine = tmp_path / "mine.json"
+    mine.write_text(json.dumps({"1": {"class_type": "Mine", "inputs": {"t": "a {{prompt}}!", "s": "{{seed}}"}}}))
+    wid = wf.add(str(mine), label="Mine")
+    out, events = run(comfy.provider, Turn(prompt="fox", history=[], run_id="r1",
+                                           extra={"model": wid, "row": "image-hq"}))
+    assert out.state == "done"
+    graph = comfy.posted[0]["prompt"]
+    assert graph["1"]["inputs"]["t"] == "a fox!" and isinstance(graph["1"]["inputs"]["s"], int)
+    assert [d["workflow"] for k, d in events if k == "tool"] == ["mine"]
+
+
+def test_an_unknown_workflow_fails(comfy):
+    out, _ = run(comfy.provider, Turn(prompt="fox", history=[], run_id="r1", extra={"model": "nope"}))
+    assert out.state == "failed" and "nope" in out.error and comfy.posted == []
 
 
 LOADERS = {"UNETLoader": "unet_name", "UnetLoaderGGUF": "unet_name", "CheckpointLoaderSimple": "ckpt_name"}
@@ -198,7 +217,7 @@ def test_an_edit_or_upscale_uploads_the_source(comfy, tmp_path, row, verb):
     loads = [n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"]
     assert loads == ["eki/eki_src_r7_last.png"]
     text = [d["text"] for k, d in events if k == "text"][0]
-    assert text.startswith(f"{verb} 1 picture ({comfyui_graphs.kind_of(row)[0]} · flux-2-klein-4b)")
+    assert text.startswith(f"{verb} 1 picture ({wf.entry(wf.for_row(row))['label']})")
 
 
 def test_an_upload_without_subfolder_is_just_the_name(comfy, tmp_path):
@@ -238,14 +257,14 @@ def test_an_upload_failure_is_comfyuis_message(comfy, tmp_path):
     assert out.state == "failed" and out.error == "ComfyUI: invalid image file" and comfy.posted == []
 
 
-def test_the_answer_names_kind_and_model(comfy):
+def test_the_answer_names_the_workflow(comfy):
     out, events = run(comfy.provider, Turn(prompt="draw a fox", history=[], run_id="r1",
                                            extra={"row": "image-anime"}))
     tool = [d for k, d in events if k == "tool"][0]
-    assert tool["detail"] == "draw a fox (anime · NoobAI-XL-v1.1)"
-    assert tool["prompt"] == "draw a fox" and tool["row"] == "image-anime" and tool["kind"] == "anime"
+    assert tool["detail"] == "draw a fox (NoobAI-XL — anime)"
+    assert tool["prompt"] == "draw a fox" and tool["row"] == "image-anime" and tool["workflow"] == "anime"
     text = [d["text"] for k, d in events if k == "text"][0]
-    assert text.startswith("Drew 1 picture (anime · NoobAI-XL-v1.1):")
+    assert text.startswith("Drew 1 picture (NoobAI-XL — anime):")
     assert tool["path"] in text
 
 
@@ -259,7 +278,7 @@ def test_a_stop_mid_poll_cancels(comfy):
     assert comfy.polls >= 1 and not any(k == "tool" for k, _ in events)
 
 
-@pytest.mark.parametrize("row", sorted(comfyui_graphs.GRAPHS))
+@pytest.mark.parametrize("row", sorted(wf.ROW_WORKFLOWS))
 def test_a_carry_on_polls_the_session_and_does_not_draw_again(comfy, home, tmp_path, row):
     src = tmp_path / "a.png"
     src.write_bytes(PNG)

@@ -203,3 +203,11 @@ def test_the_default_model_marks_its_default_effort(tmp_path):
     html = _node(tmp_path, got, {}, ["claude", {"provider": "comfyui"}])
     assert '<option value="high">high (default)</option>' in html["rows"][0]
     assert "data-tm" not in html["rows"][1]                         # no list and none to read: provider only
+
+
+def test_comfyui_lists_its_workflows_like_models(home, conn):
+    _providers(home, comfyui={"kind": "comfyui", "base_url": "http://127.0.0.1:8188"})
+    c = api_models.read(conn)["providers"]["comfyui"]
+    assert [m["model"] for m in c["listed"]] == ["draft", "hq", "anime", "edit", "upscale"]
+    assert c["listed"][0]["label"] == "FLUX.2 klein — draft" and c["listed"][0]["is_default"]
+    assert modellist.listed(conn, "comfyui")[1]["label"] == "Qwen-Image 2.1 — high quality"

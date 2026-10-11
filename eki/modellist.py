@@ -9,6 +9,7 @@ never with a token or a vendor API of eki's own:
                  control_response's `response.models`
     Codex        `codex app-server`: initialize, initialized, `model/list`
     local        GET /v1/models (Local.models())
+    ComfyUI      its workflows (eki/providers/comfyui_workflows.py), never cached
 
 A read keeps what the program says of each model: its id, its name, its own
 description, the pinned model an alias stands for, the effort levels it takes
@@ -239,7 +240,11 @@ def refresh(conn: sqlite3.Connection, name: str, timeout: float = TIMEOUT) -> Li
 
 def listed(conn: sqlite3.Connection, name: str) -> Optional[List[Dict[str, Any]]]:
     """`name`'s read list in the program's order, or None when it was never read.
-    A model is `floating` when it is an alias for a pinned one, or "default"."""
+    A model is `floating` when it is an alias for a pinned one, or "default".
+    ComfyUI's list is its workflows, read from ~/.eki/comfyui/workflows.json."""
+    if (providers.config().get(name) or {}).get("kind") == "comfyui":
+        from .providers import comfyui_workflows
+        return comfyui_workflows.listed()
     got = conn.execute("SELECT model, label, description, resolved, efforts, default_effort, is_default"
                        " FROM provider_models WHERE provider=? ORDER BY rowid", (name,)).fetchall()
     if not got:

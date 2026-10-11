@@ -162,3 +162,16 @@ def test_provider_form_failure_and_missing_provider(tmp_path):
     assert "no provider named" in service.call(c, a_call(tmp_path)[0]).error
     f = comp(tmp_path / "components", {"provider": "fake"}, "failing")
     assert service.call(f, a_call(tmp_path, ["fail"])[0]).error
+
+
+def test_picture_card_form_validates(tmp_path):
+    ok = {"kind": "service", "about": "portraits", "target": "comfyui:draft", "out": "assets/generated/portrait/"}
+    assert service.validate(ok, tmp_path) == []
+    assert service.provider_name(ok) == "comfyui"
+    assert service.validate({**ok, "target": ""}, tmp_path)
+    for out in ("../elsewhere", "/abs/path", "", "~/pics"):
+        assert any('"out"' in e for e in service.validate({**ok, "out": out}, tmp_path)), out
+    c = comp(tmp_path / "components", {"target": "comfyui:hq", "out": "assets/generated/card/"})
+    assert service.call(c, a_call(tmp_path)[0]).error == "picture cards: not callable yet"
+    assert "draws with comfyui:hq, saves into assets/generated/card/" in service.notes(c)
+    assert "runs on eki's comfyui provider" in service.notes(c)

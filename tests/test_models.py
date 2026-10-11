@@ -220,7 +220,7 @@ def test_eki_models_lists_comfyui_beside_local(comfy, capsys):
     out = capsys.readouterr().out
     lines = out.splitlines()
     assert lines[0].startswith("local") and any(ln.startswith("comfyui") for ln in lines)
-    assert "  draft: flux-2-klein-4b" in lines and "  hq: qwen-image-2.1-Q8" in lines
+    assert "  draft: FLUX.2 klein — draft" in lines and "  hq: Qwen-Image 2.1 — high quality" in lines
     assert "on demand" in out
 
 

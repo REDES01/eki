@@ -24,7 +24,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import chores, db, integration, roles, selfwork, store, workspace
+from . import chores, db, integration, roles, selfwork, store, workflow, workflowgates, workspace
 
 GOAL_MAX = 2000
 DIFF_MAX = 40000
@@ -70,9 +70,12 @@ def _settle(conn: sqlite3.Connection, it: sqlite3.Row, why: str) -> List[str]:
 def ask(conn: sqlite3.Connection, it: sqlite3.Row) -> Tuple[Optional[str], str]:
     """Called under db.tx with the item's new commit written: start its review
     chore. (review run id, '') or (None, why). It never moves the item."""
-    if not selfwork.settings().get("review", True):
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    card = workflowgates.of_goal(conn, goal) if goal is not None and goal["project"] else None
+    if card is not None and not workflow.has(card, "review"):     # the project's card leaves it out
+        return None, workflowgates.NO_REVIEW
+    if card is None and not selfwork.settings().get("review", True):
         return None, "self.review is off"
-    goal = conn.execute("SELECT text, owner FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     priority = "now" if goal is None or goal["owner"] == "you" else "background"
     pick = roles.pick("reviewer", conn, background=priority == "background")
     if pick.provider is None:

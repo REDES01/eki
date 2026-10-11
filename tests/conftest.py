@@ -39,6 +39,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
     from eki import github
     monkeypatch.setattr(github, "_last", {})
+    from eki import workflowgates          # this checkout's own workflow card is the running eki's, not a
+    monkeypatch.setattr(workflowgates, "own", lambda: None)   # test's (tests/test_workflow_gates.py)
     real = Path("~").expanduser()
     assert not str(h).startswith(str(real / ".eki")), "tests must never use the real eki home"
     (h / "providers.json").write_text(json.dumps({

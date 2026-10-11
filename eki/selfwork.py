@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import (builds, db, doccheck, integration, notify, paths, projectbrief, projects, projectwork, review,
-               scheduler, selfbrief, selfdraft, selfplan, store, workspace)
+               scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -48,7 +48,11 @@ def settings() -> Dict[str, Any]:
         got = json.loads(paths.config("routing").read_text()).get("self") or {}
     except (OSError, ValueError):
         got = {}
-    return {**DEFAULTS, **got}
+    out = {**DEFAULTS, **got}
+    wf = workflowgates.own()           # eki's own workflow card, when it has one, says these
+    if wf is not None:
+        out.update(autonomy=workflow.autonomy(wf), parallel=wf.parallel, review=workflow.has(wf, "review"))
+    return out
 
 
 def source() -> Path:
@@ -68,10 +72,12 @@ def submit(conn: sqlite3.Connection, text: str, *, plan: bool = True, draft: boo
            issue: Optional[int] = None) -> str:
     """A goal. With `draft` the text is a wish the draft run makes into a goal
     first (eki/selfdraft.py); without `plan` it is one item as it stands.
-    With `project` it is work on a person's own repo (eki/projects.py)."""
+    With `project` it is work on a person's own repo (eki/projects.py). A workflow
+    card saying plan single makes it one item whatever `plan` says."""
     text = (text or "").strip()
     if not text:
         raise ValueError("nothing to do")
+    plan = plan and not workflowgates.single(conn, project)
     if project is None:
         base = integration.sync()
     else:
@@ -112,7 +118,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     for g in conn.execute("SELECT * FROM goals WHERE state='drafting'").fetchall():
         said += selfdraft.conclude(conn, g)
     for g in conn.execute("SELECT * FROM goals WHERE state='planning'").fetchall():
-        said += selfplan.conclude_plan(conn, g)
+        said += workflowgates.told(conn, g, selfplan.conclude_plan(conn, g))
     for it in items_in(conn, ("building",)):
         said += _conclude_build(conn, it)
     for it in items_in(conn, ("judging",)):
@@ -120,7 +126,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     for it in items_in(conn, ("reviewing",)):
         said += review.conclude(conn, it)
     said += _settle_applied(conn)
-    said += scheduler.start_ready(conn)
+    said += workflowgates.started(conn, scheduler.start_ready(conn))
     return said
 
 
@@ -211,7 +217,16 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
                 needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
             return [f"item {it['id']}: left for you — {why}"]
         error = None if verdict == "done" else f"partial: {reason}"
-        if project is not None:
+        wf = workflow.of_project(conn, project) if project is not None else None
+        if wf is not None:                 # the project's workflow card chooses the gates
+            got = workflowgates.gate(wf, it["title"])
+            if got is None:                # checks: self only — the builder's own word stands
+                _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
+                     verdict=workflow.said(wf), error=error, judged_by=None, review=f"none: {workflowgates.NO_REVIEW}")
+                return [f"item {it['id']}: built — proposed on {it['branch']} ({workflow.said(wf)})"]
+            judge = got[0]
+            _set(conn, it["id"], judged_by=got[1])
+        elif project is not None:
             judge = projects.check_argv(project)
             if judge is None:              # nothing to judge with: proposed as it is
                 _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),

@@ -153,6 +153,50 @@ argv in a folder and records its output as events, done / failed /
 interrupted like any run, resumed by running again — a check is
 idempotent. It's a job runner, not a harness.
 
+## Worktrees: made, kept, removed
+
+Every item, draft, plan, gate 2 and train check works in a worktree under
+`~/.eki/work/<key>`, for eki and for projects alike. There are hundreds of
+them at once, so each must cost almost nothing.
+
+**Made as clones.** `workspace.add` runs `git worktree add --no-checkout`,
+then `clonetree.fill` (`eki/clonetree.py`) clones the source checkout's
+tracked files into it with APFS `clonefile`: a clone shares the source's
+blocks, and no data is copied until a file changes. A file in the source
+checkout that differs from the base (you are mid-edit, or the checkout is on
+another commit) is checked out normally instead; when clones aren't possible
+— not APFS, or `clonefile` fails — the whole tree is checked out the usual
+way. Then the index is set to the base, so the result is byte-identical to a
+normal checkout and `git status` is clean. Gate 2's and the train's detached
+trees (`eki/rebase.py`) are made the same way.
+
+**Dependencies stay links.** `.venv` and `node_modules` in a worktree are
+links to the source folder's (a project's comes from its folder or eki's
+clone, see `link_deps`). The build brief tells agents never to run `npm
+install` or `pip install` inside a worktree: dependencies come from the
+project folder, and installing there is your job or a separate item's (e.g.
+`npm install --include=dev` in the project folder). If an item still
+replaces a link with a real folder, eki (`eki/deplinks.py`) removes the
+folder and puts the link back before gate 1, and the item's board line says
+`relinked node_modules` (or `.venv`). A changed `package.json` or lockfile
+in an item is fine: after eki lands in your folder, the after-merge run
+(`eki/aftermerge.py`) runs `npm install --include=dev` before the build.
+
+**Removed when done.** The housekeeping step `worktrees`
+(`eki/worktreegc.py`) removes, 5 per pass:
+
+- the worktree of an item that is live, applied, landed or dropped, once no
+  active run uses it;
+- finished plan, draft, gate 2 and train trees;
+- unknown folders under `~/.eki/work` older than 2 days.
+
+A failed item's worktree is kept 2 days, so you can look at what it left,
+then removed too. The branch goes with the worktree, except one with an
+open PR or a failed item's. Each pass reads what to remove from the
+database and the folder, nothing from memory, so a restart in the middle of
+a cleanup loses nothing: the next pass picks up where it stopped. `eki self`
+shows the disk the worktrees use in one line.
+
 ## The queue: where it's parallel and where it isn't
 
 Only two things are serial: the order changes land on the integration ref,
@@ -692,7 +736,7 @@ at GitHub — never into `~/eki`. As each change lands eki pushes `main`, and
 fast-forwards `~/eki` only when it's clean and on `main`; otherwise you
 pull. Your checkout is one more git peer, so your own commits reach eki the
 usual way: eki fetches before every rebase. Item worktrees are made from
-this repo, under `~/.eki/self/<id>`.
+this repo, under `~/.eki/work/<id>` ("Worktrees" above).
 
 **Read-only mirror PRs.** With `self.pr_mirror` on (off by default) and the
 integration repo's origin on GitHub with `gh` logged in, eki's own work can

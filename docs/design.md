@@ -47,7 +47,10 @@ eki follow <run>  ◄── events table
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers within the per-kind limits, with no overall cap unless `EKI_MAX_PARALLEL` is set |
 | `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run); `oneshot` (one call with no tools through the `claude` or `codex` CLI, for eki's own text jobs) |
-| `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide; runs in one folder otherwise take turns |
+| `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide, made cheap: `git worktree add --no-checkout`, then `clonetree.fill`; `.venv`/`node_modules` linked from the source folder; runs in one folder otherwise take turns |
+| `clonetree` | fills a `--no-checkout` worktree with APFS clones (`clonefile`) of the source checkout's tracked files, so no data is copied until a file changes; a file that differs from the base is checked out normally, the whole tree when clones aren't possible; byte-identical, `git status` clean |
+| `deplinks` | `.venv`/`node_modules` stay links: one an item replaced with a real folder is put back before gate 1, and the board says `relinked …` |
+| `worktreegc` | the housekeeping step `worktrees`: removes finished, unreferenced worktrees (and their branches) a few per pass; a failed item's kept 2 days; the disk worktrees use, for `eki self` |
 | `routing/*` | the prompt check (which row) and the table (where each row goes), each checkable on its own |
 | `targets` | one way to name where work goes, as a string (`provider`, `provider:model`, the old `provider:tier`) or an object `{provider, model?, effort?}`: `parse`, `fmt` (the shortest written form), `key` (a stable one-line dict key, `claude:opus@high`), `provider_of`, `label` (`claude · Opus 5.5 · high`), `choose` (model and effort against the read list, with a note when either falls back to the default), `resolve` (the old `(model, note)`), `problems`; pure |
 | `roles` | eki's own jobs — `router`, `planner`, `reviewer`, `chores` — and the target each goes to: `get`, `default` (the old settings), `set_role`, `pick` (with the fallback and its why), `record`/`timings` (table `role_calls`) |
@@ -79,7 +82,7 @@ eki follow <run>  ◄── events table
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `projectchats` | projects you work inside: a `projects` row or the built-in `eki` (`SELF`, no row); `folder_of`, `listing`, `adopt`, `create`, `set_folder`, `find`, `home_clone` |
 | `projectqueue` | a local project's own queue (autonomy `apply`): its fit items rebased onto the predicted head of its branch, conflicts to a resolve run, gate 2 in batch with the project's check, then landed; one project per batch |
-| `aftermerge` | the workflow card's `after_merge` after eki lands in the person's folder: a `command` run, one per project at a time, changes landing close together coalesced into one run after the last; a failure on the board and the goal and a needs-you notice, the landing kept |
+| `aftermerge` | the workflow card's `after_merge` after eki lands in the person's folder (with `npm install --include=dev` first when the landing changed `package.json` or a lockfile): a `command` run, one per project at a time, changes landing close together coalesced into one run after the last; a failure on the board and the goal and a needs-you notice, the landing kept |
 | `projectland` | landing on a person's branch: `refs/heads/<branch>` moves forward only, the folder follows by `git merge --ff-only` when the branch is checked out there and no tracked file the change touches has local changes, else it waits naming the files; pure git, safe to call again |
 | `github` | the only way to GitHub: one function per `gh` call (a subprocess, 60 s), plain `git push`/`git fetch` against origin, which path a project is on, the in-memory interval of the GitHub steps |
 | `issues` | issues labelled `eki` in: a new one becomes a goal or a standing goal, a closed one drops the unfinished work |
@@ -127,6 +130,24 @@ per folder, and `priority == "background"` runs wait for `machine.room`.
 below 1 means no cap), and when set it caps all `starting`/`running` runs
 of every kind, checks included; the held runs stay `queued` and start in
 order as slots free up.
+
+**Worktrees cost almost no disk.** A new worktree — an item's, a plan's or
+draft's, gate 2's, the train's, eki's own or a project's — is made with
+`git worktree add --no-checkout`, then `clonetree.fill` clones the source
+checkout's tracked files into it with APFS `clonefile`: no data is copied
+until a file changes. A file in the source checkout that differs from the
+base is checked out normally; when clones aren't possible (not APFS,
+`clonefile` fails) the whole tree is checked out the usual way. Either way
+the result is byte-identical to a normal checkout and `git status` is
+clean. `.venv` and `node_modules` are links to the source folder; agents
+are told never to install inside a worktree, and one an item replaced with
+a real folder is put back before gate 1 (`deplinks`, the board says
+`relinked …`). A changed `package.json` or lockfile is fine: the
+after-merge run installs (`npm install --include=dev`) in your folder
+before the build. Housekeeping's `worktrees` step (`worktreegc`) removes,
+5 per pass, the worktrees of finished, unreferenced work; a failed item's
+stays 2 days for you to inspect (docs/self-build.md, "Worktrees"). Nothing
+is held in memory, so a restart mid-cleanup loses nothing.
 
 **The window's pages.** The sidebar opens with **New** (a new chat, ⌘K),
 **Projects** (`#projects`, a card per project), **Artifacts** (`#artifacts`,

@@ -23,7 +23,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #side { position: relative; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 /* the line between the sidebar and the main area; drag it to resize (split.js) */
 #side-grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; z-index: 10; cursor: col-resize; outline: none; }
-#side-grip:hover, #side-grip:focus-visible, body.resizing #side-grip { background: color-mix(in srgb, var(--teal) 45%, transparent); }
+#side-grip:hover, #side-grip:focus-visible, body.resizing #side-grip,
+#panel-grip:hover, #panel-grip:focus-visible, body.resizing #panel-grip { background: color-mix(in srgb, var(--teal) 45%, transparent); }
 body.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
 body.resizing iframe { pointer-events: none; }
 .side-head { user-select: none; -webkit-user-select: none; display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
@@ -91,9 +92,10 @@ body.resizing iframe { pointer-events: none; }
 #meta { font-size: 12px; }
 
 /* ---- side panel ---- */
-#app.with-panel { grid-template-columns: var(--side-w, 272px) minmax(380px, 1fr) minmax(360px, 44%); }
+#app.with-panel { grid-template-columns: var(--side-w, 272px) minmax(380px, 1fr) var(--panel-w, minmax(360px, 44%)); }
 #panel[hidden] { display: none; }
-#panel { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--card); }
+#panel-grip { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; z-index: 10; cursor: col-resize; outline: none; }
+#panel { position: relative; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--card); }
 .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); user-select: none; -webkit-user-select: none; }
 .panel-head .pt { flex: 1; min-width: 0; }
 .panel-head .pt div { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -149,7 +151,7 @@ button { cursor: pointer; border-radius: 9px; border: 1px solid transparent; }
 .small { font-size: 12px; padding: 1px 8px; }
 
 @media (max-width: 1000px) {
-  #app.with-panel { grid-template-columns: 1fr minmax(320px, 50%); }
+  #app.with-panel { grid-template-columns: 1fr var(--panel-w, minmax(320px, 50%)); }
   #app.with-panel #side { display: none; }
 }
 @media (max-width: 720px) {

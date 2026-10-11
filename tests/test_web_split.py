@@ -65,7 +65,7 @@ def test_the_grid_uses_the_side_width_and_the_grip_has_its_rules():
     css = (WEB / "style.css").read_text()
     rule = lambda sel: next(l for l in css.splitlines() if l.startswith(sel + " {"))
     assert "var(--side-w, 272px) 1fr" in rule("#app")
-    assert "var(--side-w, 272px) minmax(380px, 1fr) minmax(360px, 44%)" in rule("#app.with-panel")
+    assert "var(--side-w, 272px) minmax(380px, 1fr) var(--panel-w, minmax(360px, 44%))" in rule("#app.with-panel")
     assert "position: relative" in rule("#side")
     assert "col-resize" in rule("#side-grip") and "right: -3px" in rule("#side-grip")
     assert "user-select: none" in rule("body.resizing")

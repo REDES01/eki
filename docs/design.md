@@ -57,6 +57,8 @@ eki follow <run>  ◄── events table
 | `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`: per model its label, `description`, `resolved` (the pinned model an alias stands for), `efforts`, `default_effort`, whether it is the default, and `floating` (an alias that follows the newest); no suggestions |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
+| `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one |
+| `machinenow` | the Settings → Machine live line: agents working, test runs, load on cores, memory, quota left |
 | `skills`, `mcp` | one store of what every run gets, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`); a project's own skills are its `skills` card |
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
@@ -114,15 +116,38 @@ eki follow <run>  ◄── events table
 | `api_cardinstructions` | an instructions card's file saved, CLAUDE.md linked to it (`@AGENTS.md`), and a "Read first" file read (inside the project folder only) |
 | `cli/*` | one file per command |
 
-**Scheduling.** The engine's spawn step holds each kind of run only by the
-limit that already exists for it. Checks — gate 1, gate 2, the train's
-check, the docs check, a project's own check — wait for a check slot
-(`checkslots.is_judge`, `checkslots.limit()` = `self.check_slots`, default
-2). Items being built are held by `self.parallel` in
-`scheduler.start_ready` before a build run exists; the engine doesn't count
-build runs, and a waiting item's `items.why` says so ("4 building
-(self.parallel)"). The local model's own server queues its requests, so the
-engine adds no limit for it. Everything else — chats, drafts, plans,
+**Scheduling.** How much eki runs at once is a machine setting, not a
+number in any project's workflow: `routing.json` `"machine": {"agents",
+"checks"}`, shown and changed in Settings → Machine and with `eki machine`.
+The engine's spawn step holds each kind of run only by the limit that
+already exists for it.
+
+- `machine.agents` (default 12, 1–32) caps the items building across all
+  projects, and it wins. Each project's workflow card `parallel` caps only
+  that project's own live items — eki's card for eki's items, the game's
+  card for the game's — so eki's card no longer limits anything else. Both
+  are held in `scheduler.start_ready` before a build run exists; the engine
+  doesn't count build runs, and a waiting item's `items.why` names the cap
+  that held it: "12 agents working (machine)" or "4 live in holo-cards (its
+  workflow)". An agent mostly waits on the model, so this mostly costs
+  subscription quota, not CPU.
+- `machine.checks` (default max(2, cores/6)) is the pool of test slots.
+  Judge runs — gate 1, gate 2, the train's check, the docs check, a
+  project's own check — wait for one (`checkslots.is_judge`,
+  `checkslots.limit()`), and so do the agents' own test runs inside build
+  turns: the build brief tells an agent to run `bin/check`, `npm test` or
+  `pytest` as `eki slot -- <cmd>`, which waits for a free slot. A slot is a
+  lock file under `EKI_HOME/slots`, freed when its process dies, so a
+  restart loses nothing. Why: with 4 building, load sat near 100 on 18
+  cores, mostly test runs, while the agents mostly waited on the model; one
+  pool keeps load near the core count.
+
+The Settings → Machine section shows a live line under the two numbers:
+"now: N agents working · M test runs · load X on C cores · memory Y% ·
+quota left …". `routing.json`'s old `self.parallel` and `self.check_slots`
+move to `machine.agents` and `machine.checks` once; eki's own workflow card
+keeps its `parallel` as eki's project cap. The local model's own server
+queues its requests, so the engine adds no limit for it. Everything else — chats, drafts, plans,
 reviews, chores, other command runs — is a light agent turn and isn't held
 by how many other runs are going. Always: one run at a time per thread, one
 per folder, and `priority == "background"` runs wait for `machine.room`.
@@ -473,8 +498,10 @@ are Codex's.
     (`#settings/jobs`, the four role pickers and the on-demand checker
     switch; plain `#settings` opens it), **Rows** (`#settings/rows`),
     **Providers** (`#settings/providers`, the entries and the built-in
-    list), **Notifications** (`#settings/notifications`) and **eki self**
-    (`#settings/self`, autonomy and parallel); a refresh reopens the same
+    list), **Notifications** (`#settings/notifications`), **Machine**
+    (`#settings/machine`, agents at once, test runs at once and the live
+    "now: …" line; `settingsmachine.js`) and **eki self**
+    (`#settings/self`, autonomy); a refresh reopens the same
     section. `settings.js` is only the frame: each section is a file of
     its own (`settingsmodels.js`, `settingsrows.js`,
     `settingsproviders.js`, `settingsnotify.js`, `settingsself.js`) that
@@ -1305,7 +1332,9 @@ items tables; it holds nothing. Where a goal or item is drawn:
   says so.
 - `plan`: `split` — a planner turns a request into items with write-sets,
   built in parallel · `single` — the whole request is one item for one agent.
-- `parallel`: how many items build at once (a whole number ≥ 1).
+- `parallel`: how many of this project's items build at once (a whole
+  number ≥ 1). It caps only this project; the machine cap
+  (`machine.agents`, Scheduling) is separate and wins.
 - `checks`: an ordered list, each optional but `self`:
   `self` (the building agent verifies its own work — screenshots, its tests —
   before it finishes; always on), `review` (a second reader agent,
@@ -1339,12 +1368,13 @@ until a card exists. A broken card counts as none (its error is on the card):
 |---|---|
 | local | router on, split; checks self, review, and command + batch when it has a check; merge by its autonomy (`apply` → auto, `propose` → person) |
 | GitHub | as local, merge `pr` |
-| eki itself | split, parallel 4; checks self, review, batch, train; merge per `self.autonomy` |
+| eki itself | split, parallel 4 (eki's own items only); checks self, review, batch, train; merge per `self.autonomy` |
 
 **Adding a card migrates the old settings once** (`workflow.from_settings`):
 the project's check command becomes `command` (with `command` and `batch`
-checked), its autonomy becomes `merge`, `self.review` decides `review`, and
-`self.parallel` is `parallel`. From then on those settings are read from the
+checked), its autonomy becomes `merge`, and `self.review` decides
+`review`. `parallel` starts at 4 (`self.parallel` has moved to
+`machine.agents`, Scheduling). From then on those settings are read from the
 card — one source of truth (`projects` reads the check command and the
 autonomy through it).
 

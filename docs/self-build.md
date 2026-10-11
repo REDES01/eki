@@ -121,14 +121,19 @@ fewest items building goes first, then the older goal, then the older item.
 An item starts as soon as its dependencies are done — items whose write-sets
 overlap build at the same time, and the queue merges them (a resolve run on a
 conflict) — up to the room the machine and the subscriptions give (`machine.room`,
-`capacity`). `self.parallel` (4) counts building items only; judging is
-limited by `self.check_slots`. Other runs aren't counted against either
-limit, and the engine has no overall cap unless `EKI_MAX_PARALLEL` is set.
+`capacity`). Two caps count building items only: `machine.agents`
+(`routing.json`, default 12, set in Settings → Machine or with `eki
+machine`) across all projects, and it wins; and each project's workflow
+card `parallel`, for that project's own items — eki's card for eki's items,
+and no longer for anyone else's. Test runs are limited by `machine.checks`
+(Check slots, below). Other runs aren't counted against either limit, and
+the engine has no overall cap unless `EKI_MAX_PARALLEL` is set.
 Only an item with no write-set waits, until nothing else builds in its
 repo; an item marked `independent` never waits. An item that stays waiting says why
 in `items.why`, written only when it changes and cleared when it starts —
 "after <dep title>", "no write-set:
-waits until its repo is quiet", "4 building (self.parallel)" — and the board
+waits until its repo is quiet", "12 agents working (machine)", "4 live in
+eki (its workflow)" — and the board
 shows it. The write-set is a prediction, not a lock: at commit time eki
 records what was touched against what was declared, and the drift feeds the
 planner's brief.
@@ -328,10 +333,19 @@ come up, tick and write a healthy marker within the window; if it dies
 first, the launcher flips `current` back to `previous` and records why.
 Nothing waits for the watch.
 
-**Check slots.** At most `self.check_slots` (`routing.json`, default 2)
-judge runs — gate 1, gate 2 and the train's check together — run at once;
-the rest stay queued, held by the engine's scheduling (`eki/checkslots.py`),
-not the queue's, and the board says "waiting for a check slot". `bin/check`
+**Check slots.** At most `machine.checks` (`routing.json`, default
+max(2, cores/6), set in Settings → Machine or with `eki machine`) test runs
+go at once, and the pool is shared: judge runs — gate 1, gate 2 and the
+train's check — and the agents' own test runs inside build turns, which the
+brief tells them to start as `eki slot -- <cmd>` (`bin/check`, `npm test`,
+`pytest`). A queued judge run is held by the engine's scheduling
+(`eki/checkslots.py`), not the queue's, and the board says "waiting for a
+check slot"; `eki slot` waits in the agent's turn until a slot is free. A
+slot is a lock file under `EKI_HOME/slots`, freed when its process dies, so
+a restart loses nothing. Why: with 4 building, load sat near 100 on 18
+cores, mostly test runs — judges and the agents' own — while the agents
+themselves mostly waited on the model. `routing.json`'s old
+`self.check_slots` moved to `machine.checks` once. `bin/check`
 runs the suite on a third of the cores (`EKI_CHECK_WORKERS` overrides), so
 the judge slots share the cores instead of each taking all of them (with
 `-n auto` each, load went past 100 on 18 cores): a few fast checks beat many

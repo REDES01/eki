@@ -60,6 +60,7 @@ eki follow <run>  ◄── events table
 | `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one |
 | `machinenow` | the Settings → Machine live line: agents working, test runs, load on cores, memory, quota left |
 | `skills`, `mcp` | one store of what every run gets, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`); a project's own skills are its `skills` card |
+| `skillsync` | skills, Claude client → eki: every skill under `~/.claude/skills/synced/*/` copied into the store as source `claude` with a baseline hash (`sync/skills.json`), refreshed when the client folder changes, removed when it goes; eki's own (`learned`, `edited`, or a `claude` copy edited since import) and any other source with the same name are never touched and listed as clashes (`skills-in`) |
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |

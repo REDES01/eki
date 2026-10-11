@@ -52,7 +52,7 @@ def sources() -> Dict[str, str]:
     return got if isinstance(got, dict) else {}
 
 
-def _set_source(name: str, source: Optional[str]) -> None:
+def set_source(name: str, source: Optional[str]) -> None:
     got = sources()
     if source is None:
         if name not in got:
@@ -153,7 +153,7 @@ def add(source: str) -> str:
         src = Path(source).expanduser().resolve()
         name = _copy(src, "")
         source = str(src)
-    _set_source(name, source)
+    set_source(name, source)
     sync_codex()
     return name
 
@@ -163,7 +163,7 @@ def remove(name: str) -> bool:
     if not name or "/" in name or not dest.exists():
         return False
     shutil.rmtree(dest)
-    _set_source(name, None)
+    set_source(name, None)
     sync_codex()
     return True
 

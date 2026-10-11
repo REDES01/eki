@@ -1,6 +1,8 @@
 // An open card in the side panel (projectcards.js hosts it there and hands it the full card from
 // GET …/cards/<name> on open, each reload and after every action; the panel's header has its name,
-// kind and about): its state, settings as a form built from component.json (each change saved and
+// title and about): its title and state, then What it does, Used by and Right now (cardoverview.js), then
+// the kind's part, Run and Uses; under a folded Details (kept open or closed across redraws) its path,
+// notes, kind and settings as a form built from component.json (each change saved and
 // checked by its kind — a problem shows beside the field and the saved value comes back; a setting with
 // fixed choices, card.choices from its kind, is a choicemenu.js dropdown explaining each choice in its open list,
 // card.choice_help), a free-text setting its kind explains (card.field_help) a text field with that line
@@ -15,8 +17,8 @@
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
   const PASSIVE = ["knowledge", "mcp", "workflow"];                    // eki/components PASSIVE: read or attached, never called
-  for (const f of ["cardknowledge.js", "cardmcp.js", "cardworkflow.js", "cardsessions.js", "cardserve.js",
-                   "cardtool.js", "cardpicture.js"]) {
+  for (const f of ["cardoverview.js", "cardknowledge.js", "cardmcp.js", "cardworkflow.js", "cardsessions.js",
+                   "cardserve.js", "cardtool.js", "cardpicture.js"]) {
     if (document.querySelector && !document.querySelector(`script[src="/ui/${f}"]`)) {
       const t = document.createElement("script");
       t.src = "/ui/" + f; t.async = false;
@@ -100,8 +102,7 @@
     const rows = fields().map((f) => `<div class="pp-field">
         <div class="pp-label">${esc(f.key)}${Array.isArray(f.value) ? ' <span class="dim">one per line</span>' : ""}</div>
         <div class="pp-ctl">${control(f, off)}${fieldHelp()[f.key] ? `<div class="dim pp-help">${esc(fieldHelp()[f.key])}</div>` : ""}${P.problems[f.key] ? `<div class="pj-err">${esc(P.problems[f.key])}</div>` : ""}</div></div>`);
-    return `${note}<div class="pp-field"><div class="pp-label">kind</div><div class="pp-ctl"><code>${esc(c.kind || "?")}</code></div></div>
-      ${rows.join("")}${P.err.settings ? `<div class="pj-err">${esc(P.err.settings)}</div>` : ""}`;
+    return `${note}${rows.join("")}${P.err.settings ? `<div class="pj-err">${esc(P.err.settings)}</div>` : ""}`;
   }
 
   function valueOf(el) {
@@ -254,19 +255,26 @@
 
   function head() {
     const c = P.card;
-    return `<div class="pj-row"><span class="pc-state">${esc(c.error ? "broken" : c.state || "idle")}</span></div>
-      ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}
-      ${(c.kind === "skills" ? [] : c.notes || []).map((n) => `<div class="dim">${esc(n)}</div>`).join("")}
-      <div class="dim pp-path"><code>${esc(c.card || c.folder || "")}</code></div>`;
+    return `<div class="pj-row"><span class="pp-title">${esc(c.title || c.name)}</span>
+        <span class="pc-state">${esc(c.error ? "broken" : c.state || "idle")}</span></div>
+      ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}`;
   }
 
+  // the Details' first lines: where the card lives, its notes and its kind as the files name it
+  function meta() {
+    const c = P.card;
+    return `${(c.kind === "skills" ? [] : c.notes || []).map((n) => `<div class="dim">${esc(n)}</div>`).join("")}
+      <div class="dim pp-path"><code>${esc(c.card || c.folder || "")}</code></div>
+      <div class="pp-field"><div class="pp-label">kind</div><div class="pp-ctl"><code>${esc(c.kind || "?")}</code></div></div>`;
+  }
+  const overview = () => window.cardOverview ? cardOverview.html(P.card, ago) : "";
+
   function frame() {
-    const agent = isAgent(), part = kindPart();
+    const agent = isAgent(), part = kindPart(), was = q(".pp-details"), opened = !!(was && was.open);
     P.framed = part;
     P.el.innerHTML = `<div class="pj-card pp pp-cardview">
-      <div class="pp-head"></div>
+      <div class="pp-head"></div><div class="pp-overview"></div>
       ${part ? `<h4 class="pp-h">${esc(part.title)}</h4><div class="pp-kind"></div>` : ""}
-      ${part && part.form === false ? "" : '<h4 class="pp-h">Settings</h4><div class="pp-settings"></div>'}
       ${agent ? '<h4 class="pp-h">Prompt</h4><div class="pp-prompt"></div><div class="pp-prompt-err"></div>' : ""}
       ${P.card.kind === "skills" ? '<h4 class="pp-h">Skills</h4><div class="pp-skills"></div>' : ""}
       ${passive() ? "" : `<h4 class="pp-h">Run</h4>
@@ -274,7 +282,9 @@
         <button type="submit" class="pj-btn primary"${P.ro ? " disabled" : ""}>Run</button></form>
       <div class="pp-runout"></div>
       <h4 class="pp-h">Uses <span class="dim">last 20</span></h4><div class="pp-uses"></div>`}
-      ${agent ? '<h4 class="pp-h">Sessions</h4><div class="pp-sessions"></div>' : ""}</div>
+      ${agent ? '<h4 class="pp-h">Sessions</h4><div class="pp-sessions"></div>' : ""}
+      <details class="pp-details"${opened ? " open" : ""}><summary>Details</summary><div class="pp-meta"></div>
+        ${part && part.form === false ? "" : '<div class="pp-settings"></div>'}</details></div>
       ${agent ? '<div class="pj-card pp pp-sessview" hidden></div>' : ""}`;
     P.last = {};
     if (agent && window.cardSessions) {
@@ -291,6 +301,8 @@
   function draw() {
     if (kindPart() !== P.framed) frame();         // a kind's part registered after the card opened
     put(".pp-head", head());
+    put(".pp-overview", overview());
+    put(".pp-meta", meta());
     if (window.choiceMenu && !P.el.dataset.cmWired) {   // a picked choice is saved like any other setting
       P.el.dataset.cmWired = "1";
       choiceMenu.attach(P.el, (key, value) => saveValue(key, value));

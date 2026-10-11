@@ -43,7 +43,7 @@ global.CSS = { escape: (s) => s };
 global.document = { getElementById: el, addEventListener(ev, fn) { doc[ev] = fn; }, hidden: false, activeElement: null };
 global.md = { esc: (s) => String(s), render: (t) => t, outline: () => [] };
 const CARDS = { cards: [
-  { name: "alpha", kind: "agent", about: "plays the game", state: "idle", spec: { kind: "agent", about: "plays the game" },
+  { name: "alpha", kind: "agent", title: "Agent", explain: "Plays the game like a person.", about: "plays the game", state: "idle", spec: { kind: "agent", about: "plays the game" },
     prompt: "hi", editable: true, card: "/p/components/alpha" },
   { name: "beta", kind: "service", about: "", state: "idle", spec: { kind: "service" }, editable: true, card: "/p/components/beta" },
 ], readonly: "" };
@@ -58,7 +58,7 @@ global.fetch = async (url) => {
     emotions: [{ t: "00:10", emotion: "curious", why: "title" }], screenshots: [], tainted: false };
   return { ok: true, statusText: "OK", json: async () => d, text: async () => "" };
 };
-for (const f of process.argv.slice(2, 6)) require(f);
+for (const f of process.argv.slice(2, 7)) require(f);
 const host = panel.host;
 panel.host = (o) => {
   if (!o.__logged) { const c = o.close; o.close = (why) => { out.closes.push([o.name, why]); c(why); }; o.__logged = true; }
@@ -74,7 +74,7 @@ const pp = (sel) => { for (const k of Object.values(body.kids)) if (k.id === sel
 (async () => {
   projectCards.mount(area, "p1");
   await tick();
-  for (const s of JSON.parse(process.argv[6])) {
+  for (const s of JSON.parse(process.argv[7])) {
     if (s[0] === "click") { fire(area, "click", { target: target("data-card", s[1], "card") }); await tick(); }
     if (s[0] === "enter") { fire(area, "keydown", { key: "Enter", target: target("data-card", s[1], "card") }); await tick(); }
     if (s[0] === "esc") { doc.keydown({ key: "Escape" }); await tick(); }
@@ -88,7 +88,8 @@ const pp = (sel) => { for (const k of Object.values(body.kids)) if (k.id === sel
       out.log.push({ hidden: el("panel").hidden, name: el("panel-name").textContent, sub: el("panel-path").textContent,
         owner: panel.owner() && panel.owner().name, on, body: body.innerHTML,
         cardHidden: view ? !!view.hidden : null, sess: sess && !sess.hidden ? sess.innerHTML : "",
-        sessions: pp(".pp-sessions") ? pp(".pp-sessions").innerHTML : "" });
+        sessions: pp(".pp-sessions") ? pp(".pp-sessions").innerHTML : "",
+        overview: pp(".pp-overview") ? pp(".pp-overview").innerHTML : "" });
     }
   }
   process.stdout.write(JSON.stringify(out));
@@ -101,7 +102,7 @@ def run(tmp_path, steps):
         pytest.skip("node is not installed")
     stub = tmp_path / "stub.js"
     stub.write_text(STUB)
-    files = [str(WEB / f) for f in ("panel.js", "projectcards.js", "projectcardpanel.js", "cardsessions.js")]
+    files = [str(WEB / f) for f in ("panel.js", "projectcards.js", "projectcardpanel.js", "cardsessions.js", "cardoverview.js")]
     out = subprocess.run(["node", str(stub), *files, json.dumps(steps)], capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
@@ -112,9 +113,11 @@ def test_a_click_opens_the_card_in_the_side_panel(tmp_path):
     before, after = got["log"]
     assert before["hidden"] is True and before["on"] == []
     assert after["hidden"] is False and after["owner"] == "alpha"
-    assert after["name"] == "alpha" and after["sub"] == "agent · plays the game"
+    assert after["name"] == "alpha" and after["sub"] == "Agent · plays the game"
     assert "pp-cardview" in after["body"] and "pp-settings" in after["body"] and "pp-sessions" in after["body"]
     assert after["on"] == ["alpha"]
+    assert "What it does" in after["overview"] and "Plays the game like a person." in after["overview"]
+    assert after["body"].index("pp-overview") < after["body"].index("pp-details")
     assert any(u.endswith("/cards/alpha/uses") for u in got["fetched"])
 
 
@@ -166,5 +169,5 @@ def test_the_inline_panel_and_its_close_are_gone():
 
 
 def test_small():
-    for f in ("projectcards.js", "projectcardpanel.js", "cardsessions.js", "style.css", "projectcards.css"):
+    for f in ("projectcards.js", "projectcardpanel.js", "cardsessions.js", "cardoverview.js", "style.css", "projectcards.css"):
         assert len((WEB / f).read_text().splitlines()) < 400, f

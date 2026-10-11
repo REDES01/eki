@@ -66,7 +66,20 @@ def stands(c, g) -> str:
 def _item(c, it) -> Dict[str, Any]:
     return {"id": it["id"], "state": it["state"], "title": it["title"], "where": where(it),
             "note": note(c, it), "docs_only": bool(doccheck.of_item(it)), "run": it["run_id"],
-            "thread": _thread(c, it["run_id"]), "branch": it["branch"], "pr": it["pr"]}
+            "thread": _thread(c, it["run_id"]), "branch": it["branch"], "pr": it["pr"],
+            "context": [x["name"] for x in context(it)] or None}
+
+
+def context(it) -> List[Dict[str, str]]:
+    """The knowledge cards the planner picked for the item ({name, why}); [] when none or unreadable."""
+    try:
+        picked = json.loads(it["context"] or "null")
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(picked, list):
+        return []
+    return [{"name": str(x["name"]), "why": str(x.get("why") or "")}
+            for x in picked if isinstance(x, dict) and x.get("name")]
 
 
 def _thread(c, run_id: Optional[str]) -> Optional[str]:

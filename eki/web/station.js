@@ -133,6 +133,7 @@
         <span class="dim st-where">${it.pr ? prs.link(it.pr) : esc(it.where)}</span><span class="st-t">${esc(it.title)}</span>
         ${it.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(it.thread)}
         <span class="grow"></span>${err(it.id)}<span class="st-acts" data-state="${esc(it.state)}">${acts}</span></div>
+      ${Array.isArray(it.context) && it.context.length ? `<div class="dim st-ctx">context: ${esc(it.context.join(", "))}</div>` : ""}
       ${it.note ? `<div class="st-note">${esc(it.note)}</div>` : ""}</div>`;
   }
 

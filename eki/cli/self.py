@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, projectchats, projects, queue, score, selfdraft, selfwork, train
+from .. import asks, builds, digest, projectchats, projects, queue, score, selfdraft, selfview, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 from .selfloop import loop, pick
@@ -126,6 +126,9 @@ def show(c, iid: str) -> int:
     print(f"title:    {it['title']}")
     print(f"spec:     {it['spec'][:600]}")
     print(f"files:    {', '.join(json.loads(it['files'] or '[]')) or '(not declared)'}")
+    picked = selfview.context(it)
+    if picked:
+        print("context:  " + ", ".join(x["name"] + (f" ({x['why']})" if x["why"] else "") for x in picked))
     print(f"touched:  {', '.join(json.loads(it['touched'] or '[]')) or '-'}")
     print(f"worktree: {it['worktree'] or '-'}  branch {it['branch'] or '-'}  base {(it['base'] or '')[:12]}")
     print(f"commit:   {it['commit_sha'] or '-'}   tries {it['tries']}   run {it['run_id'] or '-'}")

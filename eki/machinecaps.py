@@ -1,10 +1,11 @@
 """Machine caps: how much eki runs at once on this Mac, across all projects.
 
-routing.json's "machine" block holds two numbers, each a whole number 1..MOST:
-`agents`, how many items may build at once across every project (each mostly
-waits on the model, so this costs subscription quota rather than CPU), and
-`checks`, how many test runs may run at once (judges, and the agents' own test
-runs inside build turns) so load stays near the core count. A project's
+routing.json's "machine" block holds two whole numbers, each with its own
+upper bound in MOST: `agents` (1..64), how many items may build at once across
+every project (each mostly waits on the model, so this costs subscription quota
+rather than CPU), and `checks` (1..32), how many test runs may run at once
+(judges, and the agents' own test runs inside build turns) so load stays near
+the core count. A project's
 workflow card `parallel` is only that project's cap; this one is separate and wins.
 
 They used to live in the "self" block as `parallel` and `check_slots`; the
@@ -21,8 +22,8 @@ from . import paths
 
 #: the default for agents at once
 AGENTS = 12
-#: the upper bound for both caps
-MOST = 32
+#: each cap's upper bound
+MOST = {"agents": 64, "checks": 32}
 #: the old "self" keys and where they go
 MOVED = {"parallel": "agents", "check_slots": "checks"}
 
@@ -37,6 +38,17 @@ def _defaults() -> Dict[str, int]:
 
 def _whole(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _clamp(key: str, v: Any) -> int:
+    """v as a whole number within key's bounds; TypeError/ValueError if it isn't one."""
+    return min(MOST[key], max(1, int(v)))
+
+
+def _bad(key: str, v: Any) -> Optional[str]:
+    if _whole(v) and 1 <= v <= MOST[key]:
+        return None
+    return f"machine.{key} must be a whole number from 1 to {MOST[key]}, not {v!r}"
 
 
 def _read() -> Optional[Dict[str, Any]]:
@@ -64,7 +76,7 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
         if old in me:
             v = me.pop(old)
             try:
-                block[new] = min(MOST, max(1, int(v)))
+                block[new] = _clamp(new, v)
             except (TypeError, ValueError):
                 pass                                    # a bad old value: the default
     data["machine"] = block
@@ -76,7 +88,7 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def settings() -> Dict[str, int]:
-    """{"agents", "checks"}: the saved values clamped to 1..MOST, or the defaults."""
+    """{"agents", "checks"}: the saved values clamped to their bounds, or the defaults."""
     out = _defaults()
     data = _read()
     if data is None:
@@ -86,7 +98,7 @@ def settings() -> Dict[str, int]:
         return out
     for k in out:
         try:
-            out[k] = min(MOST, max(1, int(block[k])))
+            out[k] = _clamp(k, block[k])
         except (KeyError, TypeError, ValueError):
             pass
     return out
@@ -96,8 +108,8 @@ def save(agents: Optional[int] = None, checks: Optional[int] = None) -> Dict[str
     """Set the given caps in routing.json's machine block; the new settings()."""
     given = {k: v for k, v in (("agents", agents), ("checks", checks)) if v is not None}
     for k, v in given.items():
-        if not _whole(v) or not 1 <= v <= MOST:
-            raise ValueError(f"machine.{k} must be a whole number from 1 to {MOST}, not {v!r}")
+        if _bad(k, v):
+            raise ValueError(_bad(k, v))
     settings()                                          # migrate first, so old values aren't lost
     data = _read()
     if data is None:
@@ -112,6 +124,5 @@ def problems(block: Any) -> List[str]:
     """Every problem with a "machine" block, in words."""
     if not isinstance(block, dict):
         return ["machine must be an object"]
-    return [f"machine.{k} must be a whole number from 1 to {MOST}, not {block[k]!r}"
-            for k in ("agents", "checks")
-            if k in block and not (_whole(block[k]) and 1 <= block[k] <= MOST)]
+    found = (_bad(k, block[k]) for k in ("agents", "checks") if k in block)
+    return [why for why in found if why]

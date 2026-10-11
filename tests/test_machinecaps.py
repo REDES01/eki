@@ -28,7 +28,9 @@ def test_defaults_follow_the_cores(home, monkeypatch):
 
 def test_values_are_clamped(home):
     write(home, machine={"agents": 99, "checks": 0})
-    assert machinecaps.settings() == {"agents": 32, "checks": 1}
+    assert machinecaps.settings() == {"agents": 64, "checks": 1}
+    write(home, machine={"agents": 50, "checks": 50})
+    assert machinecaps.settings() == {"agents": 50, "checks": 32}
 
 
 def test_a_bad_file_falls_back_to_the_defaults(home, monkeypatch):
@@ -55,6 +57,12 @@ def test_self_parallel_and_check_slots_move_once(home):
     assert path.stat().st_mtime_ns == 1_000_000_000 and path.read_text() == before[1]
 
 
+def test_old_values_move_within_each_bound(home):
+    write(home, self={"parallel": 50, "check_slots": 50})
+    assert machinecaps.settings() == {"agents": 50, "checks": 32}
+    assert routing(home)["machine"] == {"agents": 50, "checks": 32}
+
+
 def test_no_old_keys_means_no_write(home):
     path = home / "routing.json"
     before = path.read_text()
@@ -66,12 +74,15 @@ def test_save_sets_fields_and_refuses_out_of_range(home):
     assert machinecaps.save(agents=8)["agents"] == 8
     assert machinecaps.save(checks=4) == {"agents": 8, "checks": 4}
     assert routing(home)["machine"] == {"agents": 8, "checks": 4}
-    for bad in (0, 33):
-        with pytest.raises(ValueError, match="machine.agents"):
+    assert machinecaps.save(agents=64)["agents"] == 64
+    for bad in (0, 65):
+        with pytest.raises(ValueError) as e:
             machinecaps.save(agents=bad)
-    with pytest.raises(ValueError, match="machine.checks"):
+        assert str(e.value) == f"machine.agents must be a whole number from 1 to 64, not {bad}"
+    with pytest.raises(ValueError) as e:
         machinecaps.save(checks=33)
-    assert routing(home)["machine"] == {"agents": 8, "checks": 4}
+    assert str(e.value) == "machine.checks must be a whole number from 1 to 32, not 33"
+    assert routing(home)["machine"] == {"agents": 64, "checks": 4}
 
 
 def test_save_keeps_migrated_values(home):
@@ -85,6 +96,10 @@ def test_problems_in_words():
     assert machinecaps.problems([]) == ["machine must be an object"]
     got = machinecaps.problems({"agents": 0, "checks": True})
     assert len(got) == 2 and "machine.agents" in got[0] and "machine.checks" in got[1]
+    assert machinecaps.problems({"agents": 64, "checks": 32}) == []
+    assert machinecaps.problems({"agents": 65, "checks": 33}) == [
+        "machine.agents must be a whole number from 1 to 64, not 65",
+        "machine.checks must be a whole number from 1 to 32, not 33"]
 
 
 def test_check_slots_follow_machine_checks(home):
@@ -97,7 +112,7 @@ def test_the_settings_post_refuses_zero_agents(home, conn):
     data = {**got["data"], "machine": {"agents": 0}}
     with pytest.raises(api_settings.Invalid) as e:
         api_settings.write(conn, "routing", {"data": data, "mtime": got["mtime"]})
-    assert e.value.problems == ["machine.agents must be a whole number from 1 to 32, not 0"]
+    assert e.value.problems == ["machine.agents must be a whole number from 1 to 64, not 0"]
     data["machine"] = {"agents": 16, "checks": 4}
     api_settings.write(conn, "routing", {"data": data, "mtime": got["mtime"]})
     assert machinecaps.settings() == {"agents": 16, "checks": 4}

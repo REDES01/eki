@@ -9,9 +9,9 @@ HELP = "how much eki runs at once on this Mac: agents at once and test runs at o
 
 def add(p) -> None:
     p.add_argument("--agents", type=int, metavar="N",
-                   help=f"items building at once across all projects (1–{machinecaps.MOST})")
+                   help=f"items building at once across all projects (1–{machinecaps.MOST['agents']})")
     p.add_argument("--checks", type=int, metavar="M",
-                   help=f"test runs (checks, judges, agents' own tests) at once (1–{machinecaps.MOST})")
+                   help=f"test runs (checks, judges, agents' own tests) at once (1–{machinecaps.MOST['checks']})")
 
 
 def run(args) -> int:
@@ -19,5 +19,5 @@ def run(args) -> int:
         s = machinecaps.save(agents=args.agents, checks=args.checks)   # ValueError → `eki: ...`, exit 1
     else:
         s = machinecaps.settings()
-    print(f"agents at once {s['agents']} (1–{machinecaps.MOST}) · test runs at once {s['checks']}")
+    print(f"agents at once {s['agents']} (1–{machinecaps.MOST['agents']}) · test runs at once {s['checks']}")
     return 0

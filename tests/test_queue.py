@@ -206,6 +206,7 @@ def test_a_red_front_is_unfit_and_those_behind_are_judged_again(conn, src, monke
     assert A["state"] == "unfit" and A["error"] == "gate 2 failed" and A["gate2"] == "red", said
     assert B["state"] == "queued" and B["head"] == m and B["gate2"] is None
     assert not (Path(B["worktree"]) / "a.txt").exists()          # A's commit left behind
+    assert f"item {b}: re-stacked on {m[:12]} without {a} (left the queue)" in said, said
     assert git(B["worktree"], "rev-parse", "HEAD^") == m
     run_inline(conn, B["gate2_run"])
     queue.tick(conn)

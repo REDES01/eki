@@ -235,6 +235,7 @@ ADDED = [
     ("items", "queued_at", "REAL"),     # queue order
     ("items", "head", "TEXT"),          # the predicted head last rebased onto (or resolving against)
     ("items", "rebased", "TEXT"),       # the item's commit on top of head
+    ("items", "resolved_on", "TEXT"),   # the commit right under the item's own commits after a resolve: the head it was resolved onto, moved by each re-stack
     ("items", "gate2_run", "TEXT"),     # the gate-2 command run
     ("items", "gate2_on", "TEXT"),      # the rebased sha gate2_run judges
     ("items", "gate2", "TEXT"),         # green | red | NULL

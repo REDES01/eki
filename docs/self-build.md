@@ -153,7 +153,7 @@ land     fast-forward the integration ref         (serial, milliseconds)
 train    build, drills + candidate (full check unless gate 2 passed that exact head), swap  (serial; gate 3)
 ```
 
-`judge` and `resolve` need the **command** provider: a worker that runs an
+`judge` needs the **command** provider: a worker that runs an
 argv in a folder and records its output as events, done / failed /
 interrupted like any run, resumed by running again — a check is
 idempotent. It's a job runner, not a harness.
@@ -248,8 +248,15 @@ and C is left for you. A resolver that leaves conflict markers in a file, or
 ends without an `ITEM:` line, gets one more run, told what was wrong and shown
 the hunks still marked; a second failure leaves C for you. When it's done, eki
 continues the rebase, refuses a result with markers left or not on top of
-the head it resolved against, runs gate 1 on it again, and C rejoins at the
-back — cleanly now, since it contains A and B. Many changes resolve at once,
+the head it resolved against, and C rejoins at the back and gate 2 judges it
+with the changes under it; if one of them leaves the queue, C is re-stacked
+without it, and resolved again only if that conflicts. Gate 1 doesn't run
+again on the resolved change: on M+A+B it would judge A and B too, and a
+broken B would make C unfit for B's change; gate 2's bisect says whose fault
+a red is. eki keeps the head C was resolved onto (`resolved_on`), so every
+later move of C's branch — a re-stack, a rebuild, a re-apply after `left` —
+takes only C's own commits (`rebase --onto <new head> <resolved_on>`), and
+the queue's line names the changes left behind. Many changes resolve at once,
 each beside the queue; a conflict never holds anyone else up. `git rerere`
 records every resolution so a change that must rebase twice doesn't ask
 twice for the same hunk.
@@ -300,8 +307,9 @@ pytest), and eki runs the whole check right after the turn — this is the
 first full run. Red goes back to the change's thread with the failure
 through the same retry (`failure=` and the item's `verdict`); one retry with
 the failure in the brief, then it's left for you (`unfit`). A resolve run
-works the same way: it runs the tests for what it touched, and gate 1 runs
-again on the resolved change. A project builder (`projectbrief`) still runs
+runs the tests for what it touched; gate 1 doesn't run again on the resolved
+change — it goes back to the queue and gate 2 judges it with the changes
+under it. A project builder (`projectbrief`) still runs
 the project's own check in its turn, because a project has no gate 2 or
 train behind it. Cheap, parallel, keeps junk out of the predicted futures. A
 **docs-only** item — every touched file is `*.md` (any folder) or under
@@ -611,7 +619,8 @@ restart loses nothing.
 
 - no goal is `drafting` or `planning`;
 - no item is `waiting`, `building`, `judging`, `reviewing`, `queued`,
-  `resolving` or `rechecking`;
+  `resolving` or `rechecking` (only items from before a resolve stopped
+  running gate 1: they go back to the queue once their check ends);
 - no run with priority `now` is `queued` or `running`.
 
 It opens at most one goal per pass, and that goal makes eki busy, so picks

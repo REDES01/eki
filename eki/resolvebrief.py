@@ -32,12 +32,12 @@ anything outside this folder — not {path}, not ~/.eki."""
 CHECK_EKI = """\
 Then run the tests for the files you touched, e.g. `bin/check
 tests/test_x.py` (bin/check passes its arguments to pytest) — don't run the
-whole suite (plain `bin/check`): eki runs the whole check right after your
-turn and sends any failure back."""
+whole suite (plain `bin/check`): the queue's gate 2 checks the result with the
+changes under it, and only the change at fault is held back."""
 
 CHECK_PROJECT = """\
-Then run the project's check, `{cmd}`, and leave it green — eki runs it again
-right after your turn."""
+Then run the project's check, `{cmd}`, and leave it green — the project's
+queue checks the result with the changes under it."""
 
 CHECK_NONE = """\
 The project has no check; run the project's own tests for what you touched

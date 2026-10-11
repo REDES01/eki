@@ -4,7 +4,11 @@
 Queued items stand in order (queued_at, then created_at). Each one's
 predicted head is integration main plus the rebased commits of the items
 ahead of it — a stack. A conflict sends the item to the side path
-(resolve.py) and the items behind it are rebased without it.
+(resolve.py) and the items behind it are rebased without it. A resolved item
+comes back at the back for gate 2, with `resolved_on` the head it was
+resolved onto; each re-stack moves only the commits above that head
+(`rebase --onto`), so an item under it that left the queue is left behind —
+the line names it — and only a conflict resolves it again.
 
 Gate 2 checks the stack as one batch: one run on the tip, which carries every
 item under it. Green lands the whole batch. Red bisects: the middle of the
@@ -248,22 +252,37 @@ def _rebase(conn: sqlite3.Connection, it: sqlite3.Row, head: str) -> tuple:
     if it["gate2_run"]:
         _cancel(conn, it["gate2_run"])
     wt = it["worktree"]
-    since = it["head"] if it["rebased"] else None
     try:
-        if since and git(wt, "rev-parse", "HEAD") != it["rebased"]:
-            since = None                           # moved by hand: rebase all of it
+        at = git(wt, "rev-parse", "HEAD")
+        since = it["head"] if it["rebased"] and at == it["rebased"] else None
+        if since is None and it["resolved_on"] and resolve._is_ancestor(wt, it["resolved_on"], at):
+            since = it["resolved_on"]              # moved since its resolve: still only its own commits
         conflicts = rebase.onto(wt, head, since=since)
     except (WorkspaceError, OSError) as e:
         if _set_if(conn, it, "queued", state="left", error=f"the rebase onto {head[:12]} failed: {e}"):
             return None, [f"item {it['id']}: left for you — the rebase failed: {e}"]
         return None, []
+    gone = _departed(conn, it, since, head) if since and since != head else []
+    without = f" without {', '.join(gone)} (left the queue)" if gone else ""
     if conflicts:
         rid = resolve.start(conn, it, head, conflicts)
-        return None, [f"item {it['id']}: conflict in {', '.join(conflicts)} → resolving ({rid[:8]})"]
+        return None, [f"item {it['id']}: conflict in {', '.join(conflicts)}"
+                      f"{', re-stacked' + without if gone else ''} → resolving ({rid[:8]})"]
     sha = git(wt, "rev-parse", "HEAD")
-    if not _set_if(conn, it, "queued", head=head, rebased=sha, gate2=None, gate2_run=None, gate2_on=None):
+    moved = {"resolved_on": head} if it["resolved_on"] else {}
+    if not _set_if(conn, it, "queued", head=head, rebased=sha, gate2=None, gate2_run=None, gate2_on=None, **moved):
         return None, []
+    if gone:
+        return sha, [f"item {it['id']}: re-stacked on {head[:12]}{without}"]
     return sha, [f"item {it['id']}: rebased on {head[:12]}"]
+
+
+def _departed(conn: sqlite3.Connection, it: sqlite3.Row, since: str, head: str) -> List[str]:
+    """Items under `since` but not under `head`, out of the queue: what a re-stack left behind."""
+    left_behind = set(git(it["worktree"], "rev-list", since, f"^{head}", check=False).split())
+    rows = conn.execute("SELECT id, rebased FROM items WHERE id<>? AND rebased IS NOT NULL "
+                        "AND state NOT IN ('queued', 'landed') ORDER BY id", (it["id"],)).fetchall()
+    return [r["id"] for r in rows if r["rebased"] in left_behind]
 
 
 def _cancel(conn: sqlite3.Connection, rid: str) -> None:

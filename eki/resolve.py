@@ -5,10 +5,14 @@ The queue calls `start` when an item's rebase onto its predicted head stops
 on a conflict: a resolve run starts in the item's own worktree, mid-rebase,
 told what the item is for, what the head changed in the conflicted files and
 what each landed change was for (eki/landed.py).
-`tick` moves on every item whose resolve or gate-1 run has ended: eki
-continues the rebase, refuses a result with markers left or not on top of
-the head, runs gate 1 again (a project item: its project's check, or none
-when it has none), and puts the item at the back of the queue.
+`tick` moves on every item whose resolve run has ended: eki continues the
+rebase, refuses a result with markers left or not on top of the head, and
+puts the item at the back of the queue on that head. Gate 1 does not run
+again: gate 2 judges the item with the changes under it, and its bisect says
+whose fault a red is. `resolved_on` keeps the head it was resolved onto, so a
+later re-stack (queue._rebase) moves only the item's own commits. An item
+left in `rechecking` by an older build goes back to the queue once its run
+ends, its result not counted.
 
 Everything is rebuilt from the items table and the runs; every git step is
 safe to repeat, so a restart at any point loses nothing.
@@ -20,7 +24,7 @@ import sqlite3
 import subprocess
 from typing import List, Optional, Tuple
 
-from . import db, landed, projects, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from . import db, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -51,8 +55,8 @@ def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: Lis
     owner = goal["owner"] if goal else "eki"
     rid = store.create_run(conn, it["thread_id"], prompt, row="code", fresh=True,
                            priority="now" if owner == "you" else "background")
-    selfwork._set(conn, it["id"], state="resolving", run_id=rid, head=head, gate2_run=None,
-                  gate2=None, rebased=None, error=None)
+    selfwork._set(conn, it["id"], state="resolving", run_id=rid, head=head, resolved_on=head,
+                  gate2_run=None, gate2=None, rebased=None, error=None)
     return rid
 
 
@@ -151,21 +155,19 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if not _is_ancestor(wt, head, "HEAD"):
         return _leave(conn, it, f"the result is not on top of the head {head[:12]}")
     sha = git(wt, "rev-parse", "HEAD")
-    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-    project = projectwork.project_of(conn, goal)
-    argv = projects.check_argv(project) if project is not None else selfwork.CHECK
     with db.tx(conn):
         if not _still(conn, it, "resolving"):
             return []
-        if argv is None:                     # nothing to judge it with: as a green recheck
-            selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=it["head"],
-                          rebased=sha, commit_sha=sha, verdict=projectwork.not_judged(project),
-                          error=None)
-            return [f"item {it['id']}: resolved; not judged; back in the queue"]
-        rid = store.create_run(conn, it["thread_id"], argv, provider="command",
-                               priority=run["priority"])
-        selfwork._set(conn, it["id"], state="rechecking", run_id=rid, commit_sha=sha, error=None)
-    return [f"item {it['id']}: resolved onto {head[:12]}; gate 1 again"]
+        _requeue(conn, it, sha)
+    return [f"item {it['id']}: resolved onto {head[:12]}; back in the queue — gate 2 judges it"]
+
+
+def _requeue(conn: sqlite3.Connection, it: sqlite3.Row, sha: str, **fields) -> None:
+    """Back of the queue, on the head it was resolved onto, for gate 2 to judge with the changes
+    under it — its bisect says who is at fault. No gate 1 here: a queue-mate under it that is
+    broken would make it unfit for someone else's change."""
+    selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=it["head"], rebased=sha,
+                  commit_sha=sha, gate2=None, gate2_run=None, gate2_on=None, error=None, **fields)
 
 
 def _has_item(answer: str) -> bool:
@@ -201,25 +203,16 @@ def _failed(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, left: L
 
 
 def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
+    """An item left in `rechecking` by an older build (gate 1 after a resolve): once its run
+    has ended, whatever it said, it goes back to the queue for gate 2. Nothing enters
+    `rechecking` any more."""
     run = store.run(conn, it["run_id"]) if it["run_id"] else None
     if run is not None and run["state"] in store.ACTIVE:
         return []
-    tail = selfwork.failure_tail(store.answer(conn, run["id"])) if run else ""
-    if run is None or run["state"] != "done":
-        state = run["state"] if run else "missing"
-        tail = (tail + f"\n(checks {state}: {(run['error'] if run else '') or ''})").strip()
+    state = run["state"] if run else "missing"
     with db.tx(conn):
         if not _still(conn, it, "rechecking"):
             return []
-        if run is not None and run["state"] == "done":
-            # The branch now sits on the head it was resolved onto. Keep that head as the
-            # item's base so the next rebase moves only the item's own commits: a plain
-            # rebase would carry the predicted head's commits along, even ones whose
-            # item has since failed gate 2 and left the queue.
-            selfwork._set(conn, it["id"], state="queued", queued_at=db.now(),
-                          head=it["head"], rebased=it["commit_sha"],
-                          verdict=tail[-selfwork.FAILURE_CHARS:], error=None)
-            return [f"item {it['id']}: resolved and green; back in the queue"]
-        selfwork._set(conn, it["id"], state="unfit", verdict=tail[-selfwork.FAILURE_CHARS:],
-                      error=f"checks {run['state'] if run else 'missing'} after resolving")
-    return [f"item {it['id']}: unfit after resolving — left for you"]
+        _requeue(conn, it, it["commit_sha"],
+                 verdict=f"resolved; the old gate-1 check ({state}) is not counted — gate 2 judges it")
+    return [f"item {it['id']}: resolved; back in the queue — gate 2 judges it"]

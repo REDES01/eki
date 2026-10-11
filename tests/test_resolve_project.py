@@ -1,9 +1,7 @@
-"""A resolved item of a project is rechecked with its project's check (eki/resolve.py)."""
-import json
-
+"""A resolved item of a project goes back to its queue for gate 2, no gate 1 (eki/resolve.py)."""
 import pytest
 
-from eki import db, projects, projectwork, rebase, resolve, selfwork, store, workspace
+from eki import db, projects, rebase, resolve, selfwork, store, workspace
 from eki.workspace import git
 from conftest import run_inline
 
@@ -59,24 +57,19 @@ def resolved(conn, it, head, tmp_path, monkeypatch):
     return resolve.tick(conn)
 
 
-def test_a_project_check_is_the_recheck(conn, repo, tmp_path, monkeypatch):
+def test_a_project_item_goes_back_without_a_gate_one(conn, repo, tmp_path, monkeypatch):
     pid = projects.add(conn, repo, check="test -f a.txt")
     it, head = conflicted(conn, repo, pid)
+    runs = len(store.thread_runs(conn, it["thread_id"]))
     said = resolved(conn, it, head, tmp_path, monkeypatch)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "rechecking", (cur["error"], said)
-    check = store.run(conn, cur["run_id"])
-    assert check["provider"] == "command" and check["prompt"] != selfwork.CHECK
-    assert check["prompt"] == projects.check_argv(projects.get(conn, pid))
-    assert json.loads(check["prompt"])[2] == "test -f a.txt"
-    run_inline(conn, check["id"])
-    said = resolve.tick(conn)
-    cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "queued" and cur["head"] == head, (cur["error"], said)
-    assert any("back in the queue" in s for s in said)
+    assert cur["state"] == "queued" and cur["queued_at"] and cur["head"] == head, (cur["error"], said)
+    assert cur["resolved_on"] == head and cur["gate2"] is None and cur["gate2_run"] is None
+    assert len(store.thread_runs(conn, it["thread_id"])) == runs + 1     # the resolve run only
+    assert said == [f"item {it['id']}: resolved onto {head[:12]}; back in the queue — gate 2 judges it"]
 
 
-def test_a_project_without_a_check_goes_straight_back(conn, repo, tmp_path, monkeypatch):
+def test_a_project_without_a_check_goes_back_the_same_way(conn, repo, tmp_path, monkeypatch):
     pid = projects.add(conn, repo)
     assert projects.check_argv(projects.get(conn, pid)) is None
     it, head = conflicted(conn, repo, pid)
@@ -88,15 +81,15 @@ def test_a_project_without_a_check_goes_straight_back(conn, repo, tmp_path, monk
     assert not rebase.in_progress(wt) and git(wt, "rev-parse", "HEAD^") == head
     sha = workspace.head(wt)
     assert cur["commit_sha"] == sha and cur["rebased"] == sha and cur["head"] == head
-    assert cur["verdict"] == projectwork.not_judged(projects.get(conn, pid)) and cur["error"] is None
-    assert said == [f"item {it['id']}: resolved; not judged; back in the queue"]
+    assert cur["error"] is None and cur["gate2"] is None         # the project's queue decides (not judged)
+    assert said == [f"item {it['id']}: resolved onto {head[:12]}; back in the queue — gate 2 judges it"]
     assert len(store.thread_runs(conn, it["thread_id"])) == runs + 1     # the resolve run only
     assert resolve.tick(conn) == []
 
 
-def test_eki_items_still_use_its_own_check(conn, repo, tmp_path, monkeypatch):
+def test_eki_items_go_back_the_same_way(conn, repo, tmp_path, monkeypatch):
     it, head = conflicted(conn, repo, None)
     said = resolved(conn, it, head, tmp_path, monkeypatch)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "rechecking", (cur["error"], said)
-    assert store.run(conn, cur["run_id"])["prompt"] == selfwork.CHECK
+    assert cur["state"] == "queued", (cur["error"], said)
+    assert all(r["provider"] != "command" for r in store.thread_runs(conn, it["thread_id"]))

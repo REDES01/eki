@@ -67,27 +67,23 @@ def test_start_makes_a_resolve_run(conn, conflicted):
     assert resolve.tick(conn) == []                                  # the run hasn't ended
 
 
-def test_a_clean_resolution_is_checked_and_requeued(conn, conflicted, tmp_path, monkeypatch):
+def test_a_clean_resolution_goes_back_to_the_queue_for_gate_two(conn, conflicted, tmp_path, monkeypatch):
     it, head = conflicted
     rid = resolve.start(conn, it, head, ["a.txt"])
+    assert selfwork.store_item(conn, it["id"])["resolved_on"] == head
     says(tmp_path, monkeypatch, "SUMMARY: kept both.\nITEM: done\n")
     monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
     run_inline(conn, rid)
     said = resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "rechecking", (cur["error"], said)
+    assert cur["state"] == "queued" and cur["queued_at"], (cur["error"], said)
     wt = cur["worktree"]
     assert not rebase.in_progress(wt) and cur["commit_sha"] == workspace.head(wt)
     assert git(wt, "rev-parse", "HEAD^") == head
-    check = store.run(conn, cur["run_id"])
-    assert check["provider"] == "command" and check["prompt"] == selfwork.CHECK
-    assert resolve.tick(conn) == []
-    run_inline(conn, check["id"])
-    said = resolve.tick(conn)
-    cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "queued" and cur["queued_at"]
     assert cur["head"] == head and cur["rebased"] == cur["commit_sha"]   # its base: the head it sits on
-    assert any("back in the queue" in s for s in said)
+    assert cur["resolved_on"] == head and cur["gate2_run"] is None and cur["error"] is None
+    assert said == [f"item {it['id']}: resolved onto {head[:12]}; back in the queue — gate 2 judges it"]
+    assert [r["id"] for r in store.thread_runs(conn, it["thread_id"])] == [rid]   # no gate 1 run
     assert resolve.tick(conn) == []                                  # moved on once
 
 
@@ -99,9 +95,6 @@ def test_a_resolved_item_does_not_carry_its_old_head_along(conn, repo, conflicte
     says(tmp_path, monkeypatch, "ITEM: done\n")
     monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
     run_inline(conn, rid)
-    resolve.tick(conn)
-    cur = selfwork.store_item(conn, it["id"])
-    run_inline(conn, cur["run_id"])
     resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
     assert cur["state"] == "queued"
@@ -159,7 +152,7 @@ def test_no_item_line_gets_a_second_try(conn, conflicted, tmp_path, monkeypatch)
     assert cur["state"] == "left" and cur["error"] == "no ITEM line after a second resolve run"
 
 
-def test_a_good_second_try_goes_on_to_gate_one(conn, conflicted, tmp_path, monkeypatch):
+def test_a_good_second_try_goes_back_to_the_queue(conn, conflicted, tmp_path, monkeypatch):
     it, head = conflicted
     rid = resolve.start(conn, it, head, ["a.txt"])
     says(tmp_path, monkeypatch, "SUMMARY: sure.\nITEM: done\n")
@@ -169,7 +162,9 @@ def test_a_good_second_try_goes_on_to_gate_one(conn, conflicted, tmp_path, monke
     monkeypatch.setenv("EKI_FAKE_TOUCH", "a.txt")
     run_inline(conn, cur["run_id"])
     resolve.tick(conn)
-    assert selfwork.store_item(conn, it["id"])["state"] == "rechecking"
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "queued" and cur["head"] == head and cur["resolved_on"] == head
+    assert all(r["provider"] != "command" for r in store.thread_runs(conn, it["thread_id"]))
 
 
 def test_a_person_is_asked_for(conn, conflicted, tmp_path, monkeypatch):
@@ -183,7 +178,9 @@ def test_a_person_is_asked_for(conn, conflicted, tmp_path, monkeypatch):
     assert not rebase.in_progress(cur["worktree"])
 
 
-def test_a_red_gate_one_is_unfit(conn, conflicted, tmp_path, monkeypatch):
+def test_a_leftover_recheck_drains_back_to_the_queue_whatever_it_said(conn, conflicted, tmp_path, monkeypatch):
+    """An item an older build left in `rechecking` (gate 1 after a resolve): a red check
+    is not counted against it — gate 2 judges it."""
     it, head = conflicted
     rid = resolve.start(conn, it, head, ["a.txt"])
     says(tmp_path, monkeypatch, "ITEM: done\n")
@@ -191,12 +188,20 @@ def test_a_red_gate_one_is_unfit(conn, conflicted, tmp_path, monkeypatch):
     run_inline(conn, rid)
     resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "rechecking"
+    with db.tx(conn):                                                 # as the old build left it
+        check = store.create_run(conn, cur["thread_id"], selfwork.CHECK, provider="command")
+        selfwork._set(conn, it["id"], state="rechecking", run_id=check, rebased=None)
+    assert resolve.tick(conn) == []                                  # its run hasn't ended
     monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "1")
-    run_inline(conn, cur["run_id"])
-    resolve.tick(conn)
+    run_inline(conn, check)
+    assert store.run(conn, check)["state"] == "failed"
+    said = resolve.tick(conn)
     cur = selfwork.store_item(conn, it["id"])
-    assert cur["state"] == "unfit" and "checks" in cur["error"]
+    assert cur["state"] == "queued" and cur["queued_at"] and cur["error"] is None, said
+    assert cur["head"] == head and cur["rebased"] == cur["commit_sha"] and cur["gate2_run"] is None
+    assert "not counted" in cur["verdict"] and "failed" in cur["verdict"]
+    assert said == [f"item {it['id']}: resolved; back in the queue — gate 2 judges it"]
+    assert resolve.tick(conn) == []
 
 
 def test_a_second_stop_gets_another_run_and_three_are_the_most(conn, repo, conflicted, tmp_path,

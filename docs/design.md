@@ -73,7 +73,7 @@ eki follow <run>  ◄── events table
 | `integration` | the repo eki lands into (`~/.eki/self/repo`): `main` is fast-forwarded, pushed to origin, and the source checkout follows only when clean |
 | `queue` | proposed items in order: speculative rebase onto each one's predicted head, gate 2, and landing the front on integration `main` |
 | `rebase` | the git steps of the queue: rebase a branch onto its predicted head, carry on after a resolve, a fresh worktree for gate 2 |
-| `resolve` | the queue's side path: a run resolves a conflicted rebase, eki checks it, runs gate 1 again and puts the item at the back |
+| `resolve` | the queue's side path: a run resolves a conflicted rebase onto the predicted head, eki checks no markers are left and it sits on that head, records it (`resolved_on`) and puts the item at the back for gate 2 — no gate 1 again, so a queue-mate's failure is never blamed on it |
 | `candidate` | the train's own checks before a swap (gate 3): the checkout's engine boots, it opens and migrates a copy of the db, and the running build opens the copy |
 | `locks` | the hard lock list: files eki may never change on its own say; an item touching one waits for a person's yes |
 | `train` | integration `main` goes live every few minutes as a build; `settle` marks what it carried live or rolled back |

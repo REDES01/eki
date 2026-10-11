@@ -37,8 +37,12 @@ def home(tmp_path, monkeypatch):
     (bindir / "gh").write_text("#!/bin/sh\necho 'gh: not in tests' >&2\nexit 4\n")
     (bindir / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
-    from eki import github
+    from eki import engine, github
     monkeypatch.setattr(github, "_last", {})
+    # a CLI command under test that finds no engine must not start a real one: it would outlive the
+    # test in its temporary home (23 of them were found running a day later)
+    monkeypatch.setattr(engine, "real_start_detached", engine.start_detached, raising=False)   # the drills'
+    monkeypatch.setattr(engine, "start_detached", lambda: 0)
     from eki import workflowgates          # this checkout's own workflow card is the running eki's, not a
     monkeypatch.setattr(workflowgates, "own", lambda: None)   # test's (tests/test_workflow_gates.py)
     real = Path("~").expanduser()

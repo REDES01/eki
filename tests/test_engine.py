@@ -6,13 +6,15 @@ from eki import db, drill, engine, store
 
 
 @pytest.mark.drill
-def test_restart_drill(home):
+def test_restart_drill(home, monkeypatch):
+    monkeypatch.setattr(engine, "start_detached", engine.real_start_detached)   # the drill starts real ones
     checks = drill.run(say=lambda s: None, home=str(home / "drill"))
     assert len(checks) == 7
 
 
 @pytest.mark.drill
-def test_swap_drill(home):
+def test_swap_drill(home, monkeypatch):
+    monkeypatch.setattr(engine, "start_detached", engine.real_start_detached)
     checks = drill.swaps(say=lambda s: None, home=str(home / "swaps"))
     assert len(checks) == 5
 

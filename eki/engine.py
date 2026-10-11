@@ -329,6 +329,9 @@ def serve() -> int:
     log.info("engine %s up, home %s, build %s", os.getpid(), paths.home(), builds.running_id())
     code = 0
     while not stopping:
+        if not home_here():
+            log.info("engine %s: its home %s is gone; stopping", os.getpid(), paths.home())
+            break
         try:
             if not tick(conn):
                 log.info("a newer build is current: stepping aside")
@@ -341,6 +344,12 @@ def serve() -> int:
     log.info("engine %s down; workers left running", os.getpid())
     held.close()
     return code
+
+
+def home_here() -> bool:
+    """The engine's home and its database still exist. A test's engine lives in a temporary
+    home; once the test framework deletes it, the engine has nothing left to manage and stops."""
+    return paths.home().is_dir() and paths.db().exists()
 
 
 def start_detached() -> int:

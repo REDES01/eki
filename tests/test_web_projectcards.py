@@ -11,7 +11,7 @@ import pytest
 from eki import server
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
-FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "projectcards.css")
+FILES = ("projectcards.js", "projectcardpanel.js", "projectinstructions.js", "cardsessions.js", "projectcards.css")
 
 
 @pytest.fixture
@@ -44,16 +44,21 @@ def test_the_grid_names_its_routes_and_loads_the_rest(web):
 
 def test_the_panel_names_its_routes(web):
     js = get(web + "/ui/projectcardpanel.js")[1]
-    for name in ('"/run"', '"/uses"', '"/uses/"', '"/sessions"', '"/sessions/"', '"/file?name="', "{ settings:",
+    for name in ('"/run"', '"/uses"', '"/uses/"', "{ settings:", "cardsessions.js",
                  "{ prompt:", "problems", "edit in pool", "#settings/components", '"bare"', "setTimeout(() => poll",
-                 "slice(0, 20)", "emotions", "screenshots", "data_url", "tainted", "window.projectCardPanel"):
+                 "slice(0, 20)", "window.projectCardPanel"):
         assert name in js, name
+    js = get(web + "/ui/cardsessions.js")[1]
+    for name in ('"/sessions"', '"/sessions/"', '"/file?name="', "emotions", "screenshots", "data_url", "tainted",
+                 "← back to", "window.cardSessions"):
+        assert name in js, name
+    assert "pc-panel" not in get(web + "/ui/projectcards.js")[1]
 
 
 def test_the_instructions_card(web):
     js = get(web + "/ui/projectinstructions.js")[1]
     for name in ('"/instructions"', '"/link-claude"', '"/read?path="', "Read first", "Link CLAUDE.md", "Edit",
-                 "metaKey", "ctrlKey", "preventDefault", '"focusout"', "md.render(", "Back to", "pj-err",
+                 "metaKey", "ctrlKey", "preventDefault", '"focusout"', "md.render(", "pj-err",
                  '"unlinked"', "window.projectInstructions = { open, update, close }"):
         assert name in js, name
     assert len((WEB / "projectinstructions.js").read_text().splitlines()) < 250
@@ -76,6 +81,6 @@ def test_small_and_valid():
         assert len((WEB / f).read_text().splitlines()) < 400, f
     if not shutil.which("node"):
         pytest.skip("node is not installed")
-    for f in FILES[:3]:
+    for f in FILES[:4]:
         out = subprocess.run(["node", "--check", str(WEB / f)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr

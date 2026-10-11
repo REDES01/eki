@@ -915,7 +915,8 @@ from the worktree. A broken component (bad JSON, unknown kind, a missing
 file) is reported with its error and skipped; it never breaks the engine.
 The project page shows a project's components as cards
 (`eki/web/projectcards.js`, `api_cards`): add from the library, open to set
-up, run, see its uses, remove.
+up, run, see its uses, remove. An open card is drawn in the side panel
+(`panel.host`), the grid staying put with the open card marked.
 
 **Everything a project's agents share is a card in the project.** All the
 public knowledge, interfaces and assets shared between the agents of a

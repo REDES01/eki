@@ -1,11 +1,12 @@
 // The project page's Cards area (project.js mounts it into #pj-cards): the project's components as
 // cards in a grid — name, kind, about line, state, last use, a × that moves it to the Trash — and a
-// last "+ Add card" tile that opens the library (templates, then the pool's components). A click on
-// a card opens it below the grid (projectcardpanel.js). Everything comes from /api/projects/<id>/cards
-// (eki/api_cards.py); it reloads every 5 s while mounted and keeps nothing else.
+// last "+ Add card" tile that opens the library below the grid (templates, then the pool's components).
+// A click on a card opens it in the side panel (panel.host, drawn by projectcardpanel.js); the grid stays
+// put with the open card marked. Everything comes from /api/projects/<id>/cards (eki/api_cards.py); it
+// reloads every 5 s while mounted and keeps nothing else.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const S = { el: null, pid: null, timer: null, data: null, lib: null, open: null, err: "", last: {} };
+  const S = { el: null, pid: null, timer: null, data: null, lib: null, open: null, owner: null, err: "", last: {} };
 
   async function api(path, body, method) {
     const r = await fetch(path, body === undefined && !method ? {} : {
@@ -100,8 +101,12 @@
       (S.err ? `<div class="pj-err">${esc(S.err)}</div>` : ""));
     put(".pc-libbox", ro ? "" : library());
     const open = cards.find((c) => c.name === S.open);
-    if (S.open && !open) close();
-    else if (open && window.projectCardPanel) projectCardPanel.update(open, ro);
+    if (S.open && !open) closeCard();
+    else if (open && ours()) {
+      if (window.projectCardPanel) projectCardPanel.update(open, ro);
+      const sub = subOf(open);
+      if (sub !== S.owner.sub) { S.owner.sub = sub; panel.retitle(open.name, sub); }
+    }
   }
 
   async function load() {
@@ -114,6 +119,7 @@
     if (S.pid !== pid) return;
     S.data = d;
     if (S.err.startsWith("Can't read")) S.err = "";
+    if (S.open && !ours() && !lent()) forget();   // the panel went to something else meanwhile
     draw();
   }
 
@@ -139,30 +145,60 @@
     try {
       await api(base() + "/" + encodeURIComponent(name), {}, "DELETE");
       S.err = "";
-      if (S.open === name) close();
+      if (S.open === name) closeCard();
     } catch (e) { S.err = `Can't remove ${name}: ${e.message}`; }
     load();
   }
 
-  function openCard(name) {
-    if (S.open === name) return close();
-    S.open = name;
-    const c = ((S.data || {}).cards || []).find((x) => x.name === name);
-    if (c && window.projectCardPanel) projectCardPanel.open(q(".pc-panel"), S.pid, c, (S.data || {}).readonly || "", { api, ago, reload: load, close });
-    S.last[".pc-grid"] = null;
-    draw();
+  // ---- the open card in the side panel ---------------------------------------------------------
+
+  const cardOf = (name) => ((S.data || {}).cards || []).find((x) => x.name === name);
+  const subOf = (c) => (c.kind || "?") + (c.about ? " · " + c.about : "");
+  const ours = () => !!(S.owner && window.panel && panel.owner() === S.owner);
+  // the panel shows a file opened from our card, with "← back to" it
+  function lent() {
+    const p = document.getElementById("panel"), b = document.getElementById("panel-back");
+    return !!(S.owner && p && b && !p.hidden && !b.hidden && b.textContent === "← back to " + S.owner.name);
+  }
+  function regrid() { S.last[".pc-grid"] = null; draw(); }
+  function forget() { S.open = null; S.owner = null; regrid(); }
+
+  // one owner per open card: panel.js draws it, swaps it for another, lends the panel to a file, closes it
+  function owner(c) {
+    const o = {
+      name: c.name, sub: subOf(c),
+      draw(body) {
+        const now = cardOf(o.name) || c;
+        if (window.projectCardPanel) projectCardPanel.open(body, S.pid, now, (S.data || {}).readonly || "",
+          { api, ago, reload: load, close: () => panel.close() });
+      },
+      close(why) {
+        window.projectCardPanel && projectCardPanel.close();
+        if ((why === "show" || why === "close") && S.owner === o) forget();
+      },
+    };
+    return o;
   }
 
-  function close() {
-    S.open = null;
-    window.projectCardPanel && projectCardPanel.close();
-    S.last[".pc-grid"] = null;
-    draw();
+  function openCard(name) {
+    if (!window.panel) return;
+    if (S.open === name && ours()) return panel.close();
+    const c = cardOf(name);
+    if (!c) return;
+    if (S.open !== name || !S.owner) S.owner = owner(c);   // the same card, lent to a file: hosted again
+    S.open = name;
+    regrid();
+    panel.host(S.owner);
+  }
+
+  // ours closes through the panel (its close passes "close" back); otherwise only the mark goes
+  function closeCard() {
+    if (ours()) return panel.close();
+    if (S.open) forget();
   }
 
   function onClick(e) {
     const t = e.target;
-    if (t.closest(".pc-panel")) return;               // the panel handles its own clicks
     if (t.closest("a[href]")) return;                 // a serving link opens in its own tab
     const rm = t.closest("[data-rm]");
     if (rm) { e.stopPropagation(); return remove(rm.dataset.rm); }
@@ -188,11 +224,11 @@
     if (!el) return;
     if (S.el !== el) {
       el.innerHTML = `<section class="pc-area"><h3 class="pc-h">Cards <span class="pj-sum dim pc-sum"></span></h3>
-        <div class="pc-note"></div><div class="pc-suggest"></div><div class="pc-grid"></div><div class="pc-libbox"></div><div class="pc-panel"></div></section>`;
+        <div class="pc-note"></div><div class="pc-suggest"></div><div class="pc-grid"></div><div class="pc-libbox"></div></section>`;
       el.addEventListener("click", onClick);
       el.addEventListener("keydown", onKey);
     }
-    if (S.pid !== pid) { S.open = null; S.lib = null; S.err = ""; window.projectCardPanel && projectCardPanel.close(); }
+    if (S.pid !== pid) { closeCard(); S.open = null; S.owner = null; S.lib = null; S.err = ""; }
     S.el = el; S.pid = pid; S.data = null; S.last = {};
     load();
     clearInterval(S.timer);
@@ -202,8 +238,8 @@
   function unmount() {
     clearInterval(S.timer);
     S.timer = null;
-    S.pid = null; S.data = null; S.open = null; S.lib = null; S.err = "";
-    window.projectCardPanel && projectCardPanel.close();
+    if (ours()) panel.close();
+    S.pid = null; S.data = null; S.open = null; S.owner = null; S.lib = null; S.err = "";
     if (S.el) put(".pc-grid", "");
   }
 

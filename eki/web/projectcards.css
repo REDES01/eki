@@ -1,5 +1,6 @@
-/* The Cards area on a project page (projectcards.js) and an open card (projectcardpanel.js).
-   Only style.css's variables, in the look of the page's pj-card / pj-item. */
+/* The Cards area on a project page (projectcards.js) and the look of an open card (projectcardpanel.js).
+   Only style.css's variables, in the look of the page's pj-card / pj-item. An open card lives in the side
+   panel: its layout at the panel's width is in style.css's side-panel section (#panel-body). */
 
 .pc-area { margin: 8px 0 4px; }
 .pc-h { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 12px; font-weight: 600;
@@ -35,10 +36,8 @@
 .pc-pick .pc-pname { min-width: 110px; }
 
 /* an open card */
-.pp { padding: 12px 14px; }
 .pp-h { margin: 14px 0 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
-.pp-path { font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pp-field { display: grid; grid-template-columns: minmax(90px, 160px) 1fr; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 13px; }
+.pp-path { font-size: 11px; margin-top: 2px; }
 .pp-label { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
 .pp-ctl { min-width: 0; }
 .pp .set-in { width: 100%; font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
@@ -53,10 +52,7 @@
   padding: 6px 8px; border-radius: 8px; background: var(--panel); font: 12px/1.45 ui-monospace, Menlo, monospace; }
 .pp-line { cursor: pointer; font-size: 13px; }
 .pp-line:hover, .pp-line.on { background: color-mix(in srgb, var(--text) 6%, transparent); }
-.pp-when { min-width: 72px; font-size: 12px; white-space: nowrap; }
-.pp-who { min-width: 70px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pp-res { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pp-detail { padding: 4px 8px 10px 22px; font-size: 13px; }
+.pp-when, .pp-who { font-size: 12px; white-space: nowrap; }
 .pp-tl { border-left: 2px solid var(--line); margin: 4px 0 8px 4px; padding-left: 10px; }
 .pp-tick { padding: 2px 0; }
 .pp-t { display: inline-block; min-width: 64px; font-size: 12px; }
@@ -70,7 +66,7 @@
 .pi-file { font-size: 12px; }
 .pi-claude-row { margin: 8px 0; padding: 6px 10px; border-radius: 8px; background: var(--panel); font-size: 13px; }
 .pi-body { margin-top: 10px; }
-.pi-md { font-size: 13px; line-height: 1.5; max-height: 520px; overflow: auto; overflow-wrap: anywhere; }
+.pi-md { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .pi-md pre { padding: 6px 8px; border-radius: 8px; background: var(--panel); overflow: auto; }
 .pp textarea.pi-text { font-size: 13px; }
 .pi-back { font-size: 13px; }

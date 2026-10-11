@@ -1,14 +1,15 @@
-// An open card under the Cards grid (projectcards.js opens it): its settings as a form built from
-// component.json (each change saved and checked by its kind — a problem shows beside the field and
-// the saved value comes back), an agent's prompt.md and its bare switch, Run (eki use <name> <args>
-// through the engine, polled every second), its last 20 uses, and an agent's sessions. A card from
-// the pool shows its settings read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
+// An open card in the side panel (projectcards.js hosts it there; the panel's header has its name,
+// kind and about): its state, settings as a form built from component.json (each change saved and
+// checked by its kind — a problem shows beside the field and the saved value comes back), an agent's
+// prompt.md and its bare switch, Run (eki use <name> <args> through the engine, polled every second),
+// its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
+// read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
 // A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro), close()},
 // from cardknowledge.js, cardmcp.js) gets a section under its title; passive kinds have no Run or Uses.
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
   const PASSIVE = ["knowledge", "mcp"];                    // eki/components PASSIVE: read or attached, never called
-  for (const f of ["cardknowledge.js", "cardmcp.js"]) {
+  for (const f of ["cardknowledge.js", "cardmcp.js", "cardsessions.js"]) {
     if (document.querySelector && !document.querySelector(`script[src="/ui/${f}"]`)) {
       const t = document.createElement("script");
       t.src = "/ui/" + f; t.async = false;
@@ -17,7 +18,7 @@
   }
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const P = { el: null, pid: null, card: null, ro: "", ctx: null, last: {}, problems: {}, err: {},
-              run: null, uses: null, use: null, useData: null, sessions: null, sess: null, sessData: null, shots: {} };
+              run: null, uses: null, use: null, useData: null };
 
   const url = (tail) => "/api/projects/" + encodeURIComponent(P.pid) + "/cards/" + encodeURIComponent(P.card.name) + (tail || "");
   const q = (sel) => P.el && P.el.querySelector(sel);
@@ -202,71 +203,11 @@
     if (P.use === id) put(".pp-uses", usesPart());
   }
 
-  // ---- an agent's sessions --------------------------------------------------------------------
-
-  function sessionsPart() {
-    if (!isAgent()) return "";
-    if (!P.sessions) return '<div class="dim">Loading…</div>';
-    if (P.sessions.err) return `<div class="pj-err">${esc(P.sessions.err)}</div>`;
-    if (!P.sessions.list.length) return '<div class="dim">No sessions yet.</div>';
-    return P.sessions.list.map((s) => `<div class="pj-item pp-line${P.sess === s.id ? " on" : ""}" data-sess="${esc(s.id)}" role="button">
-        <span class="dim pp-when">${esc(ago(s.when))}</span>
-        <span class="grow pp-res">${esc((s.review || "").split("\n")[0] || "(no review)")}</span>
-        ${s.tainted ? '<span class="pj-err" title="tainted">tainted</span>' : ""}</div>
-      ${P.sess === s.id ? `<div class="pp-detail">${session()}</div>` : ""}`).join("");
-  }
-
-  function session() {
-    const d = P.sessData;
-    if (!d) return '<span class="dim">Loading…</span>';
-    if (d.err) return `<span class="pj-err">${esc(d.err)}</span>`;
-    const shots = (d.screenshots || []).map((x) => typeof x === "string" ? x : x.name || x.path || "");
-    return `${d.tainted ? `<div class="pj-err">tainted${d.taint ? ": " + esc(typeof d.taint === "string" ? d.taint : JSON.stringify(d.taint)) : ""}</div>` : ""}
-      <div class="pj-sub">Review</div><pre class="pp-text">${esc(d.review || "(none)")}</pre>
-      ${d.notes ? `<div class="pj-sub">Notes</div><pre class="pp-text">${esc(d.notes)}</pre>` : ""}
-      ${(d.emotions || []).length ? `<div class="pj-sub">Emotions</div><div class="pp-tl">${d.emotions.map((m) =>
-        `<div class="pp-tick"><span class="dim pp-t">${esc(m.t)}</span><b>${esc(m.emotion)}</b> <span class="dim">${esc(m.why || "")}</span></div>`).join("")}</div>` : ""}
-      ${shots.length ? `<div class="pj-sub">Screenshots</div><div class="pj-grid">${shots.map((n) =>
-        `<a class="pp-shot" data-shot="${esc(n)}" title="${esc(n)}" href="#" >${P.shots[n] ? `<img src="${esc(P.shots[n])}" alt="${esc(n)}">` : `<span class="dim">${esc(n)}</span>`}</a>`).join("")}</div>` : ""}`;
-  }
-
-  async function loadSessions() {
-    if (!isAgent()) return;
-    const name = P.card.name;
-    try {
-      const got = await P.ctx.api(url("/sessions"));
-      if (!P.card || P.card.name !== name) return;
-      P.sessions = { list: got.sessions || [] };
-    } catch (x) { if (P.card && P.card.name === name) P.sessions = { list: [], err: x.message }; }
-    put(".pp-sessions", sessionsPart());
-  }
-
-  async function openSession(id) {
-    if (P.sess === id) { P.sess = null; P.sessData = null; return put(".pp-sessions", sessionsPart()); }
-    P.sess = id; P.sessData = null;
-    put(".pp-sessions", sessionsPart());
-    try { P.sessData = await P.ctx.api(url("/sessions/" + encodeURIComponent(id))); } catch (x) { P.sessData = { err: x.message }; }
-    if (P.sess !== id) return;
-    put(".pp-sessions", sessionsPart());
-    for (const x of P.sessData.screenshots || []) {
-      const n = typeof x === "string" ? x : x.name || x.path || "";
-      if (!n || P.shots[n]) continue;
-      try {
-        const f = await P.ctx.api(url("/sessions/" + encodeURIComponent(id) + "/file?name=" + encodeURIComponent(n)));
-        if (f.data_url) P.shots[n] = f.data_url;
-      } catch (e) { /* the name stays as the thumbnail */ }
-      if (P.sess === id) put(".pp-sessions", sessionsPart());
-    }
-  }
-
   // ---- the panel ------------------------------------------------------------------------------
 
   function head() {
     const c = P.card;
-    return `<div class="pj-row"><b class="pc-pname">${esc(c.name)}</b><span class="dim">${esc(c.kind || "")}</span>
-        <span class="pc-state">${esc(c.error ? "broken" : c.state || "idle")}</span><span class="grow"></span>
-        <button type="button" class="pj-btn" data-pp="close">Close</button></div>
-      ${c.about ? `<div class="pj-sub">${esc(c.about)}</div>` : ""}
+    return `<div class="pj-row"><span class="pc-state">${esc(c.error ? "broken" : c.state || "idle")}</span></div>
       ${c.error ? `<div class="pj-err">${esc(c.error)}</div>` : ""}
       ${(c.kind === "skills" ? [] : c.notes || []).map((n) => `<div class="dim">${esc(n)}</div>`).join("")}
       <div class="dim pp-path"><code>${esc(c.card || c.folder || "")}</code></div>`;
@@ -275,7 +216,7 @@
   function frame() {
     const agent = isAgent(), part = kindPart();
     P.framed = part;
-    P.el.innerHTML = `<div class="pj-card pp">
+    P.el.innerHTML = `<div class="pj-card pp pp-cardview">
       <div class="pp-head"></div>
       ${part ? `<h4 class="pp-h">${esc(part.title)}</h4><div class="pp-kind"></div>` : ""}
       <h4 class="pp-h">Settings</h4><div class="pp-settings"></div>
@@ -286,8 +227,13 @@
         <button type="submit" class="pj-btn primary"${P.ro ? " disabled" : ""}>Run</button></form>
       <div class="pp-runout"></div>
       <h4 class="pp-h">Uses <span class="dim">last 20</span></h4><div class="pp-uses"></div>`}
-      ${agent ? '<h4 class="pp-h">Sessions</h4><div class="pp-sessions"></div>' : ""}</div>`;
+      ${agent ? '<h4 class="pp-h">Sessions</h4><div class="pp-sessions"></div>' : ""}</div>
+      ${agent ? '<div class="pj-card pp pp-sessview" hidden></div>' : ""}`;
     P.last = {};
+    if (agent && window.cardSessions) {
+      cardSessions.attach(q(".pp-sessions"), q(".pp-sessview"), q(".pp-cardview"),
+        { api: P.ctx.api, url, ago, name: P.card.name });
+    }
   }
 
   function draw() {
@@ -301,7 +247,6 @@
     if (!(typing && a.closest(".pp-prompt"))) put(".pp-prompt", prompt());
     put(".pp-runout", runPart());
     put(".pp-uses", usesPart());
-    put(".pp-sessions", sessionsPart());
     if (P.card.kind === "skills" && window.projectCardSkills) {   // projectcardskills.js: its list and Add skill
       projectCardSkills.draw(q(".pp-skills"), P.card, { api: P.ctx.api, url, ro: !editable(),
         done: (card) => { if (card) { P.card = card; draw(); } P.ctx.reload(); } });
@@ -315,22 +260,16 @@
     if (e.type === "change" && t.dataset && t.dataset.key) return saveSetting(t);
     if (e.type === "focusout" && t.matches && t.matches(".pp-prompt-text")) return savePrompt(t);
     if (e.type !== "click") return;
-    if (t.closest("[data-pp]")) return P.ctx.close();
-    const shot = t.closest("[data-shot]");
-    if (shot) { e.preventDefault(); return shot.classList.toggle("big"); }
     if (t.closest(".pp-detail")) return;
     const u = t.closest("[data-use]");
     if (u) return openUse(u.dataset.use);
-    const s = t.closest("[data-sess]");
-    if (s) return openSession(s.dataset.sess);
   }
 
   function open(el, pid, card, ro, ctx) {
     close();
     if (!el) return;
     if (card.kind === "instructions" && window.projectInstructions) return projectInstructions.open(el, pid, card, ro, ctx);
-    Object.assign(P, { el, pid, card, ro, ctx, problems: {}, err: {}, run: null, uses: null, use: null, useData: null,
-                       sessions: null, sess: null, sessData: null, shots: {} });
+    Object.assign(P, { el, pid, card, ro, ctx, problems: {}, err: {}, run: null, uses: null, use: null, useData: null });
     if (!el.dataset.ppWired) {
       el.dataset.ppWired = "1";
       for (const ev of ["click", "change", "focusout", "submit"]) el.addEventListener(ev, onEvent);
@@ -338,7 +277,6 @@
     frame();
     draw();
     if (!passive()) loadUses();
-    loadSessions();
   }
 
   // the cards reloaded: the card as it is now
@@ -348,11 +286,12 @@
     P.card = card; P.ro = ro;
     draw();
     if (!passive()) loadUses();
-    if (P.sessions && !P.sess) loadSessions();
+    if (isAgent() && window.cardSessions) cardSessions.refresh();
   }
 
   function close() {
     window.projectInstructions && projectInstructions.close();
+    window.cardSessions && cardSessions.close();
     const part = P.card && kindPart();
     if (part && part.close) part.close();
     if (P.run) clearTimeout(P.run.timer);
@@ -360,8 +299,8 @@
     Object.assign(P, { card: null, run: null, last: {}, framed: null });
   }
 
-  // a kind's part arrived: the open card drawn again with it
-  function redraw() { if (P.card && P.el) draw(); }
+  // a kind's part or the sessions arrived: the open card framed and drawn again with it
+  function redraw() { if (P.card && P.el) { P.framed = undefined; draw(); } }
 
   window.projectCardPanel = { open, update, close, redraw };
 })();

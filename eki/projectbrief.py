@@ -86,6 +86,11 @@ Rules: read the project's README and any CLAUDE.md or AGENTS.md first and keep
 its conventions; add or change tests for what you change; {check}; do not
 commit — eki commits what you leave here; do not ask questions — decide, and
 say what you decided.
+Never run `npm install`, `pip install` or any other install inside this
+worktree: node_modules and .venv are links to the project folder's own. If a
+dependency must change, edit package.json or the lockfile (or pyproject) and
+say so in the SUMMARY; eki installs in the project folder after the change
+lands.
 {retry}
 End your answer with a `SUMMARY:` paragraph in plain words (what is new, how
 to use it, what to check) and then one last line:

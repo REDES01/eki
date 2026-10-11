@@ -177,6 +177,16 @@ def _project(c, it) -> Optional[sqlite3.Row]:
 
 
 def said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
+    """One line on where the item stands; a judging or proposed item whose dependency
+    links eki put back says so (eki/deplinks.py)."""
+    line = _said(it, c=c)
+    why = it["why"] or ""
+    if it["state"] in ("judging", "proposed") and why.startswith("relinked "):
+        return f"{line} · {why}" if line else why
+    return line
+
+
+def _said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
     state = it["state"]
     if state == "queued" and (it["why"] or "").startswith("waits: "):
         return it["why"]

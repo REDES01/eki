@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, db, doccheck, integration, notify, paths, projectbrief, projects, projectwork, review,
+from . import (builds, db, deplinks, doccheck, integration, notify, paths, projectbrief, projects, projectwork, review,
                scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates, workspace)
 
 log = logging.getLogger("eki.self")
@@ -200,46 +200,58 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         if run["state"] != "done":
             _set(conn, it["id"], state="left", error=f"the build run ended {run['state']}: {run['error'] or ''}")
             return [f"item {it['id']}: left — the build run ended {run['state']}"]
-        verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
-        try:
-            sha = workspace.commit_all(it["worktree"], f"{'eki' if project else 'self'}: {it['title']}\n\n"
-                                                        f"{goal['text']}"[:2000])
-        except (workspace.WorkspaceError, OSError) as e:      # one item's git trouble stops one item
-            _set(conn, it["id"], state="left", error=f"couldn't commit the change: {e}"[:800])
-            return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
-        sha = sha or it["commit_sha"]           # a retry that left things as they were: judge again
-        touched = workspace.changed(it["worktree"], it["base"]) if sha else []
-        if verdict == "person" or sha is None:
-            why = reason or ("the agent changed nothing" if sha is None else "")
-            _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
-                 touched=db.dumps(touched))
-            if verdict == "person":                 # "changed nothing" is a failed try, not a question
-                needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
-            return [f"item {it['id']}: left for you — {why}"]
-        error = None if verdict == "done" else f"partial: {reason}"
-        wf = workflow.of_project(conn, project) if project is not None else None
-        if wf is not None:                 # the project's workflow card chooses the gates
-            got = workflowgates.gate(wf, it["title"])
-            if got is None:                # checks: self only — the builder's own word stands
-                _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
-                     verdict=workflow.said(wf), error=error, judged_by=None, review=f"none: {workflowgates.NO_REVIEW}")
-                return [f"item {it['id']}: built — proposed on {it['branch']} ({workflow.said(wf)})"]
-            judge = got[0]
-            _set(conn, it["id"], judged_by=got[1])
-        elif project is not None:
-            judge = projects.check_argv(project)
-            if judge is None:              # nothing to judge with: proposed as it is
-                _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
-                     verdict=projectwork.not_judged(project), error=error, judged_by=None)
-                return [f"item {it['id']}: built — proposed on {it['branch']} ({projectwork.not_judged(project)})"]
-            _set(conn, it["id"], judged_by=_judged_by(project, judge))
-        else:
-            judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
-        rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
-        _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
-             touched=db.dumps(touched), error=error)
-        rev, why = review.ask(conn, store_item(conn, it["id"]))     # a second reader beside gate 1
-        _set(conn, it["id"], review_run=rev, review=None if rev else f"none: {why}")
+        relinked = deplinks.restore(it["worktree"], project["path"] if project is not None else repo())
+        if not relinked:
+            return _built(conn, it, run, goal, project)
+        why = (f"relinked {', '.join(relinked)}: the agent installed inside the worktree;"
+               f" dependencies come from the project folder")
+        _set(conn, it["id"], why=why)
+        return [f"{line} — {why}" for line in _built(conn, it, run, goal, project)]
+
+
+def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sqlite3.Row,
+           project: Optional[sqlite3.Row]) -> List[str]:
+    """A done build: commit what it left, then propose it or start gate 1 and the review."""
+    verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
+    try:
+        sha = workspace.commit_all(it["worktree"], f"{'eki' if project else 'self'}: {it['title']}\n\n"
+                                                    f"{goal['text']}"[:2000])
+    except (workspace.WorkspaceError, OSError) as e:      # one item's git trouble stops one item
+        _set(conn, it["id"], state="left", error=f"couldn't commit the change: {e}"[:800])
+        return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
+    sha = sha or it["commit_sha"]           # a retry that left things as they were: judge again
+    touched = workspace.changed(it["worktree"], it["base"]) if sha else []
+    if verdict == "person" or sha is None:
+        why = reason or ("the agent changed nothing" if sha is None else "")
+        _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
+             touched=db.dumps(touched))
+        if verdict == "person":                 # "changed nothing" is a failed try, not a question
+            needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
+        return [f"item {it['id']}: left for you — {why}"]
+    error = None if verdict == "done" else f"partial: {reason}"
+    wf = workflow.of_project(conn, project) if project is not None else None
+    if wf is not None:                 # the project's workflow card chooses the gates
+        got = workflowgates.gate(wf, it["title"])
+        if got is None:                # checks: self only — the builder's own word stands
+            _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
+                 verdict=workflow.said(wf), error=error, judged_by=None, review=f"none: {workflowgates.NO_REVIEW}")
+            return [f"item {it['id']}: built — proposed on {it['branch']} ({workflow.said(wf)})"]
+        judge = got[0]
+        _set(conn, it["id"], judged_by=got[1])
+    elif project is not None:
+        judge = projects.check_argv(project)
+        if judge is None:              # nothing to judge with: proposed as it is
+            _set(conn, it["id"], state="proposed", commit_sha=sha, summary=summary, touched=db.dumps(touched),
+                 verdict=projectwork.not_judged(project), error=error, judged_by=None)
+            return [f"item {it['id']}: built — proposed on {it['branch']} ({projectwork.not_judged(project)})"]
+        _set(conn, it["id"], judged_by=_judged_by(project, judge))
+    else:
+        judge = doccheck.command(it["base"], sha) if doccheck.docs_only(touched) else CHECK
+    rid = store.create_run(conn, it["thread_id"], judge, provider="command", priority=run["priority"])
+    _set(conn, it["id"], state="judging", run_id=rid, commit_sha=sha, summary=summary,
+         touched=db.dumps(touched), error=error)
+    rev, why = review.ask(conn, store_item(conn, it["id"]))     # a second reader beside gate 1
+    _set(conn, it["id"], review_run=rev, review=None if rev else f"none: {why}")
     return [f"item {it['id']}: built ({len(touched)} files); judging"
             + (f" and reviewing ({rev[:8]})" if rev else "")]
 

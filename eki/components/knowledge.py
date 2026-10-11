@@ -98,18 +98,6 @@ def _instructions(found: dict, top: Path) -> List[str]:
     return out
 
 
-def _chosen(cards: List[Component], found: dict, top: Path, context: List[str]) -> List[str]:
-    """The lines for a planned item: always-cards, its chosen cards and the instructions read
-    first; the rest named once as available."""
-    picked = set(context)
-    first = [c for c in cards if c.spec.get('read') == 'always' or c.name in picked]
-    lines = [ln for ln in (_line(c, top, True) for c in first) if ln] + _instructions(found, top)
-    rest = [c.name for c in cards if c not in first and _found(c, top)]
-    if rest:
-        lines.append(f'Also available if you need them: {", ".join(rest)} (see components/).')
-    return lines
-
-
 def _pairs(cards: List[Component]) -> List[Tuple[Component, dict]]:
     """Every (card, document), always-documents first, then by card name, then card order. A
     card in the docs shape names each document in its line; an old one-document card doesn't."""

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from .. import components, db
+from .. import api_cardadd, components, db
 from ..components import cards, knowledge, uses
 from . import componentskills
 
@@ -100,8 +100,11 @@ def _root(folder: Optional[str]) -> Path:
 
 
 def _add(args) -> int:
-    base = components.pool_dir() if args.pool else _root(args.folder) / "components"
-    out, said = cards.add_template(base, args.template, args.name)
+    if not args.pool and api_cardadd.is_workflow(args.template):    # one per project, from its settings
+        out, said = api_cardadd.add_workflow(db.connect(), _root(args.folder), args.template, args.name)
+    else:
+        base = components.pool_dir() if args.pool else _root(args.folder) / "components"
+        out, said = cards.add_template(base, args.template, args.name)
     print(f"wrote {out}")
     for line in said:
         print(line)

@@ -139,6 +139,7 @@ def spawn_ready(conn) -> int:
     started = 0
     queued = conn.execute("SELECT * FROM runs WHERE state='queued' ORDER BY "
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()
+    queued = checkslots.first(conn, queued)     # the train, gate 2, gate 1, then the rest
     room: Optional[tuple] = None
     for r in queued:
         if slots is not None and slots <= 0:

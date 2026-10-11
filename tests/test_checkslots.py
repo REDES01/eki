@@ -73,9 +73,9 @@ def test_what_counts_as_a_judge(conn):
 def test_an_agents_test_run_takes_a_slot_from_the_judges(home, conn):
     from eki import testslots
     slots(home, 1)
-    with db.tx(conn):
-        a = judge(conn, "a")
-    with testslots.hold(conn, wait=0.01):
+    with testslots.hold(conn, wait=0.01):       # a queued check would go first: hold, then queue
+        with db.tx(conn):
+            a = judge(conn, "a")
         assert checkslots.busy(conn) == 1
         assert checkslots.waiting(conn, store.run(conn, a))
     assert not checkslots.waiting(conn, store.run(conn, a))
@@ -143,3 +143,70 @@ def test_a_narrow_judge_waits_while_a_wide_one_is_reserved(home, conn, monkeypat
     assert checkslots.waiting(conn, store.run(conn, n))         # 3 + 1 + 3 doesn't
     store.update_run(conn, w, cancel=1)
     assert not checkslots.waiting(conn, store.run(conn, n))
+
+
+TRAIN = '["/bin/sh", "-c", "bin/check -q && python -m eki.candidate"]'
+
+
+def test_the_train_goes_before_an_earlier_gate_1(home, conn, monkeypatch):
+    slots(home, 1)
+    spawned = []
+    monkeypatch.setattr(engine, "spawn", lambda c, rid: spawned.append(rid))
+    with db.tx(conn):
+        judge(conn, "gate 1")
+        train = store.create_run(conn, store.create_thread(conn, "train", None), TRAIN,
+                                 provider="command", priority="background")
+    engine.spawn_ready(conn)
+    assert spawned == [train]
+
+
+def test_rank_puts_the_train_then_gate_2_then_gate_1(home, conn, monkeypatch):
+    slots(home, 1)
+    spawned = []
+    monkeypatch.setattr(engine, "spawn", lambda c, rid: spawned.append(rid))
+    with db.tx(conn):
+        g1 = judge(conn, "gate 1")
+        g2 = store.create_run(conn, store.create_thread(conn, "gate 2", None), queue.GATE2,
+                              provider="command")
+        conn.execute("INSERT INTO items(id, goal_id, title, gate2_run, created_at, updated_at) "
+                     "VALUES ('i1', 'g1', 'x', ?, 1, 1)", (g2,))
+        tr = store.create_run(conn, store.create_thread(conn, "train", None), TRAIN,
+                              provider="command")
+    assert [checkslots.rank(conn, store.run(conn, r)) for r in (tr, g2, g1)] == [0, 1, 2]
+    queued = [store.run(conn, r) for r in (g1, g2, tr)]
+    assert [r["id"] for r in checkslots.first(conn, queued)] == [tr, g2, g1]
+    engine.spawn_ready(conn)
+    assert spawned == [tr]
+
+
+def test_first_keeps_other_runs_after_the_judges_in_order(conn):
+    with db.tx(conn):
+        p1 = store.create_run(conn, store.create_thread(conn, "p1", None), "hello")
+        j = judge(conn, "j")
+        p2 = store.create_run(conn, store.create_thread(conn, "p2", None), "again")
+    queued = [store.run(conn, r) for r in (p1, j, p2)]
+    assert [r["id"] for r in checkslots.first(conn, queued)] == [j, p1, p2]
+
+
+def test_ahead_counts_only_checks_that_could_start(home, conn, monkeypatch):
+    with db.tx(conn):
+        ready = judge(conn, "ready")
+    assert checkslots.ahead(conn) == 1
+    store.update_run(conn, ready, state="done")
+    with db.tx(conn):
+        later = judge(conn, "later")
+        t = store.create_thread(conn, "busy thread", None)
+        turn = store.create_run(conn, t, "build", provider="fake")
+        store.create_run(conn, t, selfwork.CHECK, provider="command")
+        bg = store.create_run(conn, store.create_thread(conn, "bg", None), selfwork.CHECK,
+                              provider="command", priority="background")
+        store.create_run(conn, store.create_thread(conn, "plain", None), '["ls"]',
+                         provider="command")
+    store.update_run(conn, later, retry_at=db.now() + 600)
+    store.update_run(conn, turn, state="running")
+    assert checkslots.ahead(conn) == 1                  # only the background one, with room
+    monkeypatch.setenv("EKI_MACHINE", "busy")
+    assert checkslots.ahead(conn) == 0
+    monkeypatch.setenv("EKI_MACHINE", "ok")
+    store.update_run(conn, bg, cancel=1)
+    assert checkslots.ahead(conn) == 0

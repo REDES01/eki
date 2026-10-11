@@ -16,6 +16,14 @@ command, so bin/check runs cores − 2 workers instead of a third) weighs
 ceil(wide/narrow) slots, capped at the limit. Gate 2 is the one serial step
 on the way to landing, so a waiting wide run goes first: the oldest ready one
 is reserved, and no new narrow judge or `eki slot` hold starts until it has.
+
+Checks go first. A hold polls about once a second while the engine starts
+queued checks only on its tick, so holds used to win every freed slot (seen
+2026-10-11: agents' holds kept all 3 slots and 18 checks sat queued for 25
+minutes). Now a hold that hasn't started waits while `ahead` counts a queued
+check that could start but for a slot; running holds finish. Among checks
+the engine starts the train's first, then gate 2, then gate 1 (`first`). `ahead` counts a wide run by its
+weight, so a hold needs no separate `reserved` on top of it.
 """
 from __future__ import annotations
 
@@ -114,3 +122,39 @@ class Tick:
         self.used += weight(run)
         if run["id"] == self.first:
             self.held_for = 0
+
+
+def ahead(conn: sqlite3.Connection) -> int:
+    """Slots wanted by queued judge runs that could start now but for a check slot (a wide
+    run by its weight) — holds wait for them.
+    A run whose thread is busy doesn't count (a build turn's hold would wait on its
+    own thread's check); a background one counts only when the machine has room."""
+    rows = conn.execute(
+        "SELECT r.provider, r.prompt, r.priority FROM runs r WHERE r.state='queued' "
+        "AND r.cancel=0 AND r.provider='command' AND (r.retry_at IS NULL OR r.retry_at<=?) "
+        "AND NOT EXISTS (SELECT 1 FROM runs o WHERE o.thread_id=r.thread_id AND o.id<>r.id "
+        "AND o.state IN ('starting', 'running'))", (db.now(),)).fetchall()
+    judges = [r for r in rows if is_judge(r)]
+    n = sum(weight(r) for r in judges if r["priority"] != "background")
+    if any(r["priority"] == "background" for r in judges):
+        from . import machine
+        if machine.room()[0]:
+            n += sum(weight(r) for r in judges if r["priority"] == "background")
+    return n
+
+
+def rank(conn: sqlite3.Connection, run: sqlite3.Row) -> int:
+    """0 the train's check, 1 gate 2 (an item's gate2_run: its prompt is gate 1's), 2 any other."""
+    if "eki.candidate" in (run["prompt"] or ""):
+        return 0
+    if conn.execute("SELECT 1 FROM items WHERE gate2_run=?", (run["id"],)).fetchone():
+        return 1
+    return 2
+
+
+def first(conn: sqlite3.Connection, queued: list) -> list:
+    """Queued runs in the order the engine tries them: judges first, by rank (stable),
+    then every other run in the order it came."""
+    judges = [r for r in queued if is_judge(r)]
+    judges.sort(key=lambda r: rank(conn, r))
+    return judges + [r for r in queued if not is_judge(r)]

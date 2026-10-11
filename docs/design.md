@@ -57,7 +57,7 @@ eki follow <run>  ◄── events table
 | `modellist` | each program's own model list (Claude Code's `initialize`, Codex's `model/list`, local's `/v1/models`) cached in `provider_models`: per model its label, `description`, `resolved` (the pinned model an alias stands for), `efforts`, `default_effort`, whether it is the default, and `floating` (an alias that follows the newest); no suggestions |
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
-| `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one |
+| `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one, waiting (an flock under `slots/waiting`) while a queued check goes first; `behind()` counts holds waiting behind checks |
 | `machinenow` | the Settings → Machine live line: agents working, test runs, load on cores, memory, quota left |
 | `skills`, `mcp` | one store of what every run gets, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`); a project's own skills are its `skills` card |
 | `skillsync` | skills, Claude client → eki: every skill under `~/.claude/skills/synced/*/` copied into the store as source `claude` with a baseline hash (`sync/skills.json`), refreshed when the client folder changes, removed when it goes; eki's own (`learned`, `edited`, or a `claude` copy edited since import) and any other source with the same name are never touched and listed as clashes (`skills-in`) |
@@ -154,6 +154,15 @@ already exists for it.
   restart loses nothing. Why: with 4 building, load sat near 100 on 18
   cores, mostly test runs, while the agents mostly waited on the model; one
   pool keeps load near the core count.
+  Queued checks go ahead of holds that haven't started (`checkslots.ahead`:
+  a queued check that could start but for a slot; a background one only
+  when there's room); running holds finish. Among checks: the train's, then
+  gate 2, then gate 1 (`checkslots.first`, in `engine.spawn_ready`). A hold
+  waiting over 3 minutes says so once on stderr, and the station's status
+  popover ends its machine line with "· N test runs waiting behind checks".
+  Why: holds poll each second and the engine starts checks on its tick, so
+  holds won every freed slot — on 2026-10-11, 18 checks sat queued for 25
+  minutes behind agents' test runs.
 
 The Settings → Machine section shows a live line under the two numbers:
 "now: N agents working · M test runs · load X on C cores · memory Y% ·

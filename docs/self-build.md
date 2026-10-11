@@ -384,7 +384,21 @@ brief tells them to start as `eki slot -- <cmd>` (`bin/check`, `npm test`,
 (`eki/checkslots.py`), not the queue's, and the board says "waiting for a
 check slot"; `eki slot` waits in the agent's turn until a slot is free. A
 slot is a lock file under `EKI_HOME/slots`, freed when its process dies, so
-a restart loses nothing. Why: with 4 building, load sat near 100 on 18
+a restart loses nothing. Checks go first: while a check is queued that could
+start but for a slot (`checkslots.ahead`), a hold that hasn't started waits,
+even one that asked before the check was queued; a hold that already has
+its slot finishes, and the check takes the next slot that frees. Among
+checks the engine starts the train's first, then gate 2, then gate 1 and
+project checks (`checkslots.first`). A background check counts only when
+the machine has room, and a check whose thread is busy doesn't count (a
+build turn's hold would wait on its own thread's check). A hold waiting
+over 3 minutes says once on its stderr that checks go first; the station's
+status popover ends its machine line with "· N test runs waiting behind
+checks" while any do (waiting holds are flocks under
+`EKI_HOME/slots/waiting`). Why checks first: on 2026-10-11, with 20+ items
+building, agents' holds kept all 3 slots back to back and 18 checks sat
+queued for 25 minutes — a hold polls about once a second, the engine starts
+checks only on its tick, so holds won every freed slot. Why the slots: with 4 building, load sat near 100 on 18
 cores, mostly test runs — judges and the agents' own — while the agents
 themselves mostly waited on the model. `routing.json`'s old
 `self.check_slots` moved to `machine.checks` once. `bin/check`

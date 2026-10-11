@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 #: the checks a change can go through, in the order they run
 CHECKS = ("self", "review", "command", "batch", "playtester", "train")
@@ -33,15 +33,24 @@ class Workflow:
     after_merge: str = ""  # shell command run in the person's folder after eki lands ('' when none)
 
 
+_eki: Dict[Tuple[str, str, str], bool] = {}   # (root, source, home) -> is_eki, for the process
+
+
 def is_eki(root) -> bool:
-    """`root` is eki's own checkout: the source, the integration repo, or a worktree of either."""
+    """`root` is eki's own checkout: the source, the integration repo, or a worktree of either.
+    Asked of git once per (folder, source, home)."""
     from . import builds, paths
     try:
         here = Path(root).expanduser().resolve()
-        own = {builds.source().resolve(), (paths.home() / "self" / "repo").resolve()}
+        source, home = builds.source().resolve(), paths.home().resolve()
+        own = {source, (home / "self" / "repo").resolve()}
     except OSError:
         return False
+    key = (str(here), str(source), str(home))
+    if key in _eki:
+        return _eki[key]
     if here in own:
+        _eki[key] = True
         return True
     try:
         out = subprocess.run(["git", "-C", str(here), "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -49,7 +58,8 @@ def is_eki(root) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     common = Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
-    return common is not None and common.name == ".git" and common.parent.resolve() in own
+    _eki[key] = common is not None and common.name == ".git" and common.parent.resolve() in own
+    return _eki[key]
 
 
 def _of(comp) -> Workflow:

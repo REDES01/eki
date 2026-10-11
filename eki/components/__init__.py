@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .. import paths
+from . import cardcache
 
 
 @dataclass
@@ -142,6 +143,24 @@ def field_help(kind: str) -> Dict[str, str]:
     return {str(k): str(v) for k, v in own_.items()}
 
 
+_common: Dict[str, str] = {}   # resolved folder -> its git common dir ('' when none), for the process
+
+
+def _common_dir(root: Path) -> str:
+    """`git rev-parse --git-common-dir` for `root`, asked once per folder."""
+    key = str(root)
+    if key in _common:
+        return _common[key]
+    try:
+        out = subprocess.run(['git', '-C', key, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                             capture_output=True, text=True, timeout=10)
+        common = out.stdout.strip() if out.returncode == 0 else ''
+    except (OSError, subprocess.SubprocessError):
+        return ''   # not kept: a timeout may pass
+    _common[key] = common
+    return common
+
+
 def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[Path]:
     """The folder whose components/ a run in `folder` sees: the main checkout of a worktree,
     and for a GitHub clone eki keeps, the person's own folder recorded on its project row."""
@@ -153,12 +172,7 @@ def project_root(folder, conn: Optional[sqlite3.Connection] = None) -> Optional[
         return None
     if not root.is_dir():
         return None
-    try:
-        out = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-                             capture_output=True, text=True, timeout=10)
-        common = out.stdout.strip() if out.returncode == 0 else ''
-    except (OSError, subprocess.SubprocessError):
-        common = ''
+    common = _common_dir(root)
     if common and Path(common).name == '.git':
         root = Path(common).parent.resolve()
     if conn is not None:
@@ -320,7 +334,7 @@ def find(folder, conn: Optional[sqlite3.Connection] = None
     try:
         root = project_root(folder, conn)
         if root is not None and is_project(root, conn):
-            _scan(root / 'components', 'project', found, errors)
+            cardcache.scan(root / 'components', found, errors)
         else:
             _scan(pool_dir(), 'pool', found, errors)
     except Exception as e:
@@ -333,7 +347,7 @@ def own(root: Path) -> Tuple[Dict[str, Component], List[Tuple[str, str]]]:
     found: Dict[str, Component] = {}
     errors: List[Tuple[str, str]] = []
     try:
-        _scan(Path(root) / 'components', 'project', found, errors)
+        cardcache.scan(Path(root) / 'components', found, errors)
     except Exception as e:
         errors.append((str(root), f'finding components failed: {e}'))
     return dict(sorted(found.items())), errors

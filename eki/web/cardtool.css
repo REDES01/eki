@@ -1,0 +1,24 @@
+/* A Tool card's "What it runs" part (cardtool.js): the command and results, and for images the graphs,
+   the default graph, output folder and size, whether ComfyUI is up, and the last pictures. */
+.ct-tool { margin-bottom: 8px; }
+.ct-line { margin: 3px 0; overflow-wrap: anywhere; }
+.ct-label { font-weight: 600; margin-right: 4px; }
+div.ct-label { margin: 10px 0 4px; }
+.ct-cmd { white-space: pre-wrap; }
+.ct-graphs { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ct-graphs th { text-align: left; font-weight: 600; opacity: 0.7; padding: 2px 6px; }
+.ct-graphs td { vertical-align: top; padding: 4px 6px; border-top: 1px solid rgba(127, 127, 127, 0.2); }
+.ct-graphs .ct-model, .ct-graphs .ct-size { white-space: nowrap; font-size: 12px; }
+.ct-default td { background: rgba(127, 160, 255, 0.08); }
+.ct-mark { font-size: 11px; opacity: 0.8; margin-left: 6px; }
+.ct-explain { font-size: 12px; margin-top: 2px; }
+.ct-field { margin: 8px 0; }
+.ct-field > .ct-label { display: block; margin-bottom: 3px; }
+.ct-in { width: 100%; box-sizing: border-box; }
+.ct-size-row { display: flex; gap: 10px; }
+.ct-size-row .ct-field { flex: 1; margin-bottom: 0; }
+.ct-note { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.ct-problem { margin-top: 3px; }
+.ct-thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ct-thumb { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; font-size: 11px; }
+.ct-thumb img { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; background: rgba(127, 127, 127, 0.15); }

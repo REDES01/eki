@@ -175,3 +175,34 @@ def test_picture_card_form_validates(tmp_path):
     assert service.call(c, a_call(tmp_path, ["--nope", "x"])[0]).error.startswith("unknown input --nope")
     assert "draws with comfyui:hq, saves into assets/generated/card/" in service.notes(c)
     assert "runs on eki's comfyui provider" in service.notes(c)
+
+
+def test_a_finished_items_server_stops_at_once(tmp_path, conn):
+    """The serve card's copy for an item stops when the item is finished, not idle_stop minutes later."""
+    import subprocess
+    from eki import db
+    from eki.components import servers
+    comp_dir = tmp_path / "components" / "serve"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.json").write_text(json.dumps({"kind": "serve", "idle_stop": 30}))
+    wt_done, wt_busy = tmp_path / "wt-done", tmp_path / "wt-busy"
+    wt_done.mkdir(); wt_busy.mkdir()
+    procs = [subprocess.Popen(["sleep", "60"], start_new_session=True) for _ in range(2)]
+    try:
+        with db.tx(conn):
+            for iid, wt, state in (("itdone", wt_done, "applied"), ("itbusy", wt_busy, "building")):
+                conn.execute("INSERT INTO items (id, goal_id, title, state, worktree, created_at, updated_at)"
+                             " VALUES (?, 'g', 't', ?, ?, ?, ?)", (iid, state, str(wt), db.now(), db.now()))
+        for p, wt in zip(procs, (wt_done, wt_busy)):
+            key = servers.state_dir() / f"serve-{wt.name}.json"
+            key.write_text(json.dumps({"pid": p.pid, "port": 1, "started_at": time.time(), "name": "serve",
+                                       "folder": str(comp_dir), "served": str(wt)}))
+        said = servers.tick(conn)
+        assert any("wt-done: item itdone is applied" in s for s in said)
+        assert procs[0].wait(timeout=10) is not None                   # stopped
+        assert procs[1].poll() is None                                  # the busy item's copy keeps running
+        assert not (servers.state_dir() / "serve-wt-done.json").exists()
+    finally:
+        for p in procs:
+            p.kill()
+            p.wait()

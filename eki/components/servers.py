@@ -9,7 +9,9 @@ finds it again from the file. eki only stops servers it started.
 
 Idle is read from the runs table: the end of the latest call run (or, while
 that run is still active, not idle at all). `idle_stop` minutes (default 5;
-0 never) after that, the housekeeping step `tick` stops it.
+0 never) after that, the housekeeping step `tick` stops it. A server for an
+item's worktree stops as soon as the item is finished (applied, landed, live,
+dropped) or its folder is gone, whatever idle_stop says.
 """
 from __future__ import annotations
 
@@ -203,8 +205,29 @@ def _last_use(conn: sqlite3.Connection, st: Dict[str, Any]) -> Optional[float]:
     return t
 
 
+#: an item in one of these is finished: its worktree's server has nothing left to show
+FINISHED = ("applied", "landed", "live", "dropped")
+
+
+def _finished(conn: sqlite3.Connection, served: str) -> Optional[str]:
+    """Why a served folder needs no server any more (its item finished, or the folder is gone); None if it may."""
+    if not served:
+        return None
+    if not os.path.isdir(served):
+        return "its folder is gone"
+    try:
+        row = conn.execute("SELECT id, state FROM items WHERE worktree=? ORDER BY updated_at DESC LIMIT 1",
+                           (served,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is not None and row[1] in FINISHED:
+        return f"item {row[0]} is {row[1]}"
+    return None
+
+
 def tick(conn: sqlite3.Connection) -> List[str]:
-    """Housekeeping: stop each server of ours idle for longer than its idle_stop minutes."""
+    """Housekeeping: stop each server of ours whose served folder's item has finished (or whose
+    folder is gone) at once, and any other idle for longer than its idle_stop minutes."""
     said: List[str] = []
     for f in sorted(state_dir().glob("*.json")):
         try:
@@ -214,6 +237,11 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         pid = st.get("pid")
         if not alive(pid):
             f.unlink(missing_ok=True)
+            continue
+        done = _finished(conn, st.get("served") or "")
+        if done:
+            if stop_pid(pid, f, st.get("name", f.stem)):
+                said.append(f"stopped component {st.get('name', f.stem)} for {Path(st['served']).name}: {done}")
             continue
         try:
             spec = json.loads((Path(st["folder"]) / "component.json").read_text())

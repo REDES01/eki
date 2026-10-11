@@ -135,16 +135,17 @@
   async function openCard(name) {
     if (!window.panel) return;
     const pid = S.pid;
-    let cards;
+    let cards, card;
     try { cards = await api(base() + "/cards"); } catch (e) { S.err = `Can't open ${name}: ${e.message}`; return header(S.data); }
+    if (!(cards.cards || []).some((c) => c.name === name)) { S.err = `No card named ${name} in this project.`; return header(S.data); }
+    // the grid is light: the panel's card is its details, GET …/cards/<name> (eki/api_carddetail.py)
+    try { card = (await api(base() + "/cards/" + encodeURIComponent(name))).card; } catch (e) { S.err = `Can't open ${name}: ${e.message}`; return header(S.data); }
     await need("projectCardPanel", "/ui/projectcardpanel.js");
     if (!S.on || S.pid !== pid) return;
-    const card = (cards.cards || []).find((c) => c.name === name);
-    if (!card) { S.err = `No card named ${name} in this project.`; return header(S.data); }
     const ro = cards.readonly || "";
     const o = {
       name: card.name, sub: (card.kind || "?") + (card.about ? " · " + card.about : ""),
-      card,
+      card, ro,
       draw(body) {
         if (window.projectCardPanel) projectCardPanel.open(body, pid, o.card, ro, { api, ago, reload: () => fresh(o), close: () => panel.close() });
       },
@@ -161,9 +162,8 @@
   // the open card changed: it as it is now, and the graph it feeds
   async function fresh(o) {
     try {
-      const got = await api(base() + "/cards");
-      const now = (got.cards || []).find((c) => c.name === o.name);
-      if (now && S.owner === o && window.projectCardPanel) { o.card = now; projectCardPanel.update(now, got.readonly || ""); }
+      const now = (await api(base() + "/cards/" + encodeURIComponent(o.name))).card;
+      if (now && S.owner === o && window.projectCardPanel) { o.card = now; projectCardPanel.update(now, o.ro); }
     } catch (e) { /* the next reload says so */ }
     return load();
   }

@@ -111,10 +111,12 @@ def test_a_stage_click_opens_the_inspector_and_redraws_with_it_selected(tmp_path
 
 def test_a_feed_with_a_card_hosts_it_and_the_command_feed_opens_its_stage(tmp_path):
     answers = {"/api/projects/p1/workflow": FLOW,
-               "/api/projects/p1/cards": {"cards": [{"name": "knowledge", "kind": "knowledge"}], "readonly": ""}}
+               "/api/projects/p1/cards": {"cards": [{"name": "knowledge", "kind": "knowledge"}], "readonly": ""},
+               "/api/projects/p1/cards/knowledge": {"card": {"name": "knowledge", "kind": "knowledge", "spec": {}}}}
     got = run(tmp_path, [{"feed": {"card": "knowledge", "kind": "knowledge", "to": "plan"}},
                          {"feed": {"card": "", "kind": "command", "to": "command"}}, "hide"], answers)
     assert ["fetch", "/api/projects/p1/cards", "GET", None, ""] in got["log"]
+    assert ["fetch", "/api/projects/p1/cards/knowledge", "GET", None, ""] in got["log"]   # the panel gets the details
     assert of(got, "host") == [["host", "knowledge"]]
     assert of(got, "card") == [["card", "p1", "knowledge", "", ["ago", "api", "close", "reload"]]]
     assert of(got, "inspect") == [["inspect", "p1", "command", "function"]]
@@ -122,7 +124,8 @@ def test_a_feed_with_a_card_hosts_it_and_the_command_feed_opens_its_stage(tmp_pa
 
 def test_hide_closes_the_card_panel_it_owns(tmp_path):
     answers = {"/api/projects/p1/workflow": FLOW,
-               "/api/projects/p1/cards": {"cards": [{"name": "serve", "kind": "serve"}], "readonly": ""}}
+               "/api/projects/p1/cards": {"cards": [{"name": "serve", "kind": "serve"}], "readonly": ""},
+               "/api/projects/p1/cards/serve": {"card": {"name": "serve", "kind": "serve"}}}
     got = run(tmp_path, [{"feed": {"card": "serve", "kind": "serve", "to": "build"}}, "hide"], answers)
     assert of(got, "pclose") == [["pclose"]]
 

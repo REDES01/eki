@@ -75,8 +75,8 @@ def test_the_notifications_section_and_its_script_are_served(web):
 def test_the_eki_self_section_is_served_as_grouped_lines(web):
     code, js = get(f"{web}/ui/settingsself.js")
     assert code == 200
-    for want in ('settings.section("self"', "autonomy", "parallel", 'file: "routing"', 'min="1"',
-                 'placeholder="3"', "delete d.self.parallel", "settingsForm.group", "settingsForm.line"):
+    for want in ('settings.section("self"', "autonomy", 'data-f="agents"', 'data-f="checks"', 'file: "routing"',
+                 'min="1"', "d.machine[f] = n", "delete d.machine[f]", "settingsForm.group", "settingsForm.line"):
         assert want in js
     _, page = get(web + "/")
     assert page.index("/ui/settingsself.js") < page.index("/ui/settings.js")

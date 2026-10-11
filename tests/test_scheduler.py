@@ -148,7 +148,7 @@ def test_a_project_card_caps_its_own_items_under_the_machine(conn, src, tmp_path
     _, second = add_item(conn, "second", ["eki/b.py"])
     scheduler.start_ready(conn)
     assert state(conn, first)["state"] == "building"
-    assert tuple(state(conn, second)) == ("waiting", "1 live in holo-cards (its workflow)")
+    assert tuple(state(conn, second)) == ("waiting", "1 building in holo-cards (its workflow)")
 
 
 def test_eki_s_card_caps_eki_but_not_a_project(conn, src, tmp_path, monkeypatch):
@@ -163,7 +163,7 @@ def test_eki_s_card_caps_eki_but_not_a_project(conn, src, tmp_path, monkeypatch)
     _, theirs2 = add_item(conn, "theirs too", ["eki/u.py"])
     scheduler.start_ready(conn)
     assert state(conn, mine)["state"] == "building"
-    assert tuple(state(conn, mine2)) == ("waiting", "1 live in eki (its workflow)")
+    assert tuple(state(conn, mine2)) == ("waiting", "1 building in eki (its workflow)")
     assert state(conn, theirs)["state"] == "building" and state(conn, theirs2)["state"] == "building"
 
 

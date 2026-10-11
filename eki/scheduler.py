@@ -6,8 +6,8 @@ starts once its deps are fit and two caps allow it. The machine cap
 (eki/machinecaps.py, routing.json machine.agents) holds the items building
 across all projects, eki's and every person's — judging and review are held
 elsewhere; it is checked first and wins. Then each project's own workflow card
-`parallel: n` (eki/workflow.py) caps only that project's live items (building,
-judging, reviewing): eki's own card for eki's items (selfwork.settings()'s
+`parallel: n` (eki/workflow.py) caps only that project's items building
+(judging and review are held by the test-run slots, not by this cap): eki's own card for eki's items (selfwork.settings()'s
 `parallel` when eki has no card), a project with no card has no cap of its own.
 eki's card never caps another project. Items whose write-sets overlap build
 at the same time: the queue merges them (a resolve run on conflict). Only an
@@ -73,6 +73,8 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
     live = selfwork.items_in(conn, selfwork.LIVE)
     live_in: Dict[Optional[str], int] = {}                # project id (None: eki) -> its items live
     for x in live:
+        if x["state"] != "building":                      # judging/review are held by the test-run slots
+            continue
         pid = project_of(x["goal_id"])
         live_in[pid] = live_in.get(pid, 0) + 1
     taken: Dict[str, List[Tuple[str, Set[str]]]] = {}     # repo -> [(item id, its files)]
@@ -103,7 +105,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         pid = project_of(it["goal_id"])
         name, cap = cap_of(pid)
         if cap is not None and live_in.get(pid, 0) >= cap:
-            return f"{live_in[pid]} live in {name} (its workflow)"
+            return f"{live_in[pid]} building in {name} (its workflow)"
         if it["independent"]:
             return None
         files = json.loads(it["files"] or "[]")

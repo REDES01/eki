@@ -212,7 +212,10 @@ def said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
     if state == "live":
         return f"✓ live in build {it['build'] or '?'}"
     if state == "applied" and it["landed_on"]:
-        return f"✓ landed on {it['landed_on']} ({(it['rebased'] or it['commit_sha'] or '')[:12]})"
+        landed = f"✓ landed on {it['landed_on']} ({(it['rebased'] or it['commit_sha'] or '')[:12]})"
+        if (it["why"] or "").startswith("after-merge build failed"):
+            return f"{landed}; {it['why']}"
+        return landed
     if state == "applied":
         return f"✓ in main ({(it['commit_sha'] or '')[:12]})"
     return ""

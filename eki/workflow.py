@@ -30,6 +30,7 @@ class Workflow:
     merge: str
     playtester: str
     card: str              # the card's folder
+    after_merge: str = ""  # shell command run in the person's folder after eki lands ('' when none)
 
 
 def is_eki(root) -> bool:
@@ -64,7 +65,8 @@ def _of(comp) -> Workflow:
                     command=s.get("command") or "",
                     merge=s.get("merge", kind.CHOICE_DEFAULTS["merge"]),
                     playtester=s.get("playtester") or kind.PLAYTESTER,
-                    card=str(comp.folder))
+                    card=str(comp.folder),
+                    after_merge=s.get("after_merge") if isinstance(s.get("after_merge"), str) else "")
 
 
 def of_root(root: Optional[Path]) -> Optional[Workflow]:

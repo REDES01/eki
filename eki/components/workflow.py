@@ -85,6 +85,8 @@ def validate(spec: dict, folder: Path) -> List[str]:
             errs.append('command is required for the command and batch checks: the project\'s check command')
     elif 'command' in spec and not isinstance(spec['command'], str):
         errs.append('command must be text')
+    if 'after_merge' in spec and not isinstance(spec['after_merge'], str):
+        errs.append('after_merge must be text')
     if 'playtester' in checks:
         p = spec.get('playtester', PLAYTESTER)
         if not isinstance(p, str) or not NAME.match(p):

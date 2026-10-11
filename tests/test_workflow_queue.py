@@ -102,18 +102,44 @@ def test_no_card_no_extra_cap(conn, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("mode, merge", [("propose", "person"), ("apply", "auto")])
 def test_set_autonomy_writes_eki_s_card(tmp_path, monkeypatch, mode, merge):
-    eki = tmp_path / "eki"
-    shutil.copytree(builds.source() / "components" / "workflow", eki / "components" / "workflow")
-    monkeypatch.setenv("EKI_SOURCE", str(eki))
+    monkeypatch.setenv("EKI_SOURCE", str(_eki_copy(tmp_path).parent.parent.parent))
     queue.set_autonomy(mode)
     assert workflow.of_project(None, None).merge == merge
     assert json.loads(paths.config("routing").read_text())["self"]["autonomy"] == mode
     assert selfwork.settings()["autonomy"] == mode
 
 
-def test_set_autonomy_never_rewrites_the_unnamed_checkout(monkeypatch):
-    committed = builds.source() / "components" / "workflow" / "component.json"
+def _eki_copy(tmp_path):
+    eki = tmp_path / "eki"
+    shutil.copytree(builds.source() / "components" / "workflow", eki / "components" / "workflow")
+    return eki / "components" / "workflow" / "component.json"
+
+
+@pytest.mark.parametrize("where", ["checkout", "foreign build"])
+def test_set_autonomy_never_rewrites_an_unnamed_source(tmp_path, monkeypatch, where):
+    """No EKI_SOURCE and no build of this home: the card stays as committed. The source is a copy,
+    so the test itself never reaches the real checkout, wherever the suite runs."""
+    committed = _eki_copy(tmp_path)
+    monkeypatch.delenv("EKI_SOURCE", raising=False)
+    monkeypatch.setattr(builds, "source", lambda: committed.parent.parent.parent)
+    here = tmp_path / "elsewhere" / "builds" / "b1"                 # a builds/ folder, not this home's
+    here.mkdir(parents=True)
+    if where == "foreign build":
+        (here / ".eki-build.json").write_text(json.dumps({"id": "b1", "source": str(committed.parent)}))
+    monkeypatch.setattr(queue, "_here", lambda: here)
     before = committed.read_text()
     queue.set_autonomy("propose")
     assert committed.read_text() == before
     assert selfwork.settings()["autonomy"] == "propose"
+
+
+def test_set_autonomy_writes_from_a_build_of_this_home(tmp_path, monkeypatch):
+    committed = _eki_copy(tmp_path)
+    monkeypatch.delenv("EKI_SOURCE", raising=False)
+    monkeypatch.setattr(builds, "source", lambda: committed.parent.parent.parent)
+    here = paths.home() / "builds" / "b1"
+    here.mkdir(parents=True)
+    (here / ".eki-build.json").write_text("{}")
+    monkeypatch.setattr(queue, "_here", lambda: here)
+    queue.set_autonomy("propose")
+    assert workflow.of_project(None, None).merge == "person"

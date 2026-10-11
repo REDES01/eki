@@ -84,15 +84,21 @@ def set_autonomy(mode: str) -> None:
 
 
 def _own_card() -> Optional[Path]:
-    """eki's workflow card folder, when its source is named (the launcher's EKI_SOURCE or a build's
-    record). The checkout this code runs from unnamed is a test or a bare run: its committed card
-    is never rewritten by a setting."""
+    """eki's workflow card folder, when its source is named: the launcher's EKI_SOURCE, or the record
+    of a build in this home's builds/. Anything else — a test (its own home, EKI_SOURCE cleared), a
+    bare checkout, a build folder run under another home — never rewrites the committed card."""
     from . import workflow
-    here = Path(__file__).resolve().parent.parent
-    if not os.environ.get("EKI_SOURCE") and not (here / ".eki-build.json").exists():
+    here = _here()
+    built = (here / ".eki-build.json").exists() and here.parent == (paths.home() / "builds").resolve()
+    if not os.environ.get("EKI_SOURCE") and not built:
         return None
     wf = workflow.of_project(None, None)
     return Path(wf.card) if wf is not None else None
+
+
+def _here() -> Path:
+    """The folder this code runs from."""
+    return Path(__file__).resolve().parent.parent
 
 
 def order(conn: sqlite3.Connection) -> List[sqlite3.Row]:

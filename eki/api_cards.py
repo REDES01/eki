@@ -87,6 +87,14 @@ def _shown(kind: str, spec: Any) -> Any:
     return spec
 
 
+def _locked(kind: str, root: Path) -> Dict[str, Any]:
+    """A workflow card's checks that can't be turned off: workflow.LOCKED on eki's own project, none elsewhere."""
+    if kind != "workflow":
+        return {}
+    from . import workflow
+    return {"locked": list(workflow.LOCKED) if workflow.is_eki(root) else []}
+
+
 def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict[str, Any]:
     prompt = None
     if c.kind == "agent":
@@ -101,7 +109,7 @@ def _good(conn: sqlite3.Connection, root: Path, c: components.Component) -> Dict
            "instructions": None, "editable": not c.card, "state": _waiting(conn, c.name, _state(conn, c)),
            "last_use": uses.last_use(conn, c.name, root), "links": _links(c), "size": _size(c),
            "choices": components.choices(c.kind), "choice_defaults": components.choice_defaults(c.kind),
-           "choice_help": components.choice_help(c.kind)}
+           "choice_help": components.choice_help(c.kind), **_locked(c.kind, root)}
     if c.kind == "skills":
         from .components import skillcard
         good, broken = skillcard.held(c.folder)
@@ -124,7 +132,7 @@ def _broken(conn: sqlite3.Connection, root: Path, where: str, why: str) -> Dict[
             "instructions": None, "editable": spec is not None and not ref, "state": _waiting(conn, name, "broken"),
             "last_use": uses.last_use(conn, name, root), "links": [], "size": "",
             "choices": components.choices(kind), "choice_defaults": components.choice_defaults(kind),
-            "choice_help": components.choice_help(kind)}
+            "choice_help": components.choice_help(kind), **_locked(kind, root)}
 
 
 def cards_of(conn: sqlite3.Connection, root: Path) -> List[Dict[str, Any]]:

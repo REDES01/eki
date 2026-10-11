@@ -5,12 +5,14 @@
 // card.choice_help), an agent's prompt.md and its bare switch,
 // Run (eki use <name> <args> through the engine, polled every second), its last 20 uses, and an agent's sessions (cardsessions.js). A card from the pool shows its settings
 // read-only, with a link to edit them in Settings. Routes: eki/api_card*.py.
-// A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro), close()},
-// from cardknowledge.js, cardmcp.js) gets a section under its title; passive kinds have no Run or Uses.
+// A kind with a part of its own (window.projectCardKinds[kind] = {title, draw(el, card, pid, ro, ctx), close(), keys},
+// from cardknowledge.js, cardmcp.js, cardworkflow.js) gets a section under its title; the settings it lists in
+// `keys` are drawn there, not in the form, and saved with ctx.save({key: value, …}) (ctx.problems: what the
+// server said, by key); passive kinds have no Run or Uses.
 (function () {
   window.projectCardKinds = window.projectCardKinds || {};
-  const PASSIVE = ["knowledge", "mcp"];                    // eki/components PASSIVE: read or attached, never called
-  for (const f of ["cardknowledge.js", "cardmcp.js", "cardsessions.js"]) {
+  const PASSIVE = ["knowledge", "mcp", "workflow"];                    // eki/components PASSIVE: read or attached, never called
+  for (const f of ["cardknowledge.js", "cardmcp.js", "cardworkflow.js", "cardsessions.js"]) {
     if (document.querySelector && !document.querySelector(`script[src="/ui/${f}"]`)) {
       const t = document.createElement("script");
       t.src = "/ui/" + f; t.async = false;
@@ -54,8 +56,9 @@
 
   function fields() {
     const spec = P.card.spec || {}, defs = P.card.choice_defaults || {};
-    const keys = Object.keys(spec).filter((k) => k !== "kind" && k !== "pool");
-    for (const k of Object.keys(choices())) if (!keys.includes(k) && k in defs) keys.push(k);
+    const own = (kindPart() && kindPart().keys) || [];      // drawn by the kind's own part
+    const keys = Object.keys(spec).filter((k) => k !== "kind" && k !== "pool" && !own.includes(k));
+    for (const k of Object.keys(choices())) if (!keys.includes(k) && !own.includes(k) && k in defs) keys.push(k);
     if (isAgent() && !keys.includes("bare")) keys.push("bare");
     return keys.map((k) => ({ key: k, value: k in spec ? spec[k] : k in defs ? defs[k] : k === "bare" ? false : undefined }));
   }
@@ -110,17 +113,21 @@
     try { value = valueOf(el); } catch (x) { P.problems[key] = "not valid JSON: " + x.message; return redrawSettings(); }
     return saveValue(key, value);
   }
-  async function saveValue(key, value) {
+  const saveValue = (key, value) => saveSettings({ [key]: value });
+  async function saveSettings(set) {
     if (!P.card) return;
-    delete P.problems[key]; delete P.err.settings;
+    const keys = Object.keys(set);
+    for (const k of keys.concat("")) delete P.problems[k];
+    delete P.err.settings;
     try {
-      const got = await P.ctx.api(url(), { settings: { [key]: value } });
+      const got = await P.ctx.api(url(), { settings: set });
       if (got.card && typeof got.card === "object") P.card = got.card;
     } catch (x) {
       const pr = x.problems || {};
-      if (Object.keys(pr).length) Object.assign(P.problems, pr); else P.problems[key] = x.message;
+      if (Object.keys(pr).length) Object.assign(P.problems, pr); else P.problems[keys[0]] = x.message;
     }
     redrawSettings();                          // a refused value goes back to the saved one
+    drawKind();
     P.ctx.reload();
   }
   // drawn again even when its html is the same, so a refused value shows the saved one; the field
@@ -270,6 +277,11 @@
     }
   }
 
+  function drawKind() {
+    const part = kindPart(), box = q(".pp-kind");
+    if (part && box) part.draw(box, P.card, P.pid, P.ro, { save: saveSettings, problems: P.problems, editable: editable() });
+  }
+
   function draw() {
     if (kindPart() !== P.framed) frame();         // a kind's part registered after the card opened
     put(".pp-head", head());
@@ -277,8 +289,7 @@
       P.el.dataset.cmWired = "1";
       choiceMenu.attach(P.el, (key, value) => saveValue(key, value));
     }
-    const part = kindPart(), box = q(".pp-kind");
-    if (part && box) part.draw(box, P.card, P.pid, P.ro);
+    drawKind();
     const a = document.activeElement;
     const typing = a && P.el.contains(a) && a.matches && a.matches("input, textarea, select, .cm-list");
     if (!(typing && a.closest(".pp-settings"))) put(".pp-settings", settings());

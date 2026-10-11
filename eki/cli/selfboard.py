@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .. import doccheck, selfpick, selfview, selfwork
+from .. import doccheck, selfpick, selfview, selfwork, worktreegc
 from ..selfview import drafting, stage  # noqa: F401  (said here before they moved)
 from .common import ago
 
@@ -14,9 +14,11 @@ def board(c) -> int:
     if not goals:
         print('nothing yet — `eki self "…"` asks for a change')
         print(selfpick.line(c))
+        print(worktreegc.disk_line())
         return 0
     s = selfwork.settings()
     print(f"(autonomy {s['autonomy']}, {s['parallel']} at once, source {selfwork.source()})")
+    print(worktreegc.disk_line())
     print(selfpick.line(c))
     _queue(c)
     for g in goals:

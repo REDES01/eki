@@ -50,6 +50,7 @@ def seed(conn):
 
 BOARD = """\
 (autonomy propose, 4 at once, source /src/eki)
+worktrees: not measured yet
 loop: off (eki self loop on)
 
 queue

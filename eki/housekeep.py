@@ -22,7 +22,9 @@ component server eki started that has sat idle past its `idle_stop`
 its port freed (eki/components/serve.py), and run each direction of the Claude-client
 sync (eki/syncstate.py), and measure every assets pool's size on a thread of its
 own at most every five minutes, so no request ever walks one
-(eki/components/assets.py). Nothing here is
+(eki/components/assets.py), and remove the worktrees under EKI_HOME/work that
+are done with, a few a pass, and measure the disk they take
+(eki/worktreegc.py). Nothing here is
 state that matters: the hour between prunes and the last list tries live in
 memory, and losing them on a restart only means an early prune or an early try.
 """
@@ -36,7 +38,7 @@ from typing import Callable, Dict, List, Tuple
 
 from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
                prmirror, projectdelete, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
-               threadkeep)
+               threadkeep, worktreegc)
 from .components import assets, serve, servers
 
 log = logging.getLogger("eki.housekeep")
@@ -118,6 +120,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),
     ("notify", notify.tick),
+    ("worktrees", worktreegc.tick),
 ]
 
 

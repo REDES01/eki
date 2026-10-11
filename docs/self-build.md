@@ -196,19 +196,24 @@ in an item is fine: after eki lands in your folder, the after-merge run
 (`eki/aftermerge.py`) runs `npm install --include=dev` before the build.
 
 **Removed when done.** The housekeeping step `worktrees`
-(`eki/worktreegc.py`) removes, 5 per pass:
+(`eki/worktreegc.py`) removes, 5 per pass, oldest first:
 
-- the worktree of an item that is live, applied, landed or dropped, once no
-  active run uses it;
-- finished plan, draft, gate 2 and train trees;
+- the worktree of an item that is live, applied, dropped, or landed with its
+  commit in main, once no active run uses it;
+- `plan-`/`draft-` trees once their goal is past planning, and `gate2-`/`train-`
+  trees once nothing checks in them;
 - unknown folders under `~/.eki/work` older than 2 days.
 
-A failed item's worktree is kept 2 days, so you can look at what it left,
-then removed too. The branch goes with the worktree, except one with an
-open PR or a failed item's. Each pass reads what to remove from the
-database and the folder, nothing from memory, so a restart in the middle of
-a cleanup loses nothing: the next pass picks up where it stopped. `eki self`
-shows the disk the worktrees use in one line.
+A failed item's worktree (left, unfit, rolled back) is kept 2 days, so you
+can look at what it left, then removed too. The branch goes with the
+worktree, except one with an open PR or a failed item's. Nothing an active
+run is in, and nothing whose item is still being built, judged, reviewed or
+queued, is ever removed. Each pass reads what to remove from the database
+and the folder, nothing from memory; each removal is written to
+`work/.gc/<key>.json` first, so a restart in the middle of a cleanup loses
+nothing: the next pass finishes it. The item's row stays; `retry` starts
+afresh when its folder is gone. `eki self` shows the disk the worktrees use
+in one line, measured every 10 minutes.
 
 ## The queue: where it's parallel and where it isn't
 

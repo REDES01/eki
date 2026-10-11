@@ -9,7 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import (api_threads, asking, builds, asks, attachments, capacity, digest, engine, gallery, machine, machinecaps,
-               machinenow, modellist, models, paths, projects, providers, quota, routing, store, targets)
+               machinenow, modellist, models, paths, projects, providers, quota, routing, store, targets, testslots)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -145,7 +145,8 @@ def status(conn: sqlite3.Connection) -> Dict[str, Any]:
             "running": sum(r["state"] in ("starting", "running") for r in active),
             "queued": sum(r["state"] == "queued" for r in active),
             "room": room, "room_why": why, "memory_pressure": machine.memory_pressure(),
-            "prs": projects.open_prs(conn)}
+            "prs": projects.open_prs(conn),
+            "behind": testslots.behind(conn)}             # sidestatus.js: holds waiting behind queued checks
 
 
 def route(conn: sqlite3.Connection, prompt: Optional[str]) -> Dict[str, Any]:

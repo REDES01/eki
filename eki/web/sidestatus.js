@@ -66,7 +66,8 @@
     showDigest(st.digest);
     const pr = $("prs");   // one line per project with PRs open; hidden when none
     if (pr) { pr.innerHTML = prs.lines(st.prs); pr.hidden = !prs.total(st.prs); }
-    $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}`;
+    const behind = st.behind > 0 ? ` · ${st.behind} test runs waiting behind checks` : "";   // eki slot holds
+    $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}${behind}`;
     $("status-dot").className = "led " + dot(ps);
     $("status-text").textContent = `${st.running} running`;
   }

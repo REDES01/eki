@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -247,6 +248,45 @@ def test_the_status_dot_opens_the_provider_block_and_esc_or_outside_closes_it(tm
     assert got["engine"] == "2 running · 1 queued · room for background work"
     assert got["closed"] and got["opened"] and got["expanded"] == "true" and got["staysInside"]
     assert got["esc"] and got["outside"]
+
+
+def test_the_machine_line_tells_how_many_test_runs_wait_behind_checks(tmp_path):
+    st = {"running": 2, "queued": 3, "room": True, "prs": {}, "digest": None, "behind": 2}
+    assert status(tmp_path, [], st)["engine"].endswith(" · 2 test runs waiting behind checks")
+    for none in (0, None):
+        st["behind"] = none
+        assert status(tmp_path, [], st)["engine"] == "2 running · 3 queued · room for background work"
+
+
+def test_status_counts_holds_waiting_behind_a_queued_check(home, conn):
+    from eki import api, db, selfwork, store, testslots
+    routing = json.loads((home / "routing.json").read_text())
+    routing["machine"] = {"checks": 1}
+    (home / "routing.json").write_text(json.dumps(routing))
+    assert api.status(conn)["behind"] == 0
+    with db.tx(conn):
+        store.create_run(conn, store.create_thread(conn, "j", None), selfwork.CHECK, provider="command")
+    assert api.status(conn)["behind"] == 0                    # a queued check, but nobody waits behind it
+    done, started = threading.Event(), threading.Event()
+
+    def holder():
+        c = db.connect()
+        started.set()
+        with testslots.hold(c, wait=0.02):
+            pass
+        c.close()
+        done.set()
+    t = threading.Thread(target=holder, daemon=True)
+    t.start()
+    started.wait(5)
+    deadline = time.time() + 5
+    while testslots.waiting() < 1 and time.time() < deadline:
+        time.sleep(0.02)
+    assert api.status(conn)["behind"] == 1 and not done.is_set()
+    conn.execute("UPDATE runs SET state='cancelled'")         # the check goes away; the hold takes its slot
+    conn.commit()
+    t.join(5)
+    assert done.is_set() and api.status(conn)["behind"] == 0
 
 
 def test_side_js_leaves_the_machine_to_sidestatus_js():

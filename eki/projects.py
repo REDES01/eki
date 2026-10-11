@@ -54,9 +54,17 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
 
 
 def autonomy(project: sqlite3.Row) -> str:
-    """'apply' or 'propose'. A GitHub project proposes: its work goes back as pull requests."""
+    """'apply' or 'propose'. A GitHub project proposes: its work goes back as pull requests.
+    A project's workflow card, when it has one, says (eki/workflow.py)."""
     if "repo" in project.keys() and project["repo"]:
         return "propose"
+    from . import workflow
+    card = workflow.of_project(None, project)
+    return workflow.autonomy(card) if card is not None else legacy_autonomy(project)
+
+
+def legacy_autonomy(project: sqlite3.Row) -> str:
+    """The row's own autonomy setting: what a project with no workflow card runs under."""
     return ("autonomy" in project.keys() and project["autonomy"]) or "apply"
 
 
@@ -135,16 +143,21 @@ def base(project: sqlite3.Row) -> str:
 
 
 def check_argv(project: sqlite3.Row) -> Optional[str]:
-    """Gate 1 as a command run's JSON argv, or None when the project has no check."""
+    """Gate 1 as a command run's JSON argv, or None when the project has no check.
+    A project's workflow card, when it has one, holds the command (eki/workflow.py)."""
+    from . import workflow
+    card = workflow.of_project(None, project)
+    cmd = (card.command or None) if card is not None else legacy_check(project)
+    return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"]) if cmd else None
+
+
+def legacy_check(project: sqlite3.Row) -> Optional[str]:
+    """The check command the row's settings mean: its check_cmd, else an executable bin/check."""
     cmd = project["check_cmd"]
-    if "repo" in project.keys() and project["repo"]:     # eki's clone: the guess or the person's word only
-        return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"]) if cmd else None
-    if not cmd:
-        check = Path(project["path"]) / "bin" / "check"
-        if not (check.is_file() and os.access(check, os.X_OK)):
-            return None
-        cmd = "bin/check"
-    return json.dumps(["/bin/sh", "-c", cmd, "eki-judge"])
+    if ("repo" in project.keys() and project["repo"]) or cmd:   # eki's clone: the guess or the person's word only
+        return cmd or None
+    check = Path(project["path"]) / "bin" / "check"
+    return "bin/check" if check.is_file() and os.access(check, os.X_OK) else None
 
 
 def link_deps(project: sqlite3.Row, worktree: str | Path) -> List[str]:

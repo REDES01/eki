@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "about": "eki's own pipeline: the parts that protect eki are fixed",
+  "router": "on",
+  "plan": "split",
+  "parallel": 4,
+  "checks": [
+    "self",
+    "review",
+    "batch",
+    "train"
+  ],
+  "merge": "auto"
+}

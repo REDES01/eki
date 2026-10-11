@@ -51,9 +51,9 @@ class Result:
 KINDS = {'service': 'eki.components.service', 'assets': 'eki.components.assets', 'agent': 'eki.components.agent',
          'skills': 'eki.components.skillcard', 'instructions': 'eki.components.instructions',
          'serve': 'eki.components.serve', 'knowledge': 'eki.components.knowledge',
-         'mcp': 'eki.components.mcpserver'}
+         'mcp': 'eki.components.mcpserver', 'workflow': 'eki.components.workflow'}
 #: kinds that are read or attached, never called with `eki use`
-PASSIVE = ('knowledge', 'mcp')
+PASSIVE = ('knowledge', 'mcp', 'workflow')
 ACCESS = ('queue', 'exclusive', 'shared')
 #: settings every kind has whose values come from a fixed set; a kind adds its own
 #: in its module's CHOICES (and CHOICE_DEFAULTS for the value used when the key is absent)

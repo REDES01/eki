@@ -1,0 +1,11 @@
+{
+  "kind": "workflow",
+  "about": "how this project's work runs",
+  "router": "on",
+  "plan": "split",
+  "parallel": 4,
+  "checks": [
+    "self"
+  ],
+  "merge": "auto"
+}

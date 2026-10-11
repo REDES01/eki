@@ -1,0 +1,122 @@
+"""The `workflow` kind: how this project's work runs — router, plan, parallel, checks, merge.
+
+A passive card the engine reads through eki/workflow.py; at most one per project. `checks`
+always holds `self`; `train` belongs to eki's own project only, and there the stages in
+workflow.LOCKED can't be dropped: they protect eki itself.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import List
+
+from . import NAME, Call, Component, Result
+
+ABOUT = "how this project's work runs: router, plan, parallel, checks, merge"
+
+CHOICES = {'router': ['on', 'off'], 'plan': ['split', 'single'], 'merge': ['auto', 'pr', 'person']}
+CHOICE_DEFAULTS = {'router': 'on', 'plan': 'split', 'merge': 'auto'}
+CHOICE_HELP = {
+    'router': {'on': "Requests are routed: rules first, a small model for the rest, among the providers "
+                     "and the project's cards.",
+               'off': 'Everything goes to target (provider → model → effort); the prompt check is never called.'},
+    'plan': {'split': 'A planner turns a request into items with write-sets, built in parallel.',
+             'single': 'The whole request is one item for one agent.'},
+    'merge': {'auto': 'eki lands it on the branch.',
+              'pr': 'A pull request on GitHub.',
+              'person': 'Waits for the person to merge.'}}
+PARALLEL = 4
+PLAYTESTER = 'playtester'
+
+
+def _second(folder: Path) -> str:
+    """The workflow card sorting before this one in the same components/, or ''."""
+    try:
+        others = sorted(d for d in folder.parent.iterdir() if d.is_dir() and d.name < folder.name)
+    except OSError:
+        return ''
+    for d in others:
+        try:
+            spec = json.loads((d / 'component.json').read_text())
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        if isinstance(spec, dict) and spec.get('kind') == 'workflow':
+            return d.name
+    return ''
+
+
+def _checks(spec: dict, eki: bool) -> List[str]:
+    from ..workflow import CHECKS, LOCKED
+    checks = spec.get('checks', ['self'])
+    if not isinstance(checks, list) or not all(isinstance(c, str) for c in checks):
+        return [f'checks must be a list of {", ".join(CHECKS)}']
+    bad = [c for c in checks if c not in CHECKS]
+    if bad:
+        return [f'checks: {", ".join(bad)} is not a check (checks: {", ".join(CHECKS)})']
+    if len(set(checks)) != len(checks):
+        return ['checks: each check once']
+    if checks != sorted(checks, key=CHECKS.index):
+        return [f'checks run in this order: {", ".join(CHECKS)}']
+    errs = [] if 'self' in checks else ['checks: self is always on']
+    if 'train' in checks and not eki:
+        errs.append("checks: train is eki's own (build + drills + swap): only eki's project has it")
+    if eki:
+        errs += [f"{c} protects eki itself: it can't be turned off here" for c in LOCKED if c not in checks]
+    return errs
+
+
+def validate(spec: dict, folder: Path) -> List[str]:
+    from .. import github, targets
+    from ..workflow import is_eki
+    errs = []
+    for key, allowed in CHOICES.items():
+        if spec.get(key, CHOICE_DEFAULTS[key]) not in allowed:
+            errs.append(f'{key} must be one of {", ".join(allowed)}')
+    n = spec.get('parallel', PARALLEL)
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        errs.append('parallel must be a whole number ≥ 1')
+    root = folder.parent.parent
+    eki = is_eki(root)
+    errs += _checks(spec, eki)
+    checks = spec.get('checks', ['self']) if isinstance(spec.get('checks', []), list) else []
+    if ('command' in checks or 'batch' in checks) and not eki:   # eki's own check is fixed: bin/check
+        cmd = spec.get('command')
+        if not isinstance(cmd, str) or not cmd.strip():
+            errs.append('command is required for the command and batch checks: the project\'s check command')
+    elif 'command' in spec and not isinstance(spec['command'], str):
+        errs.append('command must be text')
+    if 'playtester' in checks:
+        p = spec.get('playtester', PLAYTESTER)
+        if not isinstance(p, str) or not NAME.match(p):
+            errs.append('playtester must be the name of a card')
+    if spec.get('router', CHOICE_DEFAULTS['router']) == 'off':
+        if not spec.get('target'):
+            errs.append('target is required when router is off: where everything goes')
+        else:
+            try:
+                targets.parse(spec['target'])
+            except ValueError as e:
+                errs.append(f'target: {e}')
+    if spec.get('merge') == 'pr' and github.path_of(root)[0] is None:
+        errs.append('merge: pr needs a GitHub repo')
+    other = _second(folder)
+    if other:
+        errs.append(f'a project has one workflow card: {other} is it')
+    return errs
+
+
+def notes(comp: Component) -> List[str]:
+    from .. import workflow
+    return [workflow.said(workflow._of(comp))]
+
+
+def call(comp: Component, c: Call) -> Result:
+    return Result(error='a workflow card is read by the engine, not called')
+
+
+def is_up(comp: Component) -> bool:
+    return False
+
+
+def stop(comp: Component) -> bool:
+    return False

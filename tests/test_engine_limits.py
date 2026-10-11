@@ -119,9 +119,11 @@ def test_a_set_ceiling_counts_every_kind(home, conn, spawned, monkeypatch):
     with db.tx(conn):
         running(conn, judge(conn, "busy check"))
         queued = [judge(conn, "check a"), plain(conn, "a"), judge(conn, "check b"), plain(conn, "b")]
+    # checks go first (checkslots.first): both judges before the plain runs queued between them
+    first = [queued[0], queued[2], queued[1], queued[3]]
     assert engine.spawn_ready(conn) == 2
-    assert spawned == queued[:2]
-    assert all(store.run(conn, r)["state"] == "queued" for r in queued[2:])
+    assert spawned == first[:2]
+    assert all(store.run(conn, r)["state"] == "queued" for r in first[2:])
     store.update_run(conn, queued[0], state="done")
     engine.spawn_ready(conn)
-    assert spawned == queued[:3]
+    assert spawned == first[:3]

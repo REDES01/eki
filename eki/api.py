@@ -8,8 +8,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import (api_threads, asking, builds, asks, attachments, capacity, digest, engine, gallery, machine, modellist,
-               models, paths, projects, providers, quota, routing, store, targets)
+from . import (api_threads, asking, builds, asks, attachments, capacity, digest, engine, gallery, machine, machinecaps,
+               machinenow, modellist, models, paths, projects, providers, quota, routing, store, targets)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -159,3 +159,9 @@ def pictures(conn: sqlite3.Connection, limit: int = 60, before: Optional[float] 
     """The gallery, newest first; `more` says another page (by `before`) may exist."""
     got = gallery.pictures(conn, limit + 1, before)
     return {"pictures": got[:limit], "more": len(got) > limit}
+
+
+def machine_view(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """Settings → Machine: the two caps as saved, what runs now, and that in one line."""
+    got = machinenow.now(conn)
+    return {**machinecaps.settings(), "now": got, "line": machinenow.line(got)}

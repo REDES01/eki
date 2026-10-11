@@ -10,7 +10,7 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const SECTIONS = ["jobs", "rows", "providers", "notifications", "self", "components", "sync"];
+  const SECTIONS = ["jobs", "rows", "providers", "notifications", "machine", "self", "components", "sync"];
   const FILES = { routing: "Routing", providers: "Providers" };
   const REG = {};
   const S = { on: false, sect: "jobs", mode: "form", got: {}, draft: {}, raw: {}, rawErr: {}, note: {} };

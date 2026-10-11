@@ -75,9 +75,9 @@ def test_the_notifications_section_and_its_script_are_served(web):
 def test_the_eki_self_section_is_served_as_grouped_lines(web):
     code, js = get(f"{web}/ui/settingsself.js")
     assert code == 200
-    for want in ('settings.section("self"', "autonomy", 'data-f="agents"', 'data-f="checks"', 'file: "routing"',
-                 'min="1"', "d.machine[f] = n", "delete d.machine[f]", "settingsForm.group", "settingsForm.line"):
+    for want in ('settings.section("self"', "autonomy", 'file: "routing"', "settingsForm.group", "settingsForm.line"):
         assert want in js
+    assert 'data-f="parallel"' not in js and "d.self.parallel" not in js   # eki's own cap is on its workflow card
     _, page = get(web + "/")
     assert page.index("/ui/settingsself.js") < page.index("/ui/settings.js")
 

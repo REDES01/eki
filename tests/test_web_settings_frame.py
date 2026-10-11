@@ -12,9 +12,9 @@ from test_web import get, web  # noqa: F401  (the fixture)
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
 SECTIONS = {"jobs": "settingsmodels", "rows": "settingsrows", "providers": "settingsproviders",
-            "notifications": "settingsnotify", "self": "settingsself", "components": "settingscomponents",
-            "sync": "settingssync"}
-ORDER = ["settingsform", "settingstarget", "settingsmodels", "settingsnotify", "settingsself",
+            "notifications": "settingsnotify", "machine": "settingsmachine", "self": "settingsself",
+            "components": "settingscomponents", "sync": "settingssync"}
+ORDER = ["settingsform", "settingstarget", "settingsmodels", "settingsnotify", "settingsmachine", "settingsself",
          "settingsrows", "settingsproviders", "settingscomponents", "settingssync", "settings"]
 CLASSES = ["#set-nav", ".set-group", ".set-line", ".set-label", ".set-sub", ".set-ctl", ".set-fold",
            ".set-fold.open", ".set-sum", ".set-pill", ".set-amber", ".set-target",
@@ -40,7 +40,7 @@ def test_nav_routes_a_settings_section_and_never_as_a_thread(tmp_path):
 
 def test_settings_js_is_the_frame(web):
     _, js = get(f"{web}/ui/settings.js")
-    assert 'const SECTIONS = ["jobs", "rows", "providers", "notifications", "self", "components", "sync"]' in js
+    assert 'const SECTIONS = ["jobs", "rows", "providers", "notifications", "machine", "self", "components", "sync"]' in js
     for want in ('id="set-nav"', 'id="set-body"', '"#settings/"', "S.sect", "window.settingsSections",
                  "/api/settings/", "mtime", "X-Eki", "problems", "409", 'nav.register("settings"', "window.settings",
                  "saving…", "not saved", "set-status", "draft:", "got:", "note,", "render,", "clone,", "section,"):
@@ -158,7 +158,7 @@ def test_sections_register_though_window_settings_is_the_sidebar_link(tmp_path, 
                          capture_output=True, text=True, timeout=30, check=True)
     got = json.loads(out.stdout)
     assert got["errors"] == []
-    assert got["sections"] == ["jobs", "rows", "providers", "notifications", "self", "components", "sync"]
+    assert got["sections"] == ["jobs", "rows", "providers", "notifications", "machine", "self", "components", "sync"]
 
 
 # settings.js over a stub page: fake timers, a fetch whose POSTs we answer by hand, one section

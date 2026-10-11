@@ -8,8 +8,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import components
-from .components import access
+from . import cardusedby, components
+from .components import access, uses
 
 
 def live(conn: sqlite3.Connection, root: Path, comp: components.Component) -> Dict[str, Any]:
@@ -22,24 +22,83 @@ def live(conn: sqlite3.Connection, root: Path, comp: components.Component) -> Di
     return got if isinstance(got, dict) else {}
 
 
-def _now(conn: sqlite3.Connection, comp: components.Component) -> List[str]:
-    """The card's state in words: who holds it, running, or idle."""
+#: a provider's name as a person reads it
+_PROVIDER = {"comfyui": "ComfyUI"}
+
+
+def _titled(conn: sqlite3.Connection, rid: str) -> str:
+    r = cardusedby._run(conn, rid)
+    return f"'{cardusedby.title(conn, r)}'" if r is not None else "a run"
+
+
+def _state(conn: sqlite3.Connection, comp: components.Component) -> List[str]:
+    """Who is using it, who holds it, a busy provider, and how many wait; [] when none of these."""
+    out: List[str] = []
+    working = access._working(conn, comp.name)
+    for rid in dict.fromkeys(r["parent"] or r["id"] for r in working):
+        out.append(f"in use by {_titled(conn, rid)}")
+    if not working and comp.spec.get("access") == "exclusive":
+        held = access.holders(conn, comp.name)
+        if held:
+            out.append(f"{comp.name} is busy: held by {_titled(conn, held[0])}")
+    provider = comp.spec.get("provider")
+    if not working and isinstance(provider, str) and access._provider_busy(conn, provider):
+        out.append(f"{_PROVIDER.get(provider, provider)} is busy")
+    n = uses.waiting(conn, comp.name)
+    if n:
+        out.append(f"{n} waiting")
+    return out
+
+
+def _links(links: Any) -> List[str]:
+    good = [k for k in links if isinstance(k, dict)] if isinstance(links, list) else []
+    if not good:
+        return ["no preview links running"]
+    out = [f"{len(good)} preview link{'s' if len(good) != 1 else ''} running"]
+    for k in good:
+        name = k.get("task") or Path(str(k.get("folder") or "")).name or "a copy"
+        out.append(f"{cardusedby.short(str(name))} → {k.get('url') or ''}".rstrip(" →"))
+    return out
+
+
+def _comfy(c: Any) -> List[str]:
+    if not isinstance(c, dict):
+        return []
+    if c.get("up"):
+        return ["ComfyUI is up" + (f", last used {c['model']}" if c.get("model") else "")]
+    return ["ComfyUI isn't running — it starts on the next picture"]
+
+
+def _now(conn: sqlite3.Connection, comp: components.Component, live: Dict[str, Any]) -> List[str]:
+    """The card's state in words, never a run id."""
     try:
-        held = access.in_use(conn, comp.name, comp.spec)
-    except Exception:
-        held = ""
-    if held:
-        return [held]
-    try:
-        up = bool(components.kind_module(comp.kind).is_up(comp))
-    except Exception:  # a kind's is_up must never break the page
-        up = False
-    return ["running" if up else "idle"]
+        out = _state(conn, comp)
+    except Exception:  # a broken DB: say what live knows
+        out = []
+    live = live if isinstance(live, dict) else {}
+    if "links" in live:
+        return out + _links(live["links"])
+    extra = _comfy(live.get("comfy")) if "comfy" in live else []
+    if not out:
+        try:
+            up = bool(components.kind_module(comp.kind).is_up(comp))
+        except Exception:  # a kind's is_up must never break the page
+            up = False
+        out = ["running" if up and not extra else "idle"]
+    return out + extra
 
 
 def overview(conn: sqlite3.Connection, root: Path, comp: components.Component, live: Dict[str, Any]) -> Dict[str, Any]:
     """{"used_by": {"stages", "line", "runs"}, "now": [lines]} for the card's panel."""
-    return {"used_by": {"stages": [], "line": "", "runs": []}, "now": _now(conn, comp)}
+    try:
+        used = cardusedby.used_by(conn, root, comp)
+    except Exception:  # never breaks the panel
+        used = {"stages": [], "line": "", "runs": []}
+    try:
+        now = _now(conn, comp, live)
+    except Exception:
+        now = []
+    return {"used_by": used, "now": now}
 
 
 def broken(why: str) -> Dict[str, Any]:

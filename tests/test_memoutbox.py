@@ -104,3 +104,15 @@ def test_first_pass_does_not_backfill(conn):
     assert memoutbox.tick(conn) == []
     assert _notes() == []
     assert syncstate.status()["memory-out"]["count"] == 0
+
+
+def test_housekeeping_runs_it(conn):
+    """syncstate.tick finds eki/memoutbox.py through its MODULES list; no call of its own is needed."""
+    assert "memoutbox" in syncstate.MODULES
+    syncstate.tick(conn)                                 # the first pass sets the cursor
+    assert "after" in syncstate.baseline("memory-out")
+    _start(conn)
+    _say(conn, "Remember the fox lives in the gallery.")
+    said = syncstate.tick(conn)
+    assert any(line.startswith("memory-out: ") for line in said)
+    assert len(_notes()) == 1

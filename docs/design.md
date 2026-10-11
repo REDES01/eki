@@ -98,6 +98,7 @@ eki follow <run>  ◄── events table
 | `threadacts` | what you do to a chat: pin, unread, rename, move to a project (cwd follows, sessions dropped), group, archive, delete (cancel, hide; `purge` removes the rows once nothing is active) |
 | `api_threads` | the chat list: eki's threads that need you, then your pinned chats, then the rest; `all`, `archived`; each entry's pin, unread, own, title_by, group, sessions; `groups` |
 | `titles` | a `title` chore per new chat of yours with an answer, once; the cleaned title is written only while the title is still the prompt's |
+| `webproc` | the web server as the engine's child: `start` (`python -m eki.server`, nothing when `EKI_PORT=0`), `keep` each engine loop (an exit is a fault, restarted at most once per `RESTART_PAUSE`), `stop` on every way out; its stdin is the lifeline that takes it down with the engine |
 | `apiroutes` | the window's newer API as a table: `ROUTES` is each page's `api_*.ROUTES` joined, entries `(method, regex, fn)` with `fn(conn, m, q, body)`; `server.py` asks `match(method, path)` before its 404 |
 | `api_artifacts`, `api_schedule`, `api_customize` | the Artifacts, Scheduled and Customize pages over HTTP, each only through its own `ROUTES` (`api_projects.ROUTES` holds the projects page's newer routes) |
 | `artifacts` | what your chats made that is still on disk — pictures, pages, documents — newest first, from the store's `tool` events with a path |
@@ -482,10 +483,33 @@ are Codex's.
 
 ## Milestone 2: the window and the machine
 
-- **Web UI served by the engine** (`eki/server.py`, `eki/api.py`,
-  `eki/web/`) on `127.0.0.1:7788`. The files are read from disk on every
+- **Web UI served by a child process of the engine** (`python -m eki.server`,
+  `eki/api.py`, `eki/web/`) on `127.0.0.1:7788`, started and kept by
+  `webproc` with a stdin lifeline: the engine never writes to the pipe, so
+  when the engine goes (even by SIGKILL) the server reads EOF, exits and
+  frees the port for the next engine, whose server retries the port for
+  `BIND_PATIENCE` meanwhile. On threads inside the engine every request's
+  sqlite calls queued behind the engine's own threads for the GIL (a card
+  list took 8–9 s instead of 1.1 s); in its own process they don't.
+  `/api/status` says both pids: `engine` and `server` (`pid` is the server's).
+  The files are read from disk on every
   request: a UI change is live on refresh. No build step, no framework. A
   POST needs the `X-Eki: 1` header, so only eki's own page can act.
+  Nothing in `eki/server.py` relies on the engine's memory: everything goes
+  through the DB or the files, so there is no local socket between them.
+  Live run streams (`GET /api/threads/<id>/events`, `api.events`) long-poll
+  the `events` table. Cancel (`POST /api/runs/<id>/cancel`,
+  `DELETE /api/threads/<id>`, via `store.cancel` and `threadacts.delete`)
+  sets `runs.cancel`; the engine's `reap` and the worker act on it.
+  `/v1/responses` and `/api/models/<n>/start|stop` go through
+  `models.ensure`/`start`/`stop`, over the model state files and pids
+  (started models are `start_new_session`, so they outlive the server).
+  `/api/self/*`, `/api/self/release`, `/api/builds/<id>/undo` and
+  `/api/digests/write` use the DB and git. `notify.tick` stays in the
+  engine's `housekeep.tick` over the `notices` table, never called from a
+  request. `testslots.held` uses flocks. Per-process caches
+  (`components/cardcache.py`, the memoised git calls) live in the server
+  process now; they are keyed on mtimes, so they stay correct.
   Nothing lives in the page that the engine doesn't have: refresh, or
   restart the engine mid-run, and the page picks up where it was.
   One page, views on hash addresses (`eki/web/nav.js` sends each to its

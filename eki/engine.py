@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, testslots, train
+from . import aftermerge, builds, checkslots, db, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, testslots, train, webproc
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -323,26 +323,29 @@ def serve() -> int:
     stopping: list = []
     handle_signals(stopping)
     conn = db.connect()
-    from . import server
-    server.start_in_background()
+    web = webproc.start()
     _up_since[0] = time.time()
     log.info("engine %s up, home %s, build %s", os.getpid(), paths.home(), builds.running_id())
     code = 0
-    while not stopping:
-        if not home_here():
-            log.info("engine %s: its home %s is gone; stopping", os.getpid(), paths.home())
-            break
-        try:
-            if not tick(conn):
-                log.info("a newer build is current: stepping aside")
-                code = builds.SWAP_EXIT
+    try:
+        while not stopping:
+            if not home_here():
+                log.info("engine %s: its home %s is gone; stopping", os.getpid(), paths.home())
                 break
-        except Exception:                                # noqa: BLE001 — keep managing
-            log.exception("tick failed")
-            observe.fault(conn, "engine.tick")
-        time.sleep(TICK)
-    log.info("engine %s down; workers left running", os.getpid())
-    held.close()
+            try:
+                if not tick(conn):
+                    log.info("a newer build is current: stepping aside")
+                    code = builds.SWAP_EXIT
+                    break
+            except Exception:                            # noqa: BLE001 — keep managing
+                log.exception("tick failed")
+                observe.fault(conn, "engine.tick")
+            web = webproc.keep(web)
+            time.sleep(TICK)
+    finally:
+        webproc.stop(web)
+        log.info("engine %s down; workers left running", os.getpid())
+        held.close()
     return code
 
 

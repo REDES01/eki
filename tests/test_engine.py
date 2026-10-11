@@ -85,6 +85,6 @@ def test_serve_waits_out_a_probe_holding_the_lock(home, monkeypatch):
     threading.Timer(0.6, held.close).start()          # the probe lets go
     monkeypatch.setattr(engine, "handle_signals", lambda stopping: stopping.append(1))
     monkeypatch.setattr(engine, "tick", lambda conn: True)
-    from eki import server
-    monkeypatch.setattr(server, "start_in_background", lambda: None)
+    from eki import webproc
+    monkeypatch.setattr(webproc, "start", lambda: None)
     assert engine.serve() == 0

@@ -1,4 +1,4 @@
-"""The engine's web face: the UI's files and a small JSON API, on 127.0.0.1 only.
+"""eki's web face, in a process of its own (`python -m eki.server`): the UI's files and a small JSON API, on 127.0.0.1 only.
 
 UI files are read from disk on every request, so a change to them is live
 on the next refresh — no rebuild, no restart. A POST must carry the header
@@ -316,34 +316,52 @@ def serve(listen_port: Optional[int] = None) -> ThreadingHTTPServer:
 BIND_PATIENCE = 60.0
 
 
-def start_in_background() -> Optional[ThreadingHTTPServer]:
-    """Run the server on a thread of the engine. A port in use is retried for
-    BIND_PATIENCE seconds on a thread, then logged, not fatal: the engine's
-    real job is the runs."""
-    if port() == 0 and os.environ.get("EKI_PORT") == "0":
-        return None
-    try:
-        srv = serve()
-    except OSError as e:
-        log.warning("web UI: port %s: %s; trying again for %ds", port(), e, int(BIND_PATIENCE))
-        threading.Thread(target=_keep_trying, daemon=True, name="web-bind").start()
-        return None
-    threading.Thread(target=srv.serve_forever, daemon=True, name="web").start()
-    log.info("web UI on http://127.0.0.1:%s", srv.server_address[1])
-    return srv
-
-
 def _keep_trying(patience: float = BIND_PATIENCE, pause: float = 1.0) -> Optional[ThreadingHTTPServer]:
+    """Bind port(), trying again while it's in use (the engine this one replaces
+    may still hold it). Returns the bound server, or None when it was never freed."""
     until = time.time() + patience
-    while time.time() < until:
-        time.sleep(pause)
+    while True:
         try:
             srv = serve()
         except OSError as e:
-            last = e
+            if time.time() >= until:
+                log.error("web UI not served: port %s: %s", port(), e)
+                return None
+            log.warning("web UI: port %s: %s; trying again", port(), e)
+            time.sleep(pause)
             continue
-        threading.Thread(target=srv.serve_forever, daemon=True, name="web").start()
         log.info("web UI on http://127.0.0.1:%s", srv.server_address[1])
         return srv
-    log.error("web UI not served: port %s: %s", port(), last)
-    return None
+
+
+def _lifeline() -> None:
+    """The engine holds the other end of stdin and never writes to it. EOF means
+    the engine is gone (even by SIGKILL): go too, and free the port."""
+    try:
+        while os.read(0, 4096):
+            pass
+    except OSError:
+        pass
+    os._exit(0)
+
+
+def main() -> int:
+    """`python -m eki.server`: the web UI and API in a process of their own, a
+    child of the engine (eki/webproc.py), so a request never waits on the engine's threads."""
+    from . import paths
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
+                        filename=str(paths.logs() / "web.log"))
+    threading.Thread(target=_lifeline, daemon=True, name="lifeline").start()
+    srv = _keep_trying()
+    if srv is None:
+        return 1
+    try:
+        srv.serve_forever()
+    finally:
+        srv.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

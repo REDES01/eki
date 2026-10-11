@@ -140,7 +140,7 @@ def status(conn: sqlite3.Connection) -> Dict[str, Any]:
     active = store.runs_in(conn, store.ACTIVE)
     room, why = machine.room()
     page = digest.latest()
-    return {"digest": str(page) if page else None,"engine": engine.running_pid(), "pid": os.getpid(), "home": str(paths.home()),
+    return {"digest": str(page) if page else None,"engine": engine.running_pid(), "pid": os.getpid(), "server": os.getpid(), "home": str(paths.home()),
             "build": builds.running_id(),                 # pagereload.js: a new one means the page's scripts are old
             "running": sum(r["state"] in ("starting", "running") for r in active),
             "queued": sum(r["state"] == "queued" for r in active),

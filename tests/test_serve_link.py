@@ -96,8 +96,8 @@ def call_from(folder):
 def test_the_playtester_plays_the_callers_link(game, home, monkeypatch):
     wt = workspace.add(game, "wa")
     seen = []
-    monkeypatch.setattr(serve, "for_run", lambda folder, conn=None, by="": seen.append((folder, by))
-                        or "http://127.0.0.1:47213/chapter1/")
+    monkeypatch.setattr(serve, "link_for", lambda folder, conn=None, by="": (seen.append((folder, by))
+                        or "http://127.0.0.1:47213/chapter1/", ""))
     s = home / "s"
     s.mkdir()
     _, turn = agent.turn_for(playtester_in(game), call_from(wt), s)
@@ -116,7 +116,7 @@ def test_the_playtester_falls_back_to_its_own_url(proj, home):
 
 def test_the_journal_keeps_the_callers_link(game, home, monkeypatch):
     link = "http://127.0.0.1:47213/chapter1/"
-    monkeypatch.setattr(serve, "for_run", lambda *a, **k: link)
+    monkeypatch.setattr(serve, "link_for", lambda *a, **k: (link, ""))
 
     class Done:
         def take(self, turn, emit):

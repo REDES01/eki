@@ -12,6 +12,11 @@ served under, so a project's absolute paths keep their shape. A run in a
 folder that reaches a serve card gets the link (`for_run`); `eki use <name>`
 starts it for the caller's checkout and prints it. When a served folder is
 gone (its worktree removed), `tick` stops its server and frees its port.
+
+An optional `build` (e.g. "npm run build") runs in the served folder before
+its server starts and whenever its sources changed since the last build
+(servebuild.py); a failed build serves nothing and the call fails with the
+output's tail.
 """
 from __future__ import annotations
 
@@ -23,10 +28,10 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from .. import paths
-from . import Call, Component, Result, find, ports, servers
+from . import Call, Component, Result, find, ports, servebuild, servers
 from .static import HEALTH
 
 log = logging.getLogger("eki.components.serve")
@@ -35,6 +40,8 @@ ABOUT = "your own copy of the project in a browser: a static server per worktree
 DEFAULT_HEADERS = {"Cache-Control": "no-store"}
 #: how long a static server gets to answer after it is started
 START_WAIT = 10.0
+FIELD_HELP = {"build": "a shell command run in the served folder before serving it and whenever its sources "
+                       "changed since the last build (e.g. npm run build); empty: none"}
 
 
 def validate(spec: dict, folder: Path) -> List[str]:
@@ -52,6 +59,8 @@ def validate(spec: dict, folder: Path) -> List[str]:
     i = spec.get("index", "index.html")
     if not isinstance(i, str) or not i.strip() or "/" in i:
         errs.append('"index" must be a file name, e.g. "index.html"')
+    if not isinstance(spec.get("build", ""), str):
+        errs.append('"build" must be a shell command, e.g. "npm run build"')
     return errs
 
 
@@ -106,17 +115,24 @@ def _spawn(comp: Component, folder: str, port: int, by: str) -> int:
 
 
 def ensure(comp: Component, folder, by: str = "") -> dict:
-    """Start the static server for `folder` unless it is up; record `by` as its latest use."""
+    """Start the static server for `folder` unless it is up; record `by` as its latest use.
+    The card's build runs first when the server starts or the folder's sources changed."""
     folder = ports.norm(folder)
     if not Path(folder).is_dir():
         return {"up": False, "url": "", "why": f"{folder} is not a folder"}
     url = link(comp, folder)
     port = ports.get(folder) or 0
     if answers(port, folder):
+        failed = servebuild.build(comp, folder) if servebuild.changed(comp, folder) else None
+        if failed:
+            return {"up": False, "url": url, "why": failed}
         if servers.ours(comp, folder):
             servers.write(comp, folder, last_call_at=time.time(), **({"last_run": by} if by else {}))
         return {"up": True, "url": url, "why": ""}
     servers.stop(comp, folder)                    # a server of ours that doesn't answer: start afresh
+    failed = servebuild.build(comp, folder)
+    if failed:
+        return {"up": False, "url": url, "why": failed}
     if not ports.bindable(port):                  # someone else took the recorded port: take another
         ports.free(folder)
         url = link(comp, folder)
@@ -140,22 +156,27 @@ def checkout(folder) -> str:
     return ports.norm(workspace.repo_of(folder) or folder)
 
 
-def for_run(folder, conn=None, by: str = "") -> str:
-    """The serving URL for a run working in `folder`; '' when there is none. Never raises."""
+def link_for(folder, conn=None, by: str = "") -> Tuple[str, str]:
+    """(the serving URL for `folder`, why there is none): ("", "") when it reaches no serve card. Never raises."""
     if not folder:
-        return ""
+        return "", ""
     try:
         found, _ = find(folder, conn)
         cards = [c for _, c in sorted(found.items()) if c.kind == "serve"]
         if not cards:
-            return ""
+            return "", ""
         got = ensure(cards[0], checkout(folder), by=by)
-        if got["up"]:
-            return entry(cards[0], got["url"])
-        log.warning("no serving link for %s: %s", folder, got["why"])
+        return (entry(cards[0], got["url"]), "") if got["up"] else ("", got["why"])
     except Exception as e:                        # noqa: BLE001 — a run never fails for its link
-        log.warning("no serving link for %s: %s", folder, e)
-    return ""
+        return "", str(e) or type(e).__name__
+
+
+def for_run(folder, conn=None, by: str = "") -> str:
+    """The serving URL for a run working in `folder`; '' when there is none. Never raises."""
+    url, why = link_for(folder, conn, by)
+    if why:
+        log.warning("no serving link for %s: %s", folder, why)
+    return url
 
 
 def _mine(comp: Component) -> List[dict]:

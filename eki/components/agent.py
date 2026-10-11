@@ -6,6 +6,8 @@ An agent folder holds prompt.md, optional skills/, and in component.json a
 `deny_tools`, `allow_tools` (a bare agent's whole tool list) and an optional `url` ("{url}" in prompt.md becomes it).
 An agent with a `url` (the playtester) plays the caller's own serving link
 when the caller's project has a serve card; its `url` is only the fallback.
+When that card can't serve (its build failed) the call fails with why: the
+playtester never plays a broken build.
 
 Each call is a new session under ~/.eki/components/sessions/<name>/. A bare
 agent is strict and Claude Code only: prompt.md is its entire system prompt,
@@ -100,12 +102,16 @@ def prompt_text(comp: Component, url: Optional[str] = None) -> str:
 
 
 def play_url(comp: Component, c: Call) -> str:
-    """What an agent with a `url` plays: the caller's serving link, else its own `url`."""
+    """What an agent with a `url` plays: the caller's serving link, else its own `url`.
+    Raises ValueError when the caller's serve card can't serve (a failed build)."""
     own = str(comp.spec.get('url') or '')
     if 'url' not in comp.spec:
         return own
     from . import serve
-    return serve.for_run(c.caller_dir, by=c.caller_run or c.run_id) or own
+    url, why = serve.link_for(c.caller_dir, by=c.caller_run or c.run_id)
+    if why:
+        raise ValueError(f'{comp.name}: no build to play: {why}')
+    return url or own
 
 
 def mcp_file(comp: Component, session: Path) -> Path:

@@ -42,6 +42,7 @@ function el() {
     contains() { return false; }, querySelectorAll() { return []; } };
 }
 global.window = global; global.md = { esc };
+global.confirm = (q) => { out.asked = (out.asked || []).concat(q); return !scene.no; };
 global.document = { querySelector: () => ({}), createElement: el, head: el(), activeElement: null, addEventListener() {} };
 const out = { posts: [], html: [], picks: 0, title: null, reloads: 0 };
 eval(fs.readFileSync(cm, "utf8"));
@@ -57,6 +58,10 @@ global.panel = { host(o) { owner = o; out.title = [o.name, o.sub]; o.draw(body);
 global.fetch = async (url, opts) => {
   if (url === "/api/models") return { ok: true, json: async () => ({ providers: { claude: { listed: null, lists: false } } }) };
   out.posts.push([url, JSON.parse(opts.body)]);
+  if (url.startsWith("/api/self/items/")) {
+    if (scene.fail) return { ok: false, statusText: "Bad", json: async () => ({ error: scene.fail }) };
+    return { ok: true, json: async () => ({ result: "done" }) };
+  }
   if (scene.refuse) return { ok: false, statusText: "Bad", json: async () => ({ error: "no", problems: scene.refuse }) };
   const set = JSON.parse(opts.body).settings;                 // saved as the server does: null removes
   data.spec = Object.assign({}, data.spec, set);
@@ -86,6 +91,9 @@ const reload = () => { out.reloads++; return Promise.resolve(scene.after || data
     } else if (s.click) {
       const hit = { dataset: s.click[1] };
       await r.listeners.click[0]({ target: { closest: (q) => (q === s.click[0] ? hit : null) }, preventDefault() {} });
+    } else if (s.act) {
+      const hit = { dataset: { wiAct: s.act[0], wiId: s.act[1] } };
+      await r.listeners.click[0]({ target: { closest: (q) => (q === "[data-wi-act]" ? hit : null) }, preventDefault() {} });
     } else if (s.row) {
       await r.listeners.change[0]({ target: { dataset: { wrRow: String(s.row[0]), wrKey: s.row[1] }, value: s.row[2] } });
     } else if (s.update) workflowInspect.update(s.update);
@@ -339,3 +347,48 @@ def test_the_servers_objection_shows_beside_the_rules_and_batch_command(tmp_path
     got = run(tmp_path, wf(checks=["self", "command", "batch"], command=GAME, batch_command="x"), "batch",
               [{"field": "batch_command", "value": "y"}], refuse={"batch_command": "batch_command must be text"})
     assert re.search(r'data-wi="batch_command".*?batch_command must be text', got["html"][-1], re.S)
+
+
+# ---- what needs a look: why, and Retry / Drop / Open thread ---------------------------------------
+
+def _left(**kw):
+    return item("l1", "left", error="the agent changed nothing", needs_look=True, thread="t4", **kw)
+
+
+def test_an_item_that_needs_a_look_says_why_with_retry_drop_and_its_thread(tmp_path):
+    data = wf(items={"build": [_left(), item("b2", "building", needs_look=False)]})
+    by = {s["id"]: s for s in data["stages"]}
+    by["build"].update(alert=True, alert_count=1)
+    html = run(tmp_path, data, "build")["html"][0]
+    assert "1 needs a look" in html
+    assert html.count('class="wi-look"') == 1
+    assert '<span class="wi-why" title="the agent changed nothing">the agent changed nothing</span>' in html
+    assert 'data-wi-act="retry" data-wi-id="l1">Retry<' in html and 'data-wi-act="drop" data-wi-id="l1">Drop<' in html
+    assert '<a class="wi-btn" href="#t4">Open thread</a>' in html
+    assert "<button" not in html.split('class="wi-item"')[1].split("</a>")[0]      # no button inside the link
+
+
+def test_the_reason_falls_back_to_the_note_and_retry_is_only_for_what_can_be_retried(tmp_path):
+    its = [item("p1", "proposed", needs_look=True, error="", note="ready to apply"),
+           item("g9", "failed", kind="goal", needs_look=True, error="planner timed out")]
+    html = run(tmp_path, wf(items={"merge": its}), "merge")["html"][0]
+    assert "ready to apply</span>" in html and "planner timed out</span>" in html
+    assert 'data-wi-act="retry"' not in html
+    assert 'data-wi-act="drop" data-wi-id="p1"' in html and 'data-wi-id="g9"' not in html   # goals: no item route
+    assert 'disabled title="no thread yet">Open thread' in html
+
+
+def test_retry_and_drop_post_the_item_route_then_reload(tmp_path):
+    data = wf(items={"build": [_left()]})
+    after = wf(items={"build": []})
+    got = run(tmp_path, data, "build", [{"act": ["retry", "l1"]}, {"act": ["drop", "l1"]}], after=after)
+    assert got["posts"] == [["/api/self/items/l1/retry", {}], ["/api/self/items/l1/drop", {}]]
+    assert got["asked"] == ["Drop item l1?"] and got["reloads"] == 2
+    assert "nothing here now" in got["html"][-1]
+
+
+def test_drop_asks_first_and_a_refusal_shows_beside_the_item(tmp_path):
+    got = run(tmp_path, wf(items={"build": [_left()]}), "build", [{"act": ["drop", "l1"]}], no=True)
+    assert got["posts"] == [] and got["reloads"] == 0
+    got = run(tmp_path, wf(items={"build": [_left()]}), "build", [{"act": ["retry", "l1"]}], fail="item is building")
+    assert "item is building" in got["html"][-1]

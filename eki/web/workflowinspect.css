@@ -24,6 +24,17 @@
 .wi-item:hover { background: var(--panel); }
 .wi-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .wi-meta { flex: none; font-size: 12px; }
+/* an item that needs a look: why, in one line cut off (the whole of it in the tooltip), and what to do */
+.wi-row { display: flex; flex-direction: column; min-width: 0; }
+.wi-look { display: flex; align-items: center; gap: 8px; padding: 0 8px 5px; min-width: 0; font-size: 12px; }
+.wi-why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); }
+.wi-acts { flex: none; display: inline-flex; gap: 4px; }
+.wi-btn { border: 1px solid var(--line); background: none; color: inherit; font: inherit; font-size: 11px; padding: 1px 8px;
+  border-radius: 6px; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.wi-btn:hover:not(:disabled) { background: var(--panel); }
+.wi-btn:disabled { opacity: 0.5; cursor: default; }
+.wi-drop:hover:not(:disabled) { color: var(--red); }
+.wi-error { color: var(--red); }
 .wi-back { display: inline-block; font-size: 12px; margin-bottom: 6px; }
 .wi-note { white-space: pre-wrap; margin: 8px 0; font-size: 12px; }
 .wi-thread { display: inline-block; margin-top: 6px; }

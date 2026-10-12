@@ -100,7 +100,7 @@ def line(v: Dict[str, Any]) -> str:
 def _stage(sid: str, title: str, summary: str, what: str, on: bool, keys: List[str],
            locked: bool = False) -> Dict[str, Any]:
     return {"id": sid, "title": title, "summary": summary, "what": what, "on": on, "locked": locked,
-            "keys": keys, "count": 0, "alert": False, "items": []}
+            "keys": keys, "count": 0, "alert": False, "alert_count": 0, "items": []}
 
 
 def stages(v: Dict[str, Any], eki: bool) -> List[Dict[str, Any]]:
@@ -166,13 +166,14 @@ def _goal(conn, g) -> Dict[str, Any]:
     thread = selfview._thread(conn, g["draft_run"]) or selfview._thread(conn, g["plan_run"]) or g["thread_id"]
     return {"id": g["id"], "kind": "goal", "title": ((g["text"] or "").splitlines() or [""])[0],
             "state": g["state"], "since": g["created_at"], "where": "", "note": g["error"] or "",
-            "thread": thread or "", "goal": g["id"]}
+            "thread": thread or "", "goal": g["id"], "error": g["error"] or "", "needs_look": g["state"] == "failed"}
 
 
 def _item(conn, it) -> Dict[str, Any]:
     return {"id": it["id"], "kind": "item", "title": it["title"], "state": it["state"], "since": it["updated_at"],
             "where": selfview.where(it), "note": selfview.note(conn, it),
-            "thread": selfview._thread(conn, it["run_id"]) or "", "goal": it["goal_id"]}
+            "thread": selfview._thread(conn, it["run_id"]) or "", "goal": it["goal_id"],
+            "error": it["error"] or "", "needs_look": it["state"] in _ALERT}
 
 
 def _place(it, checks: List[str], eki: bool) -> Optional[str]:
@@ -198,13 +199,12 @@ def _place(it, checks: List[str], eki: bool) -> Optional[str]:
 
 
 def place(conn: sqlite3.Connection, pid: str, eki: bool, out: List[Dict[str, Any]], checks: List[str]) -> None:
-    """Fill each stage's items, count and alert from the project's goals and items."""
+    """Fill each stage's items, count, alert and alert_count from the project's goals and items."""
     by = {s["id"]: s for s in out}
     own, args = ("g.project IS NULL", ()) if eki else ("g.project = ?", (pid,))
     for g in conn.execute(f"SELECT * FROM goals g WHERE {own} AND g.state IN ('drafting','planning','failed') "
                           "ORDER BY g.created_at DESC", args).fetchall():
         by["plan"]["items"].append(_goal(conn, g))
-        by["plan"]["alert"] |= g["state"] == "failed"
     ended = _ENDED + (() if eki else ("landed",))
     marks = ",".join("?" * len(ended))
     rows = conn.execute(f"SELECT i.* FROM items i JOIN goals g ON g.id = i.goal_id WHERE {own} "
@@ -214,9 +214,10 @@ def place(conn: sqlite3.Connection, pid: str, eki: bool, out: List[Dict[str, Any
         sid = _place(it, checks, eki)
         if sid in by:
             by[sid]["items"].append(_item(conn, it))
-            by[sid]["alert"] |= it["state"] in _ALERT
     for s in out:
         s["count"] = len(s["items"])
+        s["alert_count"] = sum(1 for i in s["items"] if i["needs_look"])
+        s["alert"] = s["alert_count"] > 0
 
 
 def graph(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:

@@ -15,9 +15,9 @@ WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
 JS = (WEB / "workflowcanvas.js").read_text()
 
 
-def stage(id, title, summary="", on=True, locked=False, count=0, alert=False):
+def stage(id, title, summary="", on=True, locked=False, count=0, alert=False, alert_count=0):
     return {"id": id, "title": title, "summary": summary, "what": "", "on": on, "locked": locked, "keys": [],
-            "count": count, "alert": alert, "items": []}
+            "count": count, "alert": alert, "alert_count": alert_count, "items": []}
 
 
 def holo():
@@ -196,3 +196,13 @@ def test_zoom_is_clamped(tmp_path):
     assert out["after"]["k"] == 2.5
     out = run(tmp_path, holo(), [{"wheel": {"deltaX": 0, "deltaY": 5000, "ctrlKey": True}}])
     assert out["after"]["k"] == 0.25
+
+
+def test_the_red_dot_says_how_many_need_a_look(tmp_path):
+    data = holo()
+    by = {s["id"]: s for s in data["stages"]}
+    by["build"]["alert_count"] = 1
+    html = run(tmp_path, data)["html"]
+    assert '<circle class="wf-dot" cx="' in html and "<title>1 needs a look</title></circle>" in html
+    by["build"]["alert_count"] = 3
+    assert "<title>3 need a look</title></circle>" in run(tmp_path, data)["html"]

@@ -111,10 +111,10 @@ def _goal(conn, gid, state, project="game", text="make the cards shine\nmore"):
                  (gid, text, state, time.time(), project, "it broke" if state == "failed" else None))
 
 
-def _item(conn, iid, state, gid="g0", pr_state=None):
+def _item(conn, iid, state, gid="g0", pr_state=None, error=None):
     now = time.time()
-    conn.execute("INSERT INTO items(id, goal_id, title, state, created_at, updated_at, pr_state) "
-                 "VALUES (?,?,?,?,?,?,?)", (iid, gid, f"item {iid}", state, now, now, pr_state))
+    conn.execute("INSERT INTO items(id, goal_id, title, state, created_at, updated_at, pr_state, error) "
+                 "VALUES (?,?,?,?,?,?,?,?)", (iid, gid, f"item {iid}", state, now, now, pr_state, error))
 
 
 def test_items_sit_at_their_stage(conn, proj):
@@ -250,3 +250,22 @@ def test_values_carry_the_rules_and_the_lines():
     assert v["rules"] == GAME and v["each"] == EACH and v["together"] == "Together, before merging: b"
     v = api_workflow._values({"checks": ["self"]}, False)
     assert v["rules"] == [] and v["each"] == "Each change: no check command"
+
+
+def test_items_that_need_a_look_carry_their_error_and_the_stage_counts_them(conn, proj):
+    _card(proj, checks=["self"])
+    _project(conn, "game", proj)
+    _goal(conn, "g0", "planned")
+    _goal(conn, "g2", "failed")
+    _item(conn, "l", "left", error="the agent changed nothing")
+    _item(conn, "b", "building")
+    conn.commit()
+    by = stages(graph(conn))
+    left = next(i for i in by["build"]["items"] if i["id"] == "l")
+    assert left["error"] == "the agent changed nothing" and left["needs_look"] is True
+    busy = next(i for i in by["build"]["items"] if i["id"] == "b")
+    assert busy["error"] == "" and busy["needs_look"] is False
+    assert by["build"]["alert_count"] == 1 and by["build"]["alert"] is True
+    goal = by["plan"]["items"][0]
+    assert goal["error"] == "it broke" and goal["needs_look"] is True and by["plan"]["alert_count"] == 1
+    assert by["merge"]["alert_count"] == 0 and by["merge"]["alert"] is False

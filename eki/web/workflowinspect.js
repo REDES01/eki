@@ -4,7 +4,8 @@
 // settingstarget.js picker when router is off, a number for parallel, a switch per check, the command,
 // the command as one line or path rules in rows (workflowrules.js) and batch_command, the playtester card,
 // after_merge), then "Now here": the project's items at that stage, each opening its
-// detail with a way back. Each change is saved at once into the workflow card (POST …/cards/<card>
+// detail with a way back; one that needs a look (needs_look) says why in a line (its error, else its note) with
+// Retry / Drop (POST /api/self/items/<id>/<action>, api_station.item_action; then reload()) and Open thread. Each change is saved at once into the workflow card (POST …/cards/<card>
 // {"settings": …}; checks always the whole list in order), then reload() and redraw; what the server objects
 // to shows beside its field, and nothing is redrawn under a box being typed in. Ticking command or batch
 // with no command saved waits for the command; ticking batch on a rules card with no batch_command waits
@@ -20,8 +21,9 @@
   const CHECKS = ["self", "review", "command", "batch", "playtester", "train"];   // eki/workflow.py CHECKS
   const LOCKED = "protects eki itself: the train, the drills and locked files can't be turned off here";
   const PARALLEL = 4, PLAYTESTER = "playtester";                                  // eki/components/workflow.py
+  const RETRY = ["left", "unfit", "dropped", "rolled back"];                       // station.js RETRY
   const W = { pid: null, data: null, stage: null, reload: null, owner: null, el: null, item: null, itemData: null,
-              pending: null, problems: {}, models: null, loading: false, last: "", cmd: null };
+              pending: null, problems: {}, models: null, loading: false, last: "", cmd: null, acted: {} };
   const FIELDS = ["command", "paths", "batch_command"];                         // a "" problem naming one goes there
 
   function ago(t) {
@@ -141,11 +143,27 @@
 
   // ---- what's at the stage now --------------------------------------------------------------------
 
+  const looks = (n) => `${n} ${n === 1 ? "needs" : "need"} a look`;
+  const why = (it) => it.error || it.note || "no reason was written down";
+
+  // why it needs a look in one line, and what to do about it
+  function look(it) {
+    if (!it.needs_look) return "";
+    const btn = (a, label) => `<button class="wi-btn${a === "drop" ? " wi-drop" : ""}" data-wi-act="${a}" data-wi-id="${esc(it.id)}">${label}</button>`;
+    const item = it.kind !== "goal";
+    const thread = it.thread ? `<a class="wi-btn" href="#${encodeURIComponent(it.thread)}">Open thread</a>`
+      : '<button class="wi-btn" disabled title="no thread yet">Open thread</button>';
+    const said = W.acted[it.id] ? `<div class="pj-err wi-err">${esc(W.acted[it.id])}</div>` : "";
+    return `<div class="wi-look"><span class="wi-why" title="${esc(why(it))}">${esc(why(it))}</span>
+      <span class="wi-acts">${item && RETRY.includes(it.state) ? btn("retry", "Retry") : ""}${item ? btn("drop", "Drop") : ""}${thread}</span></div>${said}`;
+  }
+
   function items(st) {
     const list = st.items || [];
-    const alert = st.alert ? `<div class="wi-alert"><span class="wi-dot"></span>${esc(st.alert === true ? "needs a look" : st.alert)}</div>` : "";
-    const rows = list.map((it) => `<a href="#" class="wi-item" data-wi-item="${esc(it.id)}">
-      <span class="wi-title">${esc(it.title || it.id)}</span><span class="dim wi-meta">${esc(it.state || "")}${it.since ? " · " + esc(ago(it.since)) : ""}</span></a>`);
+    const n = st.alert_count || list.filter((i) => i.needs_look).length || 1;
+    const alert = st.alert ? `<div class="wi-alert"><span class="wi-dot"></span>${esc(st.alert === true ? looks(n) : st.alert)}</div>` : "";
+    const rows = list.map((it) => `<div class="wi-row${it.needs_look ? " wi-needs" : ""}"><a href="#" class="wi-item" data-wi-item="${esc(it.id)}">
+      <span class="wi-title">${esc(it.title || it.id)}</span><span class="dim wi-meta">${esc(it.state || "")}${it.since ? " · " + esc(ago(it.since)) : ""}</span></a>${look(it)}</div>`);
     return `<h4 class="pp-h">Now here${list.length ? ` <span class="dim">${list.length}</span>` : ""}</h4>${alert}
       <div class="wi-items">${rows.join("") || '<div class="dim">nothing here now</div>'}</div>`;
   }
@@ -156,6 +174,7 @@
       <h4 class="pp-h wi-dtitle">${esc(it.title || it.id)}</h4>
       ${row("state", esc(it.state || ""))}${row("since", esc(ago(it.since)))}${row("kind", esc(it.kind || ""))}
       ${row("where", it.where ? `<code>${esc(it.where)}</code>` : "")}${row("goal", esc(it.goal || ""))}
+      ${it.error && it.error !== it.note ? `<div class="wi-note wi-error">${esc(it.error)}</div>` : ""}
       ${it.note ? `<div class="wi-note">${esc(it.note)}</div>` : ""}
       ${it.thread ? `<a class="wi-thread" href="#${encodeURIComponent(it.thread)}">open its thread →</a>` : ""}`;
   }
@@ -222,6 +241,23 @@
     paint(true, el);
   }
 
+  // Retry or Drop on an item that needs a look (Drop asks first), then the graph again
+  async function act(a, id) {
+    if (a === "drop" && !window.confirm(`Drop item ${id}?`)) return;
+    delete W.acted[id];
+    try {
+      const r = await fetch(`/api/self/items/${encodeURIComponent(id)}/${a}`,
+        { method: "POST", headers: { "Content-Type": "application/json", "X-Eki": "1" }, body: "{}" });
+      const got = await r.json().catch(() => ({}));
+      if (!r.ok) W.acted[id] = got.error || r.statusText || `couldn't ${a}`;
+    } catch (x) { W.acted[id] = x.message; }
+    const pid = W.pid;
+    if (W.reload) {
+      try { const fresh = await W.reload(); if (fresh && W.pid === pid) W.data = fresh; } catch (x) { /* the next refresh brings it */ }
+    }
+    paint(true);
+  }
+
   // the checks waiting for this setting go with it once it's the one they wait for
   function pend(set) {
     if (W.pending && needs(W.pending) === Object.keys(set)[0]) { set.checks = W.pending; W.pending = null; }
@@ -263,6 +299,11 @@
 
   function onClick(e) {
     const t = e.target, at = (sel) => t && t.closest && t.closest(sel);
+    const doing = at("[data-wi-act]");
+    if (doing) {
+      if (e.preventDefault) e.preventDefault();
+      return act(doing.dataset.wiAct, doing.dataset.wiId);
+    }
     const item = at(".wi-item"), back = at(".wi-back"), wr = at("[data-wr-mode]") || at("[data-wr-add]") || at("[data-wr-del]");
     if (wr && window.workflowRules && editable()) {
       if (e.preventDefault) e.preventDefault();
@@ -285,7 +326,7 @@
   // ---- the interface ------------------------------------------------------------------------------
 
   function reset() {
-    Object.assign(W, { el: null, owner: null, stage: null, item: null, itemData: null, pending: null, problems: {}, last: "", cmd: null });
+    Object.assign(W, { el: null, owner: null, stage: null, item: null, itemData: null, pending: null, problems: {}, last: "", cmd: null, acted: {} });
   }
 
   function open(pid, data, stageId, reload) {

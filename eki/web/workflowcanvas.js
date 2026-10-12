@@ -4,7 +4,7 @@
 // between each consecutive pair with a count badge when items are moving through, and the cards that
 // feed a stage (knowledge, instructions, skills, serve …) as small side nodes above or below the row,
 // dotted links to every stage they feed. Off stages are faded with a dashed border and still clickable;
-// a locked stage carries a lock, a stage with a failure or an item left for a person a red dot.
+// a locked stage carries a lock, a stage with a failure or an item left for a person a red dot ("N need a look").
 // Plain SVG: pan by dragging empty canvas or two-finger scroll, zoom by pinch or ⌘-scroll around the
 // pointer. window.workflowCanvas = { layout(data, {perRow}), mount(el, handlers) } — layout is pure (tests read it);
 // mount draws into el and calls handlers.stage(id) / handlers.feed(feed) on a click.
@@ -71,6 +71,8 @@
 
   // ---- the markup ----------------------------------------------------------------------------------
 
+  const looks = (s) => { const n = s.alert_count || 1; return `${n} ${n === 1 ? "needs" : "need"} a look`; };
+
   function node(s, n, selected) {
     const cls = "wf-node" + (s.on === false ? " wf-off" : "") + (s.id === selected ? " wf-sel" : "")
       + (s.locked ? " wf-locked" : "") + (s.alert ? " wf-alert" : "");
@@ -82,7 +84,7 @@
       <text class="wf-sum" x="14" y="47">${esc(clip(s.summary, s.count > 0 ? 24 : 28))}</text>
       ${s.locked ? `<text class="wf-lock" x="${n.w - 14}" y="25" text-anchor="end">🔒</text>` : ""}
       ${s.count > 0 ? `<text class="wf-n" x="${n.w - 14}" y="47" text-anchor="end">${esc(s.count)}</text>` : ""}
-      ${s.alert ? `<circle class="wf-dot" cx="${n.w - 2}" cy="2" r="6"></circle>` : ""}
+      ${s.alert ? `<circle class="wf-dot" cx="${n.w - 2}" cy="2" r="6"><title>${esc(looks(s))}</title></circle>` : ""}
     </g>`;
   }
 

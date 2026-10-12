@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import asking, db, gallery, paths, projectchats, projectdelete, store
+from . import asking, db, gallery, paths, projectchats, projectdelete, projectstart, store
 
 #: what the page's "Have an agent write instructions" asks for
 INSTRUCTIONS_PROMPT = (
@@ -139,9 +139,18 @@ def _expand(folder: Optional[str]) -> Optional[str]:
 
 
 def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    pid = projectchats.create(conn, str(body.get("name") or ""), _expand(body.get("folder")),
-                              str(body.get("description") or ""))
-    return {"id": pid, "folder": projectchats.folder_of(conn, pid)}
+    """POST /api/projects {name, folder?, description?}: {id, folder, existing} (projectstart.create)."""
+    return projectstart.create(conn, body)
+
+
+def start(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/projectstart?name= or ?folder=: where it would go, recent folders, what's there."""
+    return projectstart.proposal(conn, q.get("name"), q.get("folder"))
+
+
+def starter(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/projects/<id>/starter: the cards to suggest for what is in its folder."""
+    return projectstart.starter(conn, m.group(1))
 
 
 def describe(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
@@ -226,5 +235,7 @@ def remove(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, 
 ROUTES: List[Tuple[str, str, Callable]] = [
     ("POST", r"/api/projects/([^/]+)/describe", describe),
     ("GET", r"/api/folders", folders),
+    ("GET", r"/api/projectstart", start),
+    ("GET", r"/api/projects/([\w.-]+)/starter", starter),
     ("DELETE", r"/api/projects/([^/]+)", remove),
 ]

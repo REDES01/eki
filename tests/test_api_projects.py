@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -178,6 +179,19 @@ def test_routes(conn, src):
         code, got = call(f"/api/projects/{pid}/instructions", {})
         assert code == 200 and store.thread(db.connect(), got["thread"])["project"] == pid
         assert call("/api/projects/nope")[0] == 404
+        assert made["folder"] == os.path.realpath(paths.user_home() / "Projects" / "web")
+        assert made["existing"] is False
+        assert call("/api/projects", {"name": "again", "folder": made["folder"]})[1] == {**made, "existing": True}
+        code, got = call("/api/projectstart?name=next")
+        assert code == 200 and got["folder"] == os.path.realpath(paths.user_home() / "Projects" / "next")
+        assert got["recent"] == [made["folder"]] and got["project"] is None
+        code, got = call("/api/projectstart?folder=" + urllib.parse.quote("~/Projects/web"))
+        assert code == 200 and got["exists"] is True and got["project"] == pid
+        assert call("/api/projectstart?name=a%2Fb")[0] == 400
+        (paths.user_home() / "Projects" / "web" / "README.md").write_text("# web")
+        code, got = call(f"/api/projects/{pid}/starter")
+        assert code == 200 and [s["template"] for s in got["suggestions"]] == ["instructions"]
+        assert call("/api/projects/nope/starter")[0] == 404
     finally:
         srv.shutdown()
         srv.server_close()

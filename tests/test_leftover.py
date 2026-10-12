@@ -1,4 +1,6 @@
 """On judge, background tasks a build left in its worktree are killed and said (eki/leftover.py)."""
+import os
+import signal
 import subprocess
 
 import pytest
@@ -49,3 +51,42 @@ def test_concluding_a_build_kills_leftovers_says_so_and_judges_on(conn, src, tmp
     notes = [e["data"] for e in store.events_after(conn, build) if e["kind"] == "note"]
     assert any(line in n for n in notes)
     assert selfwork.store_item(conn, a["id"])["state"] == "judging"
+
+def test_eki_s_own_servers_and_processes_are_spared(home, tmp_path):
+    import json
+    import sys
+    from eki.components import servers
+    assert str(servers.state_dir()).startswith(str(home))     # the fixture home, never the real one
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    nap = "import time; time.sleep(60)"
+    server = subprocess.Popen(["/bin/sh", "-c", "sleep 60 & wait"], cwd=wt, start_new_session=True)
+    (servers.state_dir() / "serve-test.json").write_text(json.dumps({"pid": server.pid}))
+    (servers.state_dir() / "broken.json").write_text("{not json")
+    ours = subprocess.Popen([sys.executable, "-c", nap, "eki.components.static"], cwd=wt)
+    job = subprocess.Popen(["sleep", "60"], cwd=wt)
+    try:
+        import time
+        time.sleep(0.3)         # the server's own sleep has started, in its session
+        found = leftover.find(str(wt))
+        assert [f["pid"] for f in found] == [job.pid]      # not the server, its session, or eki
+        leftover.kill(found)
+        assert job.wait(timeout=5) is not None
+        assert server.poll() is None and ours.poll() is None
+        assert leftover.find(str(wt)) == []
+    finally:
+        try:
+            os.killpg(server.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        for p in (server, ours, job):
+            p.kill()
+            p.wait()
+
+def test_is_eki_reads_command_lines():
+    yes = ["/u/.venv/bin/eki mcp-hold x", "eki use claude", "python3 -m eki slot -- bin/check",
+           "/usr/bin/python3 /u/.venv/bin/eki serve", "python -m eki.components.static 8080",
+           "python3 -c x eki.components.static"]
+    no = ["sleep 60", "npm run dev", "python3 -m http.server", "node /u/eki/web/x.js", ""]
+    assert all(leftover._is_eki(c) for c in yes)
+    assert not any(leftover._is_eki(c) for c in no)

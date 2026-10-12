@@ -4,13 +4,19 @@ Build briefs tell the agent never to leave background jobs; when one does
 anyway (a dev server, a watcher, a `sleep` it forgot), the process outlives
 the run and holds the worktree. When the build is concluded, eki looks for
 processes whose working directory is inside the item's worktree and ends
-them (docs/self-build.md). On macOS the working directories come from
+them (docs/self-build.md). Processes eki itself started for the item are
+left alone (`ours`): servers recorded in ~/.eki/component-state/ and
+everything in their process group or session, browser slot holders, and
+eki's own CLI processes (card holds, `eki slot`, `python -m eki…`, any
+`eki.` module) — only the agent's own background jobs are ended. On macOS the working directories come from
 libproc (milliseconds, every process); elsewhere from `lsof`. No new dependency.
 """
 from __future__ import annotations
 
 import ctypes
+import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -24,14 +30,87 @@ GRACE = 2.0
 
 def find(worktree: str) -> List[Dict]:
     """Processes whose working directory is the worktree or inside it:
-    [{"pid", "cmd"}]. Never this process or the engine; [] on any error."""
+    [{"pid", "cmd"}]. Never this process, the engine, or anything eki
+    started itself (`ours`); [] on any error."""
     try:
         root = os.path.realpath(worktree)
-        mine = _own()
-        return [{"pid": pid, "cmd": _command(pid) or name} for pid, name, cwd in _cwds()
-                if pid not in mine and (cwd == root or cwd.startswith(root + os.sep))]
+        inside = [(pid, name) for pid, name, cwd in _cwds()
+                  if cwd == root or cwd.startswith(root + os.sep)]
+        if not inside:
+            return []
+        mine, groups = _own() | ours(), _groups()
+        out = []
+        for pid, name in inside:
+            cmd = _command(pid)
+            if pid in mine or _in(pid, groups) or _is_eki(cmd):
+                continue
+            out.append({"pid": pid, "cmd": _short(cmd) or name})
+        return out
     except Exception:           # noqa: BLE001 — a look that fails finds nothing; judging goes on
         return []
+
+
+def ours() -> Set[int]:
+    """Pids eki started itself: the servers in component-state and the
+    browser slot holders. A source that can't be read adds nothing."""
+    out: Set[int] = set()
+    try:
+        from .components import servers
+        for f in servers.state_dir().glob("*.json"):
+            try:
+                pid = int(json.loads(f.read_text()).get("pid") or 0)
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            if pid > 0:
+                out.add(pid)
+    except Exception:           # noqa: BLE001 — spare nothing extra, never raise
+        pass
+    try:
+        from . import browserslots
+        out |= {p for p in browserslots.pids() if p > 0}
+    except Exception:           # noqa: BLE001
+        pass
+    return out
+
+
+def _groups() -> Set[Tuple[str, int]]:
+    """The process groups and sessions of eki's servers: ("g"|"s", id)."""
+    out: Set[Tuple[str, int]] = set()
+    for pid in ours():
+        for tag, get in (("g", os.getpgid), ("s", os.getsid)):
+            try:
+                out.add((tag, get(pid)))
+            except OSError:
+                pass
+    return out
+
+
+def _in(pid: int, groups: Set[Tuple[str, int]]) -> bool:
+    for tag, get in (("g", os.getpgid), ("s", os.getsid)):
+        try:
+            if (tag, get(pid)) in groups:
+                return True
+        except OSError:
+            pass
+    return False
+
+
+_MODULE = re.compile(r"^eki(\.\w+)*$")
+
+
+def _is_eki(cmd: str) -> bool:
+    """Does this command line run eki: the `eki` executable (also as a
+    script under python), `python -m eki…`, or names an `eki.` module?"""
+    args = cmd.split()
+    if not args:
+        return False
+    if os.path.basename(args[0]) == "eki":
+        return True
+    if "python" in os.path.basename(args[0]) and len(args) > 1 and os.path.basename(args[1]) == "eki":
+        return True
+    return any((a == "-m" and i + 1 < len(args) and _MODULE.match(args[i + 1]))
+               or (a.startswith("eki.") and _MODULE.match(a))
+               for i, a in enumerate(args))
 
 
 def _cwds() -> Iterator[Tuple[int, str, str]]:
@@ -119,8 +198,11 @@ def _alive(pid: int) -> bool:
 
 def _command(pid: int) -> str:
     try:
-        cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
-                             text=True, timeout=5).stdout.strip()
+        return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                              text=True, timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def _short(cmd: str) -> str:
     return cmd if len(cmd) <= 60 else cmd[:59] + "…"

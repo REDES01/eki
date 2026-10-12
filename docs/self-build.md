@@ -162,7 +162,11 @@ When a build run ends and its item moves on to judge (self items and
 project items alike), eki looks for processes still running with their
 working directory inside the item's worktree (`eki/leftover.py`): the brief
 says never to leave background jobs, so any it finds are killed (SIGTERM,
-then SIGKILL) and said on the board and as a note in the item's thread —
+then SIGKILL). eki's own servers and holds are left alone: a server recorded
+in `~/.eki/component-state/` (the serve card's preview) and anything in its
+process group or session, browser slot holders, and eki's own processes
+(card holds, `eki slot`, `python -m eki…`, any `eki.` module). Only the
+agent's own jobs are killed, and said on the board and as a note in the item's thread —
 `the build left background tasks running — killed: <pid> <command>` — and
 judging goes on unchanged.
 

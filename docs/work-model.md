@@ -14,6 +14,7 @@ and not the other, and the same event gets two answers — so there is one copy.
 | `eki/workproject.py` | `WorkProject`, and `settings`: the one function that turns cards and settings into `Settings` |
 | `eki/workrun.py` | `load`, `feed` (state and actions saved in one transaction), `carry` (actions done once, through `HANDLERS`) |
 | `eki/workhandlers_build.py`, `eki/workhandlers_queue.py` | the handlers of runs and of the queue |
+| `eki/buildfeed.py` | the build executor: which build, gate-1 and review runs ended, their facts as events (the fixer's in `eki/fixer.py`, the calls' in `eki/callwait.py`, plans and drafts in `eki/selfplan.py`, `eki/selfdraft.py`) |
 
 An executor's tick looks at what changed — a run ended, git moved — does the
 I/O that tells it the facts (commit the worktree, rebase, ask git whether a
@@ -62,9 +63,9 @@ the facts the executor found, and `item` when the event is about one item.
 |---|---|---|
 | `goal_submitted` | a goal is asked for | `plan`, `draft`, `item` (the one item's id without a plan), `files` |
 | `plan_ready` | a draft or plan run ended | `of` (draft \| plan), `ended` (run state), `items` [{id, deps, files}], `why`, `error`, `left` |
-| `item_started` | the scheduler has room, its calls are back, or its hold is over | `stage` (the stage a wake goes back to), `why` |
+| `item_started` | the scheduler has room, its calls are back, or its hold is over | `stage` (the stage a wake goes back to), `why`, `recheck` (a broken setup's recheck: no try) |
 | `item_finished` | a build, fixer, resolve or recheck run ended | `ended`, `verdict`, `reason`, `changed`, `ended_early`, `touched`, `calls`, `wakes`, `can_fix`, `commit_error`, `branch`, `said`, `no_review`; for a resolve `outcome` (resolved \| stopped \| bad \| broken), `runs`, `retried`, `person`, `files`, `on` |
-| `check_verdict` | gate 1 and the review both ended; or a gate-2 check ended | `result` (green \| red), `ended`, `review`, `tail`, `can_fix`; gate 2: `gate: 2`, `stack` [{id, result}], `tails` |
+| `check_verdict` | gate 1 and the review both ended; or a gate-2 check ended | `result` (green \| red), `ended`, `review`, `tail`, `can_fix`, `second` (the judge run is already the second); gate 2: `gate: 2`, `stack` [{id, result}], `tails` |
 | `item_failed` | a run failed, its kind known | `{kind, retry_at, fix}` (kind in `FAILURE_KINDS`), `why`, `can_fix` |
 | `run_lost` | a run was lost to a restart or a lease | — |
 | `merge_result` | the item's rebase onto its predicted head | `result` (rebased \| conflict \| failed), `on`, `files`, `error`, `unbatched`, `stack` |
@@ -73,8 +74,10 @@ the facts the executor found, and `item` when the event is about one item.
 | `person_decided` | `eki self retry / drop / apply`, `eki self goal retry` | `decision` (retry \| drop \| apply), `yes`, `fresh`, `plan` |
 
 `FAILURE_KINDS = (quota, transient, environment, judgment, lost)` are the
-failure-classes goal's kinds. Until its `classify` lands, an executor maps
-today's signals: `transient.looks_transient` → `transient`; a red check, a
+failure-classes goal's kinds. An executor reads the kind `stopkind.classify`
+stored on the run (`runs.stop`): `transient` → `transient`; `environment` →
+`environment` with `retry_at` its recheck (`stopkind.ENV_RECHECK`) and `fix`
+what is broken (eki/itemhold.py); a red check, a
 build that ended early, nothing changed, a conflict or a crash → `judgment`;
 a run lost to a restart or a lease → the `run_lost` event (never a try).
 
@@ -82,13 +85,18 @@ a run lost to a restart or a lease → the `run_lost` event (never a try).
 |---|---|
 | `quota` | `hold_until` at `retry_at`. A build goes back to `waiting`, its try not counted; any other stage keeps its stage and starts the same run again once `item_started` comes after the hold |
 | `transient` | as `quota` when it has a `retry_at`; else as `judgment` |
-| `environment` | `ask_person`, the item `left`; the fixer is not spent |
+| `environment` | `ask_person` (keyed by the fix: one ask per distinct fix); the fixer is not spent. With a `retry_at` (a broken setup, eki/itemhold.py) the item goes back to `waiting`, its try kept; the executor's `items.hold` keeps the scheduler off it till the recheck, and that recheck's `item_started{recheck}` is not a try. Without one, the item is `left` |
 | `judgment` | today's ladder for the stage (below) |
 | `lost` | as `run_lost`: the same run again, same tries |
 
 ## Actions
 
-`Action(kind, item, why, data)`; `why` is the board's words.
+`Action(kind, item, why, data)`; `why` is the board's words. A goal's
+draft or plan run (no item) carries `goal` in its data when the event did:
+a handler gets only the project and the action. A start handler claims its
+own `work_actions` row in the same transaction as the run it starts, so it
+starts it once whatever restarts; an executor skips an item with an action
+not yet carried (its `run_id` still names the run before).
 
 | Kind | data | Handler (registered by) |
 |---|---|---|
@@ -141,6 +149,8 @@ Each row: where the decision is today, what it decides, and how the model says i
 | `selfjudge.judged` | green, not objected | → `proposed` "reviewed ok …" / "fit (not reviewed: …)" |
 | `selfjudge.judged` | review no, first time | → `waiting`, reviews 1, "rebuilding once" |
 | `selfjudge.judged` | review no again | → `proposed` with the objection |
+| `selfjudge.unsure` | green, the judge uncertain (`review` "uncertain: …"), no second judge yet (`second` false) | → stays `judging` + start_run review `second: true` (`judge.second`) |
+| `selfjudge.unsure` | green, still uncertain after the second judge, or none could start | → `proposed` with review "uncertain: …" + notify needs-you |
 | `review.conclude` (legacy `reviewing`) | ok / none / no | `check_verdict{review}` → `proposed` / `proposed` / as `judged` |
 | `fixer._conclude` | fixer run failed / git trouble | `item_finished{ended}` / `{leave}` → `left` |
 | `fixer._conclude` → `selfwork._built` | fixer done | `item_finished` from `fixing` → as a build, "(after the fixer)" |
@@ -223,8 +233,32 @@ same everywhere else.
   runs only for a local project under apply (a GitHub one goes back as pull
   requests). *Setting:* `merge` (GitHub is `person`) and `kind`.
 
+## Left beside the model for now
+
+`fixer.offer` and `callwait.hold` stay as thin adapters only for the
+queue's gate 2 (`queue._unfit`) and resolve (`resolve._leave`,
+`resolve._conclude_resolve`), which call them under their own transaction
+until their executor feeds the model; the fixer run itself is started by the
+same `fixer.prepare` / `fixer.launch` as the start_run fix handler.
+
 ## Behaviour the model adds
 
 None changes today's paths until an executor feeds the event: `quota` and
 `transient` holds, `environment` → `ask_person`, and `run_lost` restarting
 the same run come with the failure-classes goal.
+
+What the build executor's feeding changes, in words only or where today had
+no answer:
+
+- A build whose run row is gone was stuck in `building`; it is `run_lost`
+  now, the same build started again, its try not counted.
+- A build or fixer run whose `runs.stop` says `transient` is `item_failed{transient}` with no retry time (the worker's own
+  retries are spent): left, as before, "left for you — the build run ended …".
+- A fixer that git can't put on main is left "the fixer couldn't start: …"
+  (before: left with the failure that called it).
+- Board lines say the model's `why` without a run id, e.g. "gate1 failed — the
+  fixer is on it"; a left draft's `goals.error` is "left — <why>"; a dropped
+  item's `items.error` is "dropped". `items.error` of a left or unfit item
+  keeps today's words (the executor writes them right after `feed`).
+- A build's brief lists every item with a run going in its repo when its run
+  starts, the ones started in the same scheduler pass included.

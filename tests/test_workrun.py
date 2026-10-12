@@ -102,7 +102,7 @@ def test_carry_leaves_actions_with_no_handler_and_retries_a_failing_one(conn, mo
             raise OSError("disk")
         return ["held"]
     monkeypatch.setitem(workrun.HANDLERS, "hold_until", flaky)
-    workrun.HANDLERS.pop("start_run", None)
+    monkeypatch.delitem(workrun.HANDLERS, "start_run", raising=False)
     assert workrun.carry(conn) == []
     assert workrun.carry(conn) == ["held"]
     assert calls == [9.0, 9.0]

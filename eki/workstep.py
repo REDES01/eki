@@ -70,7 +70,7 @@ def _submitted(goal: GoalState, items: Tuple[ItemState, ...], s: Settings, ev: E
     if d.get("plan", True) and s.plan == "on":
         role = "draft" if d.get("draft") else "plan"
         stage = "drafting" if role == "draft" else "planning"
-        return _goal(stage, stage), items, (Action("start_run", None, stage, {"role": role}),)
+        return _goal(stage, stage), items, (Action("start_run", None, stage, _goal_run(role, d)),)
     one = _item(d["item"], files=tuple(d.get("files") or ()))
     return _goal("planned", "one item as it stands"), items + (one,), ()
 
@@ -89,7 +89,7 @@ def _plan_ready(goal: GoalState, items: Tuple[ItemState, ...], s: Settings, ev: 
         if d.get("error"):
             return _goal("failed", d["error"]), items, ()
         return _goal("planning", "drafted → planning"), items, (Action("start_run", None, "planning",
-                                                                       {"role": "plan"}),)
+                                                                       _goal_run("plan", d)),)
     if d.get("error"):
         return _goal("failed", d["error"]), items, ()
     planned = tuple(_item(p["id"], deps=tuple(p.get("deps") or ()), files=tuple(p.get("files") or ()))
@@ -105,7 +105,12 @@ def _goal_decided(goal: GoalState, items: Tuple[ItemState, ...], s: Settings, ev
         raise Refused(f"goal is {goal.stage}")
     role = "plan" if ev.data.get("plan", True) else "draft"
     stage = "planning" if role == "plan" else "drafting"
-    return _goal(stage, stage), items, (Action("start_run", None, stage, {"role": role}),)
+    return _goal(stage, stage), items, (Action("start_run", None, stage, _goal_run(role, ev.data)),)
+
+
+def _goal_run(role: str, d: Dict[str, Any]) -> Dict[str, Any]:
+    """A goal's draft or plan run; `goal` (when the executor gave it) says whose, for its handler."""
+    return {"role": role, **({"goal": d["goal"]} if d.get("goal") else {})}
 
 
 _GOAL = {"goal_submitted": _submitted, "plan_ready": _plan_ready, "person_decided": _goal_decided}
@@ -137,7 +142,8 @@ def _started(it: ItemState, items: Tuple[ItemState, ...], s: Settings, ev: Event
         dep = blocked_by(items, it)
         if dep is not None:
             return replace(it, why=f"after {dep}"), ()
-        new = moved(it, "building", "building", tries=it.tries + 1, hold_until=None)
+        recheck = bool(ev.data.get("recheck"))     # a recheck after a broken setup is not a try
+        new = moved(it, "building", "building", tries=it.tries + (0 if recheck else 1), hold_until=None)
         return new, _run(new, "building")
     if it.stage == "waiting on calls":
         stage = ev.data.get("stage") if ev.data.get("stage") in ("building", "resolving") else None
@@ -246,12 +252,22 @@ def _verdict(it: ItemState, items: Tuple[ItemState, ...], s: Settings, ev: Event
     if it.stage != "judging":
         return it, ()
     if d.get("result") == "green":
-        return judged(replace(it, gate1="green"), seen, branch)
+        return judged(replace(it, gate1="green"), seen, branch, second=d.get("second", True))
     return judgment(replace(it, gate1="red", review=seen), s, d)
 
 
-def judged(it: ItemState, seen: Optional[str], branch: str) -> Moved:
-    """Gate 1 green: the review's word decides (selfjudge.judged)."""
+def judged(it: ItemState, seen: Optional[str], branch: str, second: bool = True) -> Moved:
+    """Gate 1 green: the judge's word decides (selfjudge.judged); an uncertain judge gets one
+    second judge, then the item is proposed for a person (selfjudge.unsure)."""
+    if (seen or "").startswith("uncertain:"):
+        why = seen[len("uncertain:"):].strip()
+        if not second:
+            new = moved(it, "judging", f"a judge is uncertain — {why[:120]}; a second judge looks")
+            return new, (Action("start_run", it.id, new.why, {"role": "review", "stage": "judging",
+                                                             "tries": it.tries, "second": True}),)
+        new = moved(it, "proposed", f"a judge is still uncertain — {why[:120]}; proposed, "
+                                    f"`eki self apply {it.id}` if you agree", review=seen)
+        return new, (needs_you(new, f"no judge could settle {why}", f"eki self show {it.id}"),)
     if not (seen or "").startswith("no:"):
         how = "reviewed ok" if seen == "ok" else f"fit (not reviewed: {(seen or 'none: ?')[6:]})"
         return moved(it, "proposed", f"{how} — proposed on {branch}", review=seen), ()
@@ -284,6 +300,10 @@ def _failed(it: ItemState, items: Tuple[ItemState, ...], s: Settings, ev: Event)
         return _lost(it, items, s, ev)
     if kind in ("quota", "transient") and d.get("retry_at") is not None:
         return hold(it, float(d["retry_at"]), kind)
+    if kind == "environment" and d.get("retry_at") is not None:   # a broken setup (eki/itemhold.py): waiting
+        new = moved(it, "waiting", f"held — {why}")              # for its recheck, no try spent, one ask per fix
+        return new, (Action("ask_person", it.id, why, {"key": d.get("key") or f"item:{it.id}:env:{d.get('fix')}",
+                                                       "what": why}),)
     if kind == "environment":               # a person's hands, never the fixer's
         new = moved(it, "left", f"left for you — {why}")
         return new, (Action("ask_person", it.id, why, {"key": f"item:{it.id}:left:{it.tries}"}),)

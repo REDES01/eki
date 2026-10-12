@@ -46,20 +46,36 @@ def waits(it: sqlite3.Row, now: float) -> bool:
     return it["state"] == "waiting" and h is not None and (h.get("retry_at") or 0) > now
 
 
-def settle(conn: sqlite3.Connection, it: sqlite3.Row, run: Optional[sqlite3.Row]) -> Optional[List[str]]:
-    """The item's run ended not done. On an environment stop hold the item and say so
-    (inside the caller's transaction); otherwise None and the caller goes on as before."""
+def environment(run: Optional[sqlite3.Row], now: float) -> Optional[dict]:
+    """The hold for a run that ended not done on an environment stop; else None."""
     stop = stop_of(run)
     if run is None or run["state"] == "done" or stop is None or stop.get("kind") != "environment":
         return None
+    return {**stop, "fix": stop.get("fix") or "the setup is broken", "retry_at": now + stopkind.ENV_RECHECK,
+            "run": run["id"]}
+
+
+def key(iid: str, fix: str) -> str:
+    """The needs-you key: one ping per item and distinct fix."""
+    return f"item:{iid}:env:{hashlib.sha1(fix.encode()).hexdigest()[:10]}"
+
+
+def error(hold: dict) -> str:
+    return f"{hold['fix']} (held; rechecks in {stopkind.ENV_RECHECK // 60} min)"
+
+
+def settle(conn: sqlite3.Connection, it: sqlite3.Row, run: Optional[sqlite3.Row]) -> Optional[List[str]]:
+    """The item's run ended not done. On an environment stop hold the item and say so
+    (inside the caller's transaction); otherwise None and the caller goes on as before."""
     now = db.now()
-    fix = stop.get("fix") or "the setup is broken"
-    hold = {**stop, "retry_at": now + stopkind.ENV_RECHECK, "run": run["id"]}
+    hold = environment(run, now)
+    if hold is None:
+        return None
+    fix = hold["fix"]
     conn.execute("UPDATE items SET state='waiting', hold=?, error=?, updated_at=? WHERE id=?",
-                 (db.dumps(hold), f"{fix} (held; rechecks in {stopkind.ENV_RECHECK // 60} min)", now, it["id"]))
-    key = f"item:{it['id']}:env:{hashlib.sha1(fix.encode()).hexdigest()[:10]}"
+                 (db.dumps(hold), error(hold), now, it["id"]))
     body = " ".join(f"{it['title']} — setup broken: {fix}: eki self show {it['id']}".split())[:200]
-    notify.queue(conn, key, "needs_you", "eki · needs you", body)
+    notify.queue(conn, key(it["id"], fix), "needs_you", "eki · needs you", body)
     return [f"item {it['id']}: held — {stopkind.describe(hold, now)}"]
 
 

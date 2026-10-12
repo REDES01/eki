@@ -2,7 +2,9 @@
 
 Waiting items are taken goal by goal, round-robin: the goal with the fewest
 items building goes first, then the older goal, then the older item. An item
-starts once its deps are fit and two caps allow it. The machine cap
+starts once its deps are fit (the work model's rule, workstep.blocked_by: in
+main, whoever put it there) and two caps allow it; starting it is the model's
+item_started event (eki/buildfeed.py). The machine cap
 (eki/machinecaps.py, routing.json machine.agents) holds the items building
 across all projects, eki's and every person's — judging and review are held
 elsewhere; it is checked first and wins. Then each project's own workflow card
@@ -28,19 +30,28 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from . import buildcap, db, machinecaps, memadmit, projects, workspace
+from . import buildcap, machinecaps, memadmit, projects, workrun, workspace, workstep
 
 NO_WRITE_SET = "no write-set: waits until its repo is quiet"
 
 
 def start_ready(conn: sqlite3.Connection) -> List[str]:
-    from . import selfwork              # selfwork calls this from its tick: import it late
+    from . import buildfeed, selfwork   # selfwork calls this from its tick: import them late
     _tracked.clear()
-    settings = selfwork.settings()
     agents = int(machinecaps.settings()["agents"])
-    fit = selfwork.FIT.get(settings["autonomy"], selfwork.FIT["propose"])
-    done_ids = {r["id"] for r in selfwork.items_in(conn, fit)}
     goals: Dict[str, Optional[sqlite3.Row]] = {}
+    states: Dict[str, tuple] = {}                        # goal id -> its items as the work model sees them
+
+    def dep_of(it: sqlite3.Row) -> Optional[str]:
+        """The first dependency not yet fit (workstep.blocked_by), or None."""
+        if it["goal_id"] not in states:
+            try:
+                states[it["goal_id"]] = tuple(workrun.load(conn, it["goal_id"])[1])
+            except KeyError:                              # its project is gone: said below
+                states[it["goal_id"]] = ()
+        items = states[it["goal_id"]]
+        me = next((x for x in items if x.id == it["id"]), None)
+        return workstep.blocked_by(items, me) if me is not None else None
     repos: Dict[str, Optional[Path]] = {}
 
     def goal_of(gid: str) -> Optional[sqlite3.Row]:
@@ -92,10 +103,10 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         waiting.setdefault(it["goal_id"], []).append(it)
 
     def blocker(it: sqlite3.Row) -> Optional[str]:
-        missing = [d for d in json.loads(it["deps"] or "[]") if d not in done_ids]
+        missing = dep_of(it)
         if missing:
-            dep = conn.execute("SELECT title FROM items WHERE id=?", (missing[0],)).fetchone()
-            return f"after {dep['title'] if dep else missing[0]}"
+            dep = conn.execute("SELECT title FROM items WHERE id=?", (missing,)).fetchone()
+            return f"after {dep['title'] if dep else missing}"
         r = repo_of(it["goal_id"])
         if r is None:
             return "its project is gone"
@@ -135,11 +146,10 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
             if memory() is not None:
                 break
             r = repo_of(gid)
-            others = [(x["title"], json.loads(x["files"] or "[]")) for x in live
-                      if repo_of(x["goal_id"]) == r]
-            with db.tx(conn):
-                selfwork.start_build(conn, it, goal_of(gid), others)
-                conn.execute("UPDATE items SET why=NULL WHERE id=?", (it["id"],))
+            if not buildfeed.start(conn, it):           # the model said no: never counted
+                waiting[gid] = [x for x in waiting[gid] if x["id"] != it["id"]]
+                started = True
+                continue
             mem.took("agent")
             now = selfwork.store_item(conn, it["id"])
             live.append(now)
@@ -157,7 +167,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
             why = blocker(it) or (n < agents and memory()) or f"{n} agents working (machine)"
             if why != it["why"]:
                 conn.execute("UPDATE items SET why=? WHERE id=? AND state='waiting'", (why, it["id"]))
-    return said
+    return said + (workrun.carry(conn) if said else [])       # the builds start now, briefed on each other
 
 
 def claims(it: sqlite3.Row, repo: Optional[Path] = None) -> Set[str]:

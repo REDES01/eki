@@ -4,8 +4,9 @@ plan (a goal becomes items) — docs/self-build.md, "The draft".
 Both run in a read-only worktree of the integration repo, pinned to the
 planner (the `planner` role, eki/roles.py: the strongest model eki has). The
 goals table holds everything: a restart mid-draft just waits for the run,
-and `conclude` rechecks the goal's state under a transaction, so it moves a
-goal on exactly once.
+and `conclude` feeds plan_ready to the work model (eki/workstep.py), which
+rechecks the goal's state under its transaction, so a goal moves on exactly
+once.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import (db, drybuild, integration, projectbrief, projects, roles, selfbrief, store, targets,
                verdicts, workspace)
+from .workmodel import Event
 
 #: the old eki, read as reference by a draft when it is there
 OLD = "~/eki-2026-09-26"
@@ -123,65 +125,59 @@ def _ranked(wish: str) -> Dict[int, Tuple[str, str]]:
     return out
 
 
-def _conclude_rank(conn: sqlite3.Connection, g: sqlite3.Row, answer: str) -> List[str]:
-    """A ranking draft's answer (inside the caller's tx): plan the picked entry, or leave it."""
-    gid = g["id"]
+def _rank(conn: sqlite3.Connection, g: sqlite3.Row, answer: str) -> Tuple[Dict[str, object], Dict[str, object]]:
+    """A ranking draft's answer: (what plan_ready says, the goal's own columns to write)."""
     n, why = selfbrief.pick_in(answer)
     picked = _ranked(g["wish"]).get(n) if n is not None else None
     if picked is None:
         err = "the ranking has no PICK" if n is None else f"the ranking picked {n}, which isn't listed"
-        conn.execute("UPDATE goals SET state='left', error=?, pick_key='roadmap:none' WHERE id=?", (err, gid))
-        return [f"goal {gid}: left — {err}"]
+        return {"left": err}, {"pick_key": "roadmap:none", "error": err}
     key, title = picked
     why = why or g["why"]
     goal, err = selfbrief.goal_in(answer)
     if goal is None:
-        conn.execute("UPDATE goals SET state='left', error=?, pick_key=?, why=? WHERE id=?",
-                     (err, key, why, gid))
-        return [f"goal {gid}: left — {err}"]
-    text = goal + TICK.format(title=title)
-    conn.execute("UPDATE goals SET text=?, drafted_at=?, pick_key=?, why=? WHERE id=?",
-                 (text, db.now(), key, why, gid))
-    verdicts.store_checks(conn, gid, verdicts.checks_in(goal))
-    start_plan(conn, gid, text, integration.sync(), g["owner"])
-    return [f"goal {gid}: picked {key} → planning"]
+        return {"left": err}, {"pick_key": key, "why": why, "error": err}
+    return {}, {"text": goal + TICK.format(title=title), "drafted_at": db.now(), "pick_key": key, "why": why}
 
 
 def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
-    """Move a drafting goal on once its draft run has ended: to planning, left or failed."""
+    """A drafting goal whose draft run ended: plan_ready, and the model moves it to planning, left or failed."""
+    from . import buildfeed            # buildfeed reads half of self-work: import it late
     run = store.run(conn, g["draft_run"]) if g["draft_run"] else None
     if run is None or run["state"] in store.ACTIVE:
         return []
     gid = g["id"]
-    with db.tx(conn):
-        cur = conn.execute("SELECT state FROM goals WHERE id=?", (gid,)).fetchone()
-        if cur is None or cur["state"] != "drafting":
-            return []
-        if run["state"] != "done":
-            err = f"the draft run ended {run['state']}: {run['error'] or ''}".strip()
-            conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, gid))
-            said = [f"goal {gid}: {err}"]
-        elif g["source"] == "roadmap":
-            said = _conclude_rank(conn, g, store.answer(conn, run["id"]))
+    d: Dict[str, object] = {"of": "draft", "ended": run["state"], "error": run["error"] or ""}
+    cols: Dict[str, object] = {}
+    if run["state"] == "done":
+        d["error"] = None
+        if g["source"] == "roadmap":
+            more, cols = _rank(conn, g, store.answer(conn, run["id"]))
+            d.update(more)
         else:
             goal, why = selfbrief.goal_in(store.answer(conn, run["id"]))
             if goal is None:
-                conn.execute("UPDATE goals SET state='left', error=? WHERE id=?", (why, gid))
-                said = [f"goal {gid}: left — {why}"]
-            elif g["project"] and projects.get(conn, g["project"]) is None:
-                err = f"its project {g['project']} is gone"
-                conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (err, gid))
-                said = [f"goal {gid}: {err}"]
+                d["left"], cols = why, {"error": why}
             else:
-                conn.execute("UPDATE goals SET text=?, drafted_at=? WHERE id=?", (goal, db.now(), gid))
-                verdicts.store_checks(conn, gid, verdicts.checks_in(goal))
-                start_plan(conn, gid, goal, _base(conn, g), g["owner"])
-                said = [f"goal {gid}: drafted → planning"]
+                cols = {"text": goal, "drafted_at": db.now()}
+
+    def write(c: sqlite3.Connection) -> None:
+        if cols:
+            c.execute(f"UPDATE goals SET {', '.join(f'{k}=?' for k in cols)} WHERE id=?", (*cols.values(), gid))
+        if cols.get("text"):            # the goal's checks, stored before its plan run reads them
+            verdicts.store_checks(c, gid, verdicts.checks_in(str(cols["text"])))
     try:
-        repo = projects.repo_for(conn, g)
-    except KeyError:                   # the project is gone: nothing of it to clean
-        return said
-    workspace.remove(repo, f"draft-{gid}", delete_branch=True)
+        said = buildfeed.feed_goal(conn, g, Event("plan_ready", db.now(), d), then=write)
+    except KeyError:                   # its project is gone: nothing of it to plan or clean
+        with db.tx(conn):
+            err = f"its project {g['project']} is gone"
+            if conn.execute("UPDATE goals SET state='failed', error=? WHERE id=? AND state='drafting'",
+                            (err, gid)).rowcount:
+                return [f"goal {gid}: {err}"]
+        return []
+    if g["source"] == "roadmap" and said and "planning" in said[0]:
+        said = [f"goal {gid}: picked {cols['pick_key']} → planning"]
+    workspace.remove(projects.repo_for(conn, g), f"draft-{gid}", delete_branch=True)
     return said
 
 
@@ -194,22 +190,16 @@ def _base(conn: sqlite3.Connection, g: sqlite3.Row) -> str:
 def retry(conn: sqlite3.Connection, gid: str) -> str:
     """Run a failed or left goal's plan again — or its draft, when the draft
     never produced a goal. Returns the goal's new state."""
+    from . import buildfeed, workrun, workstep
     g = conn.execute("SELECT * FROM goals WHERE id=? OR id LIKE ? ORDER BY id=? DESC",
                      (gid, gid + "%", gid)).fetchone()
     if g is None:
         raise KeyError(f"no goal {gid}")
-    if g["state"] not in ("failed", "left"):
-        raise ValueError(f"goal {g['id']} is {g['state']}")
-    project = projects.get(conn, g["project"]) if g["project"] else None
-    base = integration.sync() if project is None else projects.base(project)
     plan = bool(g["plan_run"] or g["drafted_at"] or not g["draft_run"])
-    with db.tx(conn):
-        cur = conn.execute("SELECT state FROM goals WHERE id=?", (g["id"],)).fetchone()
-        if cur["state"] not in ("failed", "left"):
-            raise ValueError(f"goal {g['id']} is {cur['state']}")
-        conn.execute("UPDATE goals SET error=NULL WHERE id=?", (g["id"],))
-        if plan:
-            start_plan(conn, g["id"], g["text"], base, g["owner"])
-        else:
-            start_draft(conn, g["id"], g["wish"] or g["text"], base, g["owner"])
-    return "planning" if plan else "drafting"
+    try:
+        buildfeed.feed_goal(conn, g, Event("person_decided", db.now(), {"decision": "retry", "plan": plan}),
+                            then=lambda c: c.execute("UPDATE goals SET error=NULL WHERE id=?", (g["id"],)))
+    except workstep.Refused:
+        raise ValueError(f"goal {g['id']} is {g['state']}") from None
+    workrun.carry(conn)                 # the run starts now, not at the next tick
+    return conn.execute("SELECT state FROM goals WHERE id=?", (g["id"],)).fetchone()["state"]

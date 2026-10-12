@@ -130,16 +130,34 @@ def _hold(conn: sqlite3.Connection, project: workproject.WorkProject, action: Ac
     return [f"item {action.item}: {action.why}"]
 
 
+#: how many rounds of actions saved by handlers one carry does
+CARRY_ROUNDS = 3
+
 HANDLERS: Dict[str, Callable[[sqlite3.Connection, workproject.WorkProject, Action], List[str]]] = {
     "notify": _notify, "hold_until": _hold, **workhandlers_build.HANDLERS, **workhandlers_queue.HANDLERS}
 
 
 def carry(conn: sqlite3.Connection) -> List[str]:
     """Do every action not yet done, oldest first. One with no handler yet waits; one whose
-    handler fails is tried again next tick; one whose project is gone is dropped, said."""
+    handler fails is tried again next tick; one whose project is gone is dropped, said. Actions a
+    handler's own feed saves (a second judge that can't start proposes and asks) are done in the
+    same call, a few rounds deep."""
     said: List[str] = []
-    rows = conn.execute("SELECT * FROM work_actions WHERE done_at IS NULL ORDER BY id").fetchall()
     projects: Dict[str, Optional[workproject.WorkProject]] = {}
+    seen = 0
+    for _ in range(CARRY_ROUNDS):
+        rows = conn.execute("SELECT * FROM work_actions WHERE done_at IS NULL AND id>? ORDER BY id",
+                            (seen,)).fetchall()
+        if not rows:
+            break
+        seen = rows[-1]["id"]
+        said += _carry(conn, rows, projects)
+    return said
+
+
+def _carry(conn: sqlite3.Connection, rows: List[sqlite3.Row],
+           projects: Dict[str, Optional[workproject.WorkProject]]) -> List[str]:
+    said: List[str] = []
     for r in rows:
         raw = _json(r["action"]) or {}
         action = Action(raw.get("kind") or "", raw.get("item"), r["why"] or "", raw.get("data") or {})

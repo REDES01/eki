@@ -1,4 +1,4 @@
-"""Gate 1 red and builds that ended early get one fixer run before unfit or left (eki/selfjudge.py, eki/selfwork.py)."""
+"""Gate 1 red and builds that ended early get one fixer run before unfit or left (eki/workstep.py, fed by eki/buildfeed.py)."""
 import pytest
 
 from eki import db, fixer, fixerbrief, selfwork, store, workspace

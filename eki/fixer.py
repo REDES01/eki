@@ -1,15 +1,16 @@
 """One more try before an eki item is left for a person (docs/self-build.md).
 
 Before an eki item becomes `unfit` (gate 1 or gate 2 red) or `left` (a resolve
-that failed, a build that ended its turn early with nothing changed), its
-caller asks `offer` for a fixer run: in the item's own worktree, put on
-integration main, told the failure, what landed since the item's base on its
-files and why (eki/landed.py), and the rule — make the intent work with what
-landed, never weaken a check. The item is `fixing` meanwhile. `tick` hands a
-done fixer's result to selfwork._built, so it is committed and goes through
-gate 1 and the review as any build does. One fixer run per item: `items.fixer`
-set means it has had it, and a second failure leaves it as before, `tried`
-saying what the fixer did.
+that failed, a build that ended its turn early with nothing changed), the work
+model (eki/workstep.py) gives it one fixer run when the executor says it can
+(`can_start`): the start_run fix handler `prepare`s the item's own worktree on
+integration main and `launch`es the run, told the failure, what landed since
+the item's base on its files and why (eki/landed.py), and the rule — make the
+intent work with what landed, never weaken a check. The item is `fixing`
+meanwhile. `tick` feeds a done fixer's result as a build's (eki/buildfeed.py),
+so it is committed and goes through gate 1 and the review as any build does.
+One fixer run per item: `items.fixer` set means it has had it, and a second
+failure leaves it as before, `tried` saying what the fixer did.
 
 Everything is in `items.fixer` and the runs; every git step is safe to repeat,
 so a restart at any point loses nothing. Only eki's own items get a fixer.
@@ -24,7 +25,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import db, fixerbrief, integration, itemhold, landed, rebase, selfbrief, selfwork, store
+from . import db, fixerbrief, integration, landed, rebase, selfbrief, selfwork, store
+from .workmodel import Event
 from .workspace import WorkspaceError, git
 
 STAGES = ("gate1", "gate2", "resolve", "nothing")
@@ -47,37 +49,55 @@ def of(it: sqlite3.Row) -> Optional[Dict[str, Any]]:
 
 # ---- in -----------------------------------------------------------------------------------
 
-def offer(conn: sqlite3.Connection, it: sqlite3.Row, stage: str, failure: str) -> Optional[str]:
-    """Under the caller's tx: start the item's one fixer run and return the board line,
-    or None — nothing changed — when it gets none."""
-    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-    if goal is None or goal["project"] is not None or it["fixer"]:
-        return None
-    if not selfwork.settings().get("fixer", True):
-        return None
+def can_start(conn: sqlite3.Connection, it: sqlite3.Row) -> bool:
+    """The executor's facts for a fixer run: `self.fixer` on, the worktree and thread there.
+    Whose item gets one, and only once, is the work model's (workstep.can_fix)."""
     wt = it["worktree"]
-    if not wt or not Path(wt).is_dir() or not it["thread_id"]:
-        return None
-    try:
-        main = integration.main()
-        conflicted = _put_on(it, main)
-        files = sorted(set(_files(it)) | set(conflicted))
-        intents = landed.intents(conn, it, main, files)      # from the item's old base
-        sha = it["commit_sha"]
-        if sha and not conflicted:
-            sha = git(wt, "rev-parse", "HEAD")
-    except (WorkspaceError, OSError, integration.IntegrationError):
-        return None
+    return bool(selfwork.settings().get("fixer", True) and wt and Path(wt).is_dir() and it["thread_id"])
+
+
+def prepare(conn: sqlite3.Connection, it: sqlite3.Row) -> Dict[str, Any]:
+    """The item's own commits put on integration main, and what landed meanwhile. Raises
+    WorkspaceError, OSError or IntegrationError when git won't."""
+    main = integration.main()
+    conflicted = _put_on(it, main)
+    files = sorted(set(_files(it)) | set(conflicted))
+    intents = landed.intents(conn, it, main, files)      # from the item's old base
+    sha = it["commit_sha"]
+    if sha and not conflicted:
+        sha = git(it["worktree"], "rev-parse", "HEAD")
+    return {"main": main, "conflicted": conflicted, "intents": intents, "sha": sha}
+
+
+def launch(conn: sqlite3.Connection, it: sqlite3.Row, stage: str, failure: str, got: Dict[str, Any]) -> str:
+    """Under the caller's tx: the fixer run, and what the item keeps of it. Not its state."""
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     failure = (failure or "").strip()[-FAILURE_CHARS:]
     prompt = fixerbrief.brief(stage=stage, goal=goal["text"], title=it["title"], spec=it["spec"],
-                              summary=it["summary"] or "", failure=failure, head=main,
-                              landed=intents, conflicted=conflicted)
+                              summary=it["summary"] or "", failure=failure, head=got["main"],
+                              landed=got["intents"], conflicted=got["conflicted"])
     rid = store.create_run(conn, it["thread_id"], prompt, row="code", fresh=True,
                            priority="now" if goal["owner"] == "you" else "background")
-    note = {"stage": stage, "failure": failure, "run": rid, "at": db.now(), "head": main, "summary": None}
-    selfwork._set(conn, it["id"], state="fixing", run_id=rid, fixer=db.dumps(note), base=main, commit_sha=sha,
+    note = {"stage": stage, "failure": failure, "run": rid, "at": db.now(), "head": got["main"], "summary": None}
+    selfwork._set(conn, it["id"], run_id=rid, fixer=db.dumps(note), base=got["main"], commit_sha=got["sha"],
                   head=None, rebased=None, resolved_on=None, gate2=None, gate2_run=None, gate2_on=None,
                   error=None)
+    return rid
+
+
+def offer(conn: sqlite3.Connection, it: sqlite3.Row, stage: str, failure: str) -> Optional[str]:
+    """Under the caller's tx, for the queue's gate 2 and resolve's leave (eki/queue.py,
+    eki/resolve.py) until their executor feeds the work model: start the item's one fixer
+    run and return the board line, or None — nothing changed — when it gets none."""
+    goal = conn.execute("SELECT project FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    if goal is None or goal["project"] is not None or it["fixer"] or not can_start(conn, it):
+        return None
+    try:
+        got = prepare(conn, it)
+    except (WorkspaceError, OSError, integration.IntegrationError):
+        return None
+    rid = launch(conn, it, stage, failure, got)
+    selfwork._set(conn, it["id"], state="fixing")
     return f"item {it['id']}: {stage} failed — the fixer is on it ({rid[:8]})"
 
 
@@ -174,10 +194,42 @@ def _day(t: Optional[float]) -> str:
 # ---- the tick -------------------------------------------------------------------------------
 
 def tick(conn: sqlite3.Connection) -> List[str]:
+    from . import workrun
     said: List[str] = []
     for it in selfwork.items_in(conn, ("fixing",)):
         said += _conclude(conn, it)
-    return said
+    return said + workrun.carry(conn)
+
+
+def _conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
+    """A fixer run that ended: its result fed as a build's, or the item left."""
+    from . import buildfeed            # buildfeed imports this module: import it late
+    run = store.run(conn, it["run_id"]) if it["run_id"] else None
+    if (run is not None and run["state"] in store.ACTIVE) or buildfeed.pending(conn, it["id"]):
+        return []
+    if run is None or run["state"] != "done":
+        why = f"the fixer run ended {run['state'] if run else 'missing'}"
+        return _leave(conn, it, why, buildfeed.ended(run, "fixer") if run is not None else None)
+    _, _, summary = selfbrief.outcome(store.answer(conn, run["id"]))
+    note = {**(of(it) or {}), "summary": summary or "(nothing said)"}
+    wt = it["worktree"]
+    try:
+        if rebase.in_progress(wt):
+            left = rebase.markers(wt, note.get("head") or it["base"])
+            if left:
+                return _leave(conn, it, f"the fixer left conflict markers in {', '.join(left)}", note=note)
+            stopped = rebase.proceed(wt)
+            if stopped:
+                return _leave(conn, it, f"the rebase stopped again on {', '.join(stopped)}", note=note)
+        at = git(wt, "rev-parse", "HEAD")
+    except (WorkspaceError, OSError) as e:
+        return _leave(conn, it, f"the rebase would not go on after the fixer: {e}", note=note)
+    with db.tx(conn):                      # its own commits, on main: what is judged if nothing changes
+        if not _still(conn, it):
+            return []
+        selfwork._set(conn, it["id"], fixer=db.dumps(note), **({"commit_sha": at} if at != it["base"] else {}))
+    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
+    return buildfeed.built(conn, selfwork.store_item(conn, it["id"]), run, goal, None, fixed=True)
 
 
 def _still(conn: sqlite3.Connection, it: sqlite3.Row) -> bool:
@@ -185,59 +237,23 @@ def _still(conn: sqlite3.Connection, it: sqlite3.Row) -> bool:
     return row is not None and row["state"] == "fixing" and row["run_id"] == it["run_id"]
 
 
-def _conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
-    run = store.run(conn, it["run_id"]) if it["run_id"] else None
-    if run is not None and run["state"] in store.ACTIVE:
-        return []
-    if run is None or run["state"] != "done":
-        return _leave(conn, it, f"the fixer run ended {run['state'] if run else 'missing'}", run)
-    _, _, summary = selfbrief.outcome(store.answer(conn, run["id"]))
-    note = {**(of(it) or {}), "summary": summary or "(nothing said)"}
-    with db.tx(conn):
-        if not _still(conn, it):
-            return []
-        selfwork._set(conn, it["id"], fixer=db.dumps(note))
-    wt = it["worktree"]
-    try:
-        if rebase.in_progress(wt):
-            left = rebase.markers(wt, note.get("head") or it["base"])
-            if left:
-                return _leave(conn, it, f"the fixer left conflict markers in {', '.join(left)}")
-            stopped = rebase.proceed(wt)
-            if stopped:
-                return _leave(conn, it, f"the rebase stopped again on {', '.join(stopped)}")
-        at = git(wt, "rev-parse", "HEAD")
-    except (WorkspaceError, OSError) as e:
-        return _leave(conn, it, f"the rebase would not go on after the fixer: {e}")
-    goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
-    with db.tx(conn):
-        if not _still(conn, it):
-            return []
-        if at != it["base"]:                     # its own commits, on main: what is judged if nothing changes
-            selfwork._set(conn, it["id"], commit_sha=at)
-        said = selfwork._built(conn, selfwork.store_item(conn, it["id"]), run, goal, None)
-        selfwork._set(conn, it["id"], summary=it["summary"])      # the builder's stays; the fixer's is in fixer
-    return [f"{line} (after the fixer)" for line in said]
-
-
-def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, run: Optional[sqlite3.Row] = None) -> List[str]:
-    """Stop a rebase the fixer was in and leave the item for a person — or, when its
-    run stopped on a broken setup, hold it till that is fixed (eki/itemhold.py)."""
+def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, event: Optional[Event] = None,
+           note: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Stop a rebase the fixer was in; the item is left for a person, `tried` saying how it ended —
+    or, when its run stopped on a broken setup, held till that is fixed (eki/itemhold.py)."""
+    from . import buildfeed
     wt = it["worktree"]
     try:
         if wt and Path(wt).is_dir():
             rebase.abort(wt)
     except WorkspaceError as e:
         why = f"{why} (and {e})"
-    cur = selfwork.store_item(conn, it["id"])
-    note = of(cur) if cur is not None else None
-    with db.tx(conn):
-        if not _still(conn, it):
-            return []
-        if (h := itemhold.settle(conn, it, run)):
-            return h
-        fields: Dict[str, Any] = {}
-        if note is not None and note.get("summary") is None:    # `tried` says how it ended
-            fields["fixer"] = db.dumps({**note, "summary": f"({why})"})
-        selfwork._set(conn, it["id"], state="left", error=why, **fields)
-    return [f"item {it['id']}: left for you — {why}"]
+    note = note if note is not None else of(it)
+    if event is not None and event.data.get("hold") is not None:     # held: it didn't end, nothing tried
+        note = None
+    if note is not None and note.get("summary") is None:
+        note = {**note, "summary": f"({why})"}
+    fields = {"fixer": db.dumps(note)} if note is not None else {}
+    event = event or Event("item_finished", db.now(), {"leave": why})
+    return buildfeed.feed(conn, it, event, then=lambda c: selfwork._set(c, it["id"], **fields) if fields else None,
+                          error=why)

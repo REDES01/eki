@@ -220,6 +220,18 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return said + [f"{line} — {why}" for line in _built(conn, it, run, goal, project)]
 
 
+def fork_point(it: sqlite3.Row, project: Optional[sqlite3.Row]) -> str:
+    """Where the item's own work starts: its base, or — when the agent rebased the
+    branch onto a newer head during its turn — the fork from that head, so the
+    commits that landed meanwhile don't count as the item's (nor lock it)."""
+    base = it["base"]
+    upstream = project["branch"] if project is not None else "main"
+    fork = workspace.git(it["worktree"], "merge-base", "HEAD", upstream, check=False).strip()
+    if not fork or not base or fork == base:
+        return base
+    return fork if projectwork.is_ancestor(it["worktree"], base, fork) else base
+
+
 def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sqlite3.Row,
            project: Optional[sqlite3.Row]) -> List[str]:
     """A done build: commit what it left, then propose it or start gate 1 and the review."""
@@ -232,7 +244,7 @@ def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sq
         _set(conn, it["id"], state="left", error=with_tried(it, f"couldn't commit the change: {e}"[:800]))
         return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
     sha = sha or it["commit_sha"]           # a retry that left things as they were: judge again
-    touched = workspace.changed(it["worktree"], it["base"]) if sha else []
+    touched = workspace.changed(it["worktree"], fork_point(it, project)) if sha else []
     if verdict == "person" or sha is None:
         why = reason or ("the agent changed nothing" if sha is None else "")
         if verdict != "person" and fixer.ended_early(answer):       # it stopped short: one fixer run first

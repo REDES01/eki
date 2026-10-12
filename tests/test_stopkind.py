@@ -78,6 +78,10 @@ ENVIRONMENT = [
      "claude", "folder /Users/x/.eki/work.noindex/ab12/wt is missing"),
     ("PermissionError: [Errno 1] Operation not permitted: '/Users/x/Documents'", "claude", "Operation not permitted"),
     ("FileNotFoundError: [Errno 2] No such file or directory: 'claude'", "claude", "`claude`"),
+    # Node's form (Claude Code, a card's script), lower case — seen in eki's own history
+    ("Error: ENOENT: no such file or directory, scandir '/Users/x/.eki/component-state/voice'", "component",
+     "folder /Users/x/.eki/component-state/voice is missing"),
+    ("Error: ENOENT: no such file or directory, chdir '/Users/x/gone'", "claude", "folder /Users/x/gone is missing"),
     ("zsh: command not found: codex", "codex", "`codex`"),
     ("Error: unknown provider 'openrouter' in config", "codex", "config"),
     ("API Error: 404 model: claude-nope does not exist", "claude", "config"),

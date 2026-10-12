@@ -41,7 +41,9 @@ class Stop:
 
 _CHECK = re.compile(r"\b\d+ (?:failed|errors?)\b|^FAILED |AssertionError", re.M)
 _LOGIN = re.compile(r"please run /login|invalid api key|\b401\b|authentication_error|not logged in|codex login", re.I)
-_MISSING = re.compile(r"(?:FileNotFoundError|No such file or directory)[^'\"\n]*['\"]([^'\"\n]+)['\"]")
+#: Python says "No such file or directory: '/x'"; Node (Claude Code, cards) says
+#: "ENOENT: no such file or directory, scandir '/x'" — both, in either case
+_MISSING = re.compile(r"(?:FileNotFoundError|No such file or directory)[^'\"\n]*['\"]([^'\"\n]+)['\"]", re.I)
 _NOCLI = re.compile(r"(?:command not found|is not installed|not found in PATH|executable not found)[: ]*['\"]?([\w.\-]*)", re.I)
 _DENIED = re.compile(r"operation not permitted(?:[^'\"\n]*['\"](/[^'\"\n]+)['\"])?", re.I)
 _MODEL = re.compile(r"unknown provider|unknown model|invalid model|model_not_found|model\b[^\n]{0,60}\b(?:does not exist|not found|not supported)", re.I)

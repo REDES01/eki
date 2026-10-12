@@ -5,7 +5,9 @@ to origin and opens (or finds) its pull request, then polls the open ones:
 merged on GitHub is applied, closed without merging is dropped, and an item
 the person dropped in eki has its PR closed. A project that is on the local
 path this pass (origin not on GitHub, gh missing or logged out) is left
-alone — no gh runs for it, and its open PRs wait until gh is back.
+alone — no gh runs for it, and its open PRs wait until gh is back. A project
+that chose 'eki merges here' (projects.lands) is never one: its proposed items
+stay for the local queue or the person, whatever its origin.
 """
 from __future__ import annotations
 
@@ -128,7 +130,8 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         if project is None:
             return None, None
         if pid not in paths:
-            paths[pid] = github.path_of(project["path"])[0]
+            here = project["lands"] == "here"
+            paths[pid] = None if here else github.path_of(project["path"])[0]
         return project, paths[pid]
 
     work = ((_items(conn, "i.state='proposed' AND i.pr IS NULL"), "open"),

@@ -11,7 +11,8 @@ it again, and every state lives in the projects row.
 
 The same pass retires a person's own folder rows whose origin is on GitHub:
 what they started finishes there, nothing new starts, and their standing
-goals move to eki's clone once it is ready.
+goals move to eki's clone once it is ready. A row that said where its work
+lands (projects.lands 'here' or 'github', eki/projectlands.py) is never retired.
 
 eki's own repo is the built-in eki: a row made for it before that rule (`_own`)
 retires once its work ends — its clone removed, its standing goals moved to
@@ -69,8 +70,9 @@ def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None
 
 
 def _chat_row(conn: sqlite3.Connection, repo: str):
-    """The oldest live row with repo NULL whose folder's origin is `repo`, with that folder."""
-    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(lands,'')!='here' AND "
+    """The oldest live row with repo NULL and lands unsaid whose folder's origin is `repo`, with that
+    folder. A row that said where it lands ('here' or 'github') is the person's choice: never merged."""
+    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND lands IS NULL AND "
                           "COALESCE(state,'on') NOT IN ('dropped','merged','retired','deleting','deleted') "
                           "ORDER BY created_at").fetchall():
         folder = projectchats.folder_of(conn, p["id"])
@@ -206,8 +208,8 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
     said: List[str] = []
     home = paths.projects().resolve()
     for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') NOT IN "
-                          "('deleting','deleted') AND COALESCE(lands,'')!='here' "
-                          "ORDER BY created_at").fetchall():   # 'here': eki merges in the folder
+                          "('deleting','deleted') AND lands IS NULL "
+                          "ORDER BY created_at").fetchall():   # lands said: the person chose, it stays
         where = Path(p["path"]).expanduser().resolve()
         if where == home or home in where.parents or not where.is_dir():
             continue

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from .. import budget, builds, github, integration, projects, projectsetup, standing
+from .. import budget, builds, github, integration, projectchats, projects, projectsetup, standing
 from . import project as projectcli
 from .common import conn, err
 
@@ -41,6 +41,8 @@ def _first(text: Optional[str]) -> str:
 
 def path_line(project) -> str:
     """Which way work comes in and goes out for a project — checked fresh, no gh off GitHub."""
+    if "lands" in project.keys() and project["lands"] == "here":
+        return "  path: local — eki merges here (you chose it)"
     repo, why = github.path_of(project["path"])
     if repo is None:
         return f"  path: local — merge by hand ({why})"
@@ -132,6 +134,9 @@ def _add(c, args) -> int:
         err("eki: say the goal in words")
         return 1
     folder = Path(args.folder).expanduser().resolve()
+    chosen = _chosen(c, folder)
+    if chosen is not None:
+        return _add_chosen(c, args, folder, chosen)
     repo = None if projects.is_self(folder) or not folder.is_dir() else github.repo_of(folder)
     try:
         if repo is None:
@@ -155,6 +160,35 @@ def _add(c, args) -> int:
         err(f"eki: {e}")
         return 1
     print(f"{repo}: working in eki's own clone at {projects.clone_path(repo)}, not {folder}")
+    print(sid)
+    return 0
+
+
+def _chosen(c, folder: Path):
+    """The live project on `folder` that said where its work lands (projects.lands), or None."""
+    where = projectchats.norm(folder)
+    for p in c.execute("SELECT * FROM projects WHERE lands IS NOT NULL AND COALESCE(state,'on') NOT IN "
+                       "('dropped','merged','retired','deleting','deleted') ORDER BY created_at").fetchall():
+        if projectchats.folder_of(c, p["id"]) == where:
+            return p
+    return None
+
+
+def _add_chosen(c, args, folder: Path, p) -> int:
+    """The standing goal on the project the person chose for the folder: worked in that folder."""
+    if args.check is not None:
+        projectcli.set_check(c, p, args.check)
+    if args.branch:
+        projectcli.set_branch(c, p, args.branch)
+    try:
+        sid = standing.add(c, str(folder), args.text, project=p["id"])
+    except ValueError as e:
+        err(f"eki: {e}")
+        return 1
+    if p["lands"] == "github" and p["repo"]:
+        print(f"{p['repo']}: pull requests from {folder}")
+    else:
+        print(f"{p['name']}: eki merges here")
     print(sid)
     return 0
 

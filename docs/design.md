@@ -1012,6 +1012,21 @@ the page's "New chat here") runs with the project's folder as its cwd, and
 continuing it in another folder is refused. Runs in your folder take turns
 as any other; nothing in `workspace` or the scheduler changes.
 
+**A project is a git folder; GitHub is an option** (`eki/projectlands.py`).
+`projects.lands` says how its work lands: `here` | `github` | unset. A
+`here` row is local whatever its origin: eki merges on its branch, `base`
+never fetches origin, it is never retired into eki's clone or merged into
+one, and its items are never sent as PRs (`prs.tick` skips it). A `github`
+row keeps its own folder and id (`path` stays the folder, `repo` is set),
+takes issues labelled eki and sends its work as pull requests from
+worktrees of that folder. Unset keeps the older rule: a folder row whose
+origin is on GitHub retires into eki's clone. `eki goal add <folder>` on a
+folder of a row with `lands` said puts the goal on that row. The window's
+New project offers a third start, "From GitHub" (OWNER/REPO or a URL, your
+repos listed when gh is signed in): cloned to `~/Projects/<repo>`, shown
+before cloning, an existing clone reused. A local project switches later
+from its workflow card (add the remote, choose PRs) without being re-made.
+
 - **eki is built in.** `projectchats.SELF = "eki"`, named `eki`, its folder
   `builds.source()`, its background work the self goals (`goals.project IS
   NULL`). It has no row, so nothing that loops over `projects` sees it.

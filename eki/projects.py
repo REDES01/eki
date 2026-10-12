@@ -128,9 +128,11 @@ def repo_for(conn: sqlite3.Connection, goal: sqlite3.Row) -> Path:
 def base(project: sqlite3.Row) -> str:
     """The sha at the tip of the project's branch, never checked out. On the GitHub path that is
     origin's branch, fetched first into refs/remotes/origin/<branch> (a failed fetch keeps the last
-    one fetched); locally, or when origin has never been fetched, refs/heads/<branch>."""
+    one fetched); locally, or when origin has never been fetched, refs/heads/<branch>. A project
+    that chose 'eki merges here' (projects.lands) is local whatever its origin: origin isn't fetched."""
     where, branch = project["path"], project["branch"]
-    if github.path_of(where)[0] is not None:
+    here = "lands" in project.keys() and project["lands"] == "here"
+    if not here and github.path_of(where)[0] is not None:
         try:
             github.fetch(where, branch)
         except github.GhError:

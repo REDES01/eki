@@ -197,8 +197,10 @@ def entry(conn: sqlite3.Connection, p: sqlite3.Row) -> dict:
     folder = _row_folder(p)
     more = {"description": p["description"], "created": p["created_at"]}
     if p["repo"] and p["state"] != "retired":
-        return _entry(conn, p["id"], p["name"], folder, p["repo"], "github",
-                      f"eki's clone at {p['path']}; changes come as PRs", **more)
+        own = p["lands"] == "github" and folder is not None and norm(p["path"]) == folder
+        how = (f"worktrees of {folder}; changes come as PRs on {p['repo']}" if own
+               else f"eki's clone at {p['path']}; changes come as PRs")
+        return _entry(conn, p["id"], p["name"], folder, p["repo"], "github", how, **more)
     background = (f"worktrees of {folder}; eki/<id> branches you merge"
                   if _has_work(conn, p["id"]) else None)
     return _entry(conn, p["id"], p["name"], folder, p["repo"], "folder", background, **more)

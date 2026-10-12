@@ -1,6 +1,6 @@
 // The workflow card's own part in an open card (projectcardpanel.js draws it under "Workflow"): one line
 // saying what happens to a request — the same words as the server's "line" (eki/api_workflow.py line) —
-// then what the checks run, "Each change: …" and "Together, before merging: …" (eki/workflow.py each_said,
+// and under it what parallel means (card.field_help: only this project's ceiling, the machine's can be lower), then what the checks run, "Each change: …" and "Together, before merging: …" (eki/workflow.py each_said,
 // together_said, word for word), and "Open workflow →" to the project's Workflow page (#project/<pid>/workflow), where each stage is
 // inspected and its settings changed. Every workflow setting is in `keys`, so the panel's form draws
 // none of them and leaves no Settings section (form: false).
@@ -55,7 +55,9 @@
   function draw(el, card, pid) {
     const link = `<a class="cw-open" href="#project/${encodeURIComponent(pid)}/workflow">Open workflow →</a>`;
     const s = card.spec;
+    const ceiling = (card.field_help || {}).parallel;       // eki/components/workflow.py FIELD_HELP
     el.innerHTML = `<div class="cw">${s ? `<div class="cw-line">${esc(line(s))}</div>` +
+      (ceiling ? `<div class="dim cw-help">parallel: ${esc(ceiling)}</div>` : "") +
       `<div class="cw-each">${esc(each(s))}</div><div class="cw-together">${esc(together(s))}</div>` : ""}${link}</div>`;
   }
 

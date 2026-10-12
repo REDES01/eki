@@ -110,6 +110,7 @@ def server_line(spec):
 def test_the_line_for_a_default_card(tmp_path):
     got = run(tmp_path, card())
     assert '<div class="cw-line">plan split · 4 parallel · checks: self · merge auto</div>' in got["html"]
+    assert "cw-help" not in got["html"]                         # no field_help in the JSON: no line
     assert server_line({}) == "plan split · 4 parallel · checks: self · merge auto"
     assert got["title"] == "Workflow" and got["keys"] == KEYS and got["form"] is False
 
@@ -153,6 +154,8 @@ def test_the_panel_draws_the_line_no_workflow_keys_and_no_settings(tmp_path):
         assert f'<h4 class="pp-h">{h}' not in out["frame"], h
     assert out["settings"] is None and "data-key=" not in out["frame"] + out["kind"]
     assert "plan split · 4 parallel · checks: self, review · merge auto" in out["kind"]
+    assert "parallel: this project's ceiling; the machine setting can be lower" in out["kind"]  # under the line
+    assert out["kind"].index("cw-line") < out["kind"].index("cw-help")
 
 
 def test_a_broken_workflow_card_still_shows_its_error(tmp_path):

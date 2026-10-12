@@ -188,3 +188,11 @@ def test_the_station_folds_its_sections_with_a_summary_each():
     assert 'closest("h3.st-h")' in js and '"goal:" +' in js
     css = (server.WEB / "station.css").read_text()
     assert ".st-fold { display: none" in css and ".st-sect.open .st-fold { display: block" in css
+
+
+def test_the_machine_line_notes_spotlight_only_when_the_key_is_there():
+    from eki import server
+    js = (server.WEB / "station.js").read_text()
+    body = js[js.index("function machine(m)"):js.index("function self(s")]
+    assert 'm.spotlight_gb == null ? ""' in body and "Spotlight's indexer uses" in body
+    assert "keeps its own working folders out of Spotlight" in body

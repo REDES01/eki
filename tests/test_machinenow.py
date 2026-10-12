@@ -90,3 +90,35 @@ def test_station_says_in_use_beside_at_once(conn, monkeypatch):
     assert {k: got[k] for k in ("agents", "agents_cap", "checks_cap", "browsers", "browsers_cap")} == \
         {"agents": 1, "agents_cap": 7, "checks_cap": 3, "browsers": 1, "browsers_cap": 2}
     assert isinstance(got["load"], float) and got["cores"] >= 1 and got["checks"] == 0
+
+
+PS = """  812 /usr/sbin/mds
+ 1048576 /System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Support/mds_stores
+  2048 /usr/libexec/mds_stores_helper
+ 524288 mds_stores
+ 9999 /Applications/Safari.app/Contents/MacOS/Safari
+"""
+
+
+def test_station_notes_spotlight_above_two_gb(conn, monkeypatch):
+    monkeypatch.setenv("EKI_MDS_STORES_GB", "4.4")
+    assert machinenow.station(conn)["spotlight_gb"] == 4.4
+    monkeypatch.setenv("EKI_MDS_STORES_GB", "1.5")
+    assert "spotlight_gb" not in machinenow.station(conn)
+
+
+def test_the_parser_sums_mds_stores_and_nothing_else():
+    assert machinenow._mds_stores_gb(PS) == 1.5
+    assert machinenow._mds_stores_gb("  812 /usr/sbin/mds\n") is None
+
+
+def test_a_ps_failure_gives_none(monkeypatch):
+    monkeypatch.delenv("EKI_MDS_STORES_GB", raising=False)
+
+    def boom(*a, **kw):
+        raise OSError("no ps")
+    monkeypatch.setattr(machinenow.subprocess, "run", boom)
+    assert machinenow.spotlight_gb() is None
+    monkeypatch.setattr(machinenow.subprocess, "run",
+                        lambda *a, **kw: subprocess.CompletedProcess(a, 1, stdout="", stderr="x"))
+    assert machinenow.spotlight_gb() is None

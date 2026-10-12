@@ -3,7 +3,8 @@
 `now(conn)` reads it all fresh — items building across every project, test
 runs holding a check slot, browsers holding a browser slot, the load, memory used and what is left of each
 subscription — and `line(now)` says it in one sentence. Nothing is kept.
-`EKI_MEMORY_TOTAL_GB` overrides the Mac's total memory (tests).
+`EKI_MEMORY_TOTAL_GB` overrides the Mac's total memory and `EKI_MDS_STORES_GB` what
+Spotlight's indexer holds (tests).
 """
 from __future__ import annotations
 
@@ -40,6 +41,28 @@ def memory() -> int:
     return max(0, min(100, round(100 * (1 - free / total))))
 
 
+def _mds_stores_gb(ps_out: str) -> Optional[float]:
+    """The summed RSS (KB) of every process named exactly mds_stores in `ps -axo rss=,comm=`, in GB."""
+    kb, seen = 0, False
+    for row in ps_out.splitlines():
+        rss, _, comm = row.strip().partition(" ")
+        if rss.isdigit() and os.path.basename(comm.strip()) == "mds_stores":
+            kb, seen = kb + int(rss), True
+    return kb / 2 ** 20 if seen else None
+
+
+def spotlight_gb() -> Optional[float]:
+    """Resident memory of Spotlight's indexer (mds_stores) in GB; None when ps fails or none runs."""
+    forced = os.environ.get("EKI_MDS_STORES_GB")
+    if forced:
+        return float(forced)
+    try:
+        r = subprocess.run(["ps", "-axo", "rss=,comm="], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _mds_stores_gb(r.stdout) if r.returncode == 0 else None
+
+
 def _quota(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """What is left of each subscription with a reading, by its fullest window."""
     cfgs = providers.config()
@@ -68,9 +91,13 @@ def now(conn: sqlite3.Connection) -> Dict[str, Any]:
 def station(conn: sqlite3.Connection) -> Dict[str, Any]:
     """The Station page's machine line: what is in use beside how many may be at once."""
     n, caps = now(conn), machinecaps.settings()
-    return {"agents": n["agents"], "agents_cap": caps["agents"], "checks": n["checks"],
-            "checks_cap": caps["checks"], "browsers": browserslots.held(), "browsers_cap": caps["browsers"],
-            "load": n["load"], "cores": n["cores"]}
+    out = {"agents": n["agents"], "agents_cap": caps["agents"], "checks": n["checks"],
+           "checks_cap": caps["checks"], "browsers": browserslots.held(), "browsers_cap": caps["browsers"],
+           "load": n["load"], "cores": n["cores"]}
+    gb = spotlight_gb()
+    if gb is not None and gb > 2.0:
+        out["spotlight_gb"] = round(gb, 1)
+    return out
 
 
 def _n(count: int, word: str) -> str:

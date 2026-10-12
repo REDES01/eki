@@ -85,7 +85,8 @@
     if (!m) return "";
     return `<a class="st-machine" href="#settings/machine" title="Settings → Machine">${esc(m.agents)}/${esc(m.agents_cap)} agents working
         · ${esc(m.checks)}/${esc(m.checks_cap)} test runs · ${esc(m.browsers)}/${esc(m.browsers_cap)} browsers
-        · load ${esc(Number(m.load).toFixed(1))} on ${esc(m.cores)} cores</a>`;
+        · load ${esc(Number(m.load).toFixed(1))} on ${esc(m.cores)} cores</a>${m.spotlight_gb == null ? ""
+        : ` · <span class="st-spotlight" title="eki keeps its own working folders out of Spotlight; the rest is the Mac indexing other folders">Spotlight's indexer uses ${esc(Number(m.spotlight_gb).toFixed(1))} GB</span>`}`;
   }
 
   function self(s, m) {

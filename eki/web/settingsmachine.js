@@ -1,10 +1,11 @@
 // Settings → Machine: routing.json's "machine" block (eki/machinecaps.py) — how many agents may
-// work at once across all projects, and how many test runs. One fold; open, it shows both caps
-// and the live line from /api/machine (eki/machinenow.py), read again every few seconds while open.
+// work at once across all projects, how many test runs, and how many browsers. One fold; open, it
+// shows the three caps and the live line from /api/machine (eki/machinenow.py), read again every
+// few seconds while open.
 // A field left empty is dropped, and an empty block drops the machine key.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const AGENTS = 12, MOST = { agents: 64, checks: 32 };                         // machinecaps.AGENTS, MOST
+  const AGENTS = 12, BROWSERS = 3, MOST = { agents: 64, checks: 32, browsers: 16 };  // machinecaps.AGENTS, BROWSERS, MOST
   const EVERY = 4000;
   const block = (d) => (d.machine && typeof d.machine === "object" ? d.machine : {});
   let open = false, got = null, timer = null;
@@ -12,7 +13,9 @@
   const agents = (d) => (block(d).agents != null ? block(d).agents : got ? got.agents : AGENTS);
   const checks = (d) => (block(d).checks != null ? block(d).checks : got ? got.checks : 2);
   const plural = (n, w) => `${n} ${w}${+n === 1 ? "" : "s"}`;
-  const summary = (d) => `${plural(agents(d), "agent")} · ${plural(checks(d), "test run")} at once`;
+  const browsers = (d) => (block(d).browsers != null ? block(d).browsers : got ? got.browsers : BROWSERS);
+  const summary = (d) =>
+    `${plural(agents(d), "agent")} · ${plural(checks(d), "test run")} · ${plural(browsers(d), "browser")} at once`;
 
   function num(f, v, ph) {
     return `<input class="set-in" type="number" min="1" max="${MOST[f]}" data-f="${f}" value="${esc(v == null ? "" : v)}" placeholder="${esc(ph)}">`;
@@ -25,6 +28,8 @@
         "how many agents may work at the same time across all projects; each mostly waits on the model, so this mostly costs subscription quota, not CPU") +
       line("Test runs at once", num("checks", m.checks, got ? got.checks : ""),
         "how many test runs — eki's checks and the agents' own tests — may run at the same time; each takes several cores, so keep this low enough that load stays near the core count") +
+      line("Browsers at once", num("browsers", m.browsers, got ? got.browsers : BROWSERS),
+        "how many browsers eki's runs may have open at once (Playwright, in an agent's script or the playtester's MCP); each renders the game, so a few already load the machine; a browser past the cap waits for one to close") +
       `<div class="set-sub" data-machine-now>${esc(got ? got.line : "now: reading…")}</div>`);
     setTimeout(live, 0);
     return `<div data-machine>${settingsForm.fold("machine", `<span data-machine-sum>${esc(summary(d))}</span>`, body, open)}</div>`;
@@ -56,7 +61,7 @@
   // one input changed: put it in d.machine, or take it out when empty
   function edit(el, d) {
     const f = el.dataset.f;
-    if (f !== "agents" && f !== "checks") return false;
+    if (!["agents", "checks", "browsers"].includes(f)) return false;
     const m = block(d), v = el.value.trim();
     if (v === "" || !isFinite(+v)) delete m[f]; else m[f] = Math.max(1, Math.min(MOST[f], Math.round(+v)));
     if (Object.keys(m).length) d.machine = m; else delete d.machine;

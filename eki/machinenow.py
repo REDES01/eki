@@ -1,7 +1,7 @@
 """What the Mac is doing right now, for Settings → Machine's live line.
 
 `now(conn)` reads it all fresh — items building across every project, test
-runs holding a check slot, the load, memory used and what is left of each
+runs holding a check slot, browsers holding a browser slot, the load, memory used and what is left of each
 subscription — and `line(now)` says it in one sentence. Nothing is kept.
 `EKI_MEMORY_TOTAL_GB` overrides the Mac's total memory (tests).
 """
@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from . import checkslots, machine, providers, quota
+from . import browserslots, checkslots, machine, providers, quota
 
 
 def _total_gb() -> Optional[float]:
@@ -56,6 +56,7 @@ def _quota(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 def now(conn: sqlite3.Connection) -> Dict[str, Any]:
     agents = conn.execute("SELECT COUNT(*) FROM items WHERE state='building'").fetchone()[0]
     out: Dict[str, Any] = {"agents": int(agents), "checks": checkslots.busy(conn),
+                           "browsers": browserslots.held(),
                            "load": round(os.getloadavg()[0], 1), "cores": os.cpu_count() or 1,
                            "memory": memory()}
     left = _quota(conn)
@@ -69,8 +70,9 @@ def _n(count: int, word: str) -> str:
 
 
 def line(now: Dict[str, Any]) -> str:
-    """now: 3 agents working · 1 test run · load 9.2 on 18 cores · memory 64% · quota left claude 70%"""
+    """now: 3 agents working · 1 test run · 2 browsers · load 9.2 on 18 cores · memory 64% · quota left claude 70%"""
     parts = [f"{_n(now['agents'], 'agent')} working", _n(now["checks"], "test run"),
+             _n(now.get("browsers", 0), "browser"),
              f"load {now['load']:.1f} on {_n(now['cores'], 'core')}", f"memory {now['memory']}%"]
     if now.get("quota"):
         parts.append("quota left " + ", ".join(f"{q['provider']} {q['left']}%" for q in now["quota"]))

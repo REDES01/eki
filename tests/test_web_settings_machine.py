@@ -1,4 +1,4 @@
-"""Settings → Machine: the two machine caps in routing.json, and the live line at /api/machine."""
+"""Settings → Machine: the three machine caps in routing.json, and the live line at /api/machine."""
 import json
 
 from eki import machinecaps
@@ -9,6 +9,9 @@ AGENTS_WHY = ("how many agents may work at the same time across all projects; ea
               "so this mostly costs subscription quota, not CPU")
 CHECKS_WHY = ("how many test runs — eki's checks and the agents' own tests — may run at the same time; each takes "
               "several cores, so keep this low enough that load stays near the core count")
+BROWSERS_WHY = ("how many browsers eki's runs may have open at once (Playwright, in an agent's script or the "
+                "playtester's MCP); each renders the game, so a few already load the machine; a browser past the "
+                "cap waits for one to close")
 
 
 def test_the_page_loads_the_machine_section(web):
@@ -20,9 +23,10 @@ def test_the_page_loads_the_machine_section(web):
     assert '"machine"' in frame.split("const SECTIONS = ")[1].split("\n")[0]
 
 
-def test_the_section_explains_both_caps_and_reads_the_live_line(web):
+def test_the_section_explains_the_three_caps_and_reads_the_live_line(web):
     _, js = get(f"{web}/ui/settingsmachine.js")
-    for want in (AGENTS_WHY, CHECKS_WHY, 'settings.section("machine"', 'title: "Machine"', 'file: "routing"',
+    for want in (AGENTS_WHY, CHECKS_WHY, BROWSERS_WHY, "Browsers at once", '"browsers"', "browsers: 16",
+                 "BROWSERS = 3", '"browser")} at once', 'settings.section("machine"', 'title: "Machine"', 'file: "routing"',
                  "Agents at once", "Test runs at once", 'data-f="${f}"', '"agents"', '"checks"', 'min="1"',
                  "settingsForm.fold", "/api/machine", "delete d.machine", "at once"):
         assert want in js, want
@@ -39,6 +43,25 @@ def test_a_machine_block_is_written_and_read_back(web, home):
     assert live["agents"] == 16 and live["checks"] == 4
 
 
+def test_browsers_at_once_is_written_and_read_back(web, home):
+    got = _read(web, "routing")
+    code, out = post(web + "/api/settings/routing",
+                     {"data": {**got["data"], "machine": {"browsers": 5}}, "mtime": got["mtime"]})
+    assert code == 200 and out["ok"] is True
+    assert json.loads((home / "routing.json").read_text())["machine"] == {"browsers": 5}
+    assert _read(web, "routing")["data"]["machine"] == {"browsers": 5}
+    assert machinecaps.settings()["browsers"] == 5
+    live = json.loads(get(web + "/api/machine")[1])
+    assert live["browsers"] == 5 and live["now"]["browsers"] == 0 and "0 browsers" in live["line"]
+
+
+def test_browsers_out_of_range_is_refused(web, home):
+    got = _read(web, "routing")
+    code, out = post(web + "/api/settings/routing",
+                     {"data": {**got["data"], "machine": {"browsers": 17}}, "mtime": got["mtime"]})
+    assert code == 400 and "machine.browsers" in out["problems"][0]
+
+
 def test_a_cap_out_of_range_is_refused(web, home):
     got = _read(web, "routing")
     code, out = post(web + "/api/settings/routing",
@@ -51,7 +74,7 @@ def test_api_machine_gives_the_caps_what_runs_now_and_the_line(web):
     assert code == 200
     got = json.loads(text)
     assert {"agents", "checks", "now", "line"} <= set(got)
-    assert {"agents", "checks", "load", "cores", "memory"} <= set(got["now"])
+    assert {"agents", "checks", "browsers", "load", "cores", "memory"} <= set(got["now"])
     assert got["line"].startswith("now: ")
 
 

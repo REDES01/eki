@@ -1,7 +1,9 @@
 """Adding a card to a project (a template or a pool card) and removing one: routes for apiroutes.
 
 Both need the project's folder (api_cards.writable_root): with none, a 400 saying why. A card is
-added under a free name, never over one; removing moves it to the Trash. Nothing is committed.
+added under a free name, never over one; removing moves it to the Trash. Adding an `assets` card
+git-ignores its pool and takes what git tracked inside it out of git, kept on disk, in one commit of
+its own (components/poolignore.py); nothing else is committed.
 A `workflow` card is one per project, and starts as today's behaviour: the project's settings
 (check command, autonomy, review) are written into it once and read from the card from then on.
 """
@@ -106,9 +108,19 @@ def add_card(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str,
         folder, said = add_workflow(conn, base.parent, str(template), project=projects.get(conn, pid))
     elif template:
         folder, said = cards.add_template(base, str(template))
+        said += _settle_pool(base.parent, folder)
     else:
         folder, said = cards.attach(base, str(pool)), []
     return {"card": api_cards.card_of(conn, pid, folder.name), "said": said}
+
+
+def _settle_pool(root: Path, folder: Path) -> List[str]:
+    """A new project assets card: its pool git-ignored and untracked (poolignore.settle)."""
+    from .components import poolignore
+    spec = api_cards._read(str(folder)) or {}
+    if spec.get("kind") != "assets" or not isinstance(spec.get("path"), str):
+        return []
+    return poolignore.settle(root, spec["path"])
 
 
 def remove_card(conn: sqlite3.Connection, m: Any, q: dict, body: dict) -> Dict[str, Any]:

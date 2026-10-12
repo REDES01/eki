@@ -78,8 +78,9 @@ objective, mostly without a person touching the code.
   stuck items: tests that a new rule made stale, two changes that each passed
   alone but clashed, an agent that ended its turn to wait for a call and was
   never woken. eki should send the common cases back to an agent with the
-  error before asking you. (Being built: wake on calls, failures that keep the
-  real error instead of a stack trace.)
+  error before asking you. The fixer is built: before an item is left for you
+  it gets one fixer run on the current head (docs/self-build.md, "The fixer"),
+  and the Station counts fixed-by-fixer against left-for-you per day.
 - **Machine resources are managed by counts, not by need.** Twenty headless game
   browsers at about 1 GB each filled memory and swap; caps came one by one
   (agents, test runs, browsers). The scheduler should admit work by memory and

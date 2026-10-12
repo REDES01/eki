@@ -507,6 +507,35 @@ this change still conclude the old way (`review.conclude`). Like every
 stage it resumes from the item and its runs: a restart mid-review loses
 nothing.
 
+## The fixer
+
+**When it runs.** Before an eki item is left for a person, it gets one more
+try: gate 1 red, gate 2 red, a resolve that failed, or a build that ended its
+turn early with nothing changed (no `ITEM:` line, or one that says it is
+waiting — an honest `ITEM: person` stays the person's). eki/fixer.py starts a
+fixer run in the item's own worktree, put on the current head of integration
+main; the item is `fixing` meanwhile, and the board says "fixing after
+<stage> (run <id>)". Only eki's own items get one, and only once per item:
+`items.fixer` (stage, failure, run, at, head, summary) set means it has had
+it, so a second failure leaves the item as before.
+
+**What it is told.** The failure's tail, which landed changes since the
+item's base touched the same files and what they were for (eki/landed.py),
+and the rule: make the item's intent work with what landed — update a test
+only when the landed change made its expectation wrong, never weaken a check
+to pass. Its result is committed and goes through gate 1, the review and the
+queue again like any build. An item left after it shows the fixer's summary
+under its line ("the fixer tried (gate1): …"). `routing.json` `self.fixer`
+(default `true`) turns it off.
+
+**The count.** The Station's self section shows "fixer today: N fixed · M
+left for you (7 days: … · …)" — eki's own items the fixer got through
+(proposed, queued, landed or live after its run) against those left `unfit`
+or `left`, per local day. It is there to show whether the fixer helps: on
+2026-10-11/12 a person cleared about twenty stuck items by hand, nearly all
+stale tests, two items that clashed at gate 2, unsettled conflicts, a
+time-of-day flake and builds that ended their turn early.
+
 ## The journal, the score and the digest
 
 **The journal** (`eki/observe.py`, table `journal`) is what eki writes down

@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, callwait, checkslots, db, doccheck, notifygoals, projects, queue, selfwork, store
+from . import asks, callwait, checkslots, db, doccheck, fixer, notifygoals, projects, queue, selfwork, store
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
@@ -42,8 +42,8 @@ def items(c: sqlite3.Connection, gid: str) -> List[sqlite3.Row]:
 
 
 def lined(c: sqlite3.Connection) -> List[sqlite3.Row]:
-    """The queue in order, then the items out of it on the side path (resolving, rechecking)."""
-    return list(queue.order(c)) + list(selfwork.items_in(c, ("resolving", "rechecking")))
+    """The queue in order, then the items out of it on the side path (resolving, rechecking, fixing)."""
+    return list(queue.order(c)) + list(selfwork.items_in(c, ("resolving", "rechecking", "fixing")))
 
 
 def _lined(c, n: int, it) -> Dict[str, Any]:
@@ -72,7 +72,7 @@ def stands(c, g) -> str:
     if any(it["state"] in ("locked", "left", "unfit", "rolled back")
            or (it["state"] == "proposed" and not it["pr"]) for it in its):
         return "for you"
-    if any(it["state"] in notifygoals.OPEN for it in its):
+    if any(it["state"] in notifygoals.OPEN or it["state"] == "fixing" for it in its):
         return "in flight"
     if not its:
         return "planned"
@@ -118,7 +118,9 @@ def drafting(c, g) -> str:
 
 
 def stage(c, it) -> str:
-    """Where a queued (or resolving) item stands, in words."""
+    """Where a queued (or resolving, or fixing) item stands, in words."""
+    if it["state"] == "fixing":
+        return fixing(it)
     if it["state"] in ("resolving", "rechecking"):
         return f"{it['state']} (run {it['run_id'] or '-'})"
     if not it["rebased"]:
@@ -133,6 +135,12 @@ def stage(c, it) -> str:
     if run["state"] in store.ACTIVE:
         return f"gate 2 (run {run['id']})"
     return f"gate 2 {run['state']} (run {run['id']})"
+
+
+def fixing(it) -> str:
+    """A fixing item: after which failure, and its fixer run."""
+    note = fixer.of(it) or {}
+    return f"fixing after {note.get('stage') or '?'} (run {(it['run_id'] or '-')[:8]})"
 
 
 def _batch_of(c, it) -> str:
@@ -162,6 +170,8 @@ def where(it) -> str:
     if it["state"] == "judging" and it["run_id"]:
         both = f" · review run {it['review_run']}" if it["review_run"] else ""
         return f"gate 1 run {it['run_id']}{both}"
+    if it["state"] == "fixing":
+        return fixing(it)
     if it["state"] in ("building", "resolving", "rechecking") and it["run_id"]:
         return f"run {it['run_id']}"
     if it["state"] in ("proposed", "locked"):
@@ -203,6 +213,10 @@ def said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
     why = it["why"] or ""
     if it["state"] in ("judging", "proposed") and why.startswith("relinked "):
         return f"{line} · {why}" if line else why
+    if it["state"] in ("left", "unfit"):
+        tried = fixer.tried(it)
+        if tried:
+            return f"{line} · {tried}" if line else tried
     return line
 
 

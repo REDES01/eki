@@ -9,7 +9,7 @@
   const ENDS = ["dropped", "applied", "landed", "live"];                            // nothing left to drop
   const RETRY = ["left", "unfit", "dropped", "rolled back"];
   const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds(), allGoals: new Set() };
-  const FLIGHT = ["waiting", "building", "waiting on calls", "judging", "reviewing", "queued", "resolving", "rechecking"];
+  const FLIGHT = ["waiting", "building", "waiting on calls", "judging", "reviewing", "queued", "resolving", "rechecking", "fixing"];
   const YOURS = ["proposed", "locked", "left", "unfit", "rolled back"];              // waits for a person
 
   // Which sections are open: Self by default; the choice is kept in this browser only.
@@ -89,7 +89,15 @@
         : ` · <span class="st-spotlight" title="eki keeps its own working folders out of Spotlight; the rest is the Mac indexing other folders">Spotlight's indexer uses ${esc(Number(m.spotlight_gb).toFixed(1))} GB</span>`}`;
   }
 
-  function self(s, m) {
+  // The fixer's count (eki/fixer.py daily): today, and the days shown (newest first).
+  function fixerLine(days) {
+    if (!Array.isArray(days) || !days.length) return "";
+    const t = days[0], all = (k) => days.reduce((a, d) => a + (d[k] || 0), 0);
+    return `<div class="st-line dim st-fixer" title="items the fixer got through vs items left for a person">fixer today: ${esc(t.fixed)} fixed · ${esc(t.left)} left for you
+        (${days.length} days: ${esc(all("fixed"))} · ${esc(all("left"))})</div>`;
+  }
+
+  function self(s, m, fx) {
     const top = `<div class="st-line">autonomy <b>${esc(s.autonomy)}</b>
         ${btn("autonomy", s.autonomy === "apply" ? "switch to propose" : "switch to apply", s.autonomy === "apply" ? "propose" : "apply", "small")}
         · ${machine(m)}
@@ -109,7 +117,7 @@
     const yours = n(YOURS), flight = n(FLIGHT);
     sum("self", [yours ? `${yours} for you` : "", flight ? `${flight} in flight` : "", prs.summary(s.prs), `${n(["live", "applied"])} live`, `autonomy ${s.autonomy}`]
       .filter(Boolean).join(" · "));
-    return top + queue + goals;
+    return top + fixerLine(fx) + queue + goals;
   }
 
   // A goal with nothing left to do is one line; it opens on click. Others show their items.
@@ -223,7 +231,7 @@
           sum("asks", st.asks.length ? `${st.asks.length} waiting for your answer` : "none");
           if (st.asks.length && !S.folds.has("asks")) fold("asks", true);     // a question opens its section
           $("meta").textContent = `autonomy ${st.self.autonomy} · ${st.self.queue.length} in line · ${st.asks.length} open question${st.asks.length === 1 ? "" : "s"}`;
-          return self(st.self, st.machine);
+          return self(st.self, st.machine, st.fixer);
         }),
         part("builds", "/api/builds", builds),
         part("route", "/api/route", table),

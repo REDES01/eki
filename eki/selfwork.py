@@ -21,9 +21,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, callwait, db, deplinks, doccheck, integration, leftover, notify, paths, projectbrief, projects,
-               projectwork, review, scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates,
-               workspace)
+from . import (builds, callwait, db, deplinks, doccheck, fixer, integration, leftover, notify, paths, projectbrief,
+               projects, projectwork, review, scheduler, selfbrief, selfdraft, selfjudge, selfplan, store, workflow,
+               workflowgates, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -40,7 +40,7 @@ DEFAULTS = {"parallel": 4, "autonomy": "propose",
 FIT = {"propose": ("landed", "live", "applied"),
        "apply": ("landed", "live", "applied")}
 #: an item in one of these has a run going and holds its write-set
-LIVE = ("building", "judging", "reviewing", "waiting on calls")
+LIVE = ("building", "judging", "reviewing", "waiting on calls", "fixing")
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
 CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_FAST=1 exec bin/check -q"]'   # drills run once, at release (traincheck)
 
@@ -124,7 +124,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     for it in items_in(conn, ("building",)):
         said += _conclude_build(conn, it)
     for it in items_in(conn, ("judging",)):
-        said += _conclude_judge(conn, it)
+        said += selfjudge.conclude(conn, it)
     for it in items_in(conn, ("reviewing",)):
         said += review.conclude(conn, it)
     said += callwait.tick(conn)          # turns that ended with card calls out: woken once they're back
@@ -223,18 +223,23 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
 def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sqlite3.Row,
            project: Optional[sqlite3.Row]) -> List[str]:
     """A done build: commit what it left, then propose it or start gate 1 and the review."""
-    verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
+    answer = store.answer(conn, run["id"])
+    verdict, reason, summary = selfbrief.outcome(answer)
     try:
         sha = workspace.commit_all(it["worktree"], f"{'eki' if project else 'self'}: {it['title']}\n\n"
                                                     f"{goal['text']}"[:2000])
     except (workspace.WorkspaceError, OSError) as e:      # one item's git trouble stops one item
-        _set(conn, it["id"], state="left", error=f"couldn't commit the change: {e}"[:800])
+        _set(conn, it["id"], state="left", error=with_tried(it, f"couldn't commit the change: {e}"[:800]))
         return [f"item {it['id']}: left for you — couldn't commit: {str(e)[:120]}"]
     sha = sha or it["commit_sha"]           # a retry that left things as they were: judge again
     touched = workspace.changed(it["worktree"], it["base"]) if sha else []
     if verdict == "person" or sha is None:
         why = reason or ("the agent changed nothing" if sha is None else "")
-        _set(conn, it["id"], state="left", error=why, summary=summary, commit_sha=sha,
+        if verdict != "person" and fixer.ended_early(answer):       # it stopped short: one fixer run first
+            line = fixer.offer(conn, it, "nothing", f"{why}\n{failure_tail(answer, 20)}")
+            if line:
+                return [line]
+        _set(conn, it["id"], state="left", error=with_tried(it, why), summary=summary, commit_sha=sha,
              touched=db.dumps(touched))
         if verdict == "person":                 # "changed nothing" is a failed try, not a question
             needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
@@ -267,6 +272,12 @@ def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sq
             + (f" and reviewing ({rev[:8]})" if rev else "")]
 
 
+def with_tried(it: sqlite3.Row, error: str) -> str:
+    """An item that had its fixer run and is left anyway says what the fixer tried."""
+    tried = fixer.tried(it)
+    return f"{error} — {tried}" if tried else error
+
+
 def _judged_by(project: sqlite3.Row, judge: str) -> str:
     """The check's command and where it came from: `make x (set)`, `npm run test (guessed: …)`."""
     cmd = json.loads(judge)[2]
@@ -288,48 +299,6 @@ def failure_tail(text: str, lines: int = FAILURE_LINES) -> str:
     throws would otherwise fill the tail with the trace and hide the errors themselves."""
     kept = [ln for ln in (text or "").strip().splitlines() if not _FRAME.match(ln)]
     return "\n".join(kept[-lines:])[-FAILURE_CHARS:]
-
-
-def _conclude_judge(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
-    """Move a `judging` item once gate 1 and its review (if any) have both ended."""
-    run = store.run(conn, it["run_id"])
-    if run is None or run["state"] in store.ACTIVE or not review.ended(conn, it):
-        return []
-    tail = failure_tail(store.answer(conn, run["id"]))
-    if run["state"] != "done":
-        tail = (tail + f"\n(checks {run['state']}: {failure_tail(run['error'] or '', 6)})").strip()
-    with db.tx(conn):
-        cur = conn.execute("SELECT state, reviews FROM items WHERE id=?", (it["id"],)).fetchone()
-        if cur is None or cur["state"] != "judging":
-            return []
-        seen = it["review"]
-        if it["review_run"]:
-            said, why = review.read(conn, it)                # closes the chore (eki/review.py)
-            seen = f"{said}: {why}" if said == "no" else said or f"none: {why}"
-        if run["state"] == "done":
-            return _judged(conn, it, tail, seen, cur["reviews"])
-        if it["tries"] - (cur["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
-            _set(conn, it["id"], state="waiting", verdict=tail[-FAILURE_CHARS:], review=seen,
-                 error="checks failed; trying once more")
-            return [f"item {it['id']}: checks failed; one more try"]
-        _set(conn, it["id"], state="unfit", verdict=tail[-FAILURE_CHARS:], review=seen, error=f"checks {run['state']}")
-    return [f"item {it['id']}: unfit — left for you"]
-
-
-def _judged(conn: sqlite3.Connection, it: sqlite3.Row, tail: str, seen: Optional[str],
-            reviews: Optional[int]) -> List[str]:
-    """Gate 1 green: the review's word decides (under the caller's tx)."""
-    if not (seen or "").startswith("no:"):
-        _set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
-        how = "reviewed ok" if seen == "ok" else f"fit (not reviewed: {(seen or 'none: ?')[6:]})"
-        return [f"item {it['id']}: {how} — proposed on {it['branch']}"]
-    why = seen[3:].strip()
-    if not reviews:
-        _set(conn, it["id"], state="waiting", verdict=None, review=seen, reviews=1,
-             error="review: no — rebuilding once")
-        return [f"item {it['id']}: the review says no — {why[:120]}; rebuilding once"]
-    _set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
-    return [f"item {it['id']}: the review says no again — proposed; `eki self apply {it['id']}` if you agree"]
 
 
 # ---- starting a build -------------------------------------------------------------------------
@@ -382,7 +351,7 @@ def retry(conn: sqlite3.Connection, iid: str) -> str:
         raise KeyError(f"no item {iid}")
     if it["state"] in LIVE:
         raise ValueError(f"item {it['id']} is {it['state']}")
-    fields: Dict[str, Any] = {"state": "waiting", "error": None}
+    fields: Dict[str, Any] = {"state": "waiting", "error": None, "fixer": None}   # a fresh fixer for your retry
     if it["worktree"] and not Path(it["worktree"]).exists():     # dropped: start afresh
         fields.update(worktree=None, branch=None, base=None, commit_sha=None, tries=0,
                       touched="[]", verdict=None, summary=None, review=None, reviews=0, review_run=None)

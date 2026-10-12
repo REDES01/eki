@@ -143,7 +143,7 @@ def test_drop_cancels_the_gate2_run(conn, src):
     assert store.run(conn, it["run_id"])["state"] not in store.ACTIVE
 
 
-def test_failed_checks_get_one_more_try_then_unfit(conn, src, tmp_path, monkeypatch):
+def test_failed_checks_get_one_more_try_then_the_fixer(conn, src, tmp_path, monkeypatch):
     selfwork.submit(conn, "x", plan=False, files=["eki/x.py"])
     selfwork.tick(conn)
     it = selfwork.items_in(conn, ("building",))[0]
@@ -165,7 +165,7 @@ def test_failed_checks_get_one_more_try_then_unfit(conn, src, tmp_path, monkeypa
     run_inline(conn, cur["run_id"])
     cur = step("judging")
     run_inline(conn, cur["run_id"])
-    cur = step("unfit")
+    cur = step("fixing")                       # red again: the fixer's one try before unfit (tests/test_fixer_gate1.py)
     assert cur["tries"] == 2
 
 

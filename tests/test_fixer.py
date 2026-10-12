@@ -163,7 +163,8 @@ def test_a_fixer_that_asks_for_a_person_leaves_it_with_its_summary(conn, stale, 
     run_inline(conn, it["run_id"])
     fixer.tick(conn)
     cur = selfwork.store_item(conn, stale)
-    assert cur["state"] == "left" and cur["error"] == "the spec contradicts main"
+    assert cur["state"] == "left" and cur["error"] == ("the spec contradicts main — "
+                                                       "the fixer tried (gate1): a real bug in the intent.")
     assert fixer.tried(cur) == "the fixer tried (gate1): a real bug in the intent."
 
 

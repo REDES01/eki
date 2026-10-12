@@ -135,7 +135,7 @@ def test_red_gate_one_retries_once_whatever_the_review_says(conn, src, tmp_path,
     assert "failed its checks" in store.run(conn, a["run_id"])["prompt"]
     a = rebuild(conn, tmp_path, monkeypatch, a)
     a = both(conn, tmp_path, monkeypatch, a, "REVIEW: ok\n")
-    assert a["state"] == "unfit" and a["review"] == "ok"
+    assert a["state"] == "fixing" and a["review"] == "ok"            # then its fixer (eki/selfjudge.py)
     assert chores.latest(conn, "review", a["id"])["state"] == "done"
     b = both(conn, tmp_path, monkeypatch, b, "REVIEW: no it misses a case\n")
     assert b["state"] == "building" and b["reviews"] == 0 and b["tries"] == 2    # gate 1's retry

@@ -89,6 +89,8 @@ eki follow <run>  ◄── events table
 | `responses`, `responses_stream` | `POST /v1/responses`: OpenAI's Responses protocol in front of the local model's chat completions, for Codex |
 | `gallery` | the pictures eki has drawn, newest first, from the store (`eki pictures`, the window's gallery) |
 | `projectchats` | projects you work inside: a `projects` row or the built-in `eki` (`SELF`, no row); `folder_of`, `listing`, `adopt`, `create`, `set_folder`, `find`, `home_clone` |
+| `gitstart` | a folder gets a history: `survey` (plain, no commit, or already git; fit or the plain reason it isn't — synced, mostly media, edited live — and what stays out), `start` (`git init`, the two `.gitignore` blocks, the first commit), `left_out` (the media block, for the assets card); no git words reach the person |
+| `history` | a project's changes and going back, in plain words, for the project page |
 | `projectqueue` | a local project's own queue (autonomy `apply`): its fit items rebased onto the predicted head of its branch, conflicts to a resolve run, gate 2 in batch with the project's check, then landed; one project per batch |
 | `aftermerge` | the workflow card's `after_merge` after eki lands in the person's folder (with `npm install --include=dev` first when the landing changed `package.json` or a lockfile): a `command` run, one per project at a time, changes landing close together coalesced into one run after the last; a failure on the board and the goal and a needs-you notice, the landing kept |
 | `projectland` | landing on a person's branch: `refs/heads/<branch>` moves forward only, the folder follows by `git merge --ff-only` when the branch is checked out there and no tracked file the change touches has local changes, else it waits naming the files; pure git, safe to call again |
@@ -1029,12 +1031,31 @@ as any other; nothing in `workspace` or the scheduler changes.
   clone), on a thread titled `clone <repo> to <dest>`, refused if `dest`
   exists. The folder is set at once and the page says `cloning…` while
   `dest/.git` is missing and the run is active, so a restart loses nothing.
-- **New projects live in your home.** `eki project --new NAME [--folder
-  PATH]` (or the `#projects` form) uses `~/<name>` by default, `git init`ing
-  it when new and taking an existing folder as it is; the same folder again
-  is the same project. `eki goal add <folder>` on a chat-only row fills its
-  branch and starts background work on that same row; housekeeping never
-  retires a row with no goals.
+- **New projects live in your home, and any folder can be one.** `eki
+  project --new NAME [--folder PATH]` (or the `#projects` form) uses
+  `~/<name>` by default; the same folder again is the same project. Git is
+  eki's engine for parallel work, never the person's chore
+  (`eki/gitstart.py`): a folder that isn't a git repo, or has no commit, is
+  offered a history in plain words (`OFFER`: "eki keeps a history of this
+  folder so several agents can work on it at once and any change can be
+  undone"). Yes runs `git init`, appends two blocks to `.gitignore` (the
+  person's own lines stay first and unchanged; a line already there isn't
+  added again) — media and files of 20 MiB or more under `MEDIA_BLOCK`,
+  build output, caches and OS junk under `OTHER_BLOCK` — and commits
+  `FIRST_COMMIT` ("the folder as it was"), as `eki` when git has no
+  identity. A folder that already has commits is used as it is. Folders
+  where a history is a bad fit are refused with the reason and chat only as
+  the choice (one agent in the folder directly, no parallel work, no queue):
+  inside iCloud Drive, Dropbox, Google Drive or OneDrive; mostly large
+  media (90% of its bytes and 200 MiB or more); a file another app has open
+  live (an Office `~$…` or LibreOffice `.~lock.…#` lock). The window and the
+  CLI ask first (`--yes` to give it a history, `--chat-only` to stay
+  chat-only); the left-out media (`gitstart.left_out`) is offered as the
+  project's assets card. The project page shows changes and going back in
+  plain words (`eki/history.py`: "5 changes landed today", "go back to
+  before …"), branches and commits only inside a details fold. `eki goal
+  add <folder>` on a chat-only row fills its branch and starts background
+  work on that same row; housekeeping never retires a row with no goals.
 - **A project can be deleted** (`eki/projectdelete.py`; never `eki`, which
   is refused with the reason). The row turns `deleting` first, in one
   transaction, and every listing hides it; then `finish` cancels the active

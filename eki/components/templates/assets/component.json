@@ -1,5 +1,6 @@
 {
   "kind": "assets",
   "about": "the project's pictures, sounds and other big files, kept in one place every agent sees",
-  "path": "assets"
+  "path": "assets",
+  "backup": ""
 }

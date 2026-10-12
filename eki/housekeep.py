@@ -23,7 +23,9 @@ component server eki started that has sat idle past its `idle_stop`
 its port freed (eki/components/serve.py), and run each direction of the Claude-client
 sync (eki/syncstate.py), and measure every assets pool's size on a thread of its
 own at most every five minutes, so no request ever walks one
-(eki/components/assets.py), and remove the worktrees under EKI_HOME/work that
+(eki/components/assets.py), and copy each pool's new and changed files to its
+card's backup folder, if it has one, on a thread of its own as often
+(eki/components/assetsbackup.py), and remove the worktrees under EKI_HOME/work that
 are done with, a few a pass, and measure the disk they take
 (eki/worktreegc.py), and keep the browser shim's mirror of Playwright's browsers
 folder current, so a newly installed browser version waits for a slot too
@@ -44,7 +46,7 @@ from typing import Callable, Dict, List, Tuple
 from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, picturecheck,
                prfollow, prmirror, projectdelete, projectlands, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
                threadkeep, worktreegc)
-from .components import assets, serve, servers
+from .components import assets, assetsbackup, serve, servers
 
 log = logging.getLogger("eki.housekeep")
 
@@ -122,6 +124,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("componentservers", servers.tick),
     ("sync", syncstate.tick),
     ("poolsizes", assets.tick),
+    ("poolbackup", assetsbackup.tick),
     ("picturecheck", picturecheck.tick),
     ("worktrees", worktreegc.tick),
     ("browsershim", lambda conn: browsershim.ensure() and []),

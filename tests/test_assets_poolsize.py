@@ -39,7 +39,7 @@ def test_size_text_and_notes_read_the_stored_value(proj, monkeypatch):
     no_walk(monkeypatch)
     assert assets.stored_size(comp) == 1288490189
     assert assets.size_text(comp) == "1.2 GB"
-    assert assets.notes(comp) == ["pool: 1.2 GB"]
+    assert assets.notes(comp) == [assets.NO_HISTORY, "pool: 1.2 GB"]
 
 
 def test_missing_or_corrupt_file_gives_nothing(proj, monkeypatch):

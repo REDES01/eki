@@ -82,9 +82,9 @@ def test_pool_size_and_writes_through(proj):
     (wt / "assets" / "sub" / "a.bin").write_bytes(b"y" * 72)
     assert (proj / "assets" / "song.ogg").stat().st_size == 3000
     assert assets.pool_size(comp) == 3072
-    assert assets.notes(comp) == ["pool: not measured yet"]     # never walked for a note
+    assert assets.notes(comp) == [assets.NO_HISTORY, "pool: not measured yet"]     # never walked for a note
     assets.measure([proj])
-    assert assets.notes(comp) == ["pool: 3.0 KB"]
+    assert assets.notes(comp) == [assets.NO_HISTORY, "pool: 3.0 KB"]
 
 
 def test_no_components_untouched(proj):
@@ -130,10 +130,10 @@ def test_escapes_refused(proj, tmp_path):
 def test_not_ignored_note(proj):
     put_assets(proj)
     comp = components.get("art", proj)
-    assert assets.notes(comp) == [f"assets/ is not git-ignored in {proj.resolve()}; not linked into worktrees",
+    assert assets.notes(comp) == [assets.NO_HISTORY, f"assets/ is not git-ignored in {proj.resolve()}; not linked into worktrees",
                                   "pool: not measured yet"]
     (proj / ".gitignore").write_text("assets/\n")
-    assert assets.notes(comp) == ["pool: not measured yet"]
+    assert assets.notes(comp) == [assets.NO_HISTORY, "pool: not measured yet"]
 
 
 def _raises(fn):
@@ -148,7 +148,7 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     put_assets(plain)
-    assert assets.notes(components.get("art", plain)) == ["pool: not measured yet"]
+    assert assets.notes(components.get("art", plain)) == [assets.NO_HISTORY, "pool: not measured yet"]
     d = components.pool_dir() / "shared"
     d.mkdir(parents=True)
     (d / "component.json").write_text(json.dumps({"kind": "assets", "about": "x", "path": "files"}))
@@ -156,7 +156,7 @@ def test_no_git_is_fine_and_pool_scope(tmp_path):
     (plain / "components" / "shared").mkdir()
     (plain / "components" / "shared" / "component.json").write_text(json.dumps({"pool": "shared"}))
     comp = components.get("shared", plain)
-    assert assets.pool(comp) == d / "files" and assets.notes(comp) == ["pool: not measured yet"]
+    assert assets.pool(comp) == d / "files" and assets.notes(comp) == [assets.NO_HISTORY, "pool: not measured yet"]
 
 
 def test_template_is_valid(tmp_path):

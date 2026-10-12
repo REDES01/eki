@@ -4,8 +4,12 @@
 folder). That folder in the project itself is the pool: created when missing,
 never versioned like code. Every worktree of the project sees it at the same
 relative path through a symlink — never a copy or hardlink — so anything
-written there lands in the pool at once. Only a pool git-ignored as a whole,
-with nothing inside tracked, is linked; otherwise the card says why. Calls: `ls [sub]`, `info <path>`,
+written there lands in the pool at once. Adding the card git-ignores the pool
+and untracks what was tracked inside it (eki/components/poolignore.py), so it
+is linked; should it be tracked again, the card says why it isn't. The pool has
+no version history: `"backup"` (an absolute folder or drive path, '' for none)
+is where housekeeping copies new and changed files, never deleting one
+(eki/components/assetsbackup.py). Calls: `ls [sub]`, `info <path>`,
 `rm <path>` (to the Trash, never a real delete).
 
 A pool's size is never walked during a request: housekeeping measures every
@@ -48,7 +52,21 @@ def validate(spec: dict, folder: Path) -> List[str]:
         return ['assets need "path": a folder relative to the project']
     if Path(p).is_absolute() or '..' in Path(p).parts or Path(p) == Path('.'):
         return [f'path {p!r} must be a folder below the project, with no ".."']
+    b = spec.get('backup', '')
+    if not isinstance(b, str) or (b and not Path(b).is_absolute()):
+        return ['backup must be an absolute folder path']
     return []
+
+
+#: the first note of a card without a backup
+NO_HISTORY = ("No version history: the pool is kept out of git, so a changed or deleted file "
+              "can't be undone — set a backup folder to keep copies.")
+
+
+def backup_target(comp: Component) -> str:
+    """The card's backup folder; '' when none is set."""
+    b = comp.spec.get('backup') or ''
+    return b if isinstance(b, str) else ''
 
 
 def root_of(comp: Component) -> Path:
@@ -310,7 +328,9 @@ def tick(conn: sqlite3.Connection) -> List[str]:
 
 def notes(comp: Component) -> List[str]:
     text = size_text(comp)
-    return problems(comp) + [f'pool: {text}' if text else 'pool: not measured yet']
+    b = backup_target(comp)
+    history = f'No version history in git; backed up to {b}' if b else NO_HISTORY
+    return [history] + problems(comp) + [f'pool: {text}' if text else 'pool: not measured yet']
 
 
 def linked(worktree, conn=None) -> List[str]:

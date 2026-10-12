@@ -5,6 +5,9 @@ registry (~/.eki/mcp.json) or a program's own config: a project run gets its car
 merged with the registry for that run only. Env values never leave whole: `public()` masks them.
 A service card's `"mcp"` reaches runs the same way; for a run its command is wrapped in
 `eki mcp-hold` so that using the server holds the card (access, conflicts) like a call.
+A Playwright server in a run's config (a card's or the registry's) gets PLAYWRIGHT_BROWSERS_PATH
+set to the browser shim in its own env — an MCP client may not pass its environment on — so its
+browsers wait for the machine's browser slots; the registry file itself is never changed.
 """
 from __future__ import annotations
 
@@ -16,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .. import mcp, paths
+from .. import browsershim, mcp, paths
 from ..providers.codex import mcp_flags
 from . import Call, Component, Result, own, project_root
 
@@ -97,13 +100,30 @@ def servers_of(folder, conn: Optional[sqlite3.Connection] = None,
     return out
 
 
+def _browser_slots(merged: Dict[str, dict]) -> Tuple[Dict[str, dict], bool]:
+    """A copy where every stdio server that mentions playwright looks up its browsers in the shim;
+    and whether any did."""
+    out, hit = {}, False
+    for name, spec in merged.items():
+        said = ' '.join([str(spec.get('command') or '')] + [str(a) for a in spec.get('args') or []])
+        if 'url' in spec or 'playwright' not in said.lower():
+            out[name] = spec
+            continue
+        out[name] = {**spec, 'env': {**(spec.get('env') or {}),
+                                     'PLAYWRIGHT_BROWSERS_PATH': str(browsershim.mirror())}}
+        hit = True
+    return out, hit
+
+
 def run_config(folder, run_id: str, conn: Optional[sqlite3.Connection] = None
                ) -> Tuple[Optional[str], List[str]]:
     """(the file for Claude's --mcp-config or None, Codex's -c flags) for one run."""
     mine = servers_of(folder, conn, run_id)
-    if not mine or not run_id or '/' in run_id or run_id.startswith('.'):
+    if not run_id or '/' in run_id or run_id.startswith('.'):
         return mcp.claude_config(), mcp.codex_config()
-    merged = {**mcp.servers(), **mine}            # a project card wins a name clash
+    merged, browsers = _browser_slots({**mcp.servers(), **mine})    # a project card wins a name clash
+    if not mine and not browsers:
+        return mcp.claude_config(), mcp.codex_config()
     d = paths.home() / 'mcp-runs'
     d.mkdir(parents=True, exist_ok=True)
     f = d / f'{run_id}.json'

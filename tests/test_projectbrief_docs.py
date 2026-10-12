@@ -68,3 +68,11 @@ def test_an_old_card_name_in_context_still_resolves(conn, proj):
     out = knowledge.brief(str(proj), conn, context=["knowledge"])
     assert len(_first(out)) == 3
     assert out.splitlines()[-1] == "Also available if you need them: playtests (see components/)."
+
+
+def test_the_build_brief_sends_browsers_through_the_slots(conn, proj):
+    project = projects.get(conn, projects.add(conn, proj))
+    text = projectbrief.build(goal="g", title="t", spec="s", files=[], branch="b", base="0" * 40,
+                              source=str(proj), others=[], project=project)
+    assert "Launch browsers only through Playwright's default lookup or $PLAYWRIGHT_BROWSERS_PATH" in text
+    assert "never\na hard-coded ~/Library/Caches/ms-playwright path" in text

@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from eki import db, digest, engine, faults, housekeep, observe, score, selfpick
+from eki import browsershim, browserstrays, db, digest, engine, faults, housekeep, observe, score, selfpick
 
 DAY = 86400.0
 
@@ -129,3 +129,22 @@ def test_pool_sizes_are_a_housekeeping_step_that_never_waits(conn, monkeypatch):
     assert len(lines) == 1
     assets._thread[0].join(10)
     assert started == [[]]
+
+
+@pytest.mark.parametrize("broken", ["browsershim", "browserstrays"])
+def test_the_browser_steps_each_stand_alone(conn, monkeypatch, broken):
+    not_due(monkeypatch)
+    ran = []
+
+    def boom(*a):
+        raise RuntimeError(f"{broken} went wrong")
+
+    monkeypatch.setattr(browsershim, "ensure", boom if broken == "browsershim" else lambda: ran.append("shim"))
+    monkeypatch.setattr(browserstrays, "note",
+                        boom if broken == "browserstrays" else lambda: ran.append("strays") or ["browsers: 1"])
+    monkeypatch.setattr(faults, "tick", lambda c, now=None: ran.append("faults") or [])
+    lines = housekeep.tick(conn)
+    assert "faults" in ran and len(ran) == 2
+    assert [json.loads(r["data"])["where"] for r in conn.execute("SELECT data FROM journal WHERE kind='fault'")] \
+        == [f"housekeep.{broken}"]
+    assert ("browsers: 1" in lines) == (broken == "browsershim")

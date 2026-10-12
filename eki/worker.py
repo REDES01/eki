@@ -21,8 +21,8 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import (asks, capacity, components, files, db, memnotes, models, observe, paths, providers, quota, routing,
-               skills, store, syncstate, transient)
+from . import (asks, browsershim, capacity, components, files, db, memnotes, models, observe, paths, providers,
+               quota, routing, skills, store, syncstate, transient)
 from .components import knowledge, mcpserver, serve, skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
@@ -86,6 +86,7 @@ def build_turn(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> Turn:
         if linked:
             turn.extra["codex_skills"] = linked
     turn.extra["claude_mcp"], turn.extra["codex_config"] = mcpserver.run_config(turn.cwd, r["id"], conn)
+    _browser_slots(r, turn)
     if r["model"]:
         turn.extra["model"] = r["model"]
     if r["effort"]:
@@ -126,6 +127,16 @@ def _owner_notes(r: sqlite3.Row, provider: str, turn: Turn) -> None:
     for line in lines:
         if line:
             turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
+
+
+def _browser_slots(r: sqlite3.Row, turn: Turn) -> None:
+    """Every run's Playwright looks up its browsers in the shim, so each browser waits for a slot."""
+    try:
+        path = str(browsershim.ensure())
+    except Exception as e:                      # noqa: BLE001 — a run never fails for its browser slots
+        log.warning("no browser shim for %s: %s", r["id"], e)
+        return
+    turn.extra["env"] = {**(turn.extra.get("env") or {}), "PLAYWRIGHT_BROWSERS_PATH": path}
 
 
 def _serving_link(conn: sqlite3.Connection, r: sqlite3.Row, turn: Turn) -> None:

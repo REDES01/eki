@@ -63,13 +63,13 @@ def test_a_failing_link_never_fails_the_run(game, conn, monkeypatch):
         raise RuntimeError("no")
     monkeypatch.setattr(serve, "for_run", boom)
     turn = worker.build_turn(conn, run_in(conn, game), "fake")
-    assert "env" not in turn.extra
+    assert "EKI_SERVE_URL" not in turn.extra.get("env", {})
 
 
 def test_a_chore_gets_no_link(game, conn, monkeypatch):
     monkeypatch.setattr(serve, "for_run", lambda *a, **k: pytest.fail("a chore asked for a link"))
     turn = worker.build_turn(conn, run_in(conn, game, row="chore"), "fake")
-    assert "env" not in turn.extra
+    assert "EKI_SERVE_URL" not in turn.extra.get("env", {})
 
 
 def test_program_env_carries_the_turns_env(home):

@@ -24,7 +24,10 @@ sync (eki/syncstate.py), and measure every assets pool's size on a thread of its
 own at most every five minutes, so no request ever walks one
 (eki/components/assets.py), and remove the worktrees under EKI_HOME/work that
 are done with, a few a pass, and measure the disk they take
-(eki/worktreegc.py). Nothing here is
+(eki/worktreegc.py), and keep the browser shim's mirror of Playwright's browsers
+folder current, so a newly installed browser version waits for a slot too
+(eki/browsershim.py), and note browsers open in eki worktrees that hold no
+browser slot (eki/browserstrays.py). Nothing here is
 state that matters: the hour between prunes and the last list tries live in
 memory, and losing them on a restart only means an early prune or an early try.
 """
@@ -36,7 +39,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Tuple
 
-from . import (db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
+from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
                prmirror, projectdelete, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
                threadkeep, worktreegc)
 from .components import assets, serve, servers
@@ -117,6 +120,8 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("sync", syncstate.tick),
     ("poolsizes", assets.tick),
     ("worktrees", worktreegc.tick),
+    ("browsershim", lambda conn: browsershim.ensure() and []),
+    ("browserstrays", lambda conn: browserstrays.note()),
     ("schedule", schedule.tick),
     ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import (asking, db, gallery, github, paths, projectchats, projectdelete, projectgithub, projectlands,
-               projectstart, store)
+               projects, projectstart, store)
 
 #: what the page's "Have an agent write instructions" asks for
 INSTRUCTIONS_PROMPT = (
@@ -40,17 +40,24 @@ _FOLDERS = 20
 
 def projects_list(conn: sqlite3.Connection) -> Dict[str, Any]:
     """Every project (eki first) and your home, to prefill a new project's `~/<name>`."""
-    return {"projects": projectchats.listing(conn, scan=True), "user_home": str(paths.user_home())}
+    return {"projects": [_history(conn, e) for e in projectchats.listing(conn, scan=True)],
+            "user_home": str(paths.user_home())}
+
+
+def _history(conn: sqlite3.Connection, e: dict) -> dict:
+    """The entry with `chat_history`: whether its chat turns are recorded (eki/chatcommit.py); never eki's own."""
+    row = projects.get(conn, e["id"]) if e["id"] != projectchats.SELF else None
+    return {**e, "chat_history": bool(row is not None and projects.chat_history(row))}
 
 
 def _entry(conn: sqlite3.Connection, pid: str) -> dict:
     for e in projectchats.listing(conn, scan=True):
         if e["id"] == pid:
-            return e
+            return _history(conn, e)
     row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
     if row is None:
         raise KeyError(f"no project {pid}")
-    return projectchats.entry(conn, row)        # dropped or merged: still shown when asked for
+    return _history(conn, projectchats.entry(conn, row))        # dropped or merged: still shown when asked for
 
 
 def show(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:

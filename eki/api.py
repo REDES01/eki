@@ -20,9 +20,8 @@ def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) ->
                                               "ended_at")}
     if full:
         view["answer"] = store.answer(conn, r["id"])
-        view["steps"] = [{"kind": e["kind"], **json.loads(e["data"])}
-                         for e in store.events_after(conn, r["id"])
-                         if e["kind"] in ("tool", "note", "interrupted", "handoff")]
+        view["steps"] = [_step(e) for e in store.events_after(conn, r["id"])
+                         if e["kind"] in ("tool", "note", "interrupted", "handoff", "commit")]
         view["last_event"] = max((e["id"] for e in store.events_after(conn, r["id"])), default=0)
         view["asks"] = [asks.view(a) for a in asks.for_run(conn, r["id"]) if a["state"] != "withdrawn"]
         view["files"] = sorted({e["path"] for e in view["steps"] if e.get("path")})
@@ -30,6 +29,14 @@ def _run_view(conn: sqlite3.Connection, r: sqlite3.Row, *, full: bool = True) ->
     view["model"], view["effort"] = r["model"], r["effort"]
     view["shown"] = _shown(conn, r["provider"], r["model"], r["effort"])
     return view
+
+
+def _step(e: sqlite3.Row) -> Dict[str, Any]:
+    """An event as a turn's step; a `commit` (eki/chatcommit.py) carries only sha, title and kind."""
+    data = json.loads(e["data"])
+    if e["kind"] == "commit":
+        return {"kind": "commit", "sha": data.get("sha"), "title": data.get("title"), "commit": data.get("kind")}
+    return {"kind": e["kind"], **data}
 
 
 def _shown(conn: sqlite3.Connection, provider: Optional[str], model: Optional[str],

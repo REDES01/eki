@@ -1,12 +1,15 @@
 // The "⋯" menu on a project — the project page header (project.js) and each card on the Projects
-// list (projectspage.js). Its one item is "Delete project…", which asks first in a sheet that says
+// list (projectspage.js). "Record chats in history" switches the project's chat_history; "Delete project…" asks first in a sheet that says
 // in one line what happens, then sends DELETE /api/projects/<id>; the API's error shows in the
 // sheet. eki's own project can't be deleted, so it gets no item and no button.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   let menu = null, sheet = null;
 
-  const items = (p) => p.id === "eki" ? "" : '<button type="button" class="pm-item danger" data-pm-act="delete">Delete project…</button>';
+  // "Record chats in history": each chat turn's change a commit on the project's branch (eki/chatcommit.py)
+  const toggle = (p) => `<button type="button" class="pm-item" role="menuitemcheckbox" aria-checked="${p.chat_history ? "true" : "false"}" data-pm-act="history">` +
+    `${p.chat_history ? "✓ " : ""}Record chats in history</button>`;
+  const items = (p) => p.id === "eki" ? "" : toggle(p) + '<button type="button" class="pm-item danger" data-pm-act="delete">Delete project…</button>';
 
   // the ⋯ button; the page catches its click on [data-pm] and calls open()
   function button(p) {
@@ -34,6 +37,7 @@
       e.stopPropagation();
       const b = e.target.closest && e.target.closest("[data-pm-act]");
       if (b && b.dataset.pmAct === "delete") { close(); confirm(p, done); }
+      if (b && b.dataset.pmAct === "history") { close(); history(p, !p.chat_history); }
     };
     if (anchor && anchor.getBoundingClientRect) {
       const r = anchor.getBoundingClientRect();
@@ -80,5 +84,20 @@
     } finally { b.disabled = false; }
   }
 
-  window.projectMenu = { button, items, sentence, open, confirm, remove };
+  // the switch; the entry shows the answer the API gives back
+  async function history(p, on) {
+    try {
+      const r = await fetch("/api/projects/" + encodeURIComponent(p.id) + "/chat-history", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Eki": "1" }, body: JSON.stringify({ on }) });
+      const got = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(got.error || r.statusText || "Can't change the setting");
+      p.chat_history = got.chat_history;
+      return got;
+    } catch (x) {
+      window.alert(x.message);
+      return null;
+    }
+  }
+
+  window.projectMenu = { button, items, sentence, open, confirm, remove, history };
 })();

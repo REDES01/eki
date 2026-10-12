@@ -20,7 +20,17 @@
     return data;
   }
 
-  function stepLine(s) {
+  // A chat turn's change saved to the project's history (eki/chatcommit.py): a quiet line, and a way back.
+  const SAVED = { chat: (t) => "saved to history: " + t, hand: () => "your edits saved", back: (t) => "went back: " + t };
+  function commitLine(s, rid) {
+    const say = SAVED[s.commit] || SAVED.chat;
+    const back = rid && (s.commit === "chat" || s.commit === "hand")
+      ? ` <button type="button" class="ghost small" data-back="${md.esc(rid)}" data-sha="${md.esc(s.sha || "")}">go back to before this</button>` : "";
+    return `<div class="step dim" title="${md.esc(s.sha || "")}">${md.esc(say(s.title || ""))}${back}</div>`;
+  }
+
+  function stepLine(s, rid) {
+    if (s.kind === "commit") return commitLine(s, rid);
     if (s.kind === "tool") {
       const detail = md.esc(s.detail || "");                     // a .md path in it opens in the side panel
       return `<div class="step"><b>${md.esc(s.name || "")}</b> ${typeof md.linkPaths === "function" ? md.linkPaths(detail) : detail}</div>`;
@@ -43,7 +53,7 @@
   function runHtml(r) {
     const live = LIVE.includes(r.state);
     const steps = r.steps.length
-      ? `<details class="steps" ${live ? "open" : ""}><summary>${r.steps.length} step${r.steps.length > 1 ? "s" : ""}</summary>${r.steps.map(stepLine).join("")}</details>` : "";
+      ? `<details class="steps" ${live ? "open" : ""}><summary>${r.steps.length} step${r.steps.length > 1 ? "s" : ""}</summary>${r.steps.map((s) => stepLine(s, r.id)).join("")}</details>` : "";
     // what it went to, as the program names it (`claude · Opus 5.5 · high`); amber when routing fell back
     const fell = FELL_BACK.test(r.why || "");
     const who = r.provider ? `${mark(r.provider)}<span class="who"${fell ? ' style="color: var(--amber)"' : ""}>${md.esc(r.shown || r.provider)}</span>` : "";
@@ -270,6 +280,13 @@
   document.addEventListener("click", async (e) => {
     const c = e.target.closest("[data-cancel]");
     if (c) { await call(`/api/runs/${c.dataset.cancel}/cancel`, {}); loadThread(false); return; }
+    const g = e.target.closest("[data-back]");
+    if (g) {   // a new commit with the earlier files; nothing in the history is lost
+      if (!window.confirm("Go back to before this? The folder's files return to how they were; this turn stays in the history.")) return;
+      g.disabled = true;
+      try { await call(`/api/runs/${g.dataset.back}/back`, { sha: g.dataset.sha }); } catch (err) { alertLine(err.message); }
+      return loadThread(false);
+    }
     const w = e.target.closest("[data-why]");
     if (w) {   // the route's why: one dim line, the whole of it on a click
       const id = w.dataset.why;

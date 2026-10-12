@@ -1,12 +1,12 @@
-"""workrun.HANDLERS for queue actions (merge, run_gate 2, land, start_run resolve), and
+"""workrun.HANDLERS for queue actions (merge, land; run_gate 2 and start_run resolve via START/GATES), and
 `say`: how the queue's executors feed an event (docs/work-model.md).
 
 An executor looks first (git, the runs), makes an Event of the facts and calls
 `say`: it feeds the event, writes the executor's own columns (head, rebased,
 gate2_run, landed_on …) in the same transaction, says on the board what
-changed, and carries the actions out. A start_run or a gate-1 run_gate that
-isn't the queue's goes to eki/workhandlers_build.py; until that registers a
-fixer start, the fixer is started as eki/fixer.py always has.
+changed, and carries the actions out. start_run and run_gate are
+eki/workhandlers_build.py's: it looks up the queue's roles and gates in START
+and GATES here; the fixer, whatever stage called it, is its start_run(fix).
 """
 from __future__ import annotations
 
@@ -118,54 +118,14 @@ def _land(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
     return projectqueue.land(conn, row, carry=False) if row is not None else []
 
 
-def _run_gate(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
-    if action.data.get("gate") != 2:
-        return _theirs("run_gate")(conn, project, action)
+def _gate2(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
     from . import queuestack
     return queuestack.start_gate2(conn, project, action)
 
 
-def _start_run(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
-    role = action.data.get("role")
-    if role == "resolve" and action.data.get("again"):
-        from . import callwait, selfwork
-        it = selfwork.store_item(conn, action.item)
-        if it is not None and callwait.waits_of(it):     # its calls are back: the waiting run's next turn
-            return _theirs("start_run")(conn, project, action)
-    if role == "resolve":
-        from . import resolve
-        return resolve.begin(conn, project, action)
-    if role == "fix" and action.data.get("stage") in ("gate2", "resolve"):
-        return _fixer(conn, project, action)         # the queue's fixer: left with what called it
-    other = _theirs("start_run", required=role != "fix")
-    if other is not None:
-        return other(conn, project, action)
-    return _fixer(conn, project, action)
-
-
-def _theirs(kind: str, required: bool = True) -> Optional[Callable[..., List[str]]]:
-    """The build handlers' own (eki/workhandlers_build.py)."""
-    from . import workhandlers_build
-    got = workhandlers_build.HANDLERS.get(kind)
-    if got is None and required:
-        raise LookupError(f"no handler yet for {kind}")
-    return got
-
-
-def _fixer(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
-    """The item's one fixer run, started as eki/fixer.py does (until the build handlers do it);
-    when it can't start after all, the item is left."""
-    from . import fixer
-    with db.tx(conn):
-        row = _row(conn, action.item)
-        if row is None or row["state"] != "fixing" or row["fixer"]:
-            return []                                # done already, or moved on
-        line = fixer.offer(conn, row, action.data.get("stage") or "gate2", action.data.get("failure") or "")
-    if line:
-        return [line]
-    why = (action.data.get("failure") or "").strip().splitlines()[-1:] or [f"{action.data.get('stage')} failed"]
-    return say(conn, row["goal_id"], row["id"], event("item_failed", kind="judgment", why=why[0]), carry=False,
-               after=left_error)
+def _resolve(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
+    from . import resolve
+    return resolve.begin(conn, project, action)
 
 
 def left_error(conn: sqlite3.Connection, old: Optional[ItemState], new: ItemState) -> None:
@@ -174,4 +134,8 @@ def left_error(conn: sqlite3.Connection, old: Optional[ItemState], new: ItemStat
         stopped_error(conn, new.id, "left", new.why.split("left for you — ", 1)[-1])
 
 
-HANDLERS: Dict[str, Callable] = {"merge": _merge, "run_gate": _run_gate, "land": _land, "start_run": _start_run}
+HANDLERS: Dict[str, Callable] = {"merge": _merge, "land": _land}
+#: the queue's roles and gates, looked up by eki/workhandlers_build.py's start_run and run_gate
+#: (a resolve whose calls are back is woken there; a fix, gate 2's or resolve's, is its _fix)
+START: Dict[str, Callable] = {"resolve": _resolve}
+GATES: Dict[Any, Callable] = {2: _gate2}

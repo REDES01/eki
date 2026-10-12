@@ -160,18 +160,24 @@ def _fix(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
     it = _item(conn, action.item)
     if it is None:
         return _drop(conn, action)
-    try:
-        got = fixer.prepare(conn, it)
-    except (workspace.WorkspaceError, OSError, integration.IntegrationError) as e:
-        return buildfeed.feed(conn, it, Event("item_finished", db.now(), {"leave": f"the fixer couldn't start: {e}"}),
-                              then=lambda c: claim(c, action) and None, error=f"the fixer couldn't start: {e}")
     stage, failure = action.data.get("stage"), action.data.get("failure") or ""
     if action.data.get("again"):           # its run was lost: the same fixer run, told the same failure
         note = fixer.of(it) or {}
         stage, failure = note.get("stage"), note.get("failure") or failure
+    try:
+        got = fixer.prepare(conn, it)
+    except (workspace.WorkspaceError, OSError, integration.IntegrationError) as e:
+        why = f"the fixer couldn't start: {e}"
+        if stage in QUEUE_STAGES:          # the queue's: left with what called it, as before the work model
+            why = (failure.strip().splitlines() or [f"{stage} failed"])[-1]
+        return buildfeed.feed(conn, it, Event("item_finished", db.now(), {"leave": why}),
+                              then=lambda c: claim(c, action) and None, error=why)
     with db.tx(conn):
-        if claim(conn, action):
-            fixer.launch(conn, it, stage if stage in fixer.STAGES else "gate1", failure, got)
+        if not claim(conn, action):
+            return []
+        rid = fixer.launch(conn, it, stage if stage in fixer.STAGES else "gate1", failure, got)
+    if stage in QUEUE_STAGES:              # the queue's board says the run, not the state (workhandlers_queue.say)
+        return [f"item {it['id']}: {stage} failed — the fixer is on it ({rid[:8]})"]
     return []
 
 
@@ -202,6 +208,8 @@ def _second(conn: sqlite3.Connection, action: Action, it: sqlite3.Row) -> List[s
     return buildfeed.verdict(conn, _item(conn, it["id"]), {"result": "green", "ended": "done", "second": True})
 
 
+#: the fixer stages the queue calls it for (gate 2, a resolve): their words are the handler's
+QUEUE_STAGES = ("gate2", "resolve")
 START: Dict[str, Handler] = {"plan": _plan, "draft": _plan, "build": _build, "fix": _fix, "review": _review}
 
 

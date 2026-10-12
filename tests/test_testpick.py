@@ -138,7 +138,8 @@ def test_any_matching_tests_rule_stands_in_for_the_scan(repo):
     {"pkg/mid.py": "from . import low\n"},
     {"pkg/mid.py": "from . import (\n    other,\n    low,\n)\n"},
     {"pkg/mid.py": "from .low import x\n"},
-    {"pkg/mid.py": "from pkg.sub import top\n", "pkg/sub/__init__.py": "", "pkg/sub/top.py": "from .. import low\n"},
+    {"pkg/sub/__init__.py": "", "pkg/sub/mid.py": "from .. import low\n",
+     "tests/test_mid.py": "from pkg.sub import mid\n"},
     {"pkg/mid.py": "import pkg.low\n"},
 ])
 def test_a_module_draws_the_tests_of_the_modules_importing_it(tmp_path, files):
@@ -147,17 +148,18 @@ def test_a_module_draws_the_tests_of_the_modules_importing_it(tmp_path, files):
     (root / "pkg" / "__init__.py").parent.mkdir()
     (root / "pkg" / "__init__.py").write_text("")
     (root / "pkg" / "low.py").write_text("x = 1\n")
+    (root / "tests" / "test_mid.py").write_text("from pkg import mid\n")
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text)
-    (root / "tests" / "test_mid.py").write_text("from pkg import mid\n")
     (root / "tests" / "test_other.py").write_text("import pkg.other\n")
     (root / "tests" / "__pycache__").mkdir()
     (root / "tests" / "__pycache__" / "x.py").write_text("from pkg import low\n")
     got = testpick.pick([], ["pkg/low.py"], root)
     assert got == Picked(False, ("tests/test_mid.py",), ("pkg/low.py",))
     assert testpick.said(got) == "gate 1: 1 test file for pkg/low.py"
-    assert testpick.pick([], ["pkg/mid.py"], root).files == ("tests/test_mid.py",)
+    mid = next(p for p in files if p.endswith("/mid.py"))
+    assert testpick.pick([], [mid], root).files == ("tests/test_mid.py",)
 
 
 def test_only_one_level_up_and_unrelated_relatives_do_not_count(tmp_path):

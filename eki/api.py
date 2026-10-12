@@ -8,7 +8,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
-from . import (api_threads, asking, builds, asks, attachments, capacity, digest, engine, gallery, machine, machinecaps,
+from . import (api_threads, asking, buildcap, builds, asks, attachments, capacity, digest, engine, gallery, machine, machinecaps,
                machinenow, modellist, models, paths, projects, providers, quota, routing, store, targets, testslots)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
@@ -146,7 +146,23 @@ def status(conn: sqlite3.Connection) -> Dict[str, Any]:
             "queued": sum(r["state"] == "queued" for r in active),
             "room": room, "room_why": why, "memory_pressure": machine.memory_pressure(),
             "prs": projects.open_prs(conn),
-            "behind": testslots.behind(conn)}             # sidestatus.js: holds waiting behind queued checks
+            "behind": testslots.behind(conn),             # sidestatus.js: holds waiting behind queued checks
+            "caps": caps(conn)}                           # sidestatus.js: the build cap in force per project
+
+
+def caps(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """One entry per project with items building or waiting, with its cap in force, by name. `id` is the
+    project's id ("eki" for eki); `project` stays buildcap's own: the project's ceiling."""
+    rows = conn.execute("SELECT DISTINCT g.project AS project FROM items i JOIN goals g ON g.id = i.goal_id "
+                        "WHERE i.state IN ('building', 'waiting')").fetchall()
+    out = []
+    for r in rows:
+        pid = r["project"]
+        row = projects.get(conn, pid) if pid is not None else None
+        if pid is not None and row is None:
+            continue                                      # a goal of a project since removed
+        out.append({"id": pid or "eki", "name": row["name"] if row else "eki", **buildcap.of(conn, pid)})
+    return sorted(out, key=lambda c: c["name"])
 
 
 def route(conn: sqlite3.Connection, prompt: Optional[str]) -> Dict[str, Any]:

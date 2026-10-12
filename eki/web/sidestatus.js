@@ -57,6 +57,19 @@
     el.textContent = "Digest " + (path.split("/").pop() || "").replace(/\.md$/, "");
   }
 
+  // The build cap in force per project with items building or waiting, under the machine line; hidden when none.
+  function showCaps(caps) {
+    let el = $("caps");
+    if (!caps || !caps.length) { if (el) el.hidden = true; return; }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "caps"; el.className = "dim small";
+      $("machine").appendChild(el);
+    }
+    el.innerHTML = caps.map((c) => `<div class="cap">${md.esc(c.name)}: ${md.esc(c.line)}</div>`).join("");
+    el.hidden = false;
+  }
+
   function draw(ps, st) {
     const sel = $("to"), cur = sel.value;   // who answers, in the composer
     sel.innerHTML = '<option value="">Auto</option>' +
@@ -68,6 +81,7 @@
     if (pr) { pr.innerHTML = prs.lines(st.prs); pr.hidden = !prs.total(st.prs); }
     const behind = st.behind > 0 ? ` · ${st.behind} test runs waiting behind checks` : "";   // eki slot holds
     $("engine").textContent = `${st.running} running · ${st.queued} queued · ${st.room ? "room for background work" : st.room_why}${behind}`;
+    showCaps(st.caps);
     $("status-dot").className = "led " + dot(ps);
     $("status-text").textContent = `${st.running} running`;
   }

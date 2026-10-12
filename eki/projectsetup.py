@@ -70,8 +70,9 @@ def ensure(conn: sqlite3.Connection, repo: str, said: Optional[List[str]] = None
 
 def _chat_row(conn: sqlite3.Connection, repo: str):
     """The oldest live row with repo NULL whose folder's origin is `repo`, with that folder."""
-    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') "
-                          "NOT IN ('dropped','merged','retired','deleting','deleted') ORDER BY created_at").fetchall():
+    for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(lands,'')!='here' AND "
+                          "COALESCE(state,'on') NOT IN ('dropped','merged','retired','deleting','deleted') "
+                          "ORDER BY created_at").fetchall():
         folder = projectchats.folder_of(conn, p["id"])
         if folder and Path(folder).is_dir() and github.repo_of(folder) == repo:
             return p, folder
@@ -205,7 +206,8 @@ def _retire(conn: sqlite3.Connection) -> List[str]:
     said: List[str] = []
     home = paths.projects().resolve()
     for p in conn.execute("SELECT * FROM projects WHERE repo IS NULL AND COALESCE(state,'on') NOT IN "
-                          "('deleting','deleted') ORDER BY created_at").fetchall():
+                          "('deleting','deleted') AND COALESCE(lands,'')!='here' "
+                          "ORDER BY created_at").fetchall():   # 'here': eki merges in the folder
         where = Path(p["path"]).expanduser().resolve()
         if where == home or home in where.parents or not where.is_dir():
             continue

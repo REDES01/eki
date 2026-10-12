@@ -144,7 +144,8 @@ def test_due_honours_the_interval():
 
 
 NEW = [("goals", "issue"), ("standing", "issue"), ("projects", "issues"), ("items", "pr"),
-       ("items", "pr_state"), ("items", "pushed"), ("items", "pr_seen"), ("items", "followups")]
+       ("items", "pr_state"), ("items", "pushed"), ("items", "pr_seen"), ("items", "followups"),
+       ("projects", "lands")]
 
 
 def cols(conn, table):
@@ -200,7 +201,7 @@ def test_open_prs_counts_only_proposed_and_open(conn, proj):
 def test_housekeep_runs_the_github_steps_after_standing_and_before_digest():
     names = [n for n, _ in housekeep.STEPS]
     at = names.index("standing")
-    assert names[at + 1:at + 7] == ["projectdelete", "projects", "issues", "prs", "prfollow", "prmirror"]
+    assert names[at + 1:at + 8] == ["projectdelete", "projects", "lands", "issues", "prs", "prfollow", "prmirror"]
     assert names.index("prmirror") < names.index("digest")
 
 

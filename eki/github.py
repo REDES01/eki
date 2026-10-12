@@ -33,6 +33,10 @@ _last: Dict[str, float] = {}
 _URL = re.compile(r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://(?:[^@/]+@)?github\.com(?::\d+)?/"
                   r"|(?:[^@/:]+@)?github\.com:)([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 _PULL = re.compile(r"https://\S+/pull/\d+")
+#: what a person types for a repository: OWNER/REPO, or a github.com URL with any path after it
+_NAME = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/([A-Za-z0-9._-]+?)(?:\.git)?$")
+_ANY_URL = re.compile(r"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?(?:www\.)?github\.com(?::\d+)?/"
+                      r"|(?:[^@/:]+@)?github\.com:|(?:www\.)?github\.com/)([^/\s?#]+)/([^/\s?#]+)(?:[/?#]\S*)?$")
 
 
 class GhError(RuntimeError):
@@ -99,6 +103,44 @@ def path_of(path: str | Path) -> Tuple[Optional[str], str]:
 
 def whoami() -> str:
     return _gh(["api", "user", "--jq", ".login"]).strip()
+
+
+def named(text: str) -> Optional[str]:
+    """OWNER/REPO from 'OWNER/REPO' or any github.com URL (https, ssh, git@, .git or not, a
+    /tree/... or /pull/... after it ignored); None otherwise."""
+    text = (text or "").strip()
+    m = _ANY_URL.match(text)
+    got = f"{m.group(1)}/{m.group(2)}" if m else text
+    m = _NAME.match(got)
+    return f"{m.group(1)}/{m.group(2)}" if m and m.group(2) not in (".", "..") else None
+
+
+# ---- repositories --------------------------------------------------------------------------
+
+def repo_list(limit: int = 100) -> List[str]:
+    """The signed-in person's repositories, OWNER/REPO, in gh's order."""
+    out = _gh(["repo", "list", "--limit", str(limit), "--json", "nameWithOwner"])
+    got = json.loads(out) if out.strip() else []
+    return [r["nameWithOwner"] for r in got if isinstance(r, dict) and r.get("nameWithOwner")]
+
+
+def repo_create(name: str, folder: str | Path, private: bool = True) -> str:
+    """Make the repository on GitHub with `folder` as its source and origin; pushed only when the
+    folder has a commit. Returns OWNER/REPO as the folder's origin now says."""
+    args = ["repo", "create", name, "--private" if private else "--public", "--source", str(folder),
+            "--remote", "origin"]
+    if workspace.git(folder, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
+        args.append("--push")
+    _gh(args)
+    repo = repo_of(folder)
+    if repo is None:
+        raise GhError(f"gh repo create {name} left no GitHub origin in {folder}")
+    return repo
+
+
+def remote_add(folder: str | Path, repo: str) -> None:
+    """`git remote add origin https://github.com/<repo>.git`."""
+    _git(folder, "remote", "add", "origin", f"https://github.com/{repo}.git")
 
 
 # ---- issues --------------------------------------------------------------------------------

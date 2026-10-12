@@ -7,7 +7,8 @@ loop pick eki's next self-work when it is on and eki is idle
 (eki/selfpick.py), open the next round of each standing goal (eki/standing.py), finish a project
 delete a restart interrupted (eki/projectdelete.py), settle eki's own
 clones of GitHub repos — clone, guessed check, install once, retired folder
-rows (eki/projectsetup.py, every pass) — take issues in and hand PRs out on GitHub (eki/issues.py, prs.py, prfollow.py,
+rows (eki/projectsetup.py, every pass), fill the branch of a project whose
+folder got its first commit after it said where its work lands (eki/projectlands.py) — take issues in and hand PRs out on GitHub (eki/issues.py, prs.py, prfollow.py,
 prmirror.py — at most every self.issues_minutes), write the daily digest when it is due and give the
 local model its patch notes and triage (eki/digestprose.py), queue a notice for each goal
 that ended (eki/notifygoals.py), fire the scheduled prompts that are due and
@@ -40,7 +41,7 @@ import time
 from typing import Callable, Dict, List, Tuple
 
 from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, prfollow,
-               prmirror, projectdelete, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
+               prmirror, projectdelete, projectlands, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
                threadkeep, worktreegc)
 from .components import assets, serve, servers
 
@@ -107,6 +108,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("standing", lambda conn: standing.tick(conn)),
     ("projectdelete", projectdelete.tick),
     ("projects", projectsetup.tick),
+    ("lands", projectlands.tick),
     ("issues", issues.tick),
     ("prs", prs.tick),
     ("prfollow", prfollow.tick),

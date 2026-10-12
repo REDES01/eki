@@ -297,6 +297,7 @@ ADDED = [
     ("items", "landed_on", "TEXT"),     # the project branch eki landed it on; NULL otherwise
     ("items", "context", "TEXT"),       # JSON [{name, why}] knowledge cards the planner picked; NULL: all
     ("items", "waits", "TEXT"),         # JSON {stage, run, since, calls} while waiting on calls
+    ("projects", "lands", "TEXT"),      # here | github; NULL: not said yet (eki/projectlands.py)
 ]
 
 

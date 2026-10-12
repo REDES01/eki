@@ -40,7 +40,8 @@ def test_nav_routes_a_settings_section_and_never_as_a_thread(tmp_path):
 
 def test_settings_js_is_the_frame(web):
     _, js = get(f"{web}/ui/settings.js")
-    assert 'const SECTIONS = ["jobs", "rows", "providers", "notifications", "machine", "self", "components", "sync"]' in js
+    assert ('const SECTIONS = ["jobs", "rows", "providers", "notifications", "machine", "self", "components", "sync", '
+            '"pictures"]') in js
     for want in ('id="set-nav"', 'id="set-body"', '"#settings/"', "S.sect", "window.settingsSections",
                  "/api/settings/", "mtime", "X-Eki", "problems", "409", 'nav.register("settings"', "window.settings",
                  "saving…", "not saved", "set-status", "draft:", "got:", "note,", "render,", "clone,", "section,"):

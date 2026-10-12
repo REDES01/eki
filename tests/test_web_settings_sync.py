@@ -16,7 +16,7 @@ def test_registered_in_sections_and_loaded_before_the_frame(web):
     assert code == 200 and len(js.splitlines()) < 400
     assert 'settings.section("sync"' in js and 'push(["sync"' in js and 'title: "Claude sync"' in js
     assert '"/api/sync"' in js and "method:" not in js            # reads only
-    assert '"sync"]' in (WEB / "settings.js").read_text().split("const SECTIONS", 1)[1].split("\n", 1)[0]
+    assert '"sync"' in (WEB / "settings.js").read_text().split("const SECTIONS", 1)[1].split("\n", 1)[0]
     _, page = get(web + "/")
     assert page.index("/ui/settingscomponents.js") < page.index("/ui/settingssync.js") < page.index("/ui/settings.js")
 

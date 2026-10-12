@@ -21,21 +21,24 @@ global.document = { getElementById: (id) => els[id] || (els["artifacts-view"] ||
   createElement: () => mk(""), head: { appendChild() {} }, querySelectorAll: () => [] };
 global.setTimeout = (f) => 0; global.clearTimeout = () => {};
 global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;") };
-const out = { fetched: [], shown: [], registered: null };
+const out = { fetched: [], shown: [], registered: null, menus: [] };
 global.nav = { register: (name, v) => { out.registered = name; } };
+window.ekiSensitive = { menu: (p, x, y) => { out.menus.push([p, x, y]); } };
 global.panel = { show: async (p) => { out.shown.push(p); } };
 const [items, now, steps] = JSON.parse(process.argv[3]);
 global.fetch = async (url) => { out.fetched.push(url); return { ok: true, json: async () => ({ items, more: true }) }; };
 require(process.argv[2]);
 const A = window.artifacts;
 // a click on the page: target.closest(sel) answers for the one selector given
-const click = (sel, dataset) => els["artifacts-view"].listeners.click({ target: { closest: (s) => s === sel ? { dataset } : null } });
+const click = (sel, dataset) => els["artifacts-view"].listeners.click({ target: { closest: (s) => s === sel ? { dataset, getBoundingClientRect: () => ({ left: 3, bottom: 4 }) } : null } });
 (async () => {
   out.days = A.days(items, now).map((d) => [d.label, d.items.map((i) => i.name)]);
   for (const s of steps) {
     if (s[0] === "show") await A.show(s[1]);
     if (s[0] === "kind") await click("[data-kind]", { kind: s[1] });
     if (s[0] === "more") await click("#af-more", {});
+    if (s[0] === "hide") await click("#af-hide", {});
+    if (s[0] === "pmenu") click("[data-pmenu]", { pmenu: String(s[1]) });
     if (s[0] === "open") { click("[data-art]", { art: String(s[1]) }); await new Promise((r) => setImmediate(r)); }
   }
   out.list = els["af-list"] ? els["af-list"].innerHTML : "";
@@ -100,6 +103,18 @@ def test_a_click_shows_the_file_and_the_way_to_its_chat(tmp_path):
     got = run(tmp_path, [item("a.html", 60, thread="t42")], [["show", None], ["open", 0]])
     assert got["shown"] == ["/tmp/x/a.html"]
     assert 'href="#t42"' in got["detail"] and "Go to chat" in got["detail"] and "make it" in got["detail"]
+
+
+def test_hide_sensitive_sends_the_flag_and_turns_off_again(tmp_path):
+    got = run(tmp_path, [item("a.png", 60, "picture")], [["show", None], ["hide"], ["hide"]])
+    assert ["hide_sensitive=1" in u for u in got["fetched"]] == [False, True, False]
+
+
+def test_each_picture_tile_has_a_menu_to_mark_it(tmp_path):
+    got = run(tmp_path, [item("a.png", 60, "picture"), item("b.html", 120)], [["show", None], ["pmenu", 0]])
+    assert got["list"].count('data-pmenu="') == 1 and 'data-pmenu="0"' in got["list"]
+    assert got["menus"] == [["/tmp/x/a.png", 3, 6]]
+    assert "Hide sensitive" in (WEB / "artifacts.js").read_text()
 
 
 def test_the_page_stays_small():

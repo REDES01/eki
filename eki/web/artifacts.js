@@ -7,7 +7,9 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const KINDS = [["all", "All"], ["picture", "Pictures"], ["page", "Pages"], ["document", "Documents"]];
-  const S = { on: false, kind: "all", q: "", items: [], more: false, loading: false, seq: 0, timer: null };
+  const HIDE = "eki.hideSensitive";   // the "Hide sensitive" toggle, kept in this window
+  const kept = () => { try { return window.localStorage.getItem(HIDE) === "1"; } catch (e) { return false; } };
+  const S = { on: false, kind: "all", q: "", items: [], more: false, loading: false, seq: 0, timer: null, hide: kept() };
 
   const ICON = { html: "🌐", htm: "🌐", md: "📝", markdown: "📝", pdf: "📄" };
   const icon = (ext) => ICON[String(ext || "").toLowerCase().replace(/^\./, "")] || "📎";
@@ -47,6 +49,11 @@
     .af-doc .af-icon { font-size: 20px; }
     .af-doc .af-text { min-width: 0; }
     .af-doc .af-name, .af-doc .quiet { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .af-tile { position: relative; }
+    .af-tile .af-pmenu { position: absolute; top: 6px; right: 6px; z-index: 2; padding: 0 7px; line-height: 20px; border: 0;
+      border-radius: 6px; background: rgba(0, 0, 0, .5); color: #fff; opacity: 0; cursor: pointer; }
+    .af-tile:hover .af-pmenu, .af-pmenu:focus-visible { opacity: 1; }
+    #af-hide.on { border-color: var(--teal); color: var(--teal); }
     .af-foot { text-align: center; margin: 20px 0; }
     .af-empty { text-align: center; margin-top: 20vh; }`;
 
@@ -67,6 +74,7 @@
           <div class="search" id="af-search"><button type="button" title="Search">⌕</button>
             <input id="af-q" placeholder="Search" spellcheck="false"></div>
           <div class="seg" id="af-seg">${KINDS.map(([k, t]) => `<button type="button" data-kind="${k}">${t}</button>`).join("")}</div>
+          <button type="button" class="btn" id="af-hide" title="Leave out pictures marked sensitive">Hide sensitive</button>
         </div></div>
       <div id="af-list"></div>
       <div id="af-empty" class="quiet af-empty" hidden></div>
@@ -88,6 +96,9 @@
     const k = e.target.closest("[data-kind]");
     if (k) return setKind(k.dataset.kind);
     if (e.target.closest("#af-more")) return more();
+    if (e.target.closest("#af-hide")) return setHide(!S.hide);
+    const pm = e.target.closest("[data-pmenu]");
+    if (pm) return picMenu(+pm.dataset.pmenu, pm);
     if (e.target.closest("#af-search button")) {
       $("af-search").classList.add("open");
       return $("af-q").focus && $("af-q").focus();
@@ -99,9 +110,10 @@
   function tile(p, i) {
     const url = "/api/file?path=" + encodeURIComponent(p.path);
     if (p.kind === "picture") {
-      return `<button type="button" class="gpic" data-art="${i}" title="${esc(p.prompt || p.name || p.path)}">
+      return `<div class="af-tile"><button type="button" class="gpic" data-art="${i}" title="${esc(p.prompt || p.name || p.path)}">
         <img src="${url}" alt="${esc(p.prompt || "")}" loading="lazy">
-        ${p.row ? `<span class="gtag">${esc(p.row)}</span>` : ""}</button>`;
+        ${p.row ? `<span class="gtag">${esc(p.row)}</span>` : ""}</button>
+        <button type="button" class="af-pmenu" data-pmenu="${i}" title="Mark sensitive or not">⋯</button></div>`;
     }
     return `<button type="button" class="card af-doc" data-art="${i}" title="${esc(p.path)}">
       <span class="af-icon">${icon(p.ext)}</span>
@@ -118,9 +130,11 @@
     </section>`).join("");
     $("af-more").hidden = !S.more;
     const what = S.kind === "all" ? "artifacts" : KINDS.find(([k]) => k === S.kind)[1].toLowerCase();
-    $("af-empty").textContent = S.q ? `No ${what} match “${S.q}”.` : `No ${what} yet. What your chats make shows up here.`;
+    $("af-empty").textContent = S.q ? `No ${what} match “${S.q}”.` : S.hide ? `No ${what} to show: sensitive pictures are hidden.`
+      : `No ${what} yet. What your chats make shows up here.`;
     $("af-empty").hidden = S.items.length > 0;
     document.querySelectorAll("#af-seg [data-kind]").forEach((b) => b.classList.toggle("on", b.dataset.kind === S.kind));
+    $("af-hide").classList.toggle("on", S.hide);
     $("meta").textContent = `${S.items.length}${S.more ? "+" : ""} item${S.items.length === 1 ? "" : "s"}`;
   }
 
@@ -131,6 +145,7 @@
     const before = !fresh && S.items.length ? S.items[S.items.length - 1].created_at : null;
     let url = "/api/artifacts?limit=60&kind=" + encodeURIComponent(S.kind);
     if (S.q) url += "&q=" + encodeURIComponent(S.q);
+    if (S.hide) url += "&hide_sensitive=1";
     if (before != null) url += "&before=" + before;
     try {
       const r = await fetch(url);
@@ -162,6 +177,24 @@
   }
 
   const more = () => load(false);
+
+  function setHide(on) {
+    S.hide = !!on;
+    try { window.localStorage.setItem(HIDE, S.hide ? "1" : "0"); } catch (e) { /* no storage: this view only */ }
+    S.items = [];
+    return load(true);
+  }
+
+  // a picture tile's ⋯: the same mark / unmark as a right-click (sensitive.js); hidden ones leave
+  function picMenu(i, btn) {
+    const p = S.items[i];
+    if (!p || !window.ekiSensitive) return;
+    const r = btn.getBoundingClientRect();
+    return window.ekiSensitive.menu(p.path, r.left, r.bottom + 2, (on) => {
+      p.sensitive = on;
+      if (S.hide && on) { S.items = []; load(true); }
+    });
+  }
 
   // the file in the side panel, then what made it and the way back to its chat
   async function open(i) {
@@ -196,6 +229,6 @@
     box().hidden = true;
   }
 
-  window.artifacts = { show, hide, days, setKind, search, more, open, state: S, on: () => S.on };
+  window.artifacts = { show, hide, days, setKind, search, more, open, setHide, state: S, on: () => S.on };
   nav.register("artifacts", { show, hide });
 })();

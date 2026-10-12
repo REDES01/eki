@@ -225,3 +225,16 @@ a.pj-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
   box-shadow: 0 2px 10px color-mix(in srgb, var(--text) 10%, transparent); }
 #pagebar[hidden] { display: none; }
 #pagebar button { color: var(--teal); }
+
+/* ---- sensitive pictures (sensitive.js): blurred under a label until clicked; its small menu ---- */
+img.sens-blur { filter: blur(28px) saturate(.6); transform: scale(1.04); cursor: pointer; }
+.sens-on { overflow: hidden; }
+.sens-rel { position: relative; }
+.sens-box { display: inline-block; max-width: 100%; vertical-align: top; }
+.sens-on::after { content: "Sensitive · click to show"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 12px; white-space: nowrap;
+  pointer-events: none; }
+.sens-menu { position: fixed; z-index: 60; min-width: 160px; padding: 4px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.sens-item { display: block; width: 100%; text-align: left; padding: 6px 10px; border: 0; border-radius: 6px; background: none; cursor: pointer; }
+.sens-item:hover { background: var(--panel); }

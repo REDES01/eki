@@ -34,7 +34,7 @@ def test_a_machine_block_is_written_and_read_back(web, home):
                      {"data": {**got["data"], "machine": {"agents": 16, "checks": 4}}, "mtime": got["mtime"]})
     assert code == 200 and out["ok"] is True
     assert json.loads((home / "routing.json").read_text())["machine"] == {"agents": 16, "checks": 4}
-    assert machinecaps.settings() == {"agents": 16, "checks": 4}
+    assert machinecaps.settings() == {"agents": 16, "checks": 4, "browsers": 3}
     live = json.loads(get(web + "/api/machine")[1])
     assert live["agents"] == 16 and live["checks"] == 4
 

@@ -1,11 +1,13 @@
 """Machine caps: how much eki runs at once on this Mac, across all projects.
 
-routing.json's "machine" block holds two whole numbers, each with its own
+routing.json's "machine" block holds three whole numbers, each with its own
 upper bound in MOST: `agents` (1..64), how many items may build at once across
 every project (each mostly waits on the model, so this costs subscription quota
-rather than CPU), and `checks` (1..32), how many test runs may run at once
+rather than CPU), `checks` (1..32), how many test runs may run at once
 (judges, and the agents' own test runs inside build turns) so load stays near
-the core count. A project's
+the core count, and `browsers` (1..16), how many Playwright browsers may be
+open at once across every run (each renders a page — a WebGL game costs
+cores and memory; browserslots.py holds the slots). A project's
 workflow card `parallel` is only that project's cap; this one is separate and wins.
 
 They used to live in the "self" block as `parallel` and `check_slots`; the
@@ -22,8 +24,10 @@ from . import paths
 
 #: the default for agents at once
 AGENTS = 12
+#: the default for browsers at once
+BROWSERS = 3
 #: each cap's upper bound
-MOST = {"agents": 64, "checks": 32}
+MOST = {"agents": 64, "checks": 32, "browsers": 16}
 #: the old "self" keys and where they go
 MOVED = {"parallel": "agents", "check_slots": "checks"}
 
@@ -33,7 +37,7 @@ def checks_default() -> int:
 
 
 def _defaults() -> Dict[str, int]:
-    return {"agents": AGENTS, "checks": checks_default()}
+    return {"agents": AGENTS, "checks": checks_default(), "browsers": BROWSERS}
 
 
 def _whole(v: Any) -> bool:
@@ -88,7 +92,7 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def settings() -> Dict[str, int]:
-    """{"agents", "checks"}: the saved values clamped to their bounds, or the defaults."""
+    """{"agents", "checks", "browsers"}: the saved values clamped to their bounds, or the defaults."""
     out = _defaults()
     data = _read()
     if data is None:
@@ -104,9 +108,11 @@ def settings() -> Dict[str, int]:
     return out
 
 
-def save(agents: Optional[int] = None, checks: Optional[int] = None) -> Dict[str, int]:
+def save(agents: Optional[int] = None, checks: Optional[int] = None,
+         browsers: Optional[int] = None) -> Dict[str, int]:
     """Set the given caps in routing.json's machine block; the new settings()."""
-    given = {k: v for k, v in (("agents", agents), ("checks", checks)) if v is not None}
+    given = {k: v for k, v in (("agents", agents), ("checks", checks), ("browsers", browsers))
+             if v is not None}
     for k, v in given.items():
         if _bad(k, v):
             raise ValueError(_bad(k, v))
@@ -124,5 +130,5 @@ def problems(block: Any) -> List[str]:
     """Every problem with a "machine" block, in words."""
     if not isinstance(block, dict):
         return ["machine must be an object"]
-    found = (_bad(k, block[k]) for k in ("agents", "checks") if k in block)
+    found = (_bad(k, block[k]) for k in MOST if k in block)
     return [why for why in found if why]

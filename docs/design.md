@@ -270,7 +270,32 @@ meters, engine line, PRs and digest in a popover (`sidestatus.js`).
 
 States: `queued → running → done | failed | cancelled | handed_off`, and
 `running → interrupted → queued` when a worker dies without finishing.
-A run carries its `attempt`; after 3 interruptions in a row it fails.
+A run carries its `attempt` (it numbers the events; nothing fails on it).
+Every failed, limited or lost run goes through one pure function,
+`eki/stopkind.py` `classify`, from `worker.finish` and `engine.interrupted`;
+what it decides is kept in `runs.stop` (`{kind, retry_at, fix, since, n}`,
+with `n` counting stops of the same kind in a row):
+
+- **lost** — the engine reaped the worker (a restart, a stale heartbeat, a
+  killed worker). Never a failure: queued at once to resume, at no cost.
+  Past `LOST_CAP` (10) losses in a row it follows the transient rule, and
+  after that it fails as judgment.
+- **quota** — a usage limit. The reset comes from what the program reported
+  or the message ("resets 4:30am (Asia/Tokyo)", "try again at 5:00 PM"),
+  else a backoff of 30 m doubling to 8 h. The provider cools down till then
+  (`capacity.limited`). An unpinned run another provider can take moves on
+  with the provider excluded; a pinned one, or one nobody else can take,
+  waits queued till the reset, its why naming it.
+- **transient** — a dropped connection, an overloaded server, a crash, a
+  program that didn't come up: queued on the same provider to resume its
+  session after 1, 10 and 30 minutes, then judgment.
+- **environment** — a broken setup a retry would meet again (a missing
+  folder, a CLI not installed or not signed in, macOS refusing access, a bad
+  model in config): the run fails, its error starting with the fix.
+- **judgment** — everything else, and every failing check (`command` runs):
+  the run fails as before.
+
+Quota, transient and lost never use an item's tries.
 `priority` is `now` (you're waiting) or `background` (gated by the machine).
 A `fresh` run starts a new program session and resumes only its own (after
 a restart cut it off), never the thread's earlier one; resolve runs and
@@ -1659,7 +1684,7 @@ project is refused.
 ## Notifications
 
 eki pushes to your phone through [ntfy](https://ntfy.sh): a plain HTTP POST,
-no account, no SDK. Only two kinds of event are sent, nothing else.
+no account, no SDK. Only three kinds of event are sent, nothing else.
 
 - **eki · goal done** (or **eki · goal ended, N left**) when a goal ends —
   every item live or landed, or stopped with items left. The body is the
@@ -1667,14 +1692,24 @@ no account, no SDK. Only two kinds of event are sent, nothing else.
 - **eki · needs you** (high priority) when an item goes `locked`, an item is
   left for a person, or an agent's question or permission card opens. The
   body says what and the command to act (`eki self apply <item> --yes`).
+  Only for a real judgment or a broken setup (stop kinds `environment` and
+  `judgment`, `stopkind.PINGS`); a limit, a dropped connection or a lost
+  worker never asks. A setup broken under an item says what is broken and
+  the fix, once per breakage.
+- **eki · a long wait** (`heads_up`, default priority) when a usage limit
+  holds work more than 12 hours: "Claude Code's weekly limit resets Thu
+  09:00; work for it waits till then." Information, not a question; once
+  per provider per reset.
 
 **Settings.** `routing.json`
-`"notify": {"server": "https://ntfy.sh", "topic": "", "events": ["goal_done", "needs_you"]}`.
+`"notify": {"server": "https://ntfy.sh", "topic": "", "events": ["goal_done", "needs_you", "heads_up"]}`.
 An empty topic means off. The topic is a secret: it is shown masked and never
 written to logs, digests or PR bodies.
 
 **Delivery.** Each event has a stable key — `goal:<id>:done`,
-`item:<id>:<state>:<tries>`, `ask:<id>` — recorded in the `notices` table at
+`item:<id>:<state>:<tries>`, `item:<id>:env:<hash>` (the hash of the fix
+text, so the same breakage is sent once however many rechecks fail),
+`ask:<id>`, `quota:<provider>:<reset>` — recorded in the `notices` table at
 the transition. The housekeeping drain sends each at most once, on a thread
 (5 s timeout, 3 tries, never blocking the engine), so a restart neither
 re-sends nor loses one. A goal counts only if it ended within the last day.

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import acceptance, aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc, workrun
+from . import acceptance, aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc, worker, workrun
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -37,8 +37,6 @@ STALE = float(os.environ.get("EKI_STALE") or 10)
 STUCK = 180
 #: a worker that hasn't claimed its run in this long never will
 STARTING = 30
-#: interruptions in a row before a run is given up on
-MAX_ATTEMPTS = 4
 
 
 def ceiling() -> Optional[int]:
@@ -96,24 +94,28 @@ def reap(conn) -> None:
 
 
 def interrupted(conn, r) -> None:
-    ended = False
+    """A reaped worker's run is lost, never failed: queued at once to resume, at no attempt's
+    cost. Past stopkind.LOST_CAP in a row it follows the transient rule, then fails as judgment."""
     with db.tx(conn):
         cur = store.run(conn, r["id"])
         if cur["state"] not in ("starting", "running"):
             return
-        ended = bool(cur["cancel"]) or cur["attempt"] >= MAX_ATTEMPTS
         store.add_event(conn, r["id"], cur["attempt"], "interrupted", {"pid": cur["pid"]})
         stop_child(cur["child_pid"])
-        if cur["cancel"]:
+        stop = None if cur["cancel"] else worker.stopped(conn, cur, "lost", provider=cur["provider"] or "")
+        if stop is None:
             store.update_run(conn, r["id"], state="cancelled", ended_at=db.now())
-        elif cur["attempt"] >= MAX_ATTEMPTS:
-            store.update_run(conn, r["id"], state="failed", ended_at=db.now(),
-                             error=f"interrupted {cur['attempt']} times")
+        elif stop.kind == "lost":
+            store.update_run(conn, r["id"], state="queued", pid=None, retry_at=None)
+        elif stop.kind == "transient":
+            store.update_run(conn, r["id"], state="queued", pid=None, retry_at=stop.retry_at,
+                             why="interrupted again and again; trying again shortly")
         else:
-            store.update_run(conn, r["id"], state="queued", pid=None)
-    if ended:
+            store.update_run(conn, r["id"], state="failed", ended_at=db.now(),
+                             error=f"interrupted {cur['attempt']} times, the last ones in a row")
+    if stop is None or stop.kind not in ("lost", "transient"):
         observe.run_ended(conn, r["id"])
-    log.info("run %s interrupted; %s", r["id"], "queued to resume")
+    log.info("run %s interrupted; %s", r["id"], stop.kind if stop else "cancelled")
 
 
 def stop_child(pid: Optional[int]) -> None:

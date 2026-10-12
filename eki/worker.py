@@ -21,8 +21,8 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import (asks, browsershim, capacity, chatcommit, components, files, db, memnotes, models, observe, paths, providers,
-               quota, routing, skills, store, syncstate, transient)
+from . import (asks, browsershim, capacity, chatcommit, components, files, db, memnotes, models, notify, observe, paths,
+               providers, quota, resettime, routing, skills, stopkind, store, syncstate)
 from .components import knowledge, mcpserver, serve, skillcard
 from .providers.base import Outcome, Turn
 from .routing.needs import is_picture
@@ -182,9 +182,43 @@ def _routed(conn: sqlite3.Connection, rid: str) -> Dict[str, Any]:
     return json.loads(got[0] or "{}") if got else {}
 
 
+def stopped(conn: sqlite3.Connection, cur: sqlite3.Row, state: str, error: str = "", reset_at=None,
+            provider: str = "") -> stopkind.Stop:
+    """Classify a failed, limited or lost run and write runs.stop (inside the caller's transaction).
+    The one way eki's own runs and project runs alike learn what kind of stop they had."""
+    now = db.now()
+    prev = json.loads(cur["stop"]) if cur["stop"] else None
+    stop = stopkind.after(prev, stopkind.Failure(state=state, error=error or "", reset_at=reset_at,
+                                                 provider=provider or "", now=now))
+    store.update_run(conn, cur["id"], stop=db.dumps(stopkind.record(prev, stop, now)))
+    return stop
+
+
+def _others(conn: sqlite3.Connection, r: sqlite3.Row, provider: str) -> bool:
+    """Whether a provider other than this one (and those tried already) can take the run now."""
+    try:
+        skip = set(store.excluded(r)) | {provider}
+        avail = capacity.status(conn, background=r["priority"] == "background")
+        return any(ok for name, (ok, _) in avail.items() if name not in skip)
+    except Exception as e:                      # noqa: BLE001 — can't tell: wait for this one
+        log.warning("can't tell who else takes %s: %s", r["id"], e)
+        return False
+
+
+def _heads_up(conn: sqlite3.Connection, provider: str, error: str, stop: stopkind.Stop) -> None:
+    """A long quota wait, once per provider per reset: information, not a question."""
+    name = stopkind._NAMES.get(provider, provider)
+    when = time.strftime("%a %H:%M", time.localtime(stop.retry_at))
+    notify.queue(conn, f"quota:{provider}:{int(stop.retry_at)}", "heads_up", "eki · a long wait",
+                 f"{name}'s {resettime.label(error)} resets {when}; work for it waits till then.")
+
+
 def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome) -> None:
     rid, now = r["id"], db.now()
     noted = None                               # what the journal is told, once the run is written
+    others = None
+    if out.state in ("limited", "failed") and not r["pinned"] and not store.run(conn, rid)["cancel"]:
+        others = _others(conn, r, provider)    # asked before the transaction: it looks at programs
     with db.tx(conn):
         cur = store.run(conn, rid)
         if out.state == "done":               # finished before the stop landed: keep the answer
@@ -204,33 +238,51 @@ def finish(conn: sqlite3.Connection, r: sqlite3.Row, provider: str, out: Outcome
             store.update_run(conn, nxt, why=f"handed off by {provider}: {reason}")
             store.add_event(conn, rid, cur["attempt"], "handoff", {"to_run": nxt, "reason": out.reason})
             noted = ("handoff", {"reason": out.reason, "to_run": nxt})
-        elif out.state == "limited":
-            until = capacity.limited(conn, provider, out.reset_at)
-            noted = ("limit", {"error": out.error, "reset_at": out.reset_at, "pinned": bool(r["pinned"])})
-            store.add_event(conn, rid, cur["attempt"], "note", {"text": f"{provider}: {out.error}"})
-            if r["pinned"]:
-                store.update_run(conn, rid, state="queued", pid=None, retry_at=until,
-                                 why=f"you picked {provider} — waiting for its limit to reset")
-            else:
-                store.update_run(conn, rid, state="queued", pid=None, provider=None, retry_at=None,
-                                 exclude=db.dumps(store.excluded(r) + [provider]),
-                                 why=f"{provider} hit its limit; trying the next")
-        elif transient.looks_transient(out.error) and (wait := transient.delay(cur["retries"] or 0)):
-            # a dropped connection says nothing about the work: queue it again on the same
-            # provider, so the next worker resumes the same session with CARRY_ON
-            store.update_run(conn, rid, state="queued", pid=None, retry_at=now + wait,
-                             retries=(cur["retries"] or 0) + 1,
-                             why=f"{provider}: transient error, trying again in {wait} s")
-            store.add_event(conn, rid, cur["attempt"], "note",
-                            {"text": f"transient error, trying again in {wait} s: {out.error[:300]}"})
-            noted = ("transient", {"error": out.error, "retry_in": wait, "retries": (cur["retries"] or 0) + 1})
         else:
-            store.update_run(conn, rid, state="failed", ended_at=now, error=out.error[:1000])
+            noted = _stop(conn, r, cur, provider, out, others)
     if noted:
         observe.record(conn, noted[0], run_id=rid, thread_id=r["thread_id"], provider=provider,
                        data=noted[1])
     observe.run_ended(conn, rid)                # a run still queued (a limit, a retry) isn't written down
     drop_run_skills(rid)
+
+
+def _stop(conn: sqlite3.Connection, r: sqlite3.Row, cur: sqlite3.Row, provider: str, out: Outcome,
+          others) -> tuple | None:
+    """A limited or failed run, by the kind of its stop; what the journal is told, if anything.
+    Quota and transient wait queued and never touch an item's tries; only environment and
+    judgment fail the run."""
+    rid, now, error = r["id"], db.now(), out.error or ""
+    stop = stopped(conn, cur, out.state, error, out.reset_at, provider)
+    if stop.kind == "quota":
+        until = capacity.limited(conn, provider, stop.retry_at)
+        store.add_event(conn, rid, cur["attempt"], "note", {"text": f"{provider}: {error}"})
+        if others:
+            store.update_run(conn, rid, state="queued", pid=None, provider=None, retry_at=None,
+                             exclude=db.dumps(store.excluded(r) + [provider]),
+                             why=f"{provider} hit its limit ({stop.fix}); trying the next")
+        else:
+            who = f"you picked {provider}" if r["pinned"] else "no other program can take it"
+            store.update_run(conn, rid, state="queued", pid=None, retry_at=until,
+                             why=f"{who} — waiting for its limit to reset ({stop.fix})")
+        if stop.long_wait:
+            _heads_up(conn, provider, error, stop)
+        return ("limit", {"error": error, "reset_at": stop.retry_at, "pinned": bool(r["pinned"]),
+                          "fix": stop.fix})
+    if stop.kind == "transient":
+        # a dropped connection or a crash says nothing about the work: queue it again on the same
+        # provider, so the next worker resumes the same session with CARRY_ON
+        wait, tries = int(round(stop.retry_at - now)), (cur["retries"] or 0) + 1
+        store.update_run(conn, rid, state="queued", pid=None, retry_at=stop.retry_at, retries=tries,
+                         why=f"{provider}: transient error, trying again in {wait} s")
+        store.add_event(conn, rid, cur["attempt"], "note",
+                        {"text": f"transient error, trying again in {wait} s: {error[:300]}"})
+        return ("transient", {"error": error, "retry_in": wait, "retries": tries})
+    if stop.kind == "environment":
+        store.add_event(conn, rid, cur["attempt"], "note", {"text": f"broken setup: {stop.fix}"})
+        error = f"{stop.fix}\n{error}"
+    store.update_run(conn, rid, state="failed", ended_at=now, error=error[:1000])
+    return None
 
 
 def drop_run_skills(rid: str) -> None:

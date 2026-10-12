@@ -1,7 +1,8 @@
-"""A run that fails on a transient error is queued again and resumes its session."""
+"""A run that fails on a transient error (eki/stopkind.py) is queued again and resumes its session."""
+import json
 import time
 
-from eki import db, observe, store
+from eki import db, observe, stopkind, store
 from conftest import run_inline
 
 
@@ -21,12 +22,13 @@ def retried_then_done(conn, tid, rid):
     before = time.time()
     r = run_inline(conn, rid)
     assert r["state"] == "queued" and r["retries"] == 1 and r["provider"] == "fake"
-    assert before + 29 <= r["retry_at"] <= time.time() + 31
+    assert before + 59 <= r["retry_at"] <= time.time() + 61
+    assert json.loads(r["stop"])["kind"] == "transient"
     assert r["ended_at"] is None
     note = notes(conn, rid)[-1]
-    assert note.startswith("transient error, trying again in 30 s") and "ECONNRESET" in note
+    assert note.startswith("transient error, trying again in 60 s") and "ECONNRESET" in note
     [j] = observe.entries(conn, kind="transient")
-    assert j["run_id"] == rid and j["data"]["retry_in"] == 30 and j["data"]["retries"] == 1
+    assert j["run_id"] == rid and j["data"]["retry_in"] == 60 and j["data"]["retries"] == 1
     assert not observe.entries(conn, kind="run")
     sid = store.session(conn, tid, "fake")["session_id"]
     r = run_inline(conn, rid)
@@ -47,7 +49,7 @@ def test_a_picked_provider_is_tried_again_on_itself(conn):
 
 def test_retries_back_off_then_fail(conn):
     _, rid = ask(conn, "flaky=4 steps=1")
-    for n, wait in enumerate((30, 120, 300), 1):
+    for n, wait in enumerate(stopkind.TRANSIENT_WAITS, 1):
         start = time.time()
         r = run_inline(conn, rid)
         assert r["state"] == "queued" and r["retries"] == n
@@ -61,6 +63,7 @@ def test_an_ordinary_failure_fails_at_once(conn):
     _, rid = ask(conn, "fail steps=1")
     r = run_inline(conn, rid)
     assert r["state"] == "failed" and r["retries"] == 0 and "fake failure" in r["error"]
+    assert json.loads(r["stop"])["kind"] == "judgment"
     assert not observe.entries(conn, kind="transient")
 
 

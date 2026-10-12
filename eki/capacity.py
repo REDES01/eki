@@ -22,8 +22,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from . import budget, models, paths, providers, quota, store
 
-#: a limit that came without a reset time is waited out this long
-DEFAULT_COOLDOWN = 15 * 60
 STARTS = "off; starts for the run"          # a managed server that is down but eki can start
 DEFAULT_LIMITS = {"stop_at": 0.98, "save_from": 0.8}
 
@@ -88,7 +86,8 @@ def saving(conn: sqlite3.Connection, name: str) -> Optional[str]:
     return None
 
 
-def limited(conn: sqlite3.Connection, provider: str, reset_at) -> float:
-    until = float(reset_at) if reset_at else time.time() + DEFAULT_COOLDOWN
+def limited(conn: sqlite3.Connection, provider: str, until: float) -> float:
+    """Cool the provider down till `until` — the quota Stop's retry_at (eki/stopkind.py)."""
+    until = float(until)
     store.cool(conn, provider, until, "limit reached")
     return until

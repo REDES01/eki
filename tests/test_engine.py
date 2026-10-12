@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -42,16 +43,27 @@ def test_background_waits_for_room(conn, monkeypatch):
     assert spawned == [now]
 
 
-def test_a_dead_worker_is_requeued_and_a_stuck_one_gives_up(conn):
+def test_a_dead_worker_is_requeued_free_and_only_endless_losses_give_up(conn):
+    from eki import stopkind
     with db.tx(conn):
         rid = store.create_run(conn, store.create_thread(conn, "t", None), "x")
-    store.update_run(conn, rid, state="running", pid=999999, heartbeat=1.0, attempt=1)
+    for n in range(1, stopkind.LOST_CAP + len(stopkind.TRANSIENT_WAITS) + 2):
+        store.update_run(conn, rid, state="running", pid=999999, heartbeat=1.0, attempt=n)
+        engine.reap(conn)
+        r = store.run(conn, rid)
+        if r["state"] == "failed":
+            break
+        assert r["state"] == "queued"
+    assert n == stopkind.LOST_CAP + len(stopkind.TRANSIENT_WAITS) + 1
+    assert "interrupted" in r["error"] and json.loads(r["stop"])["kind"] == "judgment"
+
+
+def test_a_cancelled_run_that_was_lost_is_cancelled(conn):
+    with db.tx(conn):
+        rid = store.create_run(conn, store.create_thread(conn, "t", None), "x")
+    store.update_run(conn, rid, state="running", pid=999999, heartbeat=1.0, attempt=1, cancel=1)
     engine.reap(conn)
-    assert store.run(conn, rid)["state"] == "queued"
-    store.update_run(conn, rid, state="running", pid=999999, heartbeat=1.0, attempt=engine.MAX_ATTEMPTS)
-    engine.reap(conn)
-    r = store.run(conn, rid)
-    assert r["state"] == "failed" and "interrupted" in r["error"]
+    assert store.run(conn, rid)["state"] == "cancelled" and store.run(conn, rid)["stop"] is None
 
 
 def test_only_one_engine(home):

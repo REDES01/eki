@@ -1,6 +1,8 @@
 """Pushes to the person's phone (and so their watch) through ntfy.
 
-Two kinds only: a goal that ended, and something that waits on the person.
+Three kinds: a goal that ended, something that waits on the person (a real
+judgment or a broken setup — eki/stopkind.py PINGS), and a heads-up about a
+long wait (a usage limit far off), for information only.
 A hook calls queue() inside its own transaction; the row's key makes each
 event at most one push, and the row living in the db means a restart
 neither sends one twice nor loses one. The housekeeping pass calls tick(),
@@ -25,8 +27,8 @@ from . import db, paths
 
 log = logging.getLogger("eki.notify")
 
-KINDS = ("goal_done", "needs_you")
-DEFAULTS: Dict[str, Any] = {"server": "https://ntfy.sh", "topic": "", "events": ["goal_done", "needs_you"]}
+KINDS = ("goal_done", "needs_you", "heads_up")
+DEFAULTS: Dict[str, Any] = {"server": "https://ntfy.sh", "topic": "", "events": list(KINDS)}
 
 #: seconds one POST may take
 TIMEOUT = 5
@@ -63,7 +65,7 @@ def _header(text: str) -> str:
 
 
 def headers(kind: str, title: str, click: Optional[str] = None) -> Dict[str, str]:
-    tags = {"needs_you": "bell", "goal_done": "white_check_mark"}.get(kind, "test_tube")
+    tags = {"needs_you": "bell", "goal_done": "white_check_mark", "heads_up": "information_source"}.get(kind, "test_tube")
     got = {"Title": _header(title), "Priority": "high" if kind == "needs_you" else "default", "Tags": tags}
     if click:
         got["Click"] = _header(click)

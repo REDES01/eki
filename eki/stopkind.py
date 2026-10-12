@@ -1,7 +1,6 @@
 """What kind of stop a failed or lost run is — the one place that decides.
 
-Pure. Callers pass n = runs.stop["n"] (or use `after`) and store `record`;
-only PINGS kinds may ask a person. Reset times are read by eki/resettime.py.
+Pure. Callers use `after` (n from runs.stop) and store `record`; only PINGS kinds ask a person.
 """
 import re
 import time
@@ -67,6 +66,8 @@ def classify(f: Failure) -> Stop:
         return Stop("judgment", None, "")
     if fix := _environment(text, f.provider):
         return Stop("environment", None, fix)
+    if f.provider == "command":                     # a check: its exit and output are the verdict
+        return Stop("judgment", None, "")
     low = text.lower()
     if any(k in low for k in _PASSING) or _CRASH.search(text) or ("api error" in low and _SERVER.search(low)):
         return _transient(now, f.n)
@@ -76,8 +77,7 @@ def classify(f: Failure) -> Stop:
 
 
 def after(prev: Optional[dict], f: Failure) -> Stop:
-    """classify with n and since taken from the run's last stop when it was
-    of the same kind (a lost run past LOST_CAP keeps counting as transient)."""
+    """classify with n and since from the run's last stop of the same kind (lost past LOST_CAP: transient)."""
     first = classify(replace(f, n=0, since=None))
     same = prev and (prev.get("kind") == first.kind or (
         f.state == "lost" and prev.get("kind") == "transient" and (prev.get("n") or 0) > LOST_CAP))

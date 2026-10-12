@@ -4,8 +4,8 @@
 // The topic is a secret: it is shown in a password field, never in plain view.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const KINDS = ["goal_done", "needs_you"];                                      // notify.KINDS
-  const LABELS = { goal_done: "a goal finished", needs_you: "something needs you" };
+  const KINDS = ["goal_done", "needs_you", "heads_up"];                                      // notify.KINDS
+  const LABELS = { goal_done: "a goal finished", needs_you: "something needs you", heads_up: "a long wait, for your information" };
   const SERVER = "https://ntfy.sh";                                              // notify.DEFAULTS
   const block = (d) => (d.notify && typeof d.notify === "object" ? d.notify : {});
 

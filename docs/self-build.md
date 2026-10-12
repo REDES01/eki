@@ -203,7 +203,9 @@ read as any other. An item that has waited longer than the cap — 60 minutes,
 or the largest `wait_minutes` a waited card sets in its component.json — is
 woken anyway with what came back and a line for each call still out; those
 keep running, uncancelled, and being the old turn's they don't make the woken
-turn wait again. At most `MAX_WAITS` = 4 wakes per build try; past that the
+turn wait again. A call that finishes after its build turn stopped waiting is handed to the
+item's next try: its build brief names the call and its session folder and says
+not to play again (`eki/callsback.py`). At most `MAX_WAITS` = 4 wakes per build try; past that the
 item is concluded as it would have been, the board saying "stopped waiting for
 calls after 4 wakes". Dropping a waiting item cancels its calls. The station
 shows `calls <id8>, …` and `waiting on calls: <card> (run <id8>, <state>), … ·

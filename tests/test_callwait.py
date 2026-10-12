@@ -214,3 +214,11 @@ def test_a_failed_call_shows_its_error(conn, built):
     finish(conn, c, "", state="failed", error="the game wouldn't start")
     p = callwait.wake_prompt(conn, [store.run(conn, c)], False)
     assert "failed" in p and "the game wouldn't start" in p
+
+
+def test_a_queued_call_says_queued_and_why(conn, built):
+    c = call(conn, built, state="queued")
+    store.update_run(conn, c, why="waits for playtester: 2 of 2 slots busy")
+    p = callwait.wake_prompt(conn, [store.run(conn, c)], True)
+    assert f"playtester run {c}: queued — waits for playtester: 2 of 2 slots busy" in p
+    assert "your next try gets its session" in p and "stuck" not in p

@@ -132,6 +132,11 @@ def wake_prompt(conn: sqlite3.Connection, calls: List[sqlite3.Row], timed_out: b
     out = [FIRST_LINE]
     for c in calls:
         name = card(c)
+        if c["state"] == "queued":
+            why = (c["why"] or "waiting for its turn").strip()
+            out.append(f"\n{name} run {c['id']}: queued — {why}; it keeps going, and if it finishes after this"
+                       " turn your next try gets its session")
+            continue
         if c["state"] in store.ACTIVE:
             out.append(f"\n{name} run {c['id']}: still running — not waited for any more; `eki show {c['id']}` later")
             continue

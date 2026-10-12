@@ -15,8 +15,8 @@ import json
 import sqlite3
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import (callwait, db, doccheck, fixer, integration, notify, projectbrief, projects, projectwork, review,
-               selfbrief, selfdraft, selfwork, store, workflow, workflowgates, workspace)
+from . import (callsback, callwait, db, doccheck, fixer, integration, notify, projectbrief, projects, projectwork,
+               review, selfbrief, selfdraft, selfwork, store, workflow, workflowgates, workspace)
 from .workmodel import Action, Event
 
 Handler = Callable[[sqlite3.Connection, Any, Action], List[str]]
@@ -116,6 +116,7 @@ def _build(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
                      branch=it["branch"], base=it["base"], source=str(selfwork.source()), others=others,
                      failure=failure, objection=review.objection(it))
         prompt = selfbrief.build(**brief) if row is None else projectbrief.build(**brief, project=row)
+        prompt += callsback.brief_lines(conn, callsback.unread(conn, it))
         rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                                priority="now" if goal["owner"] == "you" else "background")
         selfwork._set(conn, it["id"], run_id=rid, error=None)

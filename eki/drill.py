@@ -46,8 +46,10 @@ def _reap(pid: int) -> None:
 def run(say: Callable[[str], None] = print, home: str | None = None) -> List[str]:
     home = home or tempfile.mkdtemp(prefix="eki-drill-")
     os.makedirs(home, exist_ok=True)
-    saved = {k: os.environ.get(k) for k in ("EKI_HOME", "EKI_STALE", "EKI_MACHINE", "EKI_PORT")}
-    os.environ.update({"EKI_HOME": home, "EKI_STALE": "2", "EKI_MACHINE": "ok", "EKI_PORT": "0"})
+    saved = {k: os.environ.get(k) for k in ("EKI_HOME", "EKI_STALE", "EKI_MACHINE", "EKI_PORT",
+                                       "EKI_FREE_GB", "EKI_SWAP_PCT")}
+    os.environ.update({"EKI_HOME": home, "EKI_STALE": "2", "EKI_MACHINE": "ok", "EKI_PORT": "0",
+                       "EKI_FREE_GB": "64", "EKI_SWAP_PCT": "0"})
     engine.STALE = 2.0
     checks: List[str] = []
 
@@ -133,8 +135,10 @@ def swaps(say: Callable[[str], None] = print, home: str | None = None) -> List[s
     from . import builds
     home = home or tempfile.mkdtemp(prefix="eki-swapdrill-")
     os.makedirs(home, exist_ok=True)
-    saved = {k: os.environ.get(k) for k in ("EKI_HOME", "EKI_MACHINE", "EKI_PORT", "EKI_WATCH")}
-    os.environ.update({"EKI_HOME": home, "EKI_MACHINE": "ok", "EKI_PORT": "0", "EKI_WATCH": "3"})
+    saved = {k: os.environ.get(k) for k in ("EKI_HOME", "EKI_MACHINE", "EKI_PORT", "EKI_WATCH",
+                                       "EKI_FREE_GB", "EKI_SWAP_PCT")}
+    os.environ.update({"EKI_HOME": home, "EKI_MACHINE": "ok", "EKI_PORT": "0", "EKI_WATCH": "3",
+                       "EKI_FREE_GB": "64", "EKI_SWAP_PCT": "0"})
     checks: List[str] = []
     launcher = None
 

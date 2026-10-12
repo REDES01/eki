@@ -19,7 +19,7 @@ def write(home, **blocks):
 
 def test_defaults_follow_the_cores(home, monkeypatch):
     monkeypatch.setattr(os, "cpu_count", lambda: 18)
-    assert machinecaps.settings() == {"agents": 12, "checks": 3, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 12, "checks": 3, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     monkeypatch.setattr(os, "cpu_count", lambda: 4)
     assert machinecaps.checks_default() == 2
     monkeypatch.setattr(os, "cpu_count", lambda: None)
@@ -28,24 +28,24 @@ def test_defaults_follow_the_cores(home, monkeypatch):
 
 def test_values_are_clamped(home):
     write(home, machine={"agents": 99, "checks": 0})
-    assert machinecaps.settings() == {"agents": 64, "checks": 1, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 64, "checks": 1, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     write(home, machine={"agents": 50, "checks": 50})
-    assert machinecaps.settings() == {"agents": 50, "checks": 32, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 50, "checks": 32, "browsers": 3, "floor_gb": 6, "swap_max": 60}
 
 
 def test_a_bad_file_falls_back_to_the_defaults(home, monkeypatch):
     monkeypatch.setattr(os, "cpu_count", lambda: 12)
     (home / "routing.json").write_text("{not json")
-    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     (home / "routing.json").write_text(json.dumps({"machine": "lots"}))
-    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     (home / "routing.json").write_text(json.dumps({"machine": {"agents": "x", "checks": None}}))
-    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 12, "checks": 2, "browsers": 3, "floor_gb": 6, "swap_max": 60}
 
 
 def test_self_parallel_and_check_slots_move_once(home):
     write(home, self={"parallel": 6, "check_slots": 3, "autonomy": "apply"})
-    assert machinecaps.settings() == {"agents": 6, "checks": 3, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 6, "checks": 3, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     data = routing(home)
     assert data["machine"] == {"agents": 6, "checks": 3}
     assert data["self"] == {"autonomy": "apply"}
@@ -59,7 +59,7 @@ def test_self_parallel_and_check_slots_move_once(home):
 
 def test_old_values_move_within_each_bound(home):
     write(home, self={"parallel": 50, "check_slots": 50})
-    assert machinecaps.settings() == {"agents": 50, "checks": 32, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 50, "checks": 32, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     assert routing(home)["machine"] == {"agents": 50, "checks": 32}
 
 
@@ -72,7 +72,7 @@ def test_no_old_keys_means_no_write(home):
 
 def test_save_sets_fields_and_refuses_out_of_range(home):
     assert machinecaps.save(agents=8)["agents"] == 8
-    assert machinecaps.save(checks=4) == {"agents": 8, "checks": 4, "browsers": 3}
+    assert machinecaps.save(checks=4) == {"agents": 8, "checks": 4, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     assert routing(home)["machine"] == {"agents": 8, "checks": 4}
     assert machinecaps.save(agents=64)["agents"] == 64
     for bad in (0, 65):
@@ -87,7 +87,7 @@ def test_save_sets_fields_and_refuses_out_of_range(home):
 
 def test_save_keeps_migrated_values(home):
     write(home, self={"parallel": 6, "check_slots": 3})
-    assert machinecaps.save(agents=10) == {"agents": 10, "checks": 3, "browsers": 3}
+    assert machinecaps.save(agents=10) == {"agents": 10, "checks": 3, "browsers": 3, "floor_gb": 6, "swap_max": 60}
 
 
 def test_problems_in_words():
@@ -115,15 +115,15 @@ def test_the_settings_post_refuses_zero_agents(home, conn):
     assert e.value.problems == ["machine.agents must be a whole number from 1 to 64, not 0"]
     data["machine"] = {"agents": 16, "checks": 4}
     api_settings.write(conn, "routing", {"data": data, "mtime": got["mtime"]})
-    assert machinecaps.settings() == {"agents": 16, "checks": 4, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 16, "checks": 4, "browsers": 3, "floor_gb": 6, "swap_max": 60}
 
 
 def test_browsers_default_to_3_and_are_clamped(home):
     assert machinecaps.BROWSERS == 3 and machinecaps.MOST["browsers"] == 16
     assert machinecaps.settings()["browsers"] == 3
-    write(home, machine={"browsers": 40})
+    write(home, machine={"browsers": 40, "floor_gb": 6, "swap_max": 60})
     assert machinecaps.settings()["browsers"] == 16
-    write(home, machine={"browsers": 0})
+    write(home, machine={"browsers": 0, "floor_gb": 6, "swap_max": 60})
     assert machinecaps.settings()["browsers"] == 1
     write(home, machine={"browsers": "x"})
     assert machinecaps.settings()["browsers"] == 3
@@ -139,6 +139,28 @@ def test_save_and_problems_for_browsers(home):
             machinecaps.save(browsers=bad)
         assert str(e.value) == f"machine.browsers must be a whole number from 1 to 16, not {bad!r}"
     assert routing(home)["machine"]["browsers"] == 16
-    assert machinecaps.problems({"browsers": 1}) == machinecaps.problems({"browsers": 16}) == []
-    assert machinecaps.problems({"agents": 12, "browsers": 17}) == [
+    assert machinecaps.problems({"browsers": 1, "floor_gb": 6, "swap_max": 60}) == machinecaps.problems({"browsers": 16, "floor_gb": 6, "swap_max": 60}) == []
+    assert machinecaps.problems({"agents": 12, "browsers": 17, "floor_gb": 6, "swap_max": 60}) == [
         "machine.browsers must be a whole number from 1 to 16, not 17"]
+
+
+def test_floor_and_swap_max_read_save_and_refuse(home):
+    assert machinecaps.FLOOR_GB == 6 and machinecaps.SWAP_MAX == 60
+    s = machinecaps.settings()
+    assert (s["floor_gb"], s["swap_max"]) == (6, 60)
+    write(home, machine={"floor_gb": 99, "swap_max": 0})
+    s = machinecaps.settings()
+    assert (s["floor_gb"], s["swap_max"]) == (64, 1)
+    s = machinecaps.save(floor_gb=8, swap_max=75)
+    assert (s["floor_gb"], s["swap_max"]) == (8, 75)
+    assert routing(home)["machine"] == {"floor_gb": 8, "swap_max": 75}
+    for kw, why in (({"floor_gb": 0}, "machine.floor_gb must be a whole number from 1 to 64, not 0"),
+                    ({"swap_max": 101}, "machine.swap_max must be a whole number from 1 to 100, not 101"),
+                    ({"floor_gb": 6.5}, "machine.floor_gb must be a whole number from 1 to 64, not 6.5")):
+        with pytest.raises(ValueError) as e:
+            machinecaps.save(**kw)
+        assert str(e.value) == why
+    assert machinecaps.problems({"floor_gb": 6, "swap_max": 100}) == []
+    assert machinecaps.problems({"floor_gb": 65, "swap_max": True}) == [
+        "machine.floor_gb must be a whole number from 1 to 64, not 65",
+        "machine.swap_max must be a whole number from 1 to 100, not True"]

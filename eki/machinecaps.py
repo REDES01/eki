@@ -7,7 +7,10 @@ rather than CPU), `checks` (1..32), how many test runs may run at once
 (judges, and the agents' own test runs inside build turns) so load stays near
 the core count, and `browsers` (1..16), how many Playwright browsers may be
 open at once across every run (each renders a page — a WebGL game costs
-cores and memory; browserslots.py holds the slots). A project's
+cores and memory; browserslots.py holds the slots). Two more set the memory
+floor (eki/memadmit.py): `floor_gb` (1..64, default 6), the free + reclaimable
+GB below which no new work starts, and `swap_max` (1..100, default 60), the
+percent of swap in use above which no new work starts. A project's
 workflow card `parallel` is only that project's cap; this one is separate and wins.
 
 They used to live in the "self" block as `parallel` and `check_slots`; the
@@ -26,8 +29,12 @@ from . import paths
 AGENTS = 12
 #: the default for browsers at once
 BROWSERS = 3
+#: the default memory floor, GB free + reclaimable
+FLOOR_GB = 6
+#: the default most swap in use, percent
+SWAP_MAX = 60
 #: each cap's upper bound
-MOST = {"agents": 64, "checks": 32, "browsers": 16}
+MOST = {"agents": 64, "checks": 32, "browsers": 16, "floor_gb": 64, "swap_max": 100}
 #: the old "self" keys and where they go
 MOVED = {"parallel": "agents", "check_slots": "checks"}
 
@@ -37,7 +44,8 @@ def checks_default() -> int:
 
 
 def _defaults() -> Dict[str, int]:
-    return {"agents": AGENTS, "checks": checks_default(), "browsers": BROWSERS}
+    return {"agents": AGENTS, "checks": checks_default(), "browsers": BROWSERS,
+            "floor_gb": FLOOR_GB, "swap_max": SWAP_MAX}
 
 
 def _whole(v: Any) -> bool:
@@ -92,7 +100,7 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def settings() -> Dict[str, int]:
-    """{"agents", "checks", "browsers"}: the saved values clamped to their bounds, or the defaults."""
+    """{"agents", "checks", "browsers", "floor_gb", "swap_max"}: the saved values clamped to their bounds, or the defaults."""
     out = _defaults()
     data = _read()
     if data is None:
@@ -109,9 +117,11 @@ def settings() -> Dict[str, int]:
 
 
 def save(agents: Optional[int] = None, checks: Optional[int] = None,
-         browsers: Optional[int] = None) -> Dict[str, int]:
+         browsers: Optional[int] = None, floor_gb: Optional[int] = None,
+         swap_max: Optional[int] = None) -> Dict[str, int]:
     """Set the given caps in routing.json's machine block; the new settings()."""
-    given = {k: v for k, v in (("agents", agents), ("checks", checks), ("browsers", browsers))
+    given = {k: v for k, v in (("agents", agents), ("checks", checks), ("browsers", browsers),
+                               ("floor_gb", floor_gb), ("swap_max", swap_max))
              if v is not None}
     for k, v in given.items():
         if _bad(k, v):

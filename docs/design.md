@@ -60,6 +60,8 @@ eki follow <run>  ◄── events table
 | `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one, waiting (an flock under `slots/waiting`) while a queued check goes first; `behind()` counts holds waiting behind checks |
 | `browserslots` | the machine's browser slots (`machine.browsers`): an flock on `EKI_HOME/browsers/slots/<i>.lock` per open browser, holding the browser's pid, freed when it exits; `held()` counts the open ones for the live line |
 | `browsershim` | `EKI_HOME/browsers/playwright`, a mirror of `~/Library/Caches/ms-playwright`: symlinks to everything except each browser executable, which is a wrapper that waits for a browser slot and then execs the real binary; `ensure()` before each run and in housekeeping mirrors a new browser version and moves an install into the mirror back into Playwright's folder |
+| `memadmit` | admitting work by memory: the reading (free + reclaimable GB, swap %), the floor (`machine.floor_gb`, `machine.swap_max`), each kind's estimate (`mem_estimates`: "browser", "check", "agent:<provider>", learned by `learn` as 0.7 old + 0.3 peak) and `Tick` — one reading per pass, `fits(kind)` (None or "waiting for memory (x GB free, swap y%)") and `took(kind)`; work started under a minute ago counts its estimate; never stops running work |
+| `memlearn` | housekeeping: the peak RSS of each running process tree (`mem_peaks`), folded into its kind's estimate (`memadmit.learn`) when the run or slot ends |
 | `browserstrays` | housekeeping: notes Chrome processes in eki worktrees that hold no browser slot (a script that hard-codes the cache path) |
 | `buildcap` | the build cap in force for a project: `project_cap` (its own workflow card's `parallel`, eki's falling back to its settings; the scheduler reads it here) and `of` (items building here and elsewhere, the machine's agents, how many may build now, which limit is in force and the line the pages show); read fresh, nothing kept |
 | `machinenow` | the Settings → Machine live line: agents working, test runs, load on cores, memory, quota left |
@@ -137,7 +139,7 @@ eki follow <run>  ◄── events table
 
 **Scheduling.** How much eki runs at once is a machine setting, not a
 number in any project's workflow: `routing.json` `"machine": {"agents",
-"checks", "browsers"}` (`eki/machinecaps.py`), shown and changed in Settings → Machine
+"checks", "browsers", "floor_gb", "swap_max"}` (`eki/machinecaps.py`), shown and changed in Settings → Machine
 and with `eki machine`.
 The engine's spawn step holds each kind of run only by the limit that
 already exists for it.
@@ -197,6 +199,27 @@ already exists for it.
   slot. Why: on 2026-10-12, with 11 items building and a playtest goal,
   load was 110 on 18 cores, with 207 Chrome processes (about 20 headless
   browsers, each rendering the Three.js game with WebGL) using 19.5 GB.
+- The memory floor admits work by memory, not only by counts
+  (`eki/memadmit.py`). Before an item builds, a judge run or an `eki slot`
+  hold, a background agent run or a browser starts, eki reads free +
+  reclaimable memory (free, inactive, purgeable and speculative pages from
+  `vm_stat`) and swap in use (`sysctl vm.swapusage`). Below
+  `machine.floor_gb` (default 6, 1–64) or above `machine.swap_max` (default
+  60%, 1–100), new work waits; running work is never stopped. Each kind —
+  "browser", "check", "agent:<provider>" — has an estimate learned from the
+  measured peak RSS of its process tree (`eki/memlearn.py`, in
+  housekeeping; table `mem_estimates`, 0.7 old + 0.3 new peak; until learned
+  a browser is 1.1 GB, a check 1.5, an agent 0.3), and is admitted only if
+  free − estimate stays above the floor. Work started under a minute ago
+  counts its estimate, since the reading doesn't show it yet, and work
+  started earlier in the same pass counts too (`memadmit.Tick`). The
+  station's machine line says "waiting for memory (x GB free, swap y%)".
+  Settings → Machine shows the floor and the estimates; the counts above
+  stay as upper bounds. Why: on 2026-10-12 load hit 110 with swap at 16.5
+  of 18 GB — twenty headless game browsers at ~1 GB each (the game page's
+  renderer alone ~0.7 GB) plus 22 agents — and each count had been set one
+  by one after the fact. `EKI_FREE_GB` and `EKI_SWAP_PCT` override the
+  reading; tests and the drill set 64 and 0.
 
 The Settings → Machine section shows a live line under the three numbers:
 "now: N agents working · M test runs · B browsers · load X on C cores · memory Y% ·

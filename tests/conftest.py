@@ -27,6 +27,8 @@ def home(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)      # a suite run by eki must not see eki's own build
     monkeypatch.setenv("EKI_AGENTS_SKILLS", str(tmp_path / "agents-skills"))
     monkeypatch.setenv("EKI_MACHINE", "ok")
+    monkeypatch.setenv("EKI_FREE_GB", "64")          # no test waits on the real Mac's memory
+    monkeypatch.setenv("EKI_SWAP_PCT", "0")
     monkeypatch.setenv("EKI_PORT", "0")
     monkeypatch.setenv("EKI_MEMORY_PRESSURE", "1")
     monkeypatch.setenv("EKI_MDS_STORES_GB", "0")   # never the real Spotlight indexer

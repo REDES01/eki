@@ -226,6 +226,8 @@ CREATE TABLE IF NOT EXISTS schedules (      -- a prompt sent on a clock (eki/sch
     created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sensitive (path TEXT PRIMARY KEY, state TEXT NOT NULL, by TEXT NOT NULL, score REAL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS mem_estimates (kind TEXT PRIMARY KEY, gb REAL NOT NULL, samples INTEGER NOT NULL, at REAL NOT NULL);  -- what each kind of work was learned to need (eki/memadmit.py)
+CREATE TABLE IF NOT EXISTS mem_peaks (key TEXT PRIMARY KEY, kind TEXT NOT NULL, peak_gb REAL NOT NULL, at REAL NOT NULL);  -- the peak seen so far of each running process tree (eki/memlearn.py)
 """
 
 

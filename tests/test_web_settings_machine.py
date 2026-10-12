@@ -38,7 +38,7 @@ def test_a_machine_block_is_written_and_read_back(web, home):
                      {"data": {**got["data"], "machine": {"agents": 16, "checks": 4}}, "mtime": got["mtime"]})
     assert code == 200 and out["ok"] is True
     assert json.loads((home / "routing.json").read_text())["machine"] == {"agents": 16, "checks": 4}
-    assert machinecaps.settings() == {"agents": 16, "checks": 4, "browsers": 3}
+    assert machinecaps.settings() == {"agents": 16, "checks": 4, "browsers": 3, "floor_gb": 6, "swap_max": 60}
     live = json.loads(get(web + "/api/machine")[1])
     assert live["agents"] == 16 and live["checks"] == 4
 
@@ -46,10 +46,10 @@ def test_a_machine_block_is_written_and_read_back(web, home):
 def test_browsers_at_once_is_written_and_read_back(web, home):
     got = _read(web, "routing")
     code, out = post(web + "/api/settings/routing",
-                     {"data": {**got["data"], "machine": {"browsers": 5}}, "mtime": got["mtime"]})
+                     {"data": {**got["data"], "machine": {"browsers": 5, "floor_gb": 6, "swap_max": 60}}, "mtime": got["mtime"]})
     assert code == 200 and out["ok"] is True
-    assert json.loads((home / "routing.json").read_text())["machine"] == {"browsers": 5}
-    assert _read(web, "routing")["data"]["machine"] == {"browsers": 5}
+    assert json.loads((home / "routing.json").read_text())["machine"] == {"browsers": 5, "floor_gb": 6, "swap_max": 60}
+    assert _read(web, "routing")["data"]["machine"] == {"browsers": 5, "floor_gb": 6, "swap_max": 60}
     assert machinecaps.settings()["browsers"] == 5
     live = json.loads(get(web + "/api/machine")[1])
     assert live["browsers"] == 5 and live["now"]["browsers"] == 0 and "0 browsers" in live["line"]
@@ -58,7 +58,7 @@ def test_browsers_at_once_is_written_and_read_back(web, home):
 def test_browsers_out_of_range_is_refused(web, home):
     got = _read(web, "routing")
     code, out = post(web + "/api/settings/routing",
-                     {"data": {**got["data"], "machine": {"browsers": 17}}, "mtime": got["mtime"]})
+                     {"data": {**got["data"], "machine": {"browsers": 17, "floor_gb": 6, "swap_max": 60}}, "mtime": got["mtime"]})
     assert code == 400 and "machine.browsers" in out["problems"][0]
 
 

@@ -318,3 +318,73 @@ def test_a_goal_can_be_work_on_a_project(conn, monkeypatch, capsys):
     assert seen["project"] == "p123" and seen["text"] == "fix it"
     assert main(["self", "--bg", "--as-is", "-p", "eki", "fix it"]) == 0
     assert seen["project"] is None
+
+
+def _judged_goal(conn, monkeypatch, proj):
+    """A goal with two checks whose judge passed c1 and was uncertain on c2, twice: judgment."""
+    from eki import acceptance, verdicts
+    monkeypatch.setattr(acceptance, "_where", lambda c, g: (str(proj), "HEAD", None))
+    iid = goal_with(conn, state="landed")
+    gid = conn.execute("SELECT goal_id FROM items WHERE id=?", (iid,)).fetchone()[0]
+    with db.tx(conn):
+        verdicts.store_checks(conn, gid, [("c1", "the board shows it"), ("c2", "the page looks right")])
+    acceptance.tick(conn)
+    rid = conn.execute("SELECT run_id FROM judgings WHERE goal_id=?", (gid,)).fetchone()[0]
+    unsure = {"check_id": "c2", "verdict": "uncertain", "evidence": "read web/x.js:12",
+              "reasoning": "can't see the page", "counter_evidence": "none found",
+              "limitation": "no browser here", "suggestion": "look at it in a browser"}
+    store.update_run(conn, rid, state="running")
+    verdicts.submit(conn, rid, {"check_id": "c1", "verdict": "passed", "evidence": "ran eki self: it shows",
+                                "reasoning": "seen", "counter_evidence": "none found", "limitation": "",
+                                "suggestion": ""})
+    verdicts.submit(conn, rid, unsure)
+    store.update_run(conn, rid, state="done", ended_at=db.now())
+    acceptance.tick(conn)                       # c2 uncertain: a second judge on fake2
+    sec = conn.execute("SELECT run_id FROM judgings WHERE goal_id=? AND scope='second'", (gid,)).fetchone()[0]
+    store.update_run(conn, sec, state="running")
+    verdicts.submit(conn, sec, unsure)
+    store.update_run(conn, sec, state="done", ended_at=db.now())
+    acceptance.tick(conn)                       # still uncertain → judgment
+    return gid, sec
+
+
+def test_show_lists_each_check_with_its_verdict_and_the_limitation(conn, capsys, monkeypatch, proj):
+    gid, _ = _judged_goal(conn, monkeypatch, proj)
+    assert main(["self", "show", gid]) == 0
+    out = capsys.readouterr().out
+    assert f"goal {gid}  judgment" in out and "needs you: c2: no browser here" in out
+    lines = out.split("\nchecks:\n")[1].splitlines()
+    assert lines[0].split()[:2] == ["c1", "passed"] and "(final · fake · round 1)" in lines[0]
+    assert lines[1].split()[:2] == ["c2", "uncertain"] and "(second · fake2 · round 1)" in lines[1]
+
+
+def test_show_a_goal_with_no_checks_says_not_judged(conn, capsys):
+    iid = goal_with(conn, state="landed")
+    gid = conn.execute("SELECT goal_id FROM items WHERE id=?", (iid,)).fetchone()[0]
+    main(["self", "show", gid])
+    assert "no checks — not judged" in capsys.readouterr().out
+
+
+def test_show_goal_check_prints_every_field(conn, capsys, monkeypatch, proj):
+    gid, rid = _judged_goal(conn, monkeypatch, proj)
+    assert main(["self", "show", f"{gid}:C2"]) == 0
+    out = capsys.readouterr().out
+    assert "check c2: the page looks right" in out and f"run {rid}" in out
+    assert out.index("(second · fake2") < out.index("(final · fake ·")      # newest first
+    for said in ("uncertain  (second · fake2", "evidence: read web/x.js:12", "reasoning: can't see the page",
+                 "counter_evidence: none found", "limitation: no browser here",
+                 "suggestion: look at it in a browser"):
+        assert said in out
+
+
+def test_accept_and_retry_a_judgment_goal(conn, capsys, monkeypatch, proj):
+    gid, _ = _judged_goal(conn, monkeypatch, proj)
+    assert main(["self", "retry", gid]) == 0
+    assert f"goal {gid}: accepting again" in capsys.readouterr().out
+    assert conn.execute("SELECT COUNT(*) FROM judgings WHERE goal_id=? AND round=2", (gid,)).fetchone()[0] == 1
+    with db.tx(conn):
+        conn.execute("UPDATE goals SET state='judgment' WHERE id=?", (gid,))
+    assert main(["self", "accept", gid]) == 0
+    assert f"goal {gid}: accepted by you" in capsys.readouterr().out
+    g = conn.execute("SELECT state, accept FROM goals WHERE id=?", (gid,)).fetchone()
+    assert g["state"] == "accepted" and json.loads(g["accept"])["by"] == "you"

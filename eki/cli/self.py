@@ -6,7 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, itemhold, projectchats, projects, queue, score, selfdraft, selfview, selfwork, train
+from .. import acceptance, asks, builds, digest, itemhold, projectchats, projects, queue, score, selfdraft, selfview, selfwork, train
+from . import selfchecks
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 from .selfloop import loop, pick
@@ -16,7 +17,8 @@ HELP = "eki builds eki: `self \"…\"` plans and builds a change in parallel wor
 
 
 def add(p) -> None:
-    p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|apply <item>, retry <item|goal>, '
+    p.add_argument("what", nargs="*", help='a goal in words, or: show|diff|follow|drop|apply <item>, show <goal>[:<check>], '
+                                               'retry <item|goal>, accept <goal> (one waiting for your judgment), '
                                                'release, autonomy apply|propose, digest [now] [--long], undo <build>, '
                                                'loop on|off (eki picks its own work), pick (what it would pick now)')
     p.add_argument("--one", action="store_true", help="no planning: the goal is one item")
@@ -36,6 +38,8 @@ def run(args) -> int:
     verb = words[0]
     if verb in ("show", "diff", "follow", "drop", "retry") and len(words) == 2:
         return {"show": show, "diff": diff, "follow": follow_item, "drop": drop, "retry": retry}[verb](c, words[1])
+    if verb == "accept" and len(words) == 2:
+        return selfchecks.accept(c, words[1])
     if verb == "apply" and len(words) == 2:
         print(f"queued {queue.apply(c, words[1], yes=args.yes)}")
         ensure_engine(quiet=True)
@@ -111,6 +115,8 @@ def undo(c, build_id: str) -> int:
 
 
 def show(c, iid: str) -> int:
+    if ":" in iid:
+        return selfchecks.show_check(c, iid)
     g = c.execute("SELECT * FROM goals WHERE id=? OR id LIKE ? ORDER BY id=? DESC",
                   (iid, iid + "%", iid)).fetchone()
     if g is not None:
@@ -172,6 +178,7 @@ def show_goal(c, g) -> int:
             print(f"  ? {q.get('question')}\n    → {said}")
     if g["error"]:
         print(f"\n! {g['error']}")
+    selfchecks.block(c, g)
     items = c.execute("SELECT * FROM items WHERE goal_id=? ORDER BY created_at", (g["id"],)).fetchall()
     print("\nitems:" if items else "\nitems: none yet")
     for it in items:
@@ -218,6 +225,8 @@ def retry(c, iid: str) -> int:
                   (iid, iid + "%", iid)).fetchone()
     if g is None:
         print(f"queued again: {selfwork.retry(c, iid)}")
+    elif g["state"] == "judgment":
+        print(f"goal {g['id']}: {acceptance.rerun(c, g['id'])} again")
     else:
         state = selfdraft.retry(c, g["id"])
         g = c.execute("SELECT * FROM goals WHERE id=?", (g["id"],)).fetchone()

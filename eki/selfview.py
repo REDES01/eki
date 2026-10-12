@@ -76,7 +76,10 @@ def stands(c, g) -> str:
         return "in flight"
     if not its:
         return "planned"
-    return "done" if all(notifygoals.finished(it["state"], it["pr"]) for it in its) else "planned"
+    if not all(notifygoals.finished(it["state"], it["pr"]) for it in its):
+        return "planned"
+    # a goal with checks is done only when a judge accepts it (eki/acceptance.py)
+    return "accepting" if c.execute("SELECT 1 FROM checks WHERE goal_id=?", (g["id"],)).fetchone() else "done"
 
 
 def _item(c, it) -> Dict[str, Any]:

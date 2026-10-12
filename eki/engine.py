@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc, workrun
+from . import acceptance, aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc, workrun
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -271,7 +271,7 @@ def tick(conn) -> bool:
             observe.fault(conn, "selfwork.tick")
         for name, step in (("queue", queue.tick), ("fixer", fixer.tick), ("projectqueue", projectqueue.tick),
                            ("aftermerge", aftermerge.tick), ("train", train.tick),
-                           ("shell", shellbuild.tick)):
+                           ("shell", shellbuild.tick), ("acceptance", acceptance.tick)):
             try:
                 for line in step(conn):
                     log.info("self: %s", line)

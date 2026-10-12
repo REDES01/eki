@@ -1,11 +1,13 @@
 """Goal-done notices: find the goals that ended and queue one push each.
 
-A goal has no 'done' state; like standing._settle, its end is worked out
-from the goals and items tables on every pass, and nothing is held in
-memory. A planned goal has ended when it has a live item and none still
-open; a failed goal has ended as it is. A deleted project's goals never notify. Only ends within the last day
-count, so switching notify on never floods the phone with old goals, and a
-restart inside a day loses none. notify.queue's key makes it one notice
+A goal without checks has no 'done' state; like standing._settle, its end
+is worked out from the goals and items tables on every pass, and nothing is
+held in memory. A planned goal has ended when it has a live item and none
+still open; a failed goal has ended as it is. A goal with checks
+(eki/acceptance.py) has ended only when it is accepted or waits for your
+judgment. A deleted project's goals never notify. Only ends within the last
+day count, so switching notify on never floods the phone with old goals, and
+a restart inside a day loses none. notify.queue's key makes it one notice
 per goal, however often this runs.
 """
 from __future__ import annotations
@@ -25,15 +27,18 @@ FINISHED = ("live", "landed", "applied")
 _IN_OPEN = ",".join("?" * len(OPEN))
 _IN_FINISHED = ",".join("?" * len(FINISHED))
 
-# the end: the latest of the goal's birth, its plan run's end and its items' last move
+# the end: the latest of the goal's birth, its plan run's end, its items' last move and its judges' end
 _END = ("MAX(g.created_at, COALESCE((SELECT r.ended_at FROM runs r WHERE r.id=g.plan_run), 0), "
-        "COALESCE((SELECT MAX(i.updated_at) FROM items i WHERE i.goal_id=g.id), 0))")
+        "COALESCE((SELECT MAX(i.updated_at) FROM items i WHERE i.goal_id=g.id), 0), "
+        "COALESCE((SELECT MAX(r.ended_at) FROM judgings j JOIN runs r ON r.id=j.run_id "
+        "WHERE j.goal_id=g.id), 0))")
 
 _ENDED = (
     f"SELECT g.*, {_END} AS ended FROM goals g WHERE {_END} >= ? "
     f"AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id=g.project AND p.state IN ('deleting','deleted')) "
-    f"AND (g.state='failed' OR ("
-    f"g.state='planned' AND EXISTS (SELECT 1 FROM items i WHERE i.goal_id=g.id AND i.state!='dropped') "
+    f"AND (g.state='failed' OR g.state IN ('accepted', 'judgment') OR ("
+    f"g.state='planned' AND NOT EXISTS (SELECT 1 FROM checks c WHERE c.goal_id=g.id) "
+    f"AND EXISTS (SELECT 1 FROM items i WHERE i.goal_id=g.id AND i.state!='dropped') "
     f"AND NOT EXISTS (SELECT 1 FROM items i WHERE i.goal_id=g.id AND (i.state IN ({_IN_OPEN}) "
     f"OR (i.state='proposed' AND COALESCE(i.pr, '')='')))))"
 )
@@ -44,6 +49,8 @@ def finished(state: str, pr: Optional[str]) -> bool:
 
 
 def title_of(conn: sqlite3.Connection, g: sqlite3.Row) -> str:
+    if g["state"] == "judgment":
+        return "eki · goal needs your judgment"
     items = conn.execute("SELECT state, pr FROM items WHERE goal_id=? AND state!='dropped'",
                          (g["id"],)).fetchall()
     if not items:

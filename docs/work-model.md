@@ -236,11 +236,11 @@ same everywhere else.
 
 ## Left beside the model for now
 
-`fixer.offer` and `callwait.hold` stay as thin adapters only for the
-queue's gate 2 (`queue._unfit`) and resolve (`resolve._leave`,
-`resolve._conclude_resolve`), which call them under their own transaction
-until their executor feeds the model; the fixer run itself is started by the
-same `fixer.prepare` / `fixer.launch` as the start_run fix handler.
+Nothing of the item rules: gate 2 and resolve feed the model too (L2), and
+every fixer run is started by the one `start_run` fix handler
+(`workhandlers_build`; the queue adds only `resolve` and gate 2 to its
+`START` / `GATES` tables). What still decides outside `step` is the goal's
+final acceptance (`eki/acceptance.py`: `accepting`, `accepted`, `judgment`).
 
 ## Behaviour the model adds
 

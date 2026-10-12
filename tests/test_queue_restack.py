@@ -5,7 +5,7 @@ from pathlib import Path
 from eki import db, integration, queue, selfwork, store, workspace
 from eki.workspace import git
 from conftest import run_inline
-from test_queue import autonomy, get, item, origin, src  # noqa: F401  (fixtures)
+from test_queue import autonomy, get, item, no_fixer, origin, src  # noqa: F401  (fixtures)
 
 
 def conflicting(conn, tmp_path, monkeypatch):
@@ -42,6 +42,7 @@ def gate2_red_on_bad(conn, monkeypatch, rid):
 
 def test_a_resolved_item_is_never_blamed_for_a_queue_mate(conn, src, tmp_path, monkeypatch):
     m = integration.main()
+    no_fixer()                                     # A's red is unfit at once
     a, b = conflicting(conn, tmp_path, monkeypatch)
     A = get(conn, a)
     resolve_b(conn, b, "from A\nfrom B\n")

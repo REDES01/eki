@@ -13,9 +13,11 @@ the line names it — and only a conflict resolves it again.
 Gate 2 checks the stack as one batch: one run on the tip, which carries every
 item under it. Green lands the whole batch. Red bisects: the middle of the
 unjudged part is checked next, so one bad item is found in log2(n) runs and
-the good ones before it land; the bad one is unfit and the items behind it
-are rebased without it and checked again. One check at a time: items that
-join while it runs wait for the next batch, they don't restart it. The front
+the good ones before it land; then the bad one, at the front, gets its one
+fixer run on the main they made (eki/fixer.py; it leaves the queue, `fixing`)
+or is unfit, and the items behind it are rebased without it and checked
+again. One check at a time: items that join while it runs wait for the next
+batch, they don't restart it. The front
 lands — a fast-forward of integration main — once gate 2 is green on it or
 on an item above it in the stack.
 
@@ -37,7 +39,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-from . import db, doccheck, integration, locks, paths, rebase, resolve, selfwork, store, workspace
+from . import db, doccheck, fixer, integration, locks, paths, rebase, resolve, selfwork, store, workspace
 from .workspace import WorkspaceError, git
 
 log = logging.getLogger("eki.queue")
@@ -120,7 +122,10 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     said = _admit(conn)
     said += resolve.tick(conn)
     said += _walk(conn)
+    main = integration.main()
     said += _land(conn)
+    if order(conn) and integration.main() != main:
+        said += _walk(conn)                        # a red one waiting for those under it is at the front now
     return said
 
 
@@ -225,7 +230,9 @@ def _result(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[str]:
 def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row], start: Optional[Callable] = None) -> List[str]:
     """Gate 2 for the stack as a batch: green on an item clears it and all under it;
     red on an item means one of the unjudged ones up to it is bad — check the middle.
-    `start(conn, stack, lo, top)` starts the check (eki's own: _start_gate2)."""
+    `start(conn, stack, lo, top)` starts the check (eki's own: _start_gate2, where a bad
+    one waits for the green ones under it to land, so its fixer starts on their main)."""
+    own = start is None
     start = start or _start_gate2
     said: List[str] = []
     results = [_result(conn, it) for it in stack]
@@ -243,6 +250,8 @@ def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row], start: Optional[C
     if red is None:
         return said + start(conn, stack, lo, len(stack) - 1)
     if red == lo:
+        if lo and own:
+            return said                            # tick lands those under it, then walks again
         return said + _unfit(conn, stack[lo], store.run(conn, stack[lo]["gate2_run"]))
     return said + start(conn, stack, lo, (lo + red - 1) // 2)
 
@@ -315,10 +324,20 @@ def _start_gate2(conn: sqlite3.Connection, stack: List[sqlite3.Row], lo: int, to
 
 
 def _unfit(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:
+    """The bisect's bad item: its one fixer run when it gets one (it leaves the queue,
+    `fixing`), else unfit. Either way the items behind it are walked again."""
     tail = selfwork.failure_tail(store.answer(conn, run["id"]))
     tail = (tail + f"\n(gate 2 {run['state']}: {run['error'] or ''})").strip()
-    if not _set_if(conn, it, "queued", state="unfit", gate2="red", verdict=tail[-selfwork.FAILURE_CHARS:], error="gate 2 failed"):
-        return []
+    with db.tx(conn):
+        cur = selfwork.store_item(conn, it["id"])
+        if cur is None or cur["state"] != "queued":
+            return []
+        line = fixer.offer(conn, cur, "gate2", tail)
+        if line:
+            return [line]
+        tried = fixer.tried(cur)
+        selfwork._set(conn, it["id"], state="unfit", gate2="red", verdict=tail[-selfwork.FAILURE_CHARS:],
+                      error="gate 2 failed" + (f" — {tried}" if tried else ""))
     return [f"item {it['id']}: unfit — gate 2 failed"]
 
 

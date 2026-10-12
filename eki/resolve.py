@@ -24,7 +24,7 @@ import sqlite3
 import subprocess
 from typing import List, Optional, Tuple
 
-from . import callwait, db, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from . import callwait, db, fixer, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -92,8 +92,9 @@ def _still(conn: sqlite3.Connection, it: sqlite3.Row, state: str) -> bool:
 
 
 def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = False, **fields) -> List[str]:
-    """Stop the rebase and leave the item for a person, the branch as it was. `person`:
-    the resolver asked for one, so a push says so."""
+    """Stop the rebase and leave the item for a person, the branch as it was — unless it gets
+    its one fixer run (eki/fixer.py) first. `person`: the resolver asked for one, so no fixer
+    and a push says so."""
     wt = it["worktree"]
     try:
         rebase.abort(wt)
@@ -105,7 +106,12 @@ def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = F
     with db.tx(conn):
         if not _still(conn, it, it["state"]):
             return []
-        selfwork._set(conn, it["id"], state="left", error=why, **fields)
+        cur = selfwork.store_item(conn, it["id"])
+        line = None if person else fixer.offer(conn, cur, "resolve", why)
+        if line:
+            return [line]
+        tried = fixer.tried(cur)
+        selfwork._set(conn, it["id"], state="left", error=f"{why} — {tried}" if tried else why, **fields)
         if person:
             selfwork.needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
     return [f"item {it['id']}: left for you — {why}"]

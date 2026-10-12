@@ -47,6 +47,14 @@ def autonomy(mode):
     queue.set_autonomy(mode)
 
 
+def no_fixer():
+    """A red item is unfit at once, as before the fixer (tests/test_fixer_queue.py has it on)."""
+    path = paths.config("routing")
+    data = json.loads(path.read_text())
+    data["self"] = {**(data.get("self") or {}), "fixer": False}
+    path.write_text(json.dumps(data))
+
+
 def item(conn, title, name, text="mine\n"):
     """A proposed item built in the integration repo, one commit changing `name`."""
     r = integration.repo()
@@ -147,6 +155,7 @@ def test_one_joining_during_a_check_waits_for_the_next_batch(conn, src):
 
 def test_a_red_batch_bisects_to_the_bad_one_and_lands_the_rest(conn, src, monkeypatch):
     autonomy("apply")
+    no_fixer()
     ids = [item(conn, n, f"{n.lower()}.txt") for n in "ABCD"]
     bad = ids[2]
     checks = []
@@ -191,6 +200,7 @@ def test_a_conflict_goes_aside_and_the_rest_go_on(conn, src):
 
 def test_a_red_front_is_unfit_and_those_behind_are_judged_again(conn, src, monkeypatch):
     autonomy("apply")
+    no_fixer()
     m = integration.main()
     a, b = item(conn, "A", "a.txt"), item(conn, "B", "b.txt")
     queue.tick(conn)

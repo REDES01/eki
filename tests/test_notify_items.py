@@ -5,7 +5,7 @@ import pytest
 
 from eki import db, queue, resolve, selfwork, workspace
 from conftest import run_inline
-from test_queue import autonomy, get, item as proposed, origin, src  # noqa: F401 — fixtures
+from test_queue import autonomy, get, item as proposed, no_fixer, origin, src  # noqa: F401 — fixtures
 from test_resolve import conflicted, repo, says  # noqa: F401 — fixtures
 
 TOPIC = "xz-secret-topic-9f3k"
@@ -75,6 +75,7 @@ def test_queued_is_no_notice(conn, src, lit):
 
 def test_red_gate_two_unfit_is_no_notice(conn, src, lit, monkeypatch):
     autonomy("apply")
+    no_fixer()
     a = proposed(conn, "A", "a.txt")
     queue.tick(conn)
     monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "1")

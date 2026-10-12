@@ -49,6 +49,8 @@ def land(conn, name, gate2="green"):
     workspace.git(r, "add", "-A")
     workspace.git(r, "commit", "-q", "-m", f"self: {name}")
     sha = workspace.head(r)
+    conn.execute("INSERT OR IGNORE INTO goals(id, text, source, owner, state, created_at) "
+                 "VALUES ('g1', 'ship it', 'ask', 'you', 'planned', ?)", (db.now(),))
     iid = selfwork.new_item(conn, "g1", name, name, [], [], False)
     tid = store.create_thread(conn, name, str(r))
     rid = store.create_run(conn, tid, "check", provider="fake")

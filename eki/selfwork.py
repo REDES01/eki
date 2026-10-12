@@ -127,30 +127,9 @@ def tick(conn: sqlite3.Connection) -> List[str]:
 
 
 def _settle_applied(conn: sqlite3.Connection) -> List[str]:
-    """A proposed item whose commit is now in main — integration main, or the
-    source's main where you merged it by hand — is applied; items that depend
-    on it may start (from a base that has it). A project's item is applied
-    once you merged it into the project's branch."""
-    said = []
-    own, theirs = projectwork.split(conn, items_in(conn, ("proposed",)))
-    for it, project in theirs:
-        if it["commit_sha"] and projectwork.merged(project, it["commit_sha"]):
-            _set(conn, it["id"], state="applied")
-            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in {project['name']}"
-                        f" {project['branch']}")
-    if not own:
-        return said
-    main = workspace.head(source())
-    for it in own:
-        if it["commit_sha"] and (integration.contains(it["commit_sha"]) or _is_ancestor(it["commit_sha"], main)):
-            _set(conn, it["id"], state="applied")
-            said.append(f"item {it['id']}: applied — {it['commit_sha'][:12]} is in main ({main[:12]})")
-    return said
-
-
-def _is_ancestor(commit: str, head: str) -> bool:
-    """Is `commit` in `head`'s history (in the source checkout)?"""
-    return projectwork.is_ancestor(source(), commit, head)
+    """A proposed item whose commit is now in its target is applied (eki/queue.py `settle`)."""
+    from . import queue                 # queue imports this module: import it late
+    return queue.settle(conn)
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:

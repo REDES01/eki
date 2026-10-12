@@ -69,8 +69,9 @@ def merged(it: ItemState, items: Tuple[ItemState, ...], s: Settings, ev: Any) ->
     if result == "conflict":
         files = ", ".join(d.get("files") or ()) or "?"
         new = moved(it, "resolving", f"conflict in {files} → resolving", gate2=None)
-        return new, (Action("start_run", it.id, new.why, {"role": "resolve", "stage": "resolving",
-                                                          "tries": it.tries, "files": list(d.get("files") or ())}),)
+        return new, (Action("start_run", it.id, new.why, {"role": "resolve", "stage": "resolving", "tries": it.tries,
+                                                          "runs": int(d.get("runs") or 0) + 1,
+                                                          "files": list(d.get("files") or ())}),)
     if result == "failed":
         return moved(it, "left", f"left for you — the rebase failed: {d.get('error') or '?'}"), ()
     return it, ()

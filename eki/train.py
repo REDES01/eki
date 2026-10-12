@@ -170,13 +170,17 @@ def _score(conn: sqlite3.Connection, name: str, swapped_at: Any) -> None:
 
 
 def _mark(conn: sqlite3.Connection, it: sqlite3.Row, state: str, text: str, **more: Any) -> None:
-    with db.tx(conn):
-        now = conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()
-        if now is None or now["state"] != "landed":
-            return
-        conn.execute("UPDATE items SET state=?, error=?, updated_at=? WHERE id=?",
-                     (state, more.get("error"), db.now(), it["id"]))
-        if it["run_id"]:
+    """How the landed item's build went, fed (eki/workstep_queue.py `landed`); a note in its run."""
+    from .workhandlers_queue import event, say
+
+    def then(c: sqlite3.Connection, old: Any, new: Any) -> None:
+        if new.stage == state and not more.get("error"):
+            c.execute("UPDATE items SET error=NULL WHERE id=?", (it["id"],))
+
+    say(conn, it["goal_id"], it["id"], event("landed", went=state, why=text), then=then)
+    now = conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()
+    if it["run_id"] and now is not None and now["state"] == state:
+        with db.tx(conn):
             store.add_event(conn, it["run_id"], 0, "note", {"text": text})
 
 

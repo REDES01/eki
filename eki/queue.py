@@ -26,6 +26,10 @@ the drills and the candidate checks run on the train, before the swap. A
 docs-only item (doccheck.py) is judged by the doccheck instead: its files
 parse as UTF-8 text and nothing outside the docs lane changed.
 
+The rules are eki/workstep_queue.py's, the same for a project's queue
+(eki/projectqueue.py): this module is eki's executor. It looks (git, the
+runs), feeds what it found (eki/workhandlers_queue.py `say`) and does what
+step asks — the walk and gate 2 in eki/queuestack.py, the landing here.
 Nothing is kept in memory: each tick rebuilds what to do from the items
 table and the runs, and every step is a run or an idempotent git operation,
 so a restart anywhere loses nothing.
@@ -37,9 +41,12 @@ import logging
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional, Tuple
 
-from . import db, doccheck, fixer, integration, locks, paths, rebase, resolve, selfwork, store, workspace
+# rebase: the plumbing tests stub (queue.rebase.onto)
+from . import (db, doccheck, integration, locks, paths, projects, projectwork, queuestack, rebase, resolve,
+               selfwork, workspace, workstep)
+from .workhandlers_queue import event, say
 from .workspace import WorkspaceError, git
 
 log = logging.getLogger("eki.queue")
@@ -54,18 +61,19 @@ BUSY = ("proposed", "locked", "queued", "resolving", "rechecking")
 # ---- asked for by hand ----------------------------------------------------------------------
 
 def apply(conn: sqlite3.Connection, iid: str, *, yes: bool = False) -> str:
-    """Queue one item: a proposed one, or a locked one with the person's yes."""
+    """Queue one item: a proposed one, or a locked one with the person's yes (a person_decided
+    event; workstep.Refused, a ValueError, says why not)."""
     it = selfwork.store_item(conn, iid)
     if it is None:
         raise KeyError(f"no item {iid}")
-    if it["state"] == "locked" and not yes:
-        files = ", ".join(json.loads(it["locked"] or "[]")) or "?"
-        raise ValueError(f"item {it['id']} touches locked files: {files}, needs --yes")
-    if it["state"] not in ("proposed", "locked"):
-        raise ValueError(f"item {it['id']} is {it['state']}, not proposed")
-    with db.tx(conn):
-        selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=None, rebased=None,
-                      gate2=None, gate2_run=None, gate2_on=None, error=None)
+    try:
+        say(conn, it["goal_id"], it["id"], event("person_decided", decision="apply", yes=yes),
+            then=lambda c, old, new: selfwork._set(c, it["id"], error=None))
+    except workstep.Refused as e:
+        if it["state"] == "locked" and not yes and it["locked"]:     # the files it was locked for
+            files = ", ".join(json.loads(it["locked"])) or "?"
+            raise workstep.Refused(f"item {it['id']} touches locked files: {files}, needs --yes") from e
+        raise
     return it["id"]
 
 
@@ -123,7 +131,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     said += resolve.tick(conn)
     said += _walk(conn)
     main = integration.main()
-    said += _land(conn)
+    said += land(conn)
     if order(conn) and integration.main() != main:
         said += _walk(conn)                        # a red one waiting for those under it is at the front now
     return said
@@ -140,210 +148,104 @@ def _ahead() -> bool:
         return False
 
 
-def _set_if(conn: sqlite3.Connection, it: sqlite3.Row, was: str,
-            _then: Optional[Callable[[], Any]] = None, **fields: Any) -> bool:
-    """Write fields when the item is still in state `was` (a restart or a person may have moved it);
-    `_then` runs in the same transaction, only when they were written."""
-    with db.tx(conn):
-        row = conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()
-        if row is None or row["state"] != was:
-            return False
-        selfwork._set(conn, it["id"], **fields)
-        if _then is not None:
-            _then()
-    return True
+def _own(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
+    marks = ",".join("?" * len(states))
+    return conn.execute(f"SELECT i.* FROM items i JOIN goals g ON g.id=i.goal_id WHERE g.project IS NULL "
+                        f"AND i.state IN ({marks}) ORDER BY i.created_at", states).fetchall()
+
+
+def _in_main(sha: Optional[str], source_main: Optional[str] = None) -> bool:
+    """Already in the target, eki's way: integration main, or the source's main (merged by hand)."""
+    if not sha:
+        return False
+    if integration.contains(sha, "main"):
+        return True
+    return bool(source_main) and projectwork.is_ancestor(selfwork.source(), sha, source_main)
 
 
 def _admit(conn: sqlite3.Connection) -> List[str]:
-    waiting = selfwork.items_in(conn, ("proposed", "locked"))
+    """What git says of eki's proposed, locked and queued items: in main already, or can it be queued."""
+    waiting = _own(conn, ("proposed", "locked", "queued"))
     if not waiting:
         return []
     repo = integration.repo()
     said = []
     for it in waiting:
-        if it["commit_sha"] and integration.contains(it["commit_sha"], "main"):
-            if _set_if(conn, it, it["state"], state="landed", landed_at=db.now(), gate2="green"):
-                said.append(f"item {it['id']}: landed — {it['commit_sha'][:12]} is in main")
-    apply_mode = selfwork.settings().get("autonomy") == "apply"
-    for it in selfwork.items_in(conn, ("proposed",)):
-        if not it["worktree"] or not workspace.belongs(it["worktree"], repo):
+        sha = (it["rebased"] or it["commit_sha"]) if it["state"] == "queued" else it["commit_sha"]
+        there = _in_main(sha)
+        queueable = (it["state"] == "proposed" and bool(it["worktree"]) and workspace.belongs(it["worktree"], repo))
+        if not there and not queueable:
             continue                               # built before the queue: merged by hand
-        files = json.loads(it["touched"] or "[]") + json.loads(it["files"] or "[]")
-        held = locks.locked_in(files)
-        if held:
-            if _set_if(conn, it, "proposed", state="locked", locked=db.dumps(held),
-                       _then=lambda: selfwork.needs_you(conn, it, "locked", f"locked, touches {', '.join(held)}",
-                                                        f"eki self apply {it['id']} --yes", "judgment")):
-                said.append(f"item {it['id']}: locked — touches {', '.join(held)}; needs a person")
-        elif apply_mode and not (it["review"] or "").startswith("no:"):   # objected twice: a person's call
-            if _set_if(conn, it, "proposed", state="queued", queued_at=db.now(), head=None,
-                       rebased=None, gate2=None, gate2_run=None, gate2_on=None):
-                said.append(f"item {it['id']}: queued")
+        said += say(conn, it["goal_id"], it["id"],
+                    event("seen", in_target=there, queueable=queueable, where=f"{(sha or '')[:12]} is in main",
+                          sha=sha), then=_admitted(it), after=_seen)
     return said
 
 
-def _needs_rebase(items: List[sqlite3.Row], main: str) -> bool:
-    head = main
-    for it in items:
-        if it["head"] != head or not it["rebased"]:
-            return True
-        head = it["rebased"]
-    return False
+def _admitted(it: sqlite3.Row):
+    """The columns that go with what `seen` decides for `it`."""
+    def then(c: sqlite3.Connection, old: Any, new: Any) -> None:
+        if new.stage == "locked":
+            held = locks.locked_in(json.loads(it["touched"] or "[]") + json.loads(it["files"] or "[]"))
+            selfwork._set(c, it["id"], locked=db.dumps(held))
+        elif new.stage in ("landed", "applied") and old is not None and old.stage != new.stage:
+            selfwork._set(c, it["id"], landed_at=db.now())
+    return then
 
 
-def _walk(conn: sqlite3.Connection, again: bool = True) -> List[str]:
-    items = order(conn)
-    if not items:
-        return []
-    if _needs_rebase(items, integration.main()):
-        integration.sync()                         # eki fetches before every rebase
-    head = integration.main()
+def _seen(conn: sqlite3.Connection, old: Any, new: Any) -> None:
+    if old is not None and old.stage in ("queued", "gate 2") and new.stage in ("landed", "applied"):
+        workspace.remove(integration.repo(), f"gate2-{new.id}")
+
+
+def settle(conn: sqlite3.Connection) -> List[str]:
+    """A proposed item whose commit is now in its target — integration main or the source's main
+    (where you merged it by hand) for eki's, the project's branch for a project's — is applied;
+    items that depend on it may start (from a base that has it)."""
     said: List[str] = []
-    stack: List[sqlite3.Row] = []
-    for it in order(conn):
-        if it["head"] != head or not it["rebased"]:
-            moved = _rebase(conn, it, head)
-            said += moved[1]
-            if moved[0] is None:
-                continue                           # out of the queue: head doesn't advance past it
-            it = selfwork.store_item(conn, it["id"])
-        stack.append(it)
-        head = it["rebased"]
-    said += _judge(conn, stack)
-    if again and len(order(conn)) < len(stack):
-        said += _walk(conn, again=False)           # one went unfit: those behind it move up now
-    return said
-
-
-def _result(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[str]:
-    """'green', 'red', 'running' or None: gate 2 on this item's current rebased commit."""
-    if not it["gate2_run"] or it["gate2_on"] != it["rebased"]:
-        return None
-    run = store.run(conn, it["gate2_run"])
-    if run is None:
-        return None
-    if run["state"] in store.ACTIVE:
-        return "running"
-    return "green" if run["state"] == "done" else "red"
-
-
-def _judge(conn: sqlite3.Connection, stack: List[sqlite3.Row], start: Optional[Callable] = None) -> List[str]:
-    """Gate 2 for the stack as a batch: green on an item clears it and all under it;
-    red on an item means one of the unjudged ones up to it is bad — check the middle.
-    `start(conn, stack, lo, top)` starts the check (eki's own: _start_gate2, where a bad
-    one waits for the green ones under it to land, so its fixer starts on their main)."""
-    own = start is None
-    start = start or _start_gate2
-    said: List[str] = []
-    results = [_result(conn, it) for it in stack]
-    green = max((i for i, r in enumerate(results) if r == "green"), default=-1)
-    for it in stack[:green + 1]:
-        if it["gate2"] != "green" and _set_if(conn, it, "queued", gate2="green"):
-            said.append(f"item {it['id']}: gate 2 green"
-                        + ("" if it["id"] == stack[green]["id"] else f" (in the batch checked on {stack[green]['id']})"))
-    if "running" in results:
-        return said                                # one check at a time: the rest wait for the next batch
-    lo = green + 1
-    if lo >= len(stack):
+    own, theirs = projectwork.split(conn, selfwork.items_in(conn, ("proposed",)))
+    for it, project in theirs:
+        if it["commit_sha"] and projectwork.merged(project, it["commit_sha"]):
+            where = f"{it['commit_sha'][:12]} is in {project['name']} {project['branch']}"
+            said += say(conn, it["goal_id"], it["id"], event("seen", in_target=True, where=where))
+    if not own:
         return said
-    red = next((i for i in range(lo, len(stack)) if results[i] == "red"), None)
-    if red is None:
-        return said + start(conn, stack, lo, len(stack) - 1)
-    if red == lo:
-        if lo and own:
-            return said                            # tick lands those under it, then walks again
-        return said + _unfit(conn, stack[lo], store.run(conn, stack[lo]["gate2_run"]))
-    return said + start(conn, stack, lo, (lo + red - 1) // 2)
+    main = workspace.head(selfwork.source())
+    for it in own:
+        if _in_main(it["commit_sha"], main):
+            where = f"{it['commit_sha'][:12]} is in main ({main[:12]})"
+            said += say(conn, it["goal_id"], it["id"], event("seen", in_target=True, where=where))
+    return said
+
+
+def _queue(conn: sqlite3.Connection) -> queuestack.Queue:
+    return queuestack.Queue(rows=lambda: order(conn), tip=integration.main, sync=integration.sync)
+
+
+def _walk(conn: sqlite3.Connection) -> List[str]:
+    return queuestack.walk(conn, _queue(conn))
 
 
 def _rebase(conn: sqlite3.Connection, it: sqlite3.Row, head: str) -> tuple:
-    """(the rebased sha or None, lines). None: it left the queue."""
-    if it["gate2_run"]:
-        _cancel(conn, it["gate2_run"])
-    wt = it["worktree"]
-    try:
-        at = git(wt, "rev-parse", "HEAD")
-        since = it["head"] if it["rebased"] and at == it["rebased"] else None
-        if since is None and it["resolved_on"] and resolve._is_ancestor(wt, it["resolved_on"], at):
-            since = it["resolved_on"]              # moved since its resolve: still only its own commits
-        conflicts = rebase.onto(wt, head, since=since)
-    except (WorkspaceError, OSError) as e:
-        if _set_if(conn, it, "queued", state="left", error=f"the rebase onto {head[:12]} failed: {e}"):
-            return None, [f"item {it['id']}: left for you — the rebase failed: {e}"]
-        return None, []
-    gone = _departed(conn, it, since, head) if since and since != head else []
-    without = f" without {', '.join(gone)} (left the queue)" if gone else ""
-    if conflicts:
-        rid = resolve.start(conn, it, head, conflicts)
-        return None, [f"item {it['id']}: conflict in {', '.join(conflicts)}"
-                      f"{', re-stacked' + without if gone else ''} → resolving ({rid[:8]})"]
-    sha = git(wt, "rev-parse", "HEAD")
-    moved = {"resolved_on": head} if it["resolved_on"] else {}
-    if not _set_if(conn, it, "queued", head=head, rebased=sha, gate2=None, gate2_run=None, gate2_on=None, **moved):
-        return None, []
-    if gone:
-        return sha, [f"item {it['id']}: re-stacked on {head[:12]}{without}"]
-    return sha, [f"item {it['id']}: rebased on {head[:12]}"]
+    """(the rebased sha or None, lines) for one of eki's queued items. None: it left the queue."""
+    return queuestack.rebase_one(conn, _queue(conn), it, head)
 
 
-def _departed(conn: sqlite3.Connection, it: sqlite3.Row, since: str, head: str) -> List[str]:
-    """Items under `since` but not under `head`, out of the queue: what a re-stack left behind."""
-    left_behind = set(git(it["worktree"], "rev-list", since, f"^{head}", check=False).split())
-    rows = conn.execute("SELECT id, rebased FROM items WHERE id<>? AND rebased IS NOT NULL "
-                        "AND state NOT IN ('queued', 'landed') ORDER BY id", (it["id"],)).fetchall()
-    return [r["id"] for r in rows if r["rebased"] in left_behind]
-
-
-def _cancel(conn: sqlite3.Connection, rid: str) -> None:
-    run = store.run(conn, rid)
-    if run is not None and run["state"] in store.ACTIVE:
-        store.cancel(conn, rid)
-
-
-def _start_gate2(conn: sqlite3.Connection, stack: List[sqlite3.Row], lo: int, top: int) -> List[str]:
-    """One gate-2 run on stack[top], judging stack[lo..top] together."""
-    batch = stack[lo:top + 1]
-    it = stack[top]
-    tree = rebase.gate_tree(integration.repo(), f"gate2-{it['id']}", it["rebased"])
-    goals = {b["goal_id"] for b in batch}
-    owners = {r["owner"] for r in conn.execute(
-        f"SELECT owner FROM goals WHERE id IN ({','.join('?' * len(goals))})", tuple(goals))}
-    docs = all(doccheck.of_item(b) for b in batch)
-    with db.tx(conn):
-        row = conn.execute("SELECT state, rebased FROM items WHERE id=?", (it["id"],)).fetchone()
-        if row["state"] != "queued" or row["rebased"] != it["rebased"]:
-            return []
-        title = it["title"] if len(batch) == 1 else f"batch of {len(batch)}, up to {it['title']}"
-        tid = store.create_thread(conn, f"gate 2: {title}", str(tree), by="eki")
-        judge = doccheck.command(batch[0]["head"], it["rebased"]) if docs else GATE2
-        rid = store.create_run(conn, tid, judge, provider="command",
-                               priority="now" if "you" in owners else "background")
-        selfwork._set(conn, it["id"], gate2_run=rid, gate2_on=it["rebased"], gate2=None)
-    what = f"item {it['id']}" if len(batch) == 1 else f"a batch of {len(batch)} ({batch[0]['id']}..{it['id']})"
-    return [f"gate 2 on {what} at {it['rebased'][:12]} ({rid[:8]}){', docs only' if docs else ''}"]
-
-
-def _unfit(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:
-    """The bisect's bad item: its one fixer run when it gets one (it leaves the queue,
-    `fixing`), else unfit. Either way the items behind it are walked again."""
-    tail = selfwork.failure_tail(store.answer(conn, run["id"]))
-    tail = (tail + f"\n(gate 2 {run['state']}: {run['error'] or ''})").strip()
-    with db.tx(conn):
-        cur = selfwork.store_item(conn, it["id"])
-        if cur is None or cur["state"] != "queued":
-            return []
-        line = fixer.offer(conn, cur, "gate2", tail)
-        if line:
-            return [line]
-        tried = fixer.tried(cur)
-        selfwork._set(conn, it["id"], state="unfit", gate2="red", verdict=tail[-selfwork.FAILURE_CHARS:],
-                      error="gate 2 failed" + (f" — {tried}" if tried else ""))
-    return [f"item {it['id']}: unfit — gate 2 failed"]
+def gate2_command(conn: sqlite3.Connection, project: Any, batch: List[sqlite3.Row]) -> Tuple[Optional[str], bool]:
+    """(gate 2's command for the batch, docs only?): eki's fast tests or the doccheck; a project's check."""
+    if project.kind != "eki":
+        row = projects.get(conn, project.id)
+        return (projects.batch_argv(row) if row is not None else None), False
+    if all(doccheck.of_item(b) for b in batch):
+        return doccheck.command(batch[0]["head"], batch[-1]["rebased"]), True
+    return GATE2, False
 
 
 # ---- landing ---------------------------------------------------------------------------------
 
-def _land(conn: sqlite3.Connection) -> List[str]:
+def land(conn: sqlite3.Connection, carry: bool = True) -> List[str]:
+    """The front lands — a fast-forward of integration main — once gate 2 is green on it and it
+    sits on main; then the next one. The land handler's plumbing (eki/workhandlers_queue.py)."""
     if not order(conn) and not _ahead():
         return []
     said: List[str] = []
@@ -357,9 +259,10 @@ def _land(conn: sqlite3.Connection) -> List[str]:
         except integration.IntegrationError as e:
             log.warning("queue: item %s would not land: %s", it["id"], e)
             break
-        if _set_if(conn, it, "queued", state="landed", landed_at=db.now()):
-            landed += 1
-            said.append(f"item {it['id']}: landed ({it['rebased'][:12]})")
+        said += say(conn, it["goal_id"], it["id"], event("landed", went="target", sha=it["rebased"]),
+                    then=lambda c, old, new, iid=it["id"]: selfwork._set(c, iid, landed_at=db.now()),
+                    carry=carry)
+        landed += selfwork.store_item(conn, it["id"])["state"] == "landed"
         workspace.remove(integration.repo(), f"gate2-{it['id']}")
     if landed or _ahead():
         if not integration.push() and landed:

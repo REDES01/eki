@@ -251,3 +251,16 @@ def test_retry_brief():
     assert "lines 12–30 of log.md" in text and "<<<<<<< HEAD" in text and "Do the thing" in text
     assert resolvebrief.retry(previous_failure="your answer had no ITEM: line", hunks="", **kw).count(
         resolvebrief.NO_HUNKS) == 1
+
+
+def test_a_resolve_run_stopped_on_a_broken_setup_holds_the_item(conn, conflicted):
+    it, head = conflicted
+    rid = resolve.start(conn, it, head, ["a.txt"])
+    stop = db.dumps({"kind": "environment", "retry_at": None, "fix": "sign in to claude", "since": db.now(), "n": 1})
+    with db.tx(conn):
+        conn.execute("UPDATE runs SET state='failed', error='not signed in', stop=?, ended_at=? WHERE id=?",
+                     (stop, db.now(), rid))
+    resolve.tick(conn)
+    cur = selfwork.store_item(conn, it["id"])
+    assert cur["state"] == "waiting" and cur["hold"] and "sign in to claude" in cur["error"]
+    assert not rebase.in_progress(Path(it["worktree"])) and cur["fixer"] is None

@@ -34,8 +34,8 @@ def of_goal(conn: sqlite3.Connection, goal: Optional[sqlite3.Row]) -> WorkProjec
     """The goal's project; eki's own for a goal with no project. KeyError when its project is gone."""
     pid = goal["project"] if goal is not None and "project" in goal.keys() else None
     if not pid:
-        from . import integration
-        return WorkProject(EKI, EKI, integration.repo(), "main", EKI, settings(conn, None))
+        from . import paths            # integration.repo() would make the repo: only name it
+        return WorkProject(EKI, EKI, paths.home() / "self" / "repo", "main", EKI, settings(conn, None))
     row = projects.get(conn, pid)
     if row is None:
         raise KeyError(f"no project {pid}")

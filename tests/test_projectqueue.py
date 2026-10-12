@@ -202,3 +202,29 @@ def test_eki_s_own_queue_never_lists_a_project_item(conn, folder):
     selfwork._set(conn, iid, state="queued")
     assert [r["id"] for r in queue.order(conn)] == []
     assert [r["id"] for r in projectqueue.items(conn, p["id"], "queued")] == [iid]
+
+
+def test_a_red_front_waits_for_the_greens_under_it(conn, folder):
+    """Fixed bug (c) of docs/work-model.md: gate 2 red on an item with green ones under it no
+    longer makes it unfit at once, on the old tip; it waits for them to land, as eki's does."""
+    from eki import workrun
+    from eki.workmodel import Event
+    p = project(conn, folder, check="true")
+    good = item(conn, p, "Good", {"b.txt": "bee two\n"})
+    bad = item(conn, p, "Bad", {"bad.txt": "nope\n"})
+    with db.tx(conn):
+        for iid in (good, bad):
+            selfwork._set(conn, iid, state="queued")
+    gid = get(conn, good)["goal_id"]
+    acts = workrun.feed(conn, gid, None, Event("check_verdict", 1.0, {
+        "gate": 2, "stack": [{"id": good, "result": "green"}, {"id": bad, "result": "red"}]}))
+    assert [(a.kind, a.item) for a in acts] == [("land", good)]
+    assert get(conn, good)["state"] == "queued" and get(conn, good)["gate2"] == "green"
+    B = get(conn, bad)
+    assert B["state"] == "queued" and B["gate2"] is None, B["error"]
+    assert workrun.load(conn, gid)[1][1].why == "gate 2 red; waits for the green items under it to land"
+    workrun.feed(conn, gid, good, Event("landed", 2.0, {"went": "target", "sha": "abc", "branch": "master"}))
+    assert get(conn, good)["state"] == "applied"
+    workrun.feed(conn, gid, None, Event("check_verdict", 3.0, {"gate": 2, "stack": [{"id": bad, "result": "red"}]}))
+    B = get(conn, bad)
+    assert B["state"] == "unfit" and B["gate2"] == "red"                # now at the front: the bad one

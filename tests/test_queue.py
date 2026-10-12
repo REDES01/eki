@@ -224,12 +224,22 @@ def test_a_red_front_is_unfit_and_those_behind_are_judged_again(conn, src, monke
     assert not integration.contains(A["rebased"], "main")
 
 
-def test_merged_by_hand_shows_landed(conn, src):
+def test_merged_by_hand_is_applied_and_a_locked_one_landed(conn, src):
+    """One rule for "already in the target" (docs/work-model.md, difference g): a proposed
+    commit in main is applied — as selfwork's settle, which runs first in the engine, always
+    made it — and a locked one is landed, for the train to take live."""
     autonomy("propose")
     a = item(conn, "A", "a.txt")
     git(integration.repo(), "merge", "-q", "--ff-only", get(conn, a)["commit_sha"])
     said = queue.tick(conn)
     it = get(conn, a)
+    assert it["state"] == "applied" and it["landed_at"], said
+    b = item(conn, "B", "bin/check", "#!/bin/sh\nexit 0\n")
+    queue.tick(conn)
+    assert get(conn, b)["state"] == "locked"
+    git(integration.repo(), "merge", "-q", "--ff-only", get(conn, b)["commit_sha"])
+    said = queue.tick(conn)
+    it = get(conn, b)
     assert it["state"] == "landed" and it["gate2"] == "green" and it["landed_at"], said
 
 

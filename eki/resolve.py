@@ -5,9 +5,10 @@ The queue calls `start` when an item's rebase onto its predicted head stops
 on a conflict: a resolve run starts in the item's own worktree, mid-rebase,
 told what the item is for, what the head changed in the conflicted files and
 what each landed change was for (eki/landed.py).
-`tick` moves on every item whose resolve run has ended: eki continues the
-rebase, refuses a result with markers left or not on top of the head, and
-puts the item at the back of the queue on that head. Gate 1 does not run
+`tick` looks at every item whose resolve run has ended: eki continues the
+rebase, finds markers left or a result not on top of the head, and feeds
+what it found; eki/workstep_queue.py `resolved` says what comes of it (back
+of the queue on that head, one more run, the fixer or a person). Gate 1 does not run
 again: gate 2 judges the item with the changes under it, and its bisect says
 whose fault a red is. `resolved_on` keeps the head it was resolved onto, so a
 later re-stack (queue._rebase) moves only the item's own commits. An item
@@ -22,9 +23,11 @@ from __future__ import annotations
 import re
 import sqlite3
 import subprocess
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-from . import callwait, db, fixer, itemhold, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from . import callwait, db, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from .workhandlers_queue import can_fix, event, left_error, say
+from .workmodel import Action, Event, ItemState
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -36,16 +39,57 @@ DIFF_LINES = 150
 # ---- in -----------------------------------------------------------------------------------
 
 def start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List[str]) -> str:
-    """A resolve run for `it`, stopped mid-rebase onto `head` on `conflicted`. Returns the run id."""
-    changes = head_changes(it, head, conflicted)
-    intents = landed.intents(conn, it, head, conflicted)
+    """`it` stopped mid-rebase onto `head` on `conflicted`: fed as a conflict, its resolve run
+    started. Returns the run id ('' when the item had moved on)."""
+    def then(c: sqlite3.Connection, old: Optional[ItemState], new: ItemState) -> None:
+        if new.stage == "resolving":
+            selfwork._set(c, it["id"], head=head, rebased=None, gate2_run=None, gate2_on=None)
+
+    say(conn, it["goal_id"], it["id"], event("merge_result", result="conflict", files=list(conflicted),
+                                             on=head[:12], runs=resolve_runs(conn, it)), then=then)
+    cur = selfwork.store_item(conn, it["id"])
+    return cur["run_id"] if cur["state"] == "resolving" and cur["head"] == head else ""
+
+
+def begin(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
+    """The start_run(resolve) handler: the item's next resolve run, once (its count is the key)."""
+    it = selfwork.store_item(conn, action.item)
+    d = action.data
+    if it is None or it["state"] != "resolving" or resolve_runs(conn, it) >= int(d.get("runs") or 1):
+        return []
+    head, files, retry = it["head"], list(d.get("files") or []), None
+    try:
+        if d.get("retry"):
+            retry = _retry(it, head, files)
+        changes = head_changes(it, head, files)
+    except WorkspaceError as e:
+        why = f"{d.get('retry') or 'the resolve'} (and {e})"
+        return say(conn, it["goal_id"], it["id"], event("item_failed", kind="judgment", why=why), carry=False,
+                   after=left_error)
+    intents = landed.intents(conn, it, head, files)
     with db.tx(conn):
-        return _start(conn, it, head, conflicted, changes, intents)
+        cur = selfwork.store_item(conn, it["id"])
+        if cur["state"] != "resolving" or resolve_runs(conn, cur) >= int(d.get("runs") or 1):
+            return []
+        rid = _start(conn, cur, head, files, changes, intents, retry=retry)
+    return [f"item {it['id']}: {action.why} ({rid[:8]})"]
+
+
+def _retry(it: sqlite3.Row, head: str, files: List[str]) -> Tuple[str, str]:
+    """(what went wrong, the hunks still marked) for the second try."""
+    wt = it["worktree"]
+    left = rebase.markers(wt, head) if rebase.in_progress(wt) else []
+    hunks = rebase.marked_hunks(wt, left)
+    if left:
+        where = "; ".join(f"lines {rebase.marked_lines(wt, f)} of {f}" for f in left)
+        return f"you described the fix but the file still has markers at {where}; edit the files", hunks
+    return "your answer had no ITEM: line; end with a SUMMARY: paragraph and an ITEM: line", hunks
 
 
 def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: List[str],
            changes: str, intents: str, retry: Optional[Tuple[str, str]] = None) -> str:
-    """`retry`: (what went wrong, the hunks still marked) — the second and last try."""
+    """Under the caller's tx: the resolve run itself. `retry`: (what went wrong, the hunks still
+    marked) — the second and last try."""
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     kw = dict(goal=goal["text"] if goal else "", title=it["title"], spec=it["spec"],
               summary=it["summary"] or "", head=head, conflicted=conflicted,
@@ -55,8 +99,8 @@ def _start(conn: sqlite3.Connection, it: sqlite3.Row, head: str, conflicted: Lis
     owner = goal["owner"] if goal else "eki"
     rid = store.create_run(conn, it["thread_id"], prompt, row="code", fresh=True,
                            priority="now" if owner == "you" else "background")
-    selfwork._set(conn, it["id"], state="resolving", run_id=rid, head=head, resolved_on=head,
-                  gate2_run=None, gate2=None, rebased=None, error=None)
+    selfwork._set(conn, it["id"], run_id=rid, head=head, resolved_on=head,
+                  gate2_run=None, rebased=None, error=None)
     return rid
 
 
@@ -86,38 +130,45 @@ def tick(conn: sqlite3.Connection) -> List[str]:
     return said
 
 
-def _still(conn: sqlite3.Connection, it: sqlite3.Row, state: str) -> bool:
-    row = conn.execute("SELECT state, run_id FROM items WHERE id=?", (it["id"],)).fetchone()
-    return row is not None and row["state"] == state and row["run_id"] == it["run_id"]
+def _ended(conn: sqlite3.Connection, it: sqlite3.Row) -> Optional[sqlite3.Row]:
+    """The item's run, once it has ended (a missing one has); None while it runs."""
+    run = store.run(conn, it["run_id"]) if it["run_id"] else None
+    if run is not None and run["state"] in store.ACTIVE:
+        return None
+    return run if run is not None else {"id": None, "state": "missing", "error": "", "prompt": ""}
 
 
-def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = False,
-           run: Optional[sqlite3.Row] = None, **fields) -> List[str]:
-    """Stop the rebase and leave the item for a person, the branch as it was — unless it gets
-    its one fixer run (eki/fixer.py) first. `person`: the resolver asked for one, so no fixer
-    and a push says so."""
+def _feed(conn: sqlite3.Connection, it: sqlite3.Row, **facts: Any) -> List[str]:
+    """What the resolve came to, fed. When it leaves the side path for the fixer or a person,
+    the rebase is stopped first and the branch is as it was."""
+    from . import workrun, workstep
+    ev = event("item_finished", **{k: v for k, v in facts.items() if k not in ("waits", "columns", "sha")})
+    goal, items, settings = workrun.load(conn, it["goal_id"])
+    _, new, _ = workstep.step(goal, tuple(items), settings, Event(ev.kind, ev.at, {**ev.data, "item": it["id"]}))
+    if any(x.id == it["id"] and x.stage in ("left", "fixing") for x in new):
+        _abort(it)
+    return say(conn, it["goal_id"], it["id"], ev, then=lambda c, old, new: _then(c, it, new, facts),
+               after=left_error)
+
+
+def _then(conn: sqlite3.Connection, it: sqlite3.Row, new: ItemState, facts: dict) -> None:
+    if new.stage == "queued" and facts.get("sha"):
+        selfwork._set(conn, it["id"], head=it["head"], rebased=facts["sha"], commit_sha=facts["sha"],
+                      gate2_run=None, gate2_on=None, error=None, **facts.get("columns", {}))
+    elif new.stage == "waiting on calls":
+        conn.execute("UPDATE items SET waits=? WHERE id=?", (db.dumps(facts["waits"]), it["id"]))
+
+
+def _abort(it: sqlite3.Row) -> None:
+    """Stop the rebase, the branch as it was (a finished result refused)."""
     wt = it["worktree"]
     try:
         rebase.abort(wt)
         if it["commit_sha"] and it["head"] and _is_ancestor(wt, it["head"], "HEAD") \
                 and not _is_ancestor(wt, "HEAD", it["commit_sha"]):
-            git(wt, "reset", "-q", "--hard", it["commit_sha"])    # a finished result refused
-    except WorkspaceError as e:
-        why = f"{why} (and {e})"
-    with db.tx(conn):
-        if not _still(conn, it, it["state"]):
-            return []
-        if (h := itemhold.settle(conn, it, run)):     # a broken setup: held till it is fixed
-            return h
-        cur = selfwork.store_item(conn, it["id"])
-        line = None if person else fixer.offer(conn, cur, "resolve", why)
-        if line:
-            return [line]
-        tried = fixer.tried(cur)
-        selfwork._set(conn, it["id"], state="left", error=f"{why} — {tried}" if tried else why, **fields)
-        if person:
-            selfwork.needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}", "judgment")
-    return [f"item {it['id']}: left for you — {why}"]
+            git(wt, "reset", "-q", "--hard", it["commit_sha"])
+    except WorkspaceError:
+        pass
 
 
 def _is_ancestor(where: str, commit: str, of: str) -> bool:
@@ -131,64 +182,55 @@ def resolve_runs(conn: sqlite3.Connection, it: sqlite3.Row) -> int:
 
 
 def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
-    run = store.run(conn, it["run_id"]) if it["run_id"] else None
-    if run is not None and run["state"] in store.ACTIVE:
+    run = _ended(conn, it)
+    if run is None:
         return []
-    if run is None or run["state"] != "done":
-        state = run["state"] if run else "missing"
-        return _leave(conn, it, f"the resolve run ended {state}: {(run['error'] if run else '') or ''}".strip(),
-                      run=run)
+    fixable = can_fix(conn, it)
+    if run["state"] != "done":
+        from . import buildfeed
+        if (held := buildfeed.held(run)) is not None:     # a broken setup: held till it is fixed
+            _abort(it)
+            return buildfeed.feed(conn, it, held)
+        return _feed(conn, it, ended=run["state"], error=run["error"] or "", can_fix=fixable)
+    calls = callwait.outstanding(conn, run["id"])
+    if calls and callwait.wakes(conn, it) < callwait.MAX_WAITS:
+        waits = {"stage": "resolving", "run": run["id"], "since": db.now(), "calls": [c["id"] for c in calls]}
+        cards = ", ".join(f"{callwait.card(c)} ({c['id'][:8]})" for c in calls)
+        return _feed(conn, it, calls=len(calls), wakes=callwait.wakes(conn, it), cards=cards, waits=waits)
     with db.tx(conn):
-        if not _still(conn, it, "resolving"):
-            return []
-        if (w := callwait.hold(conn, it, run, "resolving")):
-            return [w]                               # its card calls are out: woken with their answers
         stopped = callwait.stopped(conn, it, run)
-    return stopped + _resolved(conn, it, run)
+    return stopped + _feed(conn, it, can_fix=fixable, **_outcome(conn, it, run))
 
 
-def _resolved(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:
-    """A resolve run that ended done: go on with the rebase, or say what's wrong."""
-    verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
+def _outcome(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> dict:
+    """What a resolve run that ended done came to: the rebase goes on, or what's wrong."""
+    answer = store.answer(conn, run["id"])
+    verdict, reason, summary = selfbrief.outcome(answer)
     if verdict == "person":
-        return _leave(conn, it, reason or "the resolver asked for a person", person=True)
+        return dict(person=True, why=reason or "the resolver asked for a person")
     wt, head = it["worktree"], it["head"]
     try:
         left = rebase.markers(wt, head) if rebase.in_progress(wt) else []
-        if left or not _has_item(store.answer(conn, run["id"])):
-            return _failed(conn, it, run, left)
+        if left or not _has_item(answer):
+            what = f"conflict markers left in {', '.join(left)}" if left else "no ITEM line"
+            who = f"left markers in {', '.join(left)}" if left else "gave no ITEM line"
+            try:
+                files = left or rebase.conflicted(wt)
+            except WorkspaceError as e:
+                return dict(outcome="broken", why=f"{what} (and {e})")
+            return dict(outcome="bad", why=what, who=who, files=files, runs=resolve_runs(conn, it),
+                        retried=resolvebrief.RETRY_LINE in (run["prompt"] or ""))
         stopped = rebase.proceed(wt)
     except WorkspaceError as e:
-        return _leave(conn, it, f"the rebase would not go on: {e}")
+        return dict(outcome="broken", why=f"the rebase would not go on: {e}")
     if stopped:
-        if resolve_runs(conn, it) >= MAX_RUNS:
-            return _leave(conn, it, f"still conflicted after {MAX_RUNS} resolve runs: {', '.join(stopped)}")
-        changes = head_changes(it, head, stopped)
-        intents = landed.intents(conn, it, head, stopped)
-        with db.tx(conn):
-            if not _still(conn, it, "resolving"):
-                return []
-            rid = _start(conn, it, head, stopped, changes, intents)
-        return [f"item {it['id']}: stopped again on {', '.join(stopped)}; resolving ({rid[:8]})"]
+        return dict(outcome="stopped", files=stopped, runs=resolve_runs(conn, it))
     left = rebase.markers(wt, head)
     if left:
-        return _leave(conn, it, f"conflict markers left in {', '.join(left)}")
+        return dict(outcome="broken", why=f"conflict markers left in {', '.join(left)}")
     if not _is_ancestor(wt, head, "HEAD"):
-        return _leave(conn, it, f"the result is not on top of the head {head[:12]}")
-    sha = git(wt, "rev-parse", "HEAD")
-    with db.tx(conn):
-        if not _still(conn, it, "resolving"):
-            return []
-        _requeue(conn, it, sha)
-    return [f"item {it['id']}: resolved onto {head[:12]}; back in the queue — gate 2 judges it"]
-
-
-def _requeue(conn: sqlite3.Connection, it: sqlite3.Row, sha: str, **fields) -> None:
-    """Back of the queue, on the head it was resolved onto, for gate 2 to judge with the changes
-    under it — its bisect says who is at fault. No gate 1 here: a queue-mate under it that is
-    broken would make it unfit for someone else's change."""
-    selfwork._set(conn, it["id"], state="queued", queued_at=db.now(), head=it["head"], rebased=sha,
-                  commit_sha=sha, gate2=None, gate2_run=None, gate2_on=None, error=None, **fields)
+        return dict(outcome="broken", why=f"the result is not on top of the head {head[:12]}")
+    return dict(outcome="resolved", on=head[:12], sha=git(wt, "rev-parse", "HEAD"))
 
 
 def _has_item(answer: str) -> bool:
@@ -196,44 +238,12 @@ def _has_item(answer: str) -> bool:
     return re.search(r"^\s*`?ITEM:\s*(done|partial|person)\b", answer or "", re.M | re.I) is not None
 
 
-def _failed(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, left: List[str]) -> List[str]:
-    """A resolver that left markers, or no ITEM line: one more run told what was wrong,
-    or — when this was already that run (its prompt says so) — left for a person."""
-    wt, head = it["worktree"], it["head"]
-    what = f"conflict markers left in {', '.join(left)}" if left else "no ITEM line"
-    if resolvebrief.RETRY_LINE in (run["prompt"] or ""):
-        return _leave(conn, it, f"{what} after a second resolve run")
-    try:
-        files = left or rebase.conflicted(wt)
-        hunks = rebase.marked_hunks(wt, left)
-    except WorkspaceError as e:
-        return _leave(conn, it, f"{what} (and {e})")
-    if left:
-        where = "; ".join(f"lines {rebase.marked_lines(wt, f)} of {f}" for f in left)
-        failure = f"you described the fix but the file still has markers at {where}; edit the files"
-    else:
-        failure = "your answer had no ITEM: line; end with a SUMMARY: paragraph and an ITEM: line"
-    changes = head_changes(it, head, files)
-    intents = landed.intents(conn, it, head, files)
-    with db.tx(conn):
-        if not _still(conn, it, "resolving"):
-            return []
-        rid = _start(conn, it, head, files, changes, intents, retry=(failure, hunks))
-    who = f"left markers in {', '.join(left)}" if left else "gave no ITEM line"
-    return [f"item {it['id']}: resolver {who}; second try ({rid[:8]})"]
-
-
 def _conclude_recheck(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     """An item left in `rechecking` by an older build (gate 1 after a resolve): once its run
     has ended, whatever it said, it goes back to the queue for gate 2. Nothing enters
     `rechecking` any more."""
-    run = store.run(conn, it["run_id"]) if it["run_id"] else None
-    if run is not None and run["state"] in store.ACTIVE:
+    run = _ended(conn, it)
+    if run is None:
         return []
-    state = run["state"] if run else "missing"
-    with db.tx(conn):
-        if not _still(conn, it, "rechecking"):
-            return []
-        _requeue(conn, it, it["commit_sha"],
-                 verdict=f"resolved; the old gate-1 check ({state}) is not counted — gate 2 judges it")
-    return [f"item {it['id']}: resolved; back in the queue — gate 2 judges it"]
+    verdict = f"resolved; the old gate-1 check ({run['state']}) is not counted — gate 2 judges it"
+    return _feed(conn, it, ended="done", sha=it["commit_sha"], columns={"verdict": verdict})

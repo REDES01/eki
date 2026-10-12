@@ -15,6 +15,7 @@ and not the other, and the same event gets two answers — so there is one copy.
 | `eki/workrun.py` | `load`, `feed` (state and actions saved in one transaction), `carry` (actions done once, through `HANDLERS`) |
 | `eki/workhandlers_build.py`, `eki/workhandlers_queue.py` | the handlers of runs and of the queue |
 | `eki/buildfeed.py` | the build executor: which build, gate-1 and review runs ended, their facts as events (the fixer's in `eki/fixer.py`, the calls' in `eki/callwait.py`, plans and drafts in `eki/selfplan.py`, `eki/selfdraft.py`) |
+| `eki/queue.py`, `eki/projectqueue.py`, `eki/queuestack.py`, `eki/resolve.py`, `eki/train.py` | the queue's executors: eki's (integration main, the train) and a project's (its branch, `projectland.land`); the stack's walk and gate 2 shared in `queuestack` |
 
 An executor's tick looks at what changed — a run ended, git moved — does the
 I/O that tells it the facts (commit the worktree, rebase, ask git whether a

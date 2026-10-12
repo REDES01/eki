@@ -232,3 +232,28 @@ def test_a_killed_waiting_hold_leaves_no_waiter(home, conn):
         child.kill()
         child.wait(10)
     assert testslots.waiting() == 0
+
+
+def test_a_hold_waits_for_memory_then_its_lock_names_it(home, conn, monkeypatch, capsys):
+    slots(home, 2)
+    monkeypatch.setenv("EKI_FREE_GB", "4")
+    got = threading.Event()
+
+    def holder():
+        c = db.connect()
+        with testslots.hold(c, wait=0.02):
+            got.set()
+            assert testslots.held() == 1
+            locks = [p for p in testslots.folder().glob("*.lock") if p.read_text()]
+            assert [p.read_text() for p in locks] == [str(os.getpid())]
+            assert time.time() - locks[0].stat().st_mtime < 5
+        c.close()
+    t = threading.Thread(target=holder)
+    t.start()
+    time.sleep(0.3)
+    assert not got.is_set() and testslots.held() == 0 and testslots.waiting() == 1
+    monkeypatch.setenv("EKI_FREE_GB", "64")
+    t.join(5)
+    assert got.is_set()
+    lines = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("eki slot:")]
+    assert lines == ["eki slot: waiting for memory (4.0 GB free, swap 0%)"]

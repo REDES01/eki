@@ -7,6 +7,7 @@ and per folder, background ones only when the Mac has room). Each kind of
 run is held only by its own limit: checks by check slots (checkslots.py),
 items being built by `machine.agents` (and each project's own cap) before
 a build run exists (scheduler.py); everything else — chats, plans, reviews — starts at once.
+Judges and background agents also wait for memory (memadmit.py); a 'now' chat never does.
 There is no overall cap unless EKI_MAX_PARALLEL is set (`ceiling`).
 It holds no state of its own — stop it at any moment, start it again,
 and it picks up from the database. Workers it started keep running while it's gone.
@@ -24,7 +25,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, fixer, housekeep, machine, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc
+from . import aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -141,6 +142,7 @@ def spawn_ready(conn) -> int:
                           "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at").fetchall()
     queued = checkslots.first(conn, queued)     # the train, gate 2, gate 1, then the rest
     room: Optional[tuple] = None
+    mem: Optional[memadmit.Tick] = None     # judges and background agents wait for memory too
     for r in queued:
         if slots is not None and slots <= 0:
             break
@@ -153,6 +155,12 @@ def spawn_ready(conn) -> int:
         if judge and not judges.fits(r):
             busy_threads.add(r["thread_id"])        # waiting for a check slot
             continue
+        gate = memadmit.run_kind(r) if judge or r["priority"] == "background" else None
+        if gate:
+            mem = mem or memadmit.Tick(conn)
+            if mem.fits(gate):
+                busy_threads.add(r["thread_id"])    # waiting for memory
+                continue
         if r["priority"] == "background":
             room = room or machine.room()
             if not room[0]:
@@ -165,6 +173,8 @@ def spawn_ready(conn) -> int:
         spawn(conn, r["id"])
         if judge:
             judges.took(r)
+        if gate:
+            mem.took(gate)
         if slots is not None:
             slots -= 1
         started += 1

@@ -12,6 +12,10 @@ elsewhere; it is checked first and wins. Then each project's own workflow card
 eki's card never caps another project. Items whose write-sets overlap build
 at the same time: the queue merges them (a resolve run on conflict). Only an
 item with no write-set waits, until nothing else builds in its repo.
+Under both caps, an item starts only when the Mac's memory has room for one
+more agent (eki/memadmit.py: one reading per pass, each start counted); one
+held only by memory says 'waiting for memory (x GB free, swap y%)'. Building
+items are never stopped.
 An item left waiting says why in `items.why`, written only when it changes.
 Nothing is kept between ticks but a cache of the tracked files, cleared at
 every pass.
@@ -24,7 +28,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from . import buildcap, db, machinecaps, projects, workspace
+from . import buildcap, db, machinecaps, memadmit, projects, workspace
 
 NO_WRITE_SET = "no write-set: waits until its repo is quiet"
 
@@ -110,6 +114,13 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
         return NO_WRITE_SET if taken.get(str(r)) else None
 
     said = []
+    mem: Optional[memadmit.Tick] = None             # read only when something could start
+
+    def memory() -> Optional[str]:
+        nonlocal mem
+        mem = mem or memadmit.Tick(conn)
+        return mem.fits("agent")
+
     started = True
     while started and sum(building.values()) < agents:
         started = False
@@ -121,12 +132,15 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
             it = next((x for x in waiting[gid] if blocker(x) is None), None)
             if it is None:
                 continue
+            if memory() is not None:
+                break
             r = repo_of(gid)
             others = [(x["title"], json.loads(x["files"] or "[]")) for x in live
                       if repo_of(x["goal_id"]) == r]
             with db.tx(conn):
                 selfwork.start_build(conn, it, goal_of(gid), others)
                 conn.execute("UPDATE items SET why=NULL WHERE id=?", (it["id"],))
+            mem.took("agent")
             now = selfwork.store_item(conn, it["id"])
             live.append(now)
             taken.setdefault(str(r), []).append((now["id"], claims(now, r)))
@@ -140,7 +154,7 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
     n = sum(building.values())
     for items in waiting.values():
         for it in items:
-            why = blocker(it) or f"{n} agents working (machine)"
+            why = blocker(it) or (n < agents and memory()) or f"{n} agents working (machine)"
             if why != it["why"]:
                 conn.execute("UPDATE items SET why=? WHERE id=? AND state='waiting'", (why, it["id"]))
     return said

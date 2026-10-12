@@ -18,6 +18,12 @@ longer than NOTICE says so once on stderr. While it waits it holds an flock
 on slots/waiting/<pid>-<random>.lock, so `waiting()` counts waiting holds
 across processes and `behind()` feeds the station's line "N test runs
 waiting behind checks".
+
+A hold also waits for memory: it takes its slot only when a check fits above
+the memory floor (memadmit.fits(conn, "check")), and says so once on stderr
+('eki slot: waiting for memory (…)'). A taken lock file holds its holder's pid
+as text and its mtime is when the hold began: memadmit.reserved counts fresh
+holds, memlearn measures the pid's process tree.
 """
 from __future__ import annotations
 
@@ -93,9 +99,12 @@ def _take() -> int:
         fd = os.open(folder() / f"{i}.lock", os.O_RDWR | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return fd
         except OSError:
             os.close(fd)
+            continue
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())     # who holds it; the write dates the hold
+        return fd
     raise RuntimeError("no free test slot lock")
 
 
@@ -122,19 +131,27 @@ def _free(conn) -> bool:
 def hold(conn, wait: float = 1.0, notice: float = NOTICE) -> Iterator[None]:
     """Wait until no queued check goes first and a check slot is free, then keep
     the slot until the block ends."""
+    from . import memadmit                  # it reads our lock files: import it late
     fd: Optional[int] = None
-    start, told = time.monotonic(), False
+    start, told, told_mem = time.monotonic(), False, False
     with _waiter():
         while fd is None:
+            short = None
             if _free(conn):
-                fd = _take()
-                # two holders may have looked at once: the count with ours in it decides
-                if checkslots.busy(conn) > checkslots.limit():
-                    os.close(fd)
-                    fd = None
+                short = memadmit.fits(conn, "check")
+                if short is not None:
+                    if not told_mem:
+                        print(f"eki slot: {short}", file=sys.stderr, flush=True)
+                        told_mem = True
+                else:
+                    fd = _take()
+                    # two holders may have looked at once: the count with ours in it decides
+                    if checkslots.busy(conn) > checkslots.limit():
+                        os.close(fd)
+                        fd = None
             if fd is None:
                 waited = time.monotonic() - start
-                if not told and waited > notice:
+                if not told and short is None and waited > notice:
                     print(NOTE.format(max(1, round(waited / 60))), file=sys.stderr, flush=True)
                     told = True
                 time.sleep(wait * (0.5 + random.random()))

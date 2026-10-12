@@ -248,7 +248,7 @@
   $("prompt").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("composer").requestSubmit(); }
   });
-  function autosize() { const t = $("prompt"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; }
+  function autosize() { const t = $("prompt"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; t.classList.toggle("tall", t.scrollHeight > 240); }
   $("prompt").addEventListener("input", autosize);
 
   document.addEventListener("click", async (e) => {

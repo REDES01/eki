@@ -110,7 +110,11 @@
   border: 1px solid var(--line); border-radius: 24px; padding: 12px 12px 8px 16px;
   box-shadow: 0 4px 24px color-mix(in srgb, var(--text) 9%, transparent); }
 #composer:focus-within { border-color: color-mix(in srgb, var(--text) 22%, var(--line)); }
-#prompt { width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 2px 0; max-height: 240px; }
+#prompt { width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 2px 0; max-height: 240px;
+  /* no scrollbars while it grows with its text (autosize); only a long prompt at max-height scrolls — a Mac with a mouse
+     shows classic scrollbars, and a one-row textarea showed both under "Ask eki…" */
+  line-height: 1.5; min-height: calc(1.5em + 4px); overflow: hidden; overflow-wrap: anywhere; }
+#prompt.tall { overflow-y: auto; scrollbar-width: thin; }
 .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; }
 .grow { flex: 1; }
 .icon { background: transparent; padding: 3px 8px; border-radius: 999px; }

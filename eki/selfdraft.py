@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, drybuild, integration, projectbrief, projects, roles, selfbrief, store, targets, workspace
+from . import (db, drybuild, integration, projectbrief, projects, roles, selfbrief, store, targets,
+               verdicts, workspace)
 
 #: the old eki, read as reference by a draft when it is there
 OLD = "~/eki-2026-09-26"
@@ -78,8 +79,9 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     tid = store.create_thread(conn, f"plan: {text}", str(wt), by="eki")
     provider, model, effort = planner()
     project = projects.get(conn, goal["project"]) if goal is not None and goal["project"] else None
-    brief = (selfbrief.plan(text, base) if project is None
-             else projectbrief.plan(text, base, project, standing=bool(goal["standing_id"])))
+    checks = [(c["id"], c["text"]) for c in verdicts.checks_of(conn, gid)]
+    brief = (selfbrief.plan(text, base, checks) if project is None
+             else projectbrief.plan(text, base, project, standing=bool(goal["standing_id"]), checks=checks))
     rid = store.create_run(conn, tid, brief, provider=provider, model=model, effort=effort,
                            row="code", priority=_priority(owner))
     conn.execute("UPDATE goals SET thread_id=?, plan_run=?, state='planning' WHERE id=?", (tid, rid, gid))
@@ -140,6 +142,7 @@ def _conclude_rank(conn: sqlite3.Connection, g: sqlite3.Row, answer: str) -> Lis
     text = goal + TICK.format(title=title)
     conn.execute("UPDATE goals SET text=?, drafted_at=?, pick_key=?, why=? WHERE id=?",
                  (text, db.now(), key, why, gid))
+    verdicts.store_checks(conn, gid, verdicts.checks_in(goal))
     start_plan(conn, gid, text, integration.sync(), g["owner"])
     return [f"goal {gid}: picked {key} → planning"]
 
@@ -171,6 +174,7 @@ def conclude(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
                 said = [f"goal {gid}: {err}"]
             else:
                 conn.execute("UPDATE goals SET text=?, drafted_at=? WHERE id=?", (goal, db.now(), gid))
+                verdicts.store_checks(conn, gid, verdicts.checks_in(goal))
                 start_plan(conn, gid, goal, _base(conn, g), g["owner"])
                 said = [f"goal {gid}: drafted → planning"]
     try:

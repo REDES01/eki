@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 SPLIT_RULES = """\
 - prefer items that don't depend on each other: they are built at the same time;
@@ -40,13 +40,24 @@ will build at the same time, each in a worktree of its own:
   that are merged after, never one long turn;
 - each item declares the files it will touch (its write-set, as paths or globs);
 {split}- a spec says what to build and how to tell it works — not how to code it.
-
+{checks}
 End your answer with a line `ITEMS:` followed by one JSON list, nothing after it:
 
 ITEMS:
 [{{"title": "...", "spec": "...", "files": ["eki/x.py", "tests/test_x.py"],
-  "deps": ["title of an earlier item"], "independent": false}}]
+  "deps": ["title of an earlier item"], "independent": false{checks_key}}}]
 """
+
+#: the goal's checks in a plan brief; each item names the ones it delivers
+PLAN_CHECKS = """
+The goal's checks — an independent judge holds the finished work to each:
+
+{lines}
+
+Give each item a "checks" list: the ids of the checks it delivers, e.g.
+["c1", "c3"]. Every check should be delivered by at least one item.
+"""
+CHECKS_KEY = ',\n  "checks": ["c1", "c3"]'
 
 BUILD = """\
 You are changing eki — the program that is running you right now — in a
@@ -87,6 +98,16 @@ to use it, what to check) and then one last line:
 another item, or `ITEM: person <why>` if this needs a person's hands.
 """
 
+#: the fifth part of a goal, after the four headings: the checks a judge holds the work to
+#: (eki/verdicts.py checks_in reads them)
+CHECKS_ASK = """\
+After the four parts, write a fifth: a `Checks` heading followed by 3 to 8
+lines, each `C<n>: <one concrete, checkable statement — what to run or look at,
+and what must be seen>` (C1, C2, …). An independent judge holds the finished
+work to these checks, so write each one so that someone who did not build it
+can settle it by running a command or reading a file. They are part of the goal
+text, before the `DRAFT:` line."""
+
 #: the shared end of a draft brief (this one and eki/projectbrief.py draft): the four
 #: headings, the item-shape and AskUserQuestion rules, and the ending goal_in reads
 DRAFT_ASK = """\
@@ -97,6 +118,8 @@ What must be true when done
 Read first
 Item shape and shared files
 Tests (bin/check green)
+
+""" + CHECKS_ASK + """
 
 Make it specific enough that a planner can split it without guessing: name real
 paths and modules that exist here, the functions and tables it changes, and the
@@ -159,6 +182,8 @@ Read first
 Item shape and shared files
 Tests (bin/check green)
 
+""" + CHECKS_ASK + """
+
 Make it specific enough that a planner can split it without guessing: name real
 paths and modules that exist here, the functions and tables it changes, and the
 files items will share. For "Item shape": the fewest items that keep each agent
@@ -180,8 +205,17 @@ made into a goal without a person.
 """
 
 
-def plan(goal: str, base: str) -> str:
-    return PLAN.format(goal=goal.strip(), base=base[:12], split=SPLIT_RULES)
+def plan_checks(checks: Optional[List[Tuple[str, str]]]) -> str:
+    """The plan brief's checks section: "" for a goal with no checks."""
+    if not checks:
+        return ""
+    return PLAN_CHECKS.format(lines="\n".join(f"{cid}: {text}" for cid, text in checks))
+
+
+def plan(goal: str, base: str, checks: Optional[List[Tuple[str, str]]] = None) -> str:
+    """The plan brief; `checks` are the goal's [(id, text)] (eki/verdicts.py), listed for tagging."""
+    return PLAN.format(goal=goal.strip(), base=base[:12], split=SPLIT_RULES, checks=plan_checks(checks),
+                       checks_key=CHECKS_KEY if checks else "")
 
 
 def draft(wish: str, base: str, *, digest: Optional[str] = None, old: Optional[str] = None) -> str:
@@ -230,9 +264,11 @@ def build(*, goal: str, title: str, spec: str, files: List[str], branch: str, ba
 
 # ---- reading answers ----------------------------------------------------------------------
 
-def items_in(answer: str, allow_empty: bool = False) -> List[Dict[str, Any]]:
+def items_in(answer: str, allow_empty: bool = False, known: Iterable[str] = ()) -> List[Dict[str, Any]]:
     """The JSON list after the last `ITEMS:` line. Raises ValueError when there isn't one,
-    or when it is empty and `allow_empty` is not set (only a standing round may say `[]`)."""
+    or when it is empty and `allow_empty` is not set (only a standing round may say `[]`).
+    Each item's `checks` keeps only ids in `known` (the goal's checks), lower-cased."""
+    known = {str(k).lower() for k in known}
     # the marker on a line of its own: a spec may well mention `ITEMS: []` in prose
     marks = [m for m in re.finditer(r"^\s*`?ITEMS:`?\s*$", answer or "", re.M)]
     if not marks:
@@ -257,9 +293,20 @@ def items_in(answer: str, allow_empty: bool = False) -> List[Dict[str, Any]]:
                     "files": [str(f).strip() for f in (it.get("files") or []) if str(f).strip()],
                     "deps": [str(d).strip() for d in (it.get("deps") or []) if str(d).strip()],
                     "independent": bool(it.get("independent")),
-                    "context": context_in(it.get("context"))})
+                    "context": context_in(it.get("context")),
+                    "checks": checks_of_item(it.get("checks"), known)})
     if not out and not allow_empty:
         raise ValueError("the plan has no items")
+    return out
+
+
+def checks_of_item(raw: Any, known: Set[str]) -> List[str]:
+    """An item's `checks` as goal check ids, each once: unknown ids (and `spec`) dropped."""
+    out: List[str] = []
+    for c in raw if isinstance(raw, list) else []:
+        cid = str(c).strip().lower() if isinstance(c, (str, int)) else ""
+        if cid in known and cid not in out:
+            out.append(cid)
     return out
 
 

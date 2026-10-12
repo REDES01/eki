@@ -16,7 +16,7 @@ End your answer with a line `ITEMS:` followed by one JSON list, nothing after it
 
 ITEMS:
 [{{"title": "...", "spec": "...", "files": ["src/x.py", "tests/test_x.py"],
-  "deps": ["title of an earlier item"], "independent": false{context}}}]
+  "deps": ["title of an earlier item"], "independent": false{context}{checks}}}]
 """
 CONTEXT_KEY = ',\n  "context": [{"name": "scene-loader", "why": "touches how scenes load"}]'
 
@@ -189,7 +189,9 @@ def landing(project) -> str:
     return "auto" if projects.autonomy(project) == "apply" else "person"
 
 
-def plan(goal: str, base: str, project, *, standing: bool = False) -> str:
+def plan(goal: str, base: str, project, *, standing: bool = False,
+         checks: Optional[List[Tuple[str, str]]] = None) -> str:
+    """The plan brief; `checks` are the goal's [(id, text)] (eki/verdicts.py), listed for tagging."""
     try:
         lines = _doc_lines(_cards(project))
     except Exception:  # reading the documents never breaks the plan brief
@@ -197,8 +199,9 @@ def plan(goal: str, base: str, project, *, standing: bool = False) -> str:
     known = KNOWLEDGE.format(cards="\n".join(lines)) if lines else ""
     return (PLAN.format(name=project["name"], path=project["path"], branch=project["branch"],
                         base=base[:12], goal=goal.strip(), split=selfbrief.SPLIT_RULES,
-                        rest=REST if standing else "") + known + "\n"
-            + ENDING.format(context=CONTEXT_KEY if lines else ""))
+                        rest=REST if standing else "") + known + selfbrief.plan_checks(checks) + "\n"
+            + ENDING.format(context=CONTEXT_KEY if lines else "",
+                            checks=selfbrief.CHECKS_KEY if checks else ""))
 
 
 def draft(wish: str, base: str, project) -> str:

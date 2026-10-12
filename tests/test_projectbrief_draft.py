@@ -25,3 +25,9 @@ def test_an_empty_wish_and_its_answer_is_read_by_goal_in():
     assert "(empty wish)" in projectbrief.draft("", BASE, PROJECT)
     goal, _ = selfbrief.goal_in("GOAL:\nWhat must be true when done: x.\nDRAFT: done\n")
     assert goal == "What must be true when done: x."
+
+
+def test_project_draft_asks_for_the_checks():
+    b = projectbrief.draft("grow tomatoes", BASE, PROJECT)
+    assert selfbrief.CHECKS_ASK in b and "C<n>:" in b
+    assert b.index("Tests (bin/check green)") < b.index("a `Checks` heading")

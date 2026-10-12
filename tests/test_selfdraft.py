@@ -226,3 +226,49 @@ def test_a_project_goal_drafts_in_the_projects_repo(conn, src, tmp_path, monkeyp
     assert f"draft-{gid}" not in workspace.git(repo, "worktree", "list")
     assert not workspace.git(repo, "branch", "--list", f"eki/draft-{gid}")
     assert workspace.belongs(store.cwd_of(conn, store.run(conn, g["plan_run"])["thread_id"]), repo)
+
+
+CHECKED = """GOAL:
+What must be true when done: eki/a.py exists. A stray C9: line here is not a check.
+Checks
+C1: `python -c 'import eki.a'` exits 0
+C2: tests/test_a.py passes under bin/check
+DRAFT: done
+"""
+
+
+def checks(conn, gid):
+    return [(r["id"], r["text"]) for r in conn.execute("SELECT * FROM checks WHERE goal_id=? ORDER BY n",
+                                                       (gid,))]
+
+
+def test_a_drafted_goal_stores_its_checks_and_the_plan_lists_them(conn, src, tmp_path, monkeypatch):
+    gid = selfwork.submit(conn, "a wish", draft=True)
+    says(tmp_path, monkeypatch, CHECKED)
+    run_inline(conn, goal(conn, gid)["draft_run"])
+    selfwork.tick(conn)
+    g = goal(conn, gid)
+    assert g["state"] == "planning" and "Checks\nC1:" in g["text"]
+    assert checks(conn, gid) == [("c1", "`python -c 'import eki.a'` exits 0"),
+                                 ("c2", "tests/test_a.py passes under bin/check")]
+    prompt = store.run(conn, g["plan_run"])["prompt"]
+    assert "c2: tests/test_a.py passes under bin/check" in prompt and '"checks": ["c1", "c3"]' in prompt
+
+
+def test_a_draft_without_check_lines_stores_none(conn, src, tmp_path, monkeypatch):
+    gid = selfwork.submit(conn, "a wish", draft=True)
+    says(tmp_path, monkeypatch, DRAFTED)
+    run_inline(conn, goal(conn, gid)["draft_run"])
+    selfwork.tick(conn)
+    assert goal(conn, gid)["state"] == "planning" and checks(conn, gid) == []
+    assert '"checks"' not in store.run(conn, goal(conn, gid)["plan_run"])["prompt"]
+    plain = selfwork.submit(conn, "as is\nChecks\nC1: x")              # --as-is: never drafted, no checks
+    assert checks(conn, plain) == []
+
+
+def test_a_ranking_draft_stores_the_picked_goals_checks(conn, src, tmp_path, monkeypatch):
+    answer = RANKED.replace("DRAFT: done", "Checks\nC1: the board shows one line\nDRAFT: done")
+    gid = rank(conn, tmp_path, monkeypatch, answer)
+    selfwork.tick(conn)
+    assert goal(conn, gid)["state"] == "planning"
+    assert checks(conn, gid) == [("c1", "the board shows one line")]

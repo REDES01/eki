@@ -58,3 +58,38 @@ def test_a_project_builder_still_runs_the_projects_check(conn, proj):
     p = _project(conn, proj)
     b = projectbrief.build(**_build_kw(), project=p)
     assert projectbrief._check(p) in b and "before you finish" in b
+
+
+CHECKS = [("c1", "eki show prints the line"), ("c2", "bin/check is green")]
+
+
+def test_plans_list_the_goals_checks_and_the_checks_key(conn, proj):
+    for p in (selfbrief.plan("a goal", BASE, CHECKS),
+              projectbrief.plan("a goal", BASE, _project(conn, proj), checks=CHECKS)):
+        assert "c1: eki show prints the line" in p and "c2: bin/check is green" in p
+        assert '"checks": ["c1", "c3"]' in p
+    for p in (selfbrief.plan("a goal", BASE), projectbrief.plan("a goal", BASE, _project(conn, proj))):
+        assert '"checks"' not in p and "goal's checks" not in p          # no checks: today's brief
+
+
+def test_items_in_keeps_known_checks_and_drops_the_rest():
+    got = selfbrief.items_in('ITEMS:\n[{"title": "a", "checks": ["C1", "c9", "spec", "c2", "c1", 3]},'
+                             ' {"title": "b"}, {"title": "c", "checks": "c1"}]', known=["c1", "c2"])
+    assert [i["checks"] for i in got] == [["c1", "c2"], [], []]
+    assert selfbrief.items_in('ITEMS:\n[{"title": "a", "checks": ["c1"]}]')[0]["checks"] == []
+
+
+def test_conclude_plan_writes_items_checks(conn, tmp_path, monkeypatch):
+    import json
+    from eki import selfwork, verdicts
+    from tests.test_plangraph import _plan, _src
+    _src(tmp_path, monkeypatch)
+    gid = selfwork.submit(conn, "two things")
+    verdicts.store_checks(conn, gid, CHECKS)
+    _plan(conn, tmp_path, monkeypatch, gid,
+          'ITEMS:\n[{"title": "a", "files": ["eki/a.py"], "checks": ["c1", "c7"]},'
+          ' {"title": "b", "files": ["eki/b.py"]}]\n')
+    rows = {r["title"]: r["checks"] for r in conn.execute("SELECT title, checks FROM items WHERE goal_id=?",
+                                                          (gid,))}
+    assert json.loads(rows["a"]) == ["c1"] and rows["b"] is None
+

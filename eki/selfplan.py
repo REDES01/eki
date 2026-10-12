@@ -10,7 +10,7 @@ import re
 import sqlite3
 from typing import Dict, List
 
-from . import db, plangraph, projects, selfbrief, store, workspace
+from . import db, plangraph, projects, selfbrief, store, verdicts, workspace
 
 
 def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
@@ -28,7 +28,8 @@ def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
             return [f"goal {g['id']}: {err}"]
         answer = store.answer(conn, run["id"])
         try:                            # a standing round may find nothing worth doing now
-            planned = selfbrief.items_in(answer, allow_empty=bool(g["standing_id"]))
+            planned = selfbrief.items_in(answer, allow_empty=bool(g["standing_id"]),
+                                         known=[c["id"] for c in verdicts.checks_of(conn, g["id"])])
         except ValueError as e:
             conn.execute("UPDATE goals SET state='failed', error=? WHERE id=?", (str(e), g["id"]))
             return [f"goal {g['id']}: {e}"]
@@ -36,6 +37,9 @@ def conclude_plan(conn: sqlite3.Connection, g: sqlite3.Row) -> List[str]:
         for it in planned:
             ids[it["title"]] = selfwork.new_item(conn, g["id"], it["title"], it["spec"], it["files"], [],
                                                  it["independent"], context=it.get("context"))
+            if it.get("checks"):        # the goal checks this item delivers (eki/verdicts.py)
+                conn.execute("UPDATE items SET checks=? WHERE id=?",
+                             (db.dumps(it["checks"]), ids[it["title"]]))
         for it in planned:
             deps = [ids[d] for d in it["deps"] if d in ids and ids[d] != ids[it["title"]]]
             selfwork._set(conn, ids[it["title"]], deps=db.dumps(deps))

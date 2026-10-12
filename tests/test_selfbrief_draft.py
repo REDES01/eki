@@ -107,3 +107,11 @@ def test_items_in_empty_only_when_allowed():
     assert selfbrief.items_in("nothing to do\nITEMS:\n[]", allow_empty=True) == []
     with pytest.raises(ValueError):
         selfbrief.items_in("no list at all", allow_empty=True)
+
+
+def test_draft_and_rank_ask_for_the_checks_after_the_four_parts():
+    for b in (selfbrief.draft("wish", BASE), selfbrief.rank([E(1)], BASE)):
+        flat = " ".join(b.split())
+        assert "Checks" in b and "C<n>:" in b and "3 to 8" in flat
+        assert "what to run or look at, and what must be seen" in flat
+        assert b.index("Tests (bin/check green)") < b.index("a `Checks` heading") < b.index("GOAL:")

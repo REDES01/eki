@@ -36,7 +36,7 @@ import sqlite3
 from pathlib import Path
 from typing import List
 
-from . import db, projectland, projectwork, queuestack, selfwork, workflow, workproject, workspace
+from . import db, projectland, projects, projectwork, queuestack, selfwork, workflow, workproject, workspace
 from .workhandlers_queue import event, say
 from .workspace import WorkspaceError, git
 
@@ -108,7 +108,8 @@ def _admit(conn: sqlite3.Connection, project: sqlite3.Row) -> List[str]:
             said += say(conn, it["goal_id"], it["id"],
                         event("seen", in_target=there, queueable=queueable, sha=sha, branch=project["branch"],
                               where=f"{(sha or '')[:12]} is in {project['name']} {project['branch']}",
-                              onto=f"{project['name']} {project['branch']}"),
+                              onto=f"{project['name']} {project['branch']}",
+                              **({"locked": [], "apply": projects.autonomy(project) == "apply"} if queueable else {})),
                         then=_landed(project), after=_gone(project))
     return said
 

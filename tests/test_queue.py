@@ -334,3 +334,24 @@ def test_the_board_says_which_batch_an_item_is_in(conn, src):
     queue.tick(conn)
     assert selfview.stage(conn, get(conn, a)) == f"in the batch checked on {b}"
     assert selfview.stage(conn, get(conn, c)) == f"next batch — joined after the check on {b} started"
+
+
+def test_the_admit_decides_from_the_facts_in_its_event(conn):
+    """eki's admit puts the lock and autonomy facts in the `seen` event (eki/queue.py `_admit`);
+    step decides from them, and the `locked` column is that very list."""
+    from eki import workrun
+    from eki.workmodel import Event
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES "
+                     "('g1', 'x', 'ask', 'you', 'planned', ?)", (db.now(),))
+        a = selfwork.new_item(conn, "g1", "A", "spec", ["a.txt"], [], False)
+        b = selfwork.new_item(conn, "g1", "B", "spec", ["b.txt"], [], False)
+        for iid in (a, b):
+            selfwork._set(conn, iid, state="proposed")
+    acts = workrun.feed(conn, "g1", a, Event("seen", 1.0, {"queueable": True, "locked": ["eki/quota.py"],
+                                                            "apply": True}))
+    assert get(conn, a)["state"] == "locked" and [x.kind for x in acts] == ["notify"]
+    workrun.feed(conn, "g1", b, Event("seen", 2.0, {"queueable": True, "locked": [], "apply": False}))
+    assert get(conn, b)["state"] == "proposed"                   # autonomy propose: a person's call
+    acts = workrun.feed(conn, "g1", b, Event("seen", 3.0, {"queueable": True, "locked": [], "apply": True}))
+    assert get(conn, b)["state"] == "queued" and [x.kind for x in acts] == ["merge"]

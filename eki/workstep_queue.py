@@ -44,12 +44,14 @@ def seen(it: ItemState, items: Tuple[ItemState, ...], s: Settings, ev: Any) -> M
         return it, ()
     if it.stage != "proposed" or not d.get("queueable"):
         return it, ()
-    held = locked_in(it.files + it.touched, s.locked)
+    # the executor's facts when it gives them (eki: locks.locked_in, autonomy apply), else the settings'
+    held = list(d["locked"]) if "locked" in d else locked_in(it.files + it.touched, s.locked)
     if held:
         what = f"locked, touches {', '.join(held)}"
         new = moved(it, "locked", f"locked — touches {', '.join(held)}; needs a person")
         return new, (workstep.needs_you(new, what, f"eki self apply {it.id} --yes"),)
-    if s.merge != "auto" or (it.review or "").startswith("no:"):    # objected twice: a person's call
+    auto = d["apply"] if "apply" in d else s.merge == "auto"
+    if not auto or (it.review or "").startswith("no:"):    # objected twice: a person's call
         return it, ()
     onto = d.get("onto")
     return enqueue(it, f"queued for {onto}" if onto else "queued")

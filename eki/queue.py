@@ -169,6 +169,7 @@ def _admit(conn: sqlite3.Connection) -> List[str]:
     if not waiting:
         return []
     repo = integration.repo()
+    apply_mode = selfwork.settings().get("autonomy") == "apply"
     said = []
     for it in waiting:
         sha = (it["rebased"] or it["commit_sha"]) if it["state"] == "queued" else it["commit_sha"]
@@ -176,18 +177,20 @@ def _admit(conn: sqlite3.Connection) -> List[str]:
         queueable = (it["state"] == "proposed" and bool(it["worktree"]) and workspace.belongs(it["worktree"], repo))
         if not there and not queueable:
             continue                               # built before the queue: merged by hand
-        said += say(conn, it["goal_id"], it["id"],
-                    event("seen", in_target=there, queueable=queueable, where=f"{(sha or '')[:12]} is in main",
-                          sha=sha), then=_admitted(it), after=_seen)
+        facts: dict = dict(in_target=there, queueable=queueable, where=f"{(sha or '')[:12]} is in main", sha=sha)
+        if queueable:                              # what step decides the admit from
+            facts.update(locked=locks.locked_in(json.loads(it["touched"] or "[]") + json.loads(it["files"] or "[]")),
+                         apply=apply_mode)
+        said += say(conn, it["goal_id"], it["id"], event("seen", **facts), then=_admitted(it, facts), after=_seen)
     return said
 
 
-def _admitted(it: sqlite3.Row):
-    """The columns that go with what `seen` decides for `it`."""
+def _admitted(it: sqlite3.Row, facts: dict):
+    """The columns that go with what `seen` decides for `it`: a locked one keeps the files it was
+    locked for — the very list step decided from."""
     def then(c: sqlite3.Connection, old: Any, new: Any) -> None:
         if new.stage == "locked":
-            held = locks.locked_in(json.loads(it["touched"] or "[]") + json.loads(it["files"] or "[]"))
-            selfwork._set(c, it["id"], locked=db.dumps(held))
+            selfwork._set(c, it["id"], locked=db.dumps(facts.get("locked") or []))
         elif new.stage in ("landed", "applied") and old is not None and old.stage != new.stage:
             selfwork._set(c, it["id"], landed_at=db.now())
     return then

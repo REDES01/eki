@@ -70,7 +70,7 @@ the facts the executor found, and `item` when the event is about one item.
 | `item_failed` | a run failed, its kind known | `{kind, retry_at, fix}` (kind in `FAILURE_KINDS`), `why`, `can_fix` |
 | `run_lost` | a run was lost to a restart or a lease | — |
 | `merge_result` | the item's rebase onto its predicted head | `result` (rebased \| conflict \| failed), `on`, `files`, `error`, `unbatched`, `stack` |
-| `seen` | the executor looked at a ready or queued item's commit | `in_target`, `queueable` (its worktree is there and in the repo, it has a commit), `where`, `onto`, `sha`, `branch` |
+| `seen` | the executor looked at a ready or queued item's commit | `in_target`, `queueable` (its worktree is there and in the repo, it has a commit), `locked` (the locked paths it touches: eki's `locks.locked_in`, a project's none), `apply` (autonomy apply); without these two step reads `Settings.locked` / `merge`; `where`, `onto`, `sha`, `branch` |
 | `landed` | the queue moved the target, a land waits, or the train settled | `went` (target \| live \| rolled back), `sha`, `branch`, `waits`, `why` |
 | `person_decided` | `eki self retry / drop / apply`, `eki self goal retry` | `decision` (retry \| drop \| apply), `yes`, `fresh`, `plan` |
 

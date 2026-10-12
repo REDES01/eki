@@ -177,6 +177,33 @@ def test_build_parallel_merge_after_merge_and_command(tmp_path):
     assert "nothing to set" in run(tmp_path, wf(), "request")["html"][0]
 
 
+def _cap(building, others, machine, project):
+    room = max(0, machine - others)
+    by = "machine" if room <= project else "project"
+    return {"building": building, "others": others, "machine": machine, "project": project,
+            "now": room if by == "machine" else project, "by": by, "line": ""}
+
+
+def _said(html):
+    m = re.search(r'<div class="wi-cap">(.*?)</div>', html, re.S)
+    return m and m.group(1)
+
+
+def test_build_says_the_cap_in_force_with_the_machines_number_linked(tmp_path):
+    link = lambda n: f'<a href="#settings/machine" data-wi-machine>{n}</a>'
+    html = run(tmp_path, dict(wf(parallel=24), cap=_cap(5, 0, 6, 24)), "build")["html"][0]
+    assert _said(html) == f"5 building · up to {link(6)} now (machine) · this project allows 24"
+    assert html.index("wi-cap") < html.index('data-wi="parallel"')
+    assert "this project&#39;s ceiling; the machine setting can be lower" in html or \
+        "this project's ceiling; the machine setting can be lower" in html
+    assert "how many items build at once" not in html
+    html = run(tmp_path, dict(wf(parallel=4), cap=_cap(3, 0, 12, 4)), "build")["html"][0]
+    assert _said(html) == f"3 building · up to 4 now (this project) · the machine allows {link(12)}"
+    html = run(tmp_path, dict(wf(parallel=24), cap=_cap(5, 2, 6, 24)), "build")["html"][0]
+    assert _said(html) == f"5 building · up to {link(4)} now (machine: 6, 2 in other projects) · this project allows 24"
+    assert "wi-cap" not in run(tmp_path, wf(), "build")["html"][0]          # older data: nothing new
+
+
 def test_self_is_always_on_and_eki_locked_checks_are_fixed(tmp_path):
     html = run(tmp_path, wf(), "self")["html"][0]
     assert switch(html) == ("self", True, True) and "always on" in html

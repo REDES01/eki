@@ -1,7 +1,7 @@
 // One stage of a project's workflow in the right side panel (panel.host, panel.js), for the JSON of
 // GET /api/projects/<pid>/workflow (eki/api_workflow.py): what the stage does, its settings with the
 // workflow card's controls and one-line explanations (choicemenu.js for router / plan / merge, the
-// settingstarget.js picker when router is off, a number for parallel, a switch per check, the command,
+// settingstarget.js picker when router is off, the build cap in force (graph.cap) over a number for parallel, a switch per check, the command,
 // the command as one line or path rules in rows (workflowrules.js) and batch_command, the playtester card,
 // after_merge), then "Now here": the project's items at that stage, each opening its
 // detail with a way back; one that needs a look (needs_look) says why in a line (its error, else its note) with
@@ -112,6 +112,23 @@
         : "what runs on the queued changes together; empty: the check command");
   }
 
+  // the build cap in force, in cap.line's words (eki/buildcap.py of), the machine's number linking to its setting
+  function capLine() {
+    const c = D().cap;
+    if (!c) return "";
+    const m = (n) => `<a href="#settings/machine" data-wi-machine>${esc(n)}</a>`;
+    let t;
+    if (c.by === "machine") {
+      const where = c.others ? `machine: ${esc(c.machine)}, ${esc(c.others)} in other projects` : "machine";
+      const rest = c.project == null ? "this project has no cap of its own" : `this project allows ${esc(c.project)}`;
+      t = `${esc(c.building)} building · up to ${m(c.now)} now (${where}) · ${rest}`;
+    } else {
+      const also = c.others ? ` (${esc(c.others)} in other projects)` : "";
+      t = `${esc(c.building)} building · up to ${esc(c.now)} now (this project) · the machine allows ${m(c.machine)}${also}`;
+    }
+    return `<div class="wi-cap">${t}</div>`;
+  }
+
   function settings(st) {
     const id = st.id, ro = editable() ? "" : `<div class="wi-ro">Read-only: ${esc(roWhy())}.</div>`;
     let h = "";
@@ -122,8 +139,8 @@
       if (id === "merge" && choice("merge") !== "auto" && spec().after_merge) h += '<div class="dim">after_merge runs only with merge auto</div>';
     } else if (id === "build") {
       const n = spec().parallel == null ? PARALLEL : spec().parallel;
-      h = field("parallel", `<input class="set-in wi-num" type="number" min="1" step="1" data-wi="parallel" value="${esc(n)}"${dis()}>`,
-        "how many items build at once");
+      h = capLine() + field("parallel", `<input class="set-in wi-num" type="number" min="1" step="1" data-wi="parallel" value="${esc(n)}"${dis()}>`,
+        "this project's ceiling; the machine setting can be lower");
     } else if (CHECKS.includes(id)) {
       h = toggle(id);
       if (id === "command" || (id === "batch" && !spec().command)) h += command();

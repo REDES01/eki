@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import callwait, components, pathrules, projectchats, selfview, workflow
+from . import buildcap, callwait, components, pathrules, projectchats, selfview, workflow
 
 #: a check's stage title, one-line summary and what it does
 _CHECKS = {
@@ -103,8 +103,9 @@ def _stage(sid: str, title: str, summary: str, what: str, on: bool, keys: List[s
             "keys": keys, "count": 0, "alert": False, "alert_count": 0, "items": []}
 
 
-def stages(v: Dict[str, Any], eki: bool) -> List[Dict[str, Any]]:
-    """The stages in the order they run, each on or off; no items yet."""
+def stages(v: Dict[str, Any], eki: bool, cap: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """The stages in the order they run, each on or off; no items yet. With the build cap in force
+    (eki/buildcap.py of), Build's summary is its line: the machine's limit and the project's."""
     router_on = v["router"] == "on"
     single = v["plan"] == "single"
     n = v["parallel"]
@@ -119,9 +120,9 @@ def stages(v: Dict[str, Any], eki: bool) -> List[Dict[str, Any]]:
                   "the whole request is one item" if single else "splits the request into items",
                   "A planner turns a request into items with write-sets, built in parallel.\n"
                   "Single: the whole request is one item for one agent.", True, ["plan"]),
-           _stage("build", "Build", "1 at a time" if n == 1 else f"{n} in parallel",
+           _stage("build", "Build", cap["line"] if cap else "1 at a time" if n == 1 else f"{n} in parallel",
                   "Each item is built by an agent in a worktree of its own.\n"
-                  "Parallel: how many items build at once.", True, ["parallel"])]
+                  "Parallel: this project's ceiling; the machine's agents at once can be lower.", True, ["parallel"])]
     for c in workflow.CHECKS:
         if c == "train" and not eki:
             continue
@@ -228,14 +229,15 @@ def graph(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     good, error, found = _card(root)
     spec = dict(good.spec) if good else workflow.from_settings(conn, row)
     v = _values(spec, eki)
-    out = stages(v, eki)
+    cap = buildcap.of(conn, None if eki else pid)
+    out = stages(v, eki, cap)
     place(conn, pid, eki, out, v["checks"])
     return {"project": pid, "name": "eki" if eki else row["name"], "card": good.name if good else "",
             "error": error, "editable": bool(good and not good.card and root is not None), "eki": eki,
             "line": line(v), "spec": spec, "choices": components.choices("workflow"),
             "choice_defaults": components.choice_defaults("workflow"),
             "choice_help": components.choice_help("workflow"),
-            "locked": list(workflow.LOCKED) if eki else [], "stages": out, "feeds": feeds(found, v)}
+            "locked": list(workflow.LOCKED) if eki else [], "cap": cap, "stages": out, "feeds": feeds(found, v)}
 
 
 def get(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:

@@ -5,6 +5,7 @@
 .wi-lock { font-style: italic; font-size: 12px; }
 .wi-ro { font-size: 12px; margin-bottom: 8px; opacity: 0.8; }
 .wi-help { font-size: 12px; margin-top: 2px; }
+.wi-cap { font-size: 12px; margin-bottom: 8px; }
 .wi-wait { font-size: 12px; color: var(--amber); }
 .wi-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; }
 .wi-num { width: 6em; }

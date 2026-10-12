@@ -36,6 +36,8 @@ CHOICE_HELP = {
 #: a workflow card isn't a shared resource: the common `access` setting doesn't apply
 DROPS = ('access',)
 PARALLEL = 4
+#: one line on a setting the card's page explains (parallel stays a number: cardworkflow.js draws it)
+FIELD_HELP = {'parallel': "this project's ceiling; the machine setting can be lower"}
 PLAYTESTER = 'playtester'
 
 

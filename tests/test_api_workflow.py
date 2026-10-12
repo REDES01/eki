@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from eki import apiroutes, builds, components, workflow
+from eki import apiroutes, builds, components, machinecaps, workflow
 
 ORDER = ["request", "router", "plan", "build", "self", "review", "command", "batch", "playtester",
          "merge", "after_merge"]
@@ -55,7 +55,7 @@ def test_stages_in_order_with_titles_from_the_card(conn, proj):
     assert g["error"] == "" and g["editable"] is True and g["eki"] is False and g["locked"] == []
     assert all(s["on"] for s in g["stages"]) and not any(s["locked"] for s in g["stages"])
     by = stages(g)
-    assert by["build"]["summary"] == "4 in parallel" and by["command"]["summary"] == "Each change: make test"
+    assert by["build"]["summary"] == "0 building · up to 4 now (this project) · the machine allows 12" and by["command"]["summary"] == "Each change: make test"
     assert by["merge"]["summary"].startswith("auto") and by["after_merge"]["summary"] == "npm run build"
     assert by["router"]["keys"] == ["router", "target"] and by["command"]["keys"] == ["checks", "command"]
     assert by["batch"]["keys"] == ["checks", "batch_command"]
@@ -74,7 +74,7 @@ def test_off_stages_are_drawn_off(conn, proj):
     by = stages(graph(conn))
     assert by["router"]["on"] is False and by["router"]["summary"] == "straight to fake:top"
     assert by["plan"]["title"] == "Single item" and by["plan"]["on"] is True
-    assert by["build"]["summary"] == "1 at a time"
+    assert by["build"]["summary"] == "0 building · up to 1 now (this project) · the machine allows 12"
     for c in ("review", "command", "batch", "playtester", "after_merge"):
         assert by[c]["on"] is False, c
     assert by["self"]["on"] and by["merge"]["on"] and by["merge"]["summary"] == "person merges"
@@ -87,6 +87,24 @@ def test_the_line(conn, proj):
     assert graph(conn)["line"] == "plan split · 4 parallel · checks: self · merge auto"
     _card(proj, router="off", target="fake:top", checks=["self", "review"])
     assert graph(conn)["line"] == "router off → fake:top · plan split · 4 parallel · checks: self, review · merge auto"
+
+
+def test_the_build_stage_says_the_cap_in_force(conn, proj):
+    _card(proj, parallel=24)
+    _project(conn, "game", proj)
+    _project(conn, "other", proj.parent / "other")
+    machinecaps.save(agents=6)
+    _goal(conn, "g0", "planned")
+    _goal(conn, "g1", "planned", project="other")
+    for i in range(5):
+        _item(conn, f"b{i}", "building")
+    _item(conn, "o1", "building", gid="g1")
+    conn.commit()
+    g = graph(conn)
+    assert g["cap"] == {"building": 5, "others": 1, "machine": 6, "project": 24, "now": 5, "by": "machine",
+                        "line": "5 building · up to 5 now (machine: 6, 1 in other projects) · this project allows 24"}
+    assert stages(g)["build"]["summary"] == g["cap"]["line"]
+    assert g["line"] == "plan split · 24 parallel · checks: self · merge auto"      # the card's own line stays
 
 
 def test_cards_feed_their_stages(conn, proj):

@@ -236,3 +236,9 @@ def test_eki_refuses_rules_and_a_batch_command(tmp_path, monkeypatch):
     wf = workflow.of_project(None, None)
     assert workflow.each_said(wf) == "Each change: bin/check"
     assert workflow.together_said(wf) == "Together, before merging: bin/check"
+
+
+def test_parallel_says_it_is_only_this_projects_ceiling():
+    from eki.components import workflow as kind
+    assert components.field_help("workflow") == {"parallel": "this project's ceiling; the machine setting can be lower"}
+    assert isinstance(kind.PARALLEL, int)                    # still a number on the card, not a text field

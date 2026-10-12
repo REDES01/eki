@@ -320,6 +320,8 @@ ADDED = [
     ("items", "fixer", "TEXT"),         # JSON {stage, failure, run, at, head, summary}: its one fixer run (eki/fixer.py)
     ("items", "checks", "TEXT"),        # JSON list of the goal's check ids the item delivers (eki/verdicts.py)
     ("goals", "accept", "TEXT"),        # JSON {round, runs, fixes, by?}: final acceptance (eki/acceptance.py)
+    ("runs", "stop", "TEXT"),           # JSON {kind, retry_at, fix, since, n}: why it last stopped (eki/stopkind.py record)
+    ("items", "hold", "TEXT"),          # JSON: a runs.stop record plus "run" while held for a broken setup
 ]
 
 

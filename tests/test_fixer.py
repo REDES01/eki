@@ -214,3 +214,17 @@ def test_daily_counts_fixed_and_left_by_day(conn, src):
     assert (got[0]["fixed"], got[0]["left"]) == (1, 1)
     assert (got[1]["fixed"], got[1]["left"]) == (1, 1)
     assert (got[2]["fixed"], got[2]["left"]) == (0, 0)
+
+
+def test_a_fixer_whose_run_is_gone_starts_again_not_left(conn, stale):
+    offer(conn, stale)
+    it = selfwork.store_item(conn, stale)
+    with db.tx(conn):
+        conn.execute("DELETE FROM runs WHERE id=?", (it["run_id"],))        # lost to a restart
+    fixer.tick(conn)
+    cur = selfwork.store_item(conn, stale)
+    assert cur["state"] == "fixing" and cur["run_id"] != it["run_id"] and cur["tries"] == it["tries"]
+    run = store.run(conn, cur["run_id"])
+    assert run["prompt"].startswith(fixerbrief.FIRST_LINE) and "expected the old order" in run["prompt"]
+    assert fixer.of(cur)["stage"] == "gate1" and fixer.of(cur)["run"] == cur["run_id"]
+    assert fixer.tick(conn) == []                                     # started once

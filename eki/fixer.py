@@ -207,9 +207,10 @@ def _conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     run = store.run(conn, it["run_id"]) if it["run_id"] else None
     if (run is not None and run["state"] in store.ACTIVE) or buildfeed.pending(conn, it["id"]):
         return []
-    if run is None or run["state"] != "done":
-        why = f"the fixer run ended {run['state'] if run else 'missing'}"
-        return _leave(conn, it, why, buildfeed.ended(run, "fixer") if run is not None else None)
+    if run is None:                        # lost: the same fixer run again, not a try (workstep._lost)
+        return buildfeed.feed(conn, it, Event("run_lost", db.now(), {}))
+    if run["state"] != "done":
+        return _leave(conn, it, f"the fixer run ended {run['state']}", buildfeed.ended(run, "fixer"))
     _, _, summary = selfbrief.outcome(store.answer(conn, run["id"]))
     note = {**(of(it) or {}), "summary": summary or "(nothing said)"}
     wt = it["worktree"]

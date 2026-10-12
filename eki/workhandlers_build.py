@@ -165,9 +165,13 @@ def _fix(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
     except (workspace.WorkspaceError, OSError, integration.IntegrationError) as e:
         return buildfeed.feed(conn, it, Event("item_finished", db.now(), {"leave": f"the fixer couldn't start: {e}"}),
                               then=lambda c: claim(c, action) and None, error=f"the fixer couldn't start: {e}")
+    stage, failure = action.data.get("stage"), action.data.get("failure") or ""
+    if action.data.get("again"):           # its run was lost: the same fixer run, told the same failure
+        note = fixer.of(it) or {}
+        stage, failure = note.get("stage"), note.get("failure") or failure
     with db.tx(conn):
         if claim(conn, action):
-            fixer.launch(conn, it, action.data.get("stage") or "gate1", action.data.get("failure") or "", got)
+            fixer.launch(conn, it, stage if stage in fixer.STAGES else "gate1", failure, got)
     return []
 
 

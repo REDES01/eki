@@ -250,8 +250,10 @@ the same run come with the failure-classes goal.
 What the build executor's feeding changes, in words only or where today had
 no answer:
 
-- A build whose run row is gone was stuck in `building`; it is `run_lost`
-  now, the same build started again, its try not counted.
+- A build or fixer whose run row is gone (a build was stuck in `building`, a
+  fixer was left "the fixer run ended missing") is `run_lost` now: the same
+  run started again — a fixer told its first stage and failure — its try not
+  counted and no second fixer spent.
 - A build or fixer run whose `runs.stop` says `transient` is `item_failed{transient}` with no retry time (the worker's own
   retries are spent): left, as before, "left for you — the build run ended …".
 - A fixer that git can't put on main is left "the fixer couldn't start: …"

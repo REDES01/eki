@@ -158,8 +158,11 @@ def spawn_ready(conn) -> int:
         gate = memadmit.run_kind(r) if judge or r["priority"] == "background" else None
         if gate:
             mem = mem or memadmit.Tick(conn)
-            if mem.fits(gate):
-                busy_threads.add(r["thread_id"])    # waiting for memory
+            held = mem.fits(gate)
+            if held:
+                busy_threads.add(r["thread_id"])    # waiting for memory, and saying so
+                if r["why"] != held:
+                    store.update_run(conn, r["id"], why=held)
                 continue
         if r["priority"] == "background":
             room = room or machine.room()

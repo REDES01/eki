@@ -25,6 +25,7 @@ def test_a_queued_judge_waits_below_the_floor(conn, monkeypatch):
     rid = run(conn, "j", selfwork.CHECK, provider="command")
     engine.spawn_ready(conn)
     assert spawned == [] and store.run(conn, rid)["state"] == "queued"
+    assert store.run(conn, rid)["why"].startswith(WAIT)     # a held run says why, not nothing
     monkeypatch.setenv("EKI_FREE_GB", "64")
     engine.spawn_ready(conn)
     assert spawned == [rid]

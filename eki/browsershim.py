@@ -163,8 +163,10 @@ def memory(own):
         if i != own:
             at = locked(i)
             fresh += at is not None and now - at < GRACE
-    ok = (swap <= setting("swap_max", 60, 100)
-          and free - fresh * each - each >= setting("floor_gb", 6, 64))
+    floor = setting("floor_gb", 6, 64)
+    stale = free >= 2 * floor          # swap stays allocated after pressure: alone it isn't a reason
+    ok = ((swap <= setting("swap_max", 60, 100) or stale)
+          and free - fresh * each - each >= floor)
     return ok, free, swap
 
 

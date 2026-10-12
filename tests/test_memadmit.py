@@ -17,10 +17,20 @@ def test_below_the_floor_nothing_new_starts(conn, monkeypatch):
     assert memadmit.fits(conn, "agent:claude").startswith(WAIT)
 
 
-def test_too_much_swap_and_nothing_new_starts(conn, monkeypatch):
+def test_too_much_swap_with_memory_short_and_nothing_new_starts(conn, monkeypatch):
     monkeypatch.setenv("EKI_SWAP_PCT", "70")
-    assert memadmit.low() == "waiting for memory (64.0 GB free, swap 70%)"
-    assert memadmit.Tick(conn).fits("browser") == "waiting for memory (64.0 GB free, swap 70%)"
+    monkeypatch.setenv("EKI_FREE_GB", "10")          # above the floor (6), under two floors
+    assert memadmit.low() == "waiting for memory (10.0 GB free, swap 70%)"
+    assert memadmit.Tick(conn).fits("browser") == "waiting for memory (10.0 GB free, swap 70%)"
+
+
+def test_swap_left_over_with_plenty_free_holds_nothing(conn, monkeypatch):
+    """macOS keeps swap allocated after the pressure is gone (2026-10-12: swap 84%,
+    30 GB free, every check held for 15 minutes): alone it is no reason to wait."""
+    monkeypatch.setenv("EKI_SWAP_PCT", "84")
+    monkeypatch.setenv("EKI_FREE_GB", "30.7")
+    assert memadmit.low() is None
+    assert memadmit.Tick(conn).fits("check") is None
 
 
 def test_plenty_of_room(conn):
@@ -43,7 +53,9 @@ def test_the_floor_follows_the_setting(conn, monkeypatch):
     machinecaps.save(floor_gb=2, swap_max=80)
     assert memadmit.low() is None and memadmit.fits(conn, "browser") is None
     monkeypatch.setenv("EKI_SWAP_PCT", "81")
-    assert memadmit.low().startswith(WAIT)
+    assert memadmit.low() is None                       # 4 GB is two floors: swap alone isn't a reason
+    monkeypatch.setenv("EKI_FREE_GB", "3")
+    assert memadmit.low().startswith(WAIT)              # under two floors, the swap limit holds
 
 
 def test_estimate_defaults_and_the_agent_fallback(conn):

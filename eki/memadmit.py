@@ -88,11 +88,23 @@ def why(r: Dict) -> str:
     return f"waiting for memory ({r['free_gb']:.1f} GB free, swap {r['swap_pct']}%)"
 
 
+#: swap above the limit only holds work while free memory is under this many floors.
+#: macOS keeps swap allocated long after the pressure that filled it is gone
+#: (2026-10-12: swap 84% with 30 GB free held every check for 15 minutes), so
+#: swap alone is a stale reading; with memory short too, it is a real one.
+SWAP_COUNTS_UNDER = 2
+
+
+def swap_bites(r: Dict, caps: Dict) -> bool:
+    """Swap use past the limit, while free memory is short enough for it to matter."""
+    return r["swap_pct"] > caps["swap_max"] and r["free_gb"] < SWAP_COUNTS_UNDER * caps["floor_gb"]
+
+
 def low(r: Optional[Dict] = None) -> Optional[str]:
     """why(r) when the Mac is below the floor or above the swap limit, else None."""
     r = r if r is not None else reading()
     caps = machinecaps.settings()
-    if r["free_gb"] < caps["floor_gb"] or r["swap_pct"] > caps["swap_max"]:
+    if r["free_gb"] < caps["floor_gb"] or swap_bites(r, caps):
         return why(r)
     return None
 
@@ -143,7 +155,7 @@ class Tick:
     def fits(self, kind: str) -> Optional[str]:
         """None when work of this kind may start now, else why it waits."""
         r = self.reading
-        if r["swap_pct"] > self.caps["swap_max"]:
+        if swap_bites(r, self.caps):
             return why(r)
         left = r["free_gb"] - self.reserved - self.started - estimate(self.conn, kind)
         return None if left >= self.caps["floor_gb"] - 1e-9 else why(r)      # 7.1 - 1.1 is 5.999…

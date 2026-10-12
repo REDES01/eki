@@ -143,13 +143,22 @@ def test_a_learned_browser_estimate_is_honoured(exe, tmp_path):
 
 def test_swap_above_its_limit_holds_it(exe, tmp_path):
     marker = tmp_path / "m"
-    child = launch(exe, marker, EKI_SWAP_PCT="70")
+    child = launch(exe, marker, EKI_SWAP_PCT="70", EKI_FREE_GB="10")   # memory short too
     try:
         time.sleep(1.5)
         assert not marker.exists() and child.poll() is None
     finally:
         stop(child)
     assert "swap 70%" in child.stderr.read()
+
+
+def test_swap_left_over_with_plenty_free_does_not_hold_it(exe, tmp_path):
+    marker = tmp_path / "m"
+    child = launch(exe, marker, EKI_SWAP_PCT="84", EKI_FREE_GB="30")
+    try:
+        assert wait_for(marker.exists)
+    finally:
+        stop(child)
 
 
 def test_the_floor_is_read_from_settings(exe, tmp_path, home):

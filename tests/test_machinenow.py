@@ -138,4 +138,6 @@ def test_station_says_when_new_work_waits_for_memory(conn, monkeypatch):
     monkeypatch.setenv("EKI_FREE_GB", "64")
     assert machinenow.station(conn)["memory"] is None
     monkeypatch.setenv("EKI_SWAP_PCT", "75")
-    assert machinenow.station(conn)["memory"] == "waiting for memory (64.0 GB free, swap 75%)"
+    assert machinenow.station(conn)["memory"] is None        # swap left over, plenty free
+    monkeypatch.setenv("EKI_FREE_GB", "10")
+    assert machinenow.station(conn)["memory"] == "waiting for memory (10.0 GB free, swap 75%)"

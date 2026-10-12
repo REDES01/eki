@@ -4,3 +4,20 @@
 .cw-open { font-weight: 600; }
 .cw-each, .cw-together { font-size: 12px; margin-bottom: 4px; overflow-wrap: anywhere; }
 .cw-together { margin-bottom: 8px; }
+/* How work lands: two plain options, the small GitHub form when the folder has no remote, why and the error. */
+.cw-lands { margin-bottom: 10px; }
+.cw-lands-h { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.cw-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.cw-opt { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px; font-size: 12px; text-align: left; }
+.cw-opt:hover:not(:disabled) { border-color: var(--dim); }
+.cw-opt.on { border-color: var(--text); font-weight: 600; }
+.cw-opt:disabled { opacity: .5; cursor: default; }
+.cw-opt.on:disabled { opacity: 1; }
+.cw-repo { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--dim); }
+.cw-why, .cw-note { font-size: 12px; color: var(--dim); margin-top: 4px; overflow-wrap: anywhere; }
+.cw-gh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.cw-gh-h { display: flex; align-items: center; gap: 6px; }
+.cw-gh-repo { width: 16em; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.cw-gh-or { color: var(--dim); }
+.cw-gh-private { display: inline-flex; align-items: center; gap: 4px; }
+.cw-err { margin-top: 4px; }

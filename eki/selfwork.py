@@ -21,9 +21,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, callwait, db, deplinks, doccheck, fixer, integration, leftover, notify, paths, projectbrief,
-               projects, projectwork, review, scheduler, selfbrief, selfdraft, selfjudge, selfplan, store, workflow,
-               workflowgates, workspace)
+from . import (builds, callwait, db, deplinks, doccheck, fixer, integration, itemhold, leftover, notify, paths,
+               projectbrief, projects, projectwork, review, scheduler, selfbrief, selfdraft, selfjudge, selfplan, stopkind, store,
+               workflow, workflowgates, workspace)
 
 log = logging.getLogger("eki.self")
 
@@ -161,15 +161,16 @@ def _is_ancestor(commit: str, head: str) -> bool:
 
 
 def items_in(conn: sqlite3.Connection, states: tuple) -> List[sqlite3.Row]:
-    """Items in these states, oldest first. Waiting items `held` for a brief are
-    left out: they aren't ready, and the scheduler is who asks for waiting ones."""
+    """Items in these states, oldest first. Waiting items `held` for a brief, or held
+    for a broken setup until their recheck (eki/itemhold.py), are left out: they
+    aren't ready, and the scheduler is who asks for waiting ones."""
     marks = ",".join("?" * len(states))
     rows = conn.execute(f"SELECT * FROM items WHERE state IN ({marks}) ORDER BY created_at",
                         states).fetchall()
     if "waiting" not in states:
         return rows
-    wait = held(conn)
-    return [r for r in rows if not (r["state"] == "waiting" and r["goal_id"] in wait)]
+    wait, now = held(conn), db.now()
+    return [r for r in rows if not (r["state"] == "waiting" and (r["goal_id"] in wait or itemhold.waits(r, now)))]
 
 
 def held(conn: sqlite3.Connection) -> set:
@@ -185,8 +186,11 @@ def _set(conn: sqlite3.Connection, iid: str, **fields: Any) -> None:
     conn.execute(f"UPDATE items SET {cols} WHERE id=?", (*fields.values(), iid))
 
 
-def needs_you(conn: sqlite3.Connection, it: sqlite3.Row, state: str, what: str, act: str) -> bool:
-    """Queue a needs-you push for the item that just went to `state` (inside the caller's transaction)."""
+def needs_you(conn: sqlite3.Connection, it: sqlite3.Row, state: str, what: str, act: str, kind: str) -> bool:
+    """Queue a needs-you push for the item that just went to `state` (inside the caller's transaction).
+    Only a stop of a kind that is a person's (`stopkind.PINGS`) pings: never quota, transient or lost."""
+    if kind not in stopkind.PINGS:
+        return False
     body = " ".join(f"{it['title']} — {what}: {act}".split())[:200]
     return notify.queue(conn, f"item:{it['id']}:{state}:{it['tries']}", "needs_you", "eki · needs you", body)
 
@@ -209,6 +213,8 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             store.add_event(conn, run["id"], run["attempt"], "note", {"text": left})
         said = ([left] if left else []) + callwait.stopped(conn, it, run)
         if run["state"] != "done":
+            if (h := itemhold.settle(conn, it, run)):
+                return said + h
             _set(conn, it["id"], state="left", error=f"the build run ended {run['state']}: {run['error'] or ''}")
             return said + [f"item {it['id']}: left — the build run ended {run['state']}"]
         relinked = deplinks.restore(it["worktree"], project["path"] if project is not None else repo())
@@ -254,7 +260,7 @@ def _built(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row, goal: sq
         _set(conn, it["id"], state="left", error=with_tried(it, why), summary=summary, commit_sha=sha,
              touched=db.dumps(touched))
         if verdict == "person":                 # "changed nothing" is a failed try, not a question
-            needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
+            needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}", "judgment")
         return [f"item {it['id']}: left for you — {why}"]
     error = None if verdict == "done" else f"partial: {reason}"
     wf = workflow.of_project(conn, project) if project is not None else None
@@ -333,7 +339,8 @@ def start_build(conn: sqlite3.Connection, it: sqlite3.Row, goal: sqlite3.Row, ot
     prompt = selfbrief.build(**brief) if project is None else projectbrief.build(**brief, project=project)
     rid = store.create_run(conn, it["thread_id"], prompt, row="code",
                            priority="now" if goal["owner"] == "you" else "background")
-    _set(conn, it["id"], state="building", run_id=rid, tries=it["tries"] + 1, error=None)
+    held = itemhold.hold_of(it) is not None            # a recheck after a broken setup costs no attempt
+    _set(conn, it["id"], state="building", run_id=rid, tries=it["tries"] + (0 if held else 1), error=None, hold=None)
 
 
 def store_item(conn: sqlite3.Connection, iid: str) -> sqlite3.Row:
@@ -363,7 +370,8 @@ def retry(conn: sqlite3.Connection, iid: str) -> str:
         raise KeyError(f"no item {iid}")
     if it["state"] in LIVE:
         raise ValueError(f"item {it['id']} is {it['state']}")
-    fields: Dict[str, Any] = {"state": "waiting", "error": None, "fixer": None}   # a fresh fixer for your retry
+    fields: Dict[str, Any] = {"state": "waiting", "error": None, "fixer": None,   # a fresh fixer for your retry
+                              "hold": None}                                      # held: start it now
     if it["worktree"] and not Path(it["worktree"]).exists():     # dropped: start afresh
         fields.update(worktree=None, branch=None, base=None, commit_sha=None, tries=0,
                       touched="[]", verdict=None, summary=None, review=None, reviews=0, review_run=None)

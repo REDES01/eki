@@ -173,7 +173,7 @@ def _admit(conn: sqlite3.Connection) -> List[str]:
         if held:
             if _set_if(conn, it, "proposed", state="locked", locked=db.dumps(held),
                        _then=lambda: selfwork.needs_you(conn, it, "locked", f"locked, touches {', '.join(held)}",
-                                                        f"eki self apply {it['id']} --yes")):
+                                                        f"eki self apply {it['id']} --yes", "judgment")):
                 said.append(f"item {it['id']}: locked — touches {', '.join(held)}; needs a person")
         elif apply_mode and not (it["review"] or "").startswith("no:"):   # objected twice: a person's call
             if _set_if(conn, it, "proposed", state="queued", queued_at=db.now(), head=None,

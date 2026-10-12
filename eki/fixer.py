@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import db, fixerbrief, integration, landed, rebase, selfbrief, selfwork, store
+from . import db, fixerbrief, integration, itemhold, landed, rebase, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 STAGES = ("gate1", "gate2", "resolve", "nothing")
@@ -190,7 +190,7 @@ def _conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if run is not None and run["state"] in store.ACTIVE:
         return []
     if run is None or run["state"] != "done":
-        return _leave(conn, it, f"the fixer run ended {run['state'] if run else 'missing'}")
+        return _leave(conn, it, f"the fixer run ended {run['state'] if run else 'missing'}", run)
     _, _, summary = selfbrief.outcome(store.answer(conn, run["id"]))
     note = {**(of(it) or {}), "summary": summary or "(nothing said)"}
     with db.tx(conn):
@@ -220,8 +220,9 @@ def _conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     return [f"{line} (after the fixer)" for line in said]
 
 
-def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str) -> List[str]:
-    """Stop a rebase the fixer was in and leave the item for a person."""
+def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, run: Optional[sqlite3.Row] = None) -> List[str]:
+    """Stop a rebase the fixer was in and leave the item for a person — or, when its
+    run stopped on a broken setup, hold it till that is fixed (eki/itemhold.py)."""
     wt = it["worktree"]
     try:
         if wt and Path(wt).is_dir():
@@ -233,6 +234,8 @@ def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str) -> List[str]:
     with db.tx(conn):
         if not _still(conn, it):
             return []
+        if (h := itemhold.settle(conn, it, run)):
+            return h
         fields: Dict[str, Any] = {}
         if note is not None and note.get("summary") is None:    # `tried` says how it ended
             fields["fixer"] = db.dumps({**note, "summary": f"({why})"})

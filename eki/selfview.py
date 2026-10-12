@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, callwait, checkslots, db, doccheck, fixer, notifygoals, projects, queue, selfwork, store
+from . import asks, callwait, checkslots, db, doccheck, fixer, itemhold, notifygoals, projects, queue, selfwork, store
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
@@ -228,6 +228,8 @@ def _said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
         return f"! {it['error'].splitlines()[0][:150]}"
     if state == callwait.STATE:
         return _waiting(c, it)
+    if state in ("waiting", "building") and (why := itemhold.line(c, it, queued_only=True)):
+        return f"stopped: {why}"          # held for a broken setup, or its run waits to go again
     if state == "reviewing":
         return "a second reader (the reviewer role, Settings → Routing) is reading the diff"
     if state == "judging" and it["review_run"]:

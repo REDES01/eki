@@ -197,6 +197,22 @@ shows `calls <id8>, …` and `waiting on calls: <card> (run <id8>, <state>), …
 N min of 60`. Everything lives in `items.waits` and the runs table, so a
 restart loses nothing.
 
+**Held for a broken setup.** When an item's build, gate 1, fixer or resolve
+run ends not done and its `runs.stop` (eki/stopkind.py) is `environment` —
+the CLI isn't signed in or installed, the folder is gone, macOS refused —
+another try would fail the same way. So the item isn't left or unfit and no
+fixer is offered: `eki/itemhold.py` puts it back to `waiting` with
+`items.hold` (the stop record plus its run) and rechecks after
+`ENV_RECHECK` (an hour). Until then the scheduler doesn't see it. A held item
+uses no attempt: the recheck doesn't add to `tries`. The person is pinged once
+per distinct fix (`item:<id>:env:<hash of the fix>`), however many rechecks
+fail; a different breakage pings again. `eki self retry <item>` clears the
+hold and starts it now. `eki self show` and the board say
+`stopped: environment — fix: …; rechecks 15:00`, and a building item whose run
+waits queued (quota, transient) says its stop the same way. Quota, transient
+and lost stops never ping; every other stop is judgment and goes the usual way
+(one more try, the fixer, unfit or left).
+
 ## Worktrees: made, kept, removed
 
 Every item, draft, plan, gate 2 and train check works in a worktree under

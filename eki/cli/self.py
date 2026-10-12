@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import asks, builds, digest, projectchats, projects, queue, score, selfdraft, selfview, selfwork, train
+from .. import asks, builds, digest, itemhold, projectchats, projects, queue, score, selfdraft, selfview, selfwork, train
 from .common import conn, ensure_engine, err, follow
 from .selfboard import board
 from .selfloop import loop, pick
@@ -132,6 +132,9 @@ def show(c, iid: str) -> int:
     print(f"touched:  {', '.join(json.loads(it['touched'] or '[]')) or '-'}")
     print(f"worktree: {it['worktree'] or '-'}  branch {it['branch'] or '-'}  base {(it['base'] or '')[:12]}")
     print(f"commit:   {it['commit_sha'] or '-'}   tries {it['tries']}   run {it['run_id'] or '-'}")
+    stopped = itemhold.line(c, it)
+    if stopped:
+        print(f"stopped:  {stopped}")
     if project is not None and it["state"] == "proposed":
         print(f"merge:    git -C {project['path']} merge {it['branch'] or 'eki/' + it['id']}")
     if it["summary"]:

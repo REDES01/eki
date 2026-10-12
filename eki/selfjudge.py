@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlite3
 from typing import List, Optional
 
-from . import db, fixer, review, selfwork, store
+from . import db, fixer, itemhold, review, selfwork, store
 
 
 def conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
@@ -28,6 +28,9 @@ def conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
             seen = f"{said}: {why}" if said == "no" else said or f"none: {why}"
         if run["state"] == "done":
             return judged(conn, it, tail, seen, cur["reviews"])
+        if (h := itemhold.settle(conn, it, run)):           # a broken setup: held, no try spent
+            selfwork._set(conn, it["id"], review=seen)
+            return h
         if it["tries"] - (cur["reviews"] or 0) < 2 and run["state"] == "failed":   # a review's rebuild is free
             selfwork._set(conn, it["id"], state="waiting", verdict=tail[-selfwork.FAILURE_CHARS:], review=seen,
                  error="checks failed; trying once more")

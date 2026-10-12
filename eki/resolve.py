@@ -24,7 +24,7 @@ import sqlite3
 import subprocess
 from typing import List, Optional, Tuple
 
-from . import callwait, db, fixer, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from . import callwait, db, fixer, itemhold, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -91,7 +91,8 @@ def _still(conn: sqlite3.Connection, it: sqlite3.Row, state: str) -> bool:
     return row is not None and row["state"] == state and row["run_id"] == it["run_id"]
 
 
-def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = False, **fields) -> List[str]:
+def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = False,
+           run: Optional[sqlite3.Row] = None, **fields) -> List[str]:
     """Stop the rebase and leave the item for a person, the branch as it was — unless it gets
     its one fixer run (eki/fixer.py) first. `person`: the resolver asked for one, so no fixer
     and a push says so."""
@@ -106,6 +107,8 @@ def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = F
     with db.tx(conn):
         if not _still(conn, it, it["state"]):
             return []
+        if (h := itemhold.settle(conn, it, run)):     # a broken setup: held till it is fixed
+            return h
         cur = selfwork.store_item(conn, it["id"])
         line = None if person else fixer.offer(conn, cur, "resolve", why)
         if line:
@@ -113,7 +116,7 @@ def _leave(conn: sqlite3.Connection, it: sqlite3.Row, why: str, person: bool = F
         tried = fixer.tried(cur)
         selfwork._set(conn, it["id"], state="left", error=f"{why} — {tried}" if tried else why, **fields)
         if person:
-            selfwork.needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}")
+            selfwork.needs_you(conn, it, "left", f"left for you: {why}", f"eki self show {it['id']}", "judgment")
     return [f"item {it['id']}: left for you — {why}"]
 
 
@@ -133,7 +136,8 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return []
     if run is None or run["state"] != "done":
         state = run["state"] if run else "missing"
-        return _leave(conn, it, f"the resolve run ended {state}: {(run['error'] if run else '') or ''}".strip())
+        return _leave(conn, it, f"the resolve run ended {state}: {(run['error'] if run else '') or ''}".strip(),
+                      run=run)
     with db.tx(conn):
         if not _still(conn, it, "resolving"):
             return []

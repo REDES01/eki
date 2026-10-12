@@ -175,5 +175,5 @@ def test_a_restart_does_not_queue_again(conn, conflicted, lit, tmp_path, monkeyp
     run_inline(conn, rid)
     resolve.tick(conn)
     with db.tx(conn):
-        assert not selfwork.needs_you(conn, selfwork.store_item(conn, it["id"]), "left", "again", "x")
+        assert not selfwork.needs_you(conn, selfwork.store_item(conn, it["id"]), "left", "again", "x", "judgment")
     assert len(notices(conn)) == 1

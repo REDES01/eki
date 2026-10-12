@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import components, projectchats
+from . import components, gitstart, projectchats
 from .components import kindtext, uses
 
 READONLY = "pick or clone a folder first"
@@ -81,8 +81,29 @@ def card_of(conn: sqlite3.Connection, pid: str, name: str) -> Dict[str, Any]:
         raise KeyError(f"project {pid} has no card {name}") from None
 
 
+def _assets_offer(root: Path) -> Optional[Dict[str, str]]:
+    """The offer of a media pool for what the first commit left out; None when it left nothing out.
+    Its path is the one top-level folder every entry sits in, else "assets" (and the why says to move them)."""
+    out = [e.strip().lstrip("/") for e in gitstart.left_out(root)]
+    out = [e for e in out if e.strip("/")]
+    if not out:
+        return None
+    more = f" and {len(out) - 1} more are" if len(out) > 1 else " is"
+    why = f"{out[0]}{more} kept out of the history: add a media pool so every agent sees them"
+    tops = {e.split("/", 1)[0] for e in out}
+    top = tops.pop() if len(tops) == 1 else ""
+    if top and (all("/" in e for e in out) or (root / top).is_dir()):
+        return {"template": "assets", "why": why, "path": top}
+    return {"template": "assets", "why": why + "; move them into assets/", "path": "assets"}
+
+
 def suggest(root: Path, cards: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
-    """The Cards area's offer of an instructions card; None when the project has one."""
+    """The Cards area's offer: a media pool for what the first commit left out (gitstart.left_out) when
+    the project has no assets card, else an instructions card; None when it has that too."""
+    if not any(c["kind"] == "assets" for c in cards):
+        offer = _assets_offer(root)
+        if offer is not None:
+            return offer
     if any(c["kind"] == "instructions" for c in cards):
         return None
     for name in ("AGENTS.md", "CLAUDE.md"):

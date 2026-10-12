@@ -87,7 +87,7 @@
     put(".pc-sum", cards.length ? `${cards.length} card${cards.length === 1 ? "" : "s"}` : "");
     const sg = !ro && d.suggest;
     put(".pc-suggest", sg ? `<div class="pj-card pj-row pc-suggest-row"><span class="grow">${esc(sg.why || "")}</span>
-        <button type="button" class="pj-btn primary" data-suggest="${esc(sg.template)}">Add instructions card</button></div>` : "");
+        <button type="button" class="pj-btn primary" data-suggest="${esc(sg.template)}" data-path="${esc(sg.path || "")}">${sg.template === "assets" ? "Add media pool card" : "Add instructions card"}</button></div>` : "");
     const F = filter();
     put(".pc-filter", F && cards.length ? PF().html(F, cards) : "");
     put(".pc-grid", (F ? PF().shown(F, cards) : cards).map((c) => tile(c, ro)).join("") +
@@ -235,7 +235,7 @@
     const lib = t.closest("[data-lib]");
     if (lib) { if (lib.dataset.lib === "open" && !S.lib) return openLib(); S.lib = null; return draw(); }
     const sg = t.closest("[data-suggest]");
-    if (sg) { sg.disabled = true; return add({ template: sg.dataset.suggest }); }
+    if (sg) { sg.disabled = true; return add(sg.dataset.path ? { template: sg.dataset.suggest, path: sg.dataset.path } : { template: sg.dataset.suggest }); }
     const tpl = t.closest("[data-tpl]");
     if (tpl) return add({ template: tpl.dataset.tpl });
     const pool = t.closest("[data-pool]");

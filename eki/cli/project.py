@@ -202,6 +202,8 @@ def run(args) -> int:
             print(e["name"])
             if p is not None:
                 print(f"  autonomy: {projects.autonomy(p)}")
-                print(f"  lands: {api_projects.landing_line(p)}")
+                landing = api_projects.landing_line(p)
+                if landing:                         # a local project only; a GitHub row says it in block()
+                    print(f"  lands: {landing}")
         print("\n".join(projectlist.details(e)))
     return 0

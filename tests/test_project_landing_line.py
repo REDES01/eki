@@ -59,3 +59,12 @@ def test_the_cli_says_it(conn, capsys, folder):
     out = capsys.readouterr().out
     assert "  lands: eki lands finished work on main" in out
     assert "never pushes a local project." in out
+
+
+def test_the_cli_says_nothing_of_it_for_a_github_row_or_eki(conn, capsys, folder):
+    pid = projects.add(conn, folder)
+    conn.execute("UPDATE projects SET repo='o/r' WHERE id=?", (pid,))
+    assert main(["project", "o/r"]) == 0
+    assert "lands:" not in capsys.readouterr().out
+    assert main(["project", "eki"]) == 0
+    assert "lands:" not in capsys.readouterr().out

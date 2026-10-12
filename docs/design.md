@@ -58,6 +58,9 @@ eki follow <run>  ◄── events table
 | `capacity` | can a provider take work right now: installed, not cooling down after a limit |
 | `machine` | power, memory pressure, load — background work only runs when the Mac has room and is plugged in |
 | `testslots`, `cli/slot` | the machine's test slots (`machine.checks`): lock files under `EKI_HOME/slots`, one per running test run, freed when its process dies; `eki slot -- <cmd>` runs a command in one, waiting (an flock under `slots/waiting`) while a queued check goes first; `behind()` counts holds waiting behind checks |
+| `browserslots` | the machine's browser slots (`machine.browsers`): an flock on `EKI_HOME/browsers/slots/<i>.lock` per open browser, holding the browser's pid, freed when it exits; `held()` counts the open ones for the live line |
+| `browsershim` | `EKI_HOME/browsers/playwright`, a mirror of `~/Library/Caches/ms-playwright`: symlinks to everything except each browser executable, which is a wrapper that waits for a browser slot and then execs the real binary; `ensure()` before each run and in housekeeping mirrors a new browser version and moves an install into the mirror back into Playwright's folder |
+| `browserstrays` | housekeeping: notes Chrome processes in eki worktrees that hold no browser slot (a script that hard-codes the cache path) |
 | `machinenow` | the Settings → Machine live line: agents working, test runs, load on cores, memory, quota left |
 | `skills`, `mcp` | one store of what every run gets, handed to every program per run (Claude: `--plugin-dir`, `--mcp-config`; Codex: `~/.agents/skills`, `-c mcp_servers…`); a project's own skills are its `skills` card |
 | `skillsync` | skills, Claude client → eki: every skill under `~/.claude/skills/synced/*/` copied into the store as source `claude` with a baseline hash (`sync/skills.json`), refreshed when the client folder changes, removed when it goes; eki's own (`learned`, `edited`, or a `claude` copy edited since import) and any other source with the same name are never touched and listed as clashes (`skills-in`) |
@@ -130,7 +133,7 @@ eki follow <run>  ◄── events table
 
 **Scheduling.** How much eki runs at once is a machine setting, not a
 number in any project's workflow: `routing.json` `"machine": {"agents",
-"checks"}` (`eki/machinecaps.py`), shown and changed in Settings → Machine
+"checks", "browsers"}` (`eki/machinecaps.py`), shown and changed in Settings → Machine
 and with `eki machine`.
 The engine's spawn step holds each kind of run only by the limit that
 already exists for it.
@@ -163,9 +166,36 @@ already exists for it.
   Why: holds poll each second and the engine starts checks on its tick, so
   holds won every freed slot — on 2026-10-11, 18 checks sat queued for 25
   minutes behind agents' test runs.
+- `machine.browsers` (default 3, 1–16) caps the browsers eki's runs may
+  have open at once, held at the Chrome executable so no agent has to
+  cooperate. `claude -p` has no browser of its own; Claude in Chrome and the
+  desktop app's browser are the person's own sessions, never an eki run. A
+  run gets a browser only from a Playwright MCP in its config or from a
+  script that launches Playwright's Chromium (the game's `tools/shot.mjs`,
+  `slice/tools/play-*.mjs`, scripts agents write), and both end in
+  Playwright starting an executable it finds under
+  `PLAYWRIGHT_BROWSERS_PATH` — the one place every browser passes.
+  `eki/browsershim.py` keeps `EKI_HOME/browsers/playwright` as a mirror of
+  `~/Library/Caches/ms-playwright`: symlinks to everything except each
+  browser executable (`chrome-headless-shell`, `Chromium`, …), which is a
+  small wrapper that waits for a slot — an flock on
+  `EKI_HOME/browsers/slots/<i>.lock` holding the browser's pid
+  (`eki/browserslots.py`) — and then execs the real binary, which keeps the
+  lock until it exits. The lock dies with the process, so a restart loses
+  nothing. `ensure()` runs before each run and in housekeeping, so a new
+  browser version is mirrored and an install into the mirror is moved into
+  Playwright's folder. Every run gets `PLAYWRIGHT_BROWSERS_PATH`, and so
+  does any Playwright MCP server in its config. A waiting launch prints one
+  line saying why it waits. Scripts that hard-code the cache path bypass
+  it: the build brief tells agents to launch through Playwright's default
+  lookup or `$PLAYWRIGHT_BROWSERS_PATH`, and housekeeping
+  (`eki/browserstrays.py`) notes browsers in eki worktrees that hold no
+  slot. Why: on 2026-10-12, with 11 items building and a playtest goal,
+  load was 110 on 18 cores, with 207 Chrome processes (about 20 headless
+  browsers, each rendering the Three.js game with WebGL) using 19.5 GB.
 
-The Settings → Machine section shows a live line under the two numbers:
-"now: N agents working · M test runs · load X on C cores · memory Y% ·
+The Settings → Machine section shows a live line under the three numbers:
+"now: N agents working · M test runs · B browsers · load X on C cores · memory Y% ·
 quota left …". `routing.json`'s old `self.parallel` and `self.check_slots`
 move to `machine.agents` and `machine.checks` once; eki's own workflow card
 keeps its `parallel` as eki's project cap. The local model's own server

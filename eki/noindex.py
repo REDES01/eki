@@ -13,7 +13,8 @@ an older eki left in `work`, a step of housekeeping every pass:
 (b) the stored paths under the old root (items.worktree, threads.cwd, by the
     root as written and as resolved) are rewritten, each only when the new
     path exists and isn't one a staying child shadows;
-(c) `git worktree repair` in each moved worktree, so its repo finds it;
+(c) `git worktree repair` in each worktree in work.noindex whose repo still names
+    it at its old place, so a repair a kill cut off is done by the next pass;
 (d) once only those symlinks are left, `work` itself becomes one symlink to
     work.noindex.
 
@@ -49,7 +50,6 @@ def migrate(conn: sqlite3.Connection) -> List[str]:
     new = paths.work()
     olds = list(dict.fromkeys([str(old), os.path.realpath(old)]))
     staying: Set[str] = set()
-    moved: List[Path] = []
     for child in sorted(old.iterdir()):
         if _ours(child, new):
             continue                                    # moved by an earlier pass
@@ -60,10 +60,9 @@ def migrate(conn: sqlite3.Connection) -> List[str]:
             continue
         os.rename(child, dest)
         os.symlink(dest, child)                         # an old absolute path still works meanwhile
-        moved.append(dest)
         said.append(f"spotlight: moved {child.name} to work.noindex")
     said += _rewrite(conn, olds, new, staying)
-    said += [line for d in moved for line in _repair(d)]
+    said += [line for d in sorted(new.iterdir()) if _stale(d, new) for line in _repair(d)]
     if not staying and all(_ours(c, new) for c in old.iterdir()):
         for c in old.iterdir():
             c.unlink()
@@ -111,9 +110,20 @@ def _like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _stale(d: Path, new: Path) -> bool:
+    """A worktree whose repo still names it outside work.noindex — moved by this pass or by
+    one killed before its repair; a file read each, so every pass can look at them all."""
+    if d.is_symlink() or not (d / ".git").is_file():
+        return False                                    # not a git worktree
+    try:
+        admin = (d / ".git").read_text().strip().removeprefix("gitdir:").strip()
+        named = (Path(admin) / "gitdir").read_text().strip()
+    except OSError:
+        return True                                     # can't tell: repair is harmless twice
+    return os.path.realpath(os.path.dirname(os.path.dirname(named))) != os.path.realpath(new)
+
+
 def _repair(d: Path) -> List[str]:
-    if not (d / ".git").is_file():
-        return []                                       # not a git worktree
     try:
         r = subprocess.run(["git", "-C", str(d), "worktree", "repair"], capture_output=True, text=True,
                            timeout=REPAIR_TIMEOUT)

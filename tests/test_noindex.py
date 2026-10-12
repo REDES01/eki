@@ -115,3 +115,15 @@ def test_the_persons_project_folders_are_left_as_they_are(home, conn, repo, tmp_
     assert not list((tmp_path / "user").rglob(".metadata_never_index"))
     assert conn.execute("SELECT cwd FROM threads WHERE id='t2'").fetchone()[0] == str(proj / "src")
     assert conn.execute("SELECT path FROM projects WHERE id='p1'").fetchone()[0] == str(proj)
+
+
+def test_a_pass_killed_before_its_repair_is_repaired_next_time(home, conn, repo):
+    old = old_home(home, conn, repo)
+    new = paths.work()
+    os.rename(old / "it1", new / "it1")                 # moved, then killed: no symlink, no repair
+    os.symlink(new / "it1", old / "it1")
+    assert noindex._stale(new / "it1", new)
+    noindex.migrate(conn)
+    assert not noindex._stale(new / "it1", new)
+    assert old.is_symlink()
+    assert f"worktree {os.path.realpath(new / 'it1')}" in git(repo, "worktree", "list", "--porcelain")

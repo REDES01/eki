@@ -327,7 +327,7 @@
   }
 
   // Until index.html names the Projects page's scripts (the sidebar item), fetch them from here.
-  for (const f of ["shell.js", "newproject.js", "projectmenu.js", "projectspage.js"]) {
+  for (const f of ["shell.js", "newprojectgh.js", "newproject.js", "projectmenu.js", "projectspage.js"]) {
     if (!document.querySelector || document.querySelector(`script[src="/ui/${f}"]`)) continue;
     const t = document.createElement("script");
     t.src = "/ui/" + f; t.async = false;

@@ -69,6 +69,18 @@ dialog.sheet input, dialog.sheet textarea, dialog.sheet select {
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 dialog.sheet .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 dialog.sheet .error { color: var(--red); font-size: 13px; margin-top: 8px; }
+/* the New project sheet's own parts (newproject.js): the start choice, the notes under a field, the choices */
+dialog.sheet .np-mode { margin-bottom: 4px; }
+dialog.sheet .np-note { font-size: 12.5px; color: var(--dim); margin-top: 5px; min-height: 1em; }
+dialog.sheet .np-note.bad { color: var(--red); }
+dialog.sheet .np-lands { border: 0; padding: 0; margin: 14px 0 0; }
+dialog.sheet .np-lands legend { font-size: 13px; color: var(--dim); padding: 0; margin-bottom: 4px; }
+dialog.sheet label.np-pick { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--text); font-size: 14px; }
+dialog.sheet label.np-pick[hidden] { display: none; }
+dialog.sheet label.np-pick.off { color: var(--dim); }
+dialog.sheet label.np-pick input { width: auto; margin: 0; }
+dialog.sheet label.np-sub { margin-left: 24px; }
+dialog.sheet .np-warn { color: var(--text); background: var(--panel); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-top: 10px; }
 
 /* a project's ⋯ menu (projectmenu.js): the button sits top-right of a card or the project page */
 .pm-more { float: right; font: inherit; font-size: 16px; line-height: 1; padding: 2px 8px; margin: -2px -6px 0 6px;
@@ -82,9 +94,9 @@ dialog.sheet .error { color: var(--red); font-size: 13px; margin-top: 8px; }
 .pm-item:hover { background: var(--panel); }
 .pm-item.danger { color: var(--red); }
 
-/* the "Create a project" sheet (newproject.js): two starts, then the fields for the one chosen */
+/* the "Create a project" sheet (newproject.js): three starts, then the fields for the one chosen */
 dialog.sheet [hidden] { display: none !important; }
-.np-starts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.np-starts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .np-start { font: inherit; text-align: left; padding: 16px 14px; border-radius: 10px; cursor: pointer;
   background: var(--bg); color: var(--text); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .np-start:hover { border-color: var(--text); }

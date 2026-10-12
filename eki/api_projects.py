@@ -15,7 +15,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import asking, db, gallery, paths, projectchats, projectdelete, projectstart, store
+from . import (asking, db, gallery, github, paths, projectchats, projectdelete, projectgithub, projectlands,
+               projectstart, store)
 
 #: what the page's "Have an agent write instructions" asks for
 INSTRUCTIONS_PROMPT = (
@@ -110,20 +111,23 @@ def _files(conn: sqlite3.Connection, pid: str) -> List[str]:
 
 
 def _clone_title(repo: str, dest: str) -> str:
-    return f"clone {repo} to {dest}"
+    return projectgithub.clone_title(repo, dest)
 
 
 def _cloning(conn: sqlite3.Connection, pid: str) -> bool:
-    row = conn.execute("SELECT repo, folder FROM projects WHERE id=?", (pid,)).fetchone()
-    if row is None or not row["repo"] or not row["folder"]:
+    """A `clone <repo> to <folder>` run for the project's folder is active (any repo: a row that
+    lands here has none)."""
+    row = conn.execute("SELECT folder FROM projects WHERE id=?", (pid,)).fetchone()
+    if row is None or not row["folder"]:
         return False
     if os.path.isdir(os.path.join(row["folder"], ".git")):
         return False
     marks = ",".join("?" * len(_ACTIVE))
+    tail = " to " + row["folder"]
     return bool(conn.execute(
-        f"SELECT 1 FROM runs r JOIN threads t ON t.id = r.thread_id WHERE t.title = ? "
-        f"AND r.state IN ({marks}) LIMIT 1",
-        (_clone_title(row["repo"], row["folder"]), *_ACTIVE)).fetchone())
+        f"SELECT 1 FROM runs r JOIN threads t ON t.id = r.thread_id WHERE t.title LIKE 'clone %' "
+        f"AND substr(t.title, -?) = ? AND r.state IN ({marks}) LIMIT 1",
+        (len(tail), tail, *_ACTIVE)).fetchone())
 
 
 # ---- what the page can do -------------------------------------------------------------------
@@ -139,8 +143,54 @@ def _expand(folder: Optional[str]) -> Optional[str]:
 
 
 def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/projects {name, folder?, description?}: {id, folder, existing} (projectstart.create)."""
-    return projectstart.create(conn, body)
+    """POST /api/projects {name, description?, folder?, github?, lands?, create_repo?, private?}:
+    {id, folder, lands, cloning, existing, warning?}. With `github`, the repository's clone
+    (projectgithub.start). Start new (no folder) with `create_repo` makes a GitHub repository for it
+    too; gh failing leaves the project made, landing here, and says why in `warning`."""
+    if str(body.get("github") or "").strip():
+        return projectgithub.start(conn, body)
+    lands = body.get("lands") or None
+    if lands is not None and lands not in projectlands.LANDS:
+        raise ValueError(f"work lands {' or '.join(projectlands.LANDS)}, not {lands!r}")
+    typed = str(body.get("folder") or "").strip()
+    if lands == "github" and not body.get("create_repo"):
+        _can_github(typed)
+    made = projectstart.create(conn, body)
+    pid, warning = made["id"], None
+    if made.get("ask") or pid == projectchats.SELF:
+        return made
+    if made.get("existing"):
+        pass                                        # a project already there keeps what it said
+    elif body.get("create_repo") and not typed:
+        folder = made["folder"]
+        try:
+            projectlands.mark(conn, pid, "github",
+                              github.repo_create(os.path.basename(folder), folder, body.get("private", True) is not False))
+        except (github.GhError, ValueError) as e:
+            projectlands.mark(conn, pid, "here")
+            warning = f"the project is made, but not its GitHub repository: {e}"
+    elif lands is not None:
+        projectlands.set_lands(conn, pid, lands)
+    out = {**made, "lands": projectlands.lands_of(conn, pid)["lands"], "cloning": _cloning(conn, pid)}
+    if warning:
+        out["warning"] = warning
+    return out
+
+
+def _can_github(typed: str) -> None:
+    """Pull requests need a folder whose origin is on GitHub, and gh signed in."""
+    where = projectstart.expand(typed) if typed else None
+    if where is None or not os.path.isdir(where) or github.repo_of(where) is None:
+        raise ValueError("pull requests need a folder with a GitHub remote: "
+                         "pick 'eki merges here', or start new with a GitHub repository")
+    ok, why = projectlands._signed_in()
+    if not ok:
+        raise ValueError(f"pull requests need gh — {why}")
+
+
+def clone_to(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/github/clone-to?repo=: where the New project sheet's From GitHub would clone it."""
+    return projectgithub.clone_to(q.get("repo") or "")
 
 
 def start(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
@@ -235,6 +285,7 @@ def remove(conn: sqlite3.Connection, m: Any, q: Dict[str, str], body: Dict[str, 
 ROUTES: List[Tuple[str, str, Callable]] = [
     ("POST", r"/api/projects/([^/]+)/describe", describe),
     ("GET", r"/api/folders", folders),
+    ("GET", r"/api/github/clone-to", clone_to),
     ("GET", r"/api/projectstart", start),
     ("GET", r"/api/projects/([\w.-]+)/starter", starter),
     ("DELETE", r"/api/projects/([^/]+)", remove),

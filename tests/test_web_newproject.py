@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
+SHEET = ",".join(str(WEB / f) for f in ("newprojectgh.js", "newproject.js"))
 
 # Just enough of a page: one element per selector, listeners remembered. GETs are answered by the first matching
 # prefix in input.gets, POSTs from input.answers in turn. input.steps drives the sheet; the elements named in
@@ -44,7 +45,7 @@ global.fetch = async (url, opts) => {
   const hit = Object.keys(input.gets || {}).find((k) => url.startsWith(k));
   return { ok: true, json: async () => (hit ? input.gets[hit] : {}) };
 };
-require(process.argv[2]);
+for (const f of process.argv[2].split(",")) require(f);
 const target = (data) => ({ closest: (s) => (s === "[data-" + Object.keys(data)[0] + "]" ? { dataset: data } : null) });
 (async () => {
   const d = window.newProject.open();
@@ -82,7 +83,7 @@ def run(tmp_path, data):
         pytest.skip("node is not installed")
     stub = tmp_path / "sheet.js"
     stub.write_text(STUB)
-    out = subprocess.run(["node", str(stub), str(WEB / "newproject.js"), json.dumps(data)],
+    out = subprocess.run(["node", str(stub), SHEET, json.dumps(data)],
                          capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
@@ -117,7 +118,7 @@ def test_start_new_shows_the_folder_it_will_make_and_posts_the_name(tmp_path):
     assert els["#np-starts"]["hidden"] and not els["#np-new-at"]["hidden"] and els["#np-open-at"]["hidden"]
     assert "/api/projectstart?name=atlas" in got["gets"]
     assert els["#np-path"]["text"] == "/Users/p/Projects/atlas" and els["#np-note"]["hidden"]
-    assert got["posted"] == [["/api/projects", {"name": "atlas", "description": "A game"}]]
+    assert got["posted"] == [["/api/projects", {"name": "atlas", "description": "A game", "lands": "here"}]]
     assert got["went"] == ["project/ab12"] and got["closed"]
 
 
@@ -137,7 +138,7 @@ def test_change_picks_another_parent(tmp_path):
     assert got["picks"] == 1
     assert "/api/projectstart?folder=%2FUsers%2Fp%2Fgames%2Fatlas" in got["gets"]
     assert got["els"]["#np-path"]["text"] == "/Users/p/games/atlas"
-    assert got["posted"] == [["/api/projects", {"name": "atlas", "folder": "/Users/p/games/atlas"}]]
+    assert got["posted"] == [["/api/projects", {"name": "atlas", "folder": "/Users/p/games/atlas", "lands": "here"}]]
 
 
 def test_change_without_the_picker_shows_a_path_field(tmp_path):
@@ -157,7 +158,7 @@ def test_open_a_folder_uses_the_picker_at_once_in_the_shell(tmp_path):
     assert got["picks"] == 1
     assert got["els"]["#np-folder"]["value"] == "/Users/p/code/beat-box" and got["els"]["#np-name"]["value"] == "beat-box"
     assert got["els"]["#np-recent"]["html"] == ""
-    assert got["posted"] == [["/api/projects", {"name": "beat-box", "folder": "/Users/p/code/beat-box"}]]
+    assert got["posted"] == [["/api/projects", {"name": "beat-box", "folder": "/Users/p/code/beat-box", "lands": "here"}]]
     assert got["went"] == ["project/ef56"]
 
 
@@ -200,7 +201,7 @@ def test_a_folder_that_is_a_project_opens_it(tmp_path):
 def test_a_post_that_answers_existing_lands_on_that_project(tmp_path):
     got = run(tmp_path, {"answers": [{"id": "p1", "folder": "/x", "existing": True}],
                          "steps": [["click", {"start": "open"}], ["set", "#np-folder", "/x"], ["create"]]})
-    assert got["posted"] == [["/api/projects", {"name": "x", "folder": "/x"}]] and got["went"] == ["project/p1"]
+    assert got["posted"] == [["/api/projects", {"name": "x", "folder": "/x", "lands": "here"}]] and got["went"] == ["project/p1"]
 
 
 def test_start_new_needs_a_name(tmp_path):
@@ -220,8 +221,8 @@ def test_the_offer_keeps_the_fields_and_keep_a_history_posts_start(tmp_path):
     got = run(tmp_path, {"answers": [{"ask": SURVEY}, {"id": "ab12", "folder": "/x", "left_out": []}],
                          "steps": [["click", {"start": "open"}], ["set", "#np-name", "Atlas"],
                                    ["set", "#np-folder", "~/Music/atlas"], ["create"], ["history", "start"]]})
-    assert got["posted"] == [["/api/projects", {"name": "Atlas", "folder": "~/Music/atlas"}],
-                             ["/api/projects", {"name": "Atlas", "folder": "~/Music/atlas", "history": "start"}]]
+    assert got["posted"] == [["/api/projects", {"name": "Atlas", "folder": "~/Music/atlas", "lands": "here"}],
+                             ["/api/projects", {"name": "Atlas", "folder": "~/Music/atlas", "lands": "here", "history": "start"}]]
     assert got["went"] == ["project/ab12"] and got["closed"]
 
 
@@ -237,4 +238,4 @@ def test_the_offer_shows_what_is_kept_out_folded(tmp_path):
 def test_chat_only_posts_none(tmp_path):
     got = run(tmp_path, {"answers": [{"ask": SURVEY}, {"id": "cd34"}],
                          "steps": [["click", {"start": "new"}], ["set", "#np-name", "Atlas"], ["create"], ["history", "none"]]})
-    assert got["posted"][1][1] == {"name": "Atlas", "history": "none"} and got["went"] == ["project/cd34"]
+    assert got["posted"][1][1] == {"name": "Atlas", "lands": "here", "history": "none"} and got["went"] == ["project/cd34"]

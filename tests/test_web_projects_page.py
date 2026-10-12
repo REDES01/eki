@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 WEB = Path(__file__).resolve().parent.parent / "eki" / "web"
+SHEET = ",".join(str(WEB / f) for f in ("newprojectgh.js", "newproject.js"))
 
 # Just enough of a page: elements remember their listeners, querySelector hands out one element per selector.
 STUB = r"""
@@ -31,12 +32,15 @@ global.document = { getElementById: (id) => id === "projects-page" ? null : els[
   body: mk("body"), head: mk("head"), addEventListener() {} };
 global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
 global.setInterval = () => 0; global.clearInterval = () => {};
-const went = [], posted = [], deleted = [];
+const went = [], posted = [], deleted = [], got = [];
 global.nav = { register() {}, go: (h) => went.push(h) };
 const input = JSON.parse(process.argv[3]);
 global.fetch = async (url, opts) => {
   if (opts && opts.method === "DELETE") { deleted.push([url, opts]); return DELETE_ANSWER; }
   if (opts && opts.method === "POST") { posted.push([url, JSON.parse(opts.body)]); return input.answer; }
+  got.push(url);
+  if (url.startsWith("/api/github/clone-to")) return { ok: true, json: async () => input.dest || {} };
+  if (url.startsWith("/api/github")) return { ok: true, json: async () => (url.includes("folder=") ? input.ghFolder : input.gh) || {} };
   return { ok: true, json: async () => ({ projects: input.projects || [], user_home: "/Users/me" }) };
 };
 if (input.shell) window.ekiShell = { canPickFolder: () => true, pickFolder: async () => "/Users/me/x" };
@@ -63,6 +67,36 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     d.querySelector("#np-desc").value = f.description || "";
     await d.querySelector("form").l.submit({ preventDefault() {} });
     out.posted = posted; out.err = d.querySelector("#np-err").textContent; out.went = went; out.closed = d.closed;
+  }
+  if (input.do === "modes") {
+    const d = window.newProject.open(); await tick(); await tick();
+    const q = (s) => d.querySelector(s);
+    await window.newProject.start(input.mode === "github" ? "github" : input.mode === "folder" ? "open" : "new");
+    const seen = () => ({ repoBox: !q("#np-repo-box").hidden, prOff: !!q("#np-lands-github").disabled,
+                          why: q("#np-lands-why").textContent, note: q("#np-gh-note").textContent,
+                          repos: q("#np-repos").innerHTML });
+    out.start = seen();
+    const f = input.fields || {};
+    q("#np-name").value = f.name || ""; q("#np-desc").value = f.description || "";
+    if (input.mode === "github") {
+      out.prPicked = q("#np-lands-github").checked;
+      q("#np-github").value = f.github; await q("#np-github").l.input(); await tick();
+      out.dest = q("#np-dest").textContent; out.destBad = q("#np-dest").className;
+    }
+    if (input.mode === "create_repo") {
+      q("#np-create-repo").checked = true; q("#np-create-repo").l.change();
+      out.privateShown = !q("#np-private-box").hidden;
+      q("#np-private").checked = input.private !== false;
+    }
+    if (input.mode === "folder") {
+      q("#np-lands-here").checked = true;
+      q("#np-folder").value = f.folder; await window.newProject.lookGh(f.folder);
+      out.afterFolder = seen();
+      if (!q("#np-lands-github").disabled) { q("#np-lands-github").checked = true; q("#np-lands-here").checked = false; }
+    }
+    await q("form").l.submit({ preventDefault() {} });
+    out.posted = posted; out.got = got; out.went = went; out.closed = d.closed;
+    out.warn = q("#np-warn").textContent; out.warnShown = !q("#np-warn").hidden; out.button = q("#np-create").textContent;
   }
   if (input.do === "menu") {
     out.eki = window.projectMenu.button(input.projects[0]); out.ekiItems = window.projectMenu.items(input.projects[0]);
@@ -162,10 +196,10 @@ def test_the_page_loads_searches_as_you_type_and_remembers_the_sort(tmp_path):
 def test_the_sheet_posts_the_documented_body_and_opens_the_project(tmp_path):
     stub_answer = "{ ok: true, json: async () => ({ id: 'ab12' }) }"
     got = run_sheet(tmp_path, stub_answer, {"name": " Atlas ", "folder": "~/code/atlas", "description": " Maps "})
-    assert got["posted"] == [["/api/projects", {"name": "Atlas", "folder": "~/code/atlas", "description": "Maps"}]]
+    assert got["posted"] == [["/api/projects", {"name": "Atlas", "folder": "~/code/atlas", "description": "Maps", "lands": "here"}]]
     assert got["went"] == ["project/ab12"] and got["closed"] and got["err"] == ""
     bare = run_sheet(tmp_path, stub_answer, {"name": "Atlas"})
-    assert bare["posted"] == [["/api/projects", {"name": "Atlas"}]]          # no folder, no description: left out
+    assert bare["posted"] == [["/api/projects", {"name": "Atlas", "lands": "here"}]]          # no folder, no description: left out
 
 
 def test_the_sheet_shows_the_apis_error(tmp_path):
@@ -193,10 +227,85 @@ def run_sheet(tmp_path, answer_js, fields, shell=False):
     stub = tmp_path / "sheet.js"
     stub.write_text(STUB.replace("return input.answer;", f"return ({answer_js});"))
     data = {"do": "sheet", "fields": fields, "shell": shell}
-    out = subprocess.run(["node", str(stub), str(WEB / "newproject.js"), json.dumps(data)],
+    out = subprocess.run(["node", str(stub), SHEET, json.dumps(data)],
                          capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
+
+
+SIGNED_IN = {"signed_in": True, "login": "me", "why": "", "repos": ["me/atlas", "me/<odd>"], "remote": None}
+SIGNED_OUT = {"signed_in": False, "login": "", "why": "gh is not logged in: run `gh auth login`", "repos": [], "remote": None}
+
+
+def run_modes(tmp_path, answer_js, data):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "modes.js"
+    stub.write_text(STUB.replace("return input.answer;", f"return ({answer_js});"))
+    out = subprocess.run(["node", str(stub), SHEET, json.dumps({"do": "modes", **data})],
+                         capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+OPENED = "{ ok: true, json: async () => ({ id: 'ab12', lands: 'github', cloning: true }) }"
+
+
+def test_from_github_posts_the_repository_and_pull_requests(tmp_path):
+    got = run_modes(tmp_path, OPENED, {"mode": "github", "gh": SIGNED_IN, "fields": {"github": " me/atlas "},
+                                       "dest": {"repo": "me/atlas", "folder": "/Users/me/Projects/atlas",
+                                                "exists": False, "reuse": False, "error": ""}})
+    assert "/api/github" in got["got"] and "/api/github/clone-to?repo=me%2Fatlas" in got["got"]
+    assert '<option value="me/atlas">' in got["start"]["repos"] and "me/&lt;odd>" in got["start"]["repos"]
+    assert got["prPicked"] and got["dest"] == "Clones to ~/Projects/atlas"
+    assert got["posted"] == [["/api/projects", {"name": "", "github": "me/atlas", "lands": "github"}]]
+    assert got["went"] == ["project/ab12"] and got["closed"]
+
+
+def test_from_github_says_a_reused_clone_and_the_error(tmp_path):
+    reuse = run_modes(tmp_path, OPENED, {"mode": "github", "gh": SIGNED_OUT, "fields": {"github": "me/atlas"},
+                                         "dest": {"folder": "/Users/me/Projects/atlas", "reuse": True, "error": ""}})
+    assert reuse["dest"] == "Uses your clone at ~/Projects/atlas"
+    assert reuse["start"]["note"] == "Sign in with `gh auth login` to see your repositories"
+    bad = run_modes(tmp_path, OPENED, {"mode": "github", "gh": SIGNED_IN, "fields": {"github": "me/atlas"},
+                                       "dest": {"folder": "/x", "error": "/x is already there"}})
+    assert bad["dest"] == "/x is already there" and "bad" in bad["destBad"]
+
+
+def test_a_folder_can_pick_pull_requests_only_with_a_remote(tmp_path):
+    plain = run_modes(tmp_path, OPENED, {"mode": "folder", "gh": SIGNED_IN, "ghFolder": SIGNED_IN,
+                                         "fields": {"name": "proj", "folder": "~/proj"}})
+    assert plain["afterFolder"]["prOff"] and "GitHub remote" in plain["afterFolder"]["why"]
+    assert plain["got"][-1] == "/api/github?folder=~%2Fproj"
+    assert plain["posted"] == [["/api/projects", {"name": "proj", "folder": "~/proj", "lands": "here"}]]
+    on = run_modes(tmp_path, OPENED, {"mode": "folder", "gh": SIGNED_IN, "ghFolder": dict(SIGNED_IN, remote="me/proj"),
+                                      "fields": {"name": "proj", "folder": "~/proj"}})
+    assert not on["afterFolder"]["prOff"] and on["afterFolder"]["why"] == ""
+    assert on["posted"] == [["/api/projects", {"name": "proj", "folder": "~/proj", "lands": "github"}]]
+
+
+def test_also_create_a_repository_only_when_signed_in(tmp_path):
+    out = run_modes(tmp_path, OPENED, {"mode": "none", "gh": SIGNED_OUT, "fields": {"name": "atlas"}})
+    assert not out["start"]["repoBox"] and out["start"]["prOff"] and "gh auth login" in out["start"]["why"]
+    inn = run_modes(tmp_path, OPENED, {"mode": "create_repo", "gh": SIGNED_IN, "fields": {"name": "atlas"}})
+    assert inn["start"]["repoBox"] and inn["privateShown"]
+    assert inn["posted"] == [["/api/projects", {"name": "atlas", "lands": "github", "create_repo": True, "private": True}]]
+    pub = run_modes(tmp_path, OPENED, {"mode": "create_repo", "gh": SIGNED_IN, "fields": {"name": "atlas"}, "private": False})
+    assert pub["posted"][0][1]["private"] is False
+
+
+def test_a_warning_shows_after_create(tmp_path):
+    warned = "{ ok: true, json: async () => ({ id: 'ab12', lands: 'here', warning: 'the project is made, but not its GitHub repository: Name already exists' }) }"
+    got = run_modes(tmp_path, warned, {"mode": "create_repo", "gh": SIGNED_IN, "fields": {"name": "atlas"}})
+    assert got["warnShown"] and "Name already exists" in got["warn"]
+    assert got["went"] == [] and not got["closed"] and got["button"] == "Open the project"
+    js = (WEB / "newproject.js").read_text()
+    assert len(js.splitlines()) < 400
+    assert len((WEB / "newprojectgh.js").read_text().splitlines()) < 400
+    js += (WEB / "newprojectgh.js").read_text()
+    for name in ("Open a folder", "Start new", "From GitHub", "How work lands", "eki merges here", "eki opens pull requests on GitHub",
+                 "Also create a GitHub repository", "Private"):
+        assert name in js, name
 
 
 def test_the_menu_offers_delete_but_not_for_eki(tmp_path):

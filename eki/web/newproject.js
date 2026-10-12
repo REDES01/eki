@@ -1,29 +1,41 @@
-// The "Create a project" sheet. It opens on two choices:
+// The "Create a project" sheet. It opens on three choices:
 // - "Open a folder": in the Mac shell the native picker (window.ekiShell, shell.js) at once; in a browser a
 //   path field with completion from GET /api/folders and the recent project folders as one-click rows. The
 //   name defaults to the folder's last part.
 // - "Start new": a name, and the folder it will make, from GET /api/projectstart?name= as you type
 //   (~/Projects/<name>, or beside the project made last; never your home's root). "Change…" picks another
-//   parent (the picker, or a path field); then the folder is <parent>/<name>, checked with ?folder=.
+//   parent (the picker, or a path field); then the folder is <parent>/<name>, checked with ?folder=. With
+//   the folder proposed and gh signed in, "Also create a GitHub repository" (Private checked) is offered.
+// - "From GitHub": OWNER/REPO or a URL, the person's repositories as completion from GET /api/github when gh
+//   is signed in, and where it clones (GET /api/github/clone-to) shown as you type, before Create.
+// Each says how work lands: "eki merges here" or "eki opens pull requests on GitHub" — from GitHub by
+// default; for a folder only when GET /api/github?folder= finds its GitHub remote (or a repository is made).
 // Either way GET /api/projectstart answers {folder, base, recent, exists, project}: a folder that is a project
 // already says "Already a project — open it" and Create opens that one instead of making a second. The goal
 // ("What should this become?") is the first thing the project's agents read.
-// Nothing is made until Create: POST /api/projects {name, folder?, description?, history?} → {id, folder,
-// existing}, and the sheet goes to #project/<id> (also when existing). The API's error shows in the sheet.
+// Nothing is made until Create: POST /api/projects {name, description?, folder?, github?, lands, create_repo?,
+// private?, history?} → {id, folder, lands, cloning, existing, warning?}, and the sheet goes to #project/<id>
+// (also when existing). The API's error shows in the sheet; a warning (the project made, its repository not)
+// shows with "Open the project".
 // A folder eki keeps no history of yet comes back as {ask: {fit, offer, left_out, …}} with nothing made: the
 // sheet keeps its fields and shows the offer in place of the error line, with "Keep a history" (history
 // "start") and "Chat only" (history "none") — only "Chat only" when ask.fit is false — and what is kept out
 // in a closed details fold. Outside that fold the sheet never says git, commit, branch or worktree.
 (function () {
   let sheet = null, seq = 0, lookSeq = 0, timer = null;
-  // mode: null (the two choices), "open" or "new"; parent: a parent other than the proposed one;
+  // mode: null (the three choices), "open", "new" or "github"; parent: a parent other than the proposed one;
   // named: the name was typed, so a chosen folder doesn't replace it; found: the project already on the folder
   const S = { mode: null, parent: "", named: false, found: null, recent: [] };
+  // the GitHub part (newprojectgh.js): G = {gh, remote, made}, refresh, lookGh, ghSoon, lookDest
+  let GH = null, G = {};
+  const refresh = () => GH.refresh(), lookGh = (f) => GH.lookGh(f), ghSoon = () => GH.ghSoon(), lookDest = () => GH.lookDest();
 
   const canPick = () => !!(window.ekiShell && window.ekiShell.canPickFolder && window.ekiShell.canPickFolder());
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const last = (p) => String(p || "").replace(/\/+$/, "").split("/").pop();
   const join = (parent, name) => String(parent).replace(/\/+$/, "") + "/" + name;
+
+  const trim = (s) => String(s || "").trim();
 
   const EXAMPLE = "A small web game where you sort recycling against the clock, playable on a phone";
 
@@ -35,6 +47,8 @@
           <span>Work on something already on this Mac</span></button>
         <button type="button" class="np-start" data-start="new"><b>Start new</b>
           <span>A new folder for a new idea</span></button>
+        <button type="button" class="np-start" data-start="github"><b>From GitHub</b>
+          <span>Clone a repository and work on it</span></button>
       </div>
       <div class="np-body" id="np-body" hidden>
         <div id="np-open-at" hidden>
@@ -55,13 +69,28 @@
             <label for="np-parent">Inside this folder</label>
             <input id="np-parent" list="np-folders" spellcheck="false" placeholder="/path/to/a/folder">
           </div>
+          <label class="np-pick" id="np-repo-box" hidden><input type="checkbox" id="np-create-repo"> Also create a GitHub repository</label>
+          <label class="np-pick np-sub" id="np-private-box" hidden><input type="checkbox" id="np-private" checked> Private</label>
+        </div>
+        <div id="np-github-box" hidden>
+          <label for="np-github">OWNER/REPO or a GitHub URL</label>
+          <input id="np-github" name="github" list="np-repos" spellcheck="false" placeholder="owner/repo">
+          <datalist id="np-repos"></datalist>
+          <div class="np-note" id="np-gh-note"></div>
+          <div class="np-note" id="np-dest"></div>
         </div>
         <div class="np-note" id="np-note" hidden></div>
         <label for="np-desc">What should this become?</label>
         <textarea id="np-desc" name="description" rows="3" placeholder="${esc(EXAMPLE)}"></textarea>
         <div class="np-hint">The first thing the project's agents read. A sentence or two is plenty.</div>
+        <fieldset class="np-lands"><legend>How work lands</legend>
+          <label class="np-pick"><input type="radio" name="lands" id="np-lands-here" value="here" checked> eki merges here</label>
+          <label class="np-pick" id="np-pr-box"><input type="radio" name="lands" id="np-lands-github" value="github"> eki opens pull requests on GitHub</label>
+          <div class="np-note" id="np-lands-why"></div>
+        </fieldset>
       </div>
       <div class="error" id="np-err"></div>
+      <div class="np-warn" id="np-warn" hidden></div>
       <div class="np-ask" id="np-ask" hidden></div>
       <div class="row-end">
         <button type="button" class="btn np-back" id="np-back" hidden>Back</button>
@@ -71,11 +100,15 @@
       </div></form>`;
   }
 
-  // what Create posts: the name, and the folder, description and history only when given
-  function body(name, folder, description, history) {
-    const out = { name: String(name || "").trim() };
-    if (String(folder || "").trim()) out.folder = String(folder).trim();
-    if (String(description || "").trim()) out.description = String(description).trim();
+  // what Create posts: only the keys the mode has, and each optional one only when given
+  function body(f, history) {
+    f = f || {};
+    const out = { name: trim(f.name) };
+    if (trim(f.description)) out.description = trim(f.description);
+    if (f.mode === "github") out.github = trim(f.github);
+    else if (trim(f.folder)) out.folder = trim(f.folder);
+    if (f.lands) out.lands = f.lands;
+    if (f.mode !== "github" && !trim(f.folder) && f.create_repo) { out.create_repo = true; out.private = f.private !== false; }
     if (history) out.history = history;
     return out;
   }
@@ -192,10 +225,11 @@
     q("#np-folders").innerHTML = "";
     if (!S.named) q("#np-name").value = last(path);
     ask(null);
+    ghSoon();
     return look();
   }
 
-  // ---- the two starts -----------------------------------------------------------------------
+  // ---- the three starts ---------------------------------------------------------------------
 
   function show(mode) {
     S.mode = mode;
@@ -203,11 +237,15 @@
     q("#np-body").hidden = !mode;
     q("#np-open-at").hidden = mode !== "open";
     q("#np-new-at").hidden = mode !== "new";
+    q(mode === "github" ? "#np-lands-github" : "#np-lands-here").checked = true;
+    if (mode !== "github") q("#np-lands-github").checked = false;
+    G.remote = null;
     q("#np-back").hidden = !mode;
     q("#np-create").hidden = !mode;
     q("#np-err").textContent = "";
     ask(null);
     note(null);
+    refresh();
   }
 
   async function start(mode) {
@@ -220,6 +258,7 @@
     }
     show(mode);
     if (mode === "open") { q("#np-folder").focus(); return recent(); }
+    if (mode === "github") { q("#np-github").focus(); return lookDest(); }
     q("#np-name").focus();
     return look();
   }
@@ -231,6 +270,7 @@
       if (!path) return null;
       S.parent = path;
       q("#np-parent").value = path;
+      refresh();
       return look();
     }
     q("#np-parent-row").hidden = false;
@@ -249,14 +289,21 @@
     nav.go("project/" + id);
   }
 
+  function fields() {
+    const lands = q("#np-lands-github").checked ? "github" : "here";
+    return { mode: S.mode, name: q("#np-name").value, description: q("#np-desc").value, folder: target(),
+             github: q("#np-github").value, lands, private: !!q("#np-private").checked,
+             create_repo: !q("#np-repo-box").hidden && !!q("#np-create-repo").checked };
+  }
+
   async function create(e, history) {
     if (e) e.preventDefault();
+    if (G.made) { opened(G.made.id); return G.made; }
     if (S.found && !history) { opened(S.found); return { id: S.found, existing: true }; }
-    const name = q("#np-name").value;
-    const where = target();
-    if (S.mode === "open" && !where) { q("#np-err").textContent = "Which folder?"; return null; }
-    if (S.mode !== "open" && !String(name).trim()) { q("#np-err").textContent = "Give it a name."; return null; }
-    const b = body(name, where, q("#np-desc").value, history);
+    const b = body(fields(), history);
+    if (S.mode === "github" && !b.github) { q("#np-err").textContent = "Say which repository: OWNER/REPO or a URL."; return null; }
+    if (S.mode === "open" && !b.folder) { q("#np-err").textContent = "Which folder?"; return null; }
+    if (S.mode === "new" && !b.name) { q("#np-err").textContent = "Give it a name."; return null; }
     q("#np-err").textContent = "";
     q("#np-create").disabled = true;
     try {
@@ -265,6 +312,12 @@
       const got = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(got.error || r.statusText || "Can't create the project");
       if (got.ask) { ask(got.ask); return got; }
+      if (got.warning) {
+        G.made = got;
+        Object.assign(q("#np-warn"), { textContent: got.warning, hidden: false });
+        q("#np-create").textContent = "Open the project";
+        return got;
+      }
       opened(got.id);
       return got;
     } catch (x) {
@@ -290,6 +343,8 @@
       document.body.appendChild(sheet);
     }
     Object.assign(S, { mode: null, parent: "", named: false, found: null, recent: [] });
+    GH = window.newProjectGitHub({ q, S, target, esc, trim, live: () => !!sheet });
+    G = GH.G;
     sheet.innerHTML = html(canPick());
     q("form").addEventListener("submit", create);
     q("form").addEventListener("click", onClick);
@@ -297,17 +352,23 @@
     q("#np-back").addEventListener("click", () => show(null));
     q("#np-folder").addEventListener("input", () => {
       if (!S.named) q("#np-name").value = last(q("#np-folder").value);
-      ask(null); complete(q("#np-folder")); soon();
+      ask(null); complete(q("#np-folder")); soon(); ghSoon();
     });
     q("#np-name").addEventListener("input", () => { S.named = !!q("#np-name").value.trim(); ask(null); if (S.mode === "new") soon(); });
-    q("#np-parent").addEventListener("input", () => { S.parent = q("#np-parent").value.trim(); complete(q("#np-parent")); soon(); });
+    q("#np-parent").addEventListener("input", () => { S.parent = q("#np-parent").value.trim(); complete(q("#np-parent")); soon(); refresh(); });
+    q("#np-github").addEventListener("input", () => { q("#np-err").textContent = ""; return lookDest(); });
+    q("#np-create-repo").addEventListener("change", () => {
+      q(q("#np-create-repo").checked ? "#np-lands-github" : "#np-lands-here").checked = true;
+      refresh();
+    });
     q("#np-change").addEventListener("click", change);
     q("#np-ask").addEventListener("click", choice);
     const c = q("#np-choose");
     if (c) c.addEventListener("click", choose);
     sheet.showModal();
+    lookGh("");
     return sheet;
   }
 
-  window.newProject = { open, body, html, create, ask, start, look, change, folder, recent };
+  window.newProject = { open, body, html, create, ask, start, look, change, folder, recent, refresh, lookGh, lookDest };
 })();

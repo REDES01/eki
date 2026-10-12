@@ -81,3 +81,39 @@ dialog.sheet .error { color: var(--red); font-size: 13px; margin-top: 8px; }
   background: none; border: 0; border-radius: 6px; color: var(--text); cursor: pointer; }
 .pm-item:hover { background: var(--panel); }
 .pm-item.danger { color: var(--red); }
+
+/* the "Create a project" sheet (newproject.js): two starts, then the fields for the one chosen */
+dialog.sheet [hidden] { display: none !important; }
+.np-starts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.np-start { font: inherit; text-align: left; padding: 16px 14px; border-radius: 10px; cursor: pointer;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.np-start:hover { border-color: var(--text); }
+.np-start b { font-size: 15px; font-weight: 500; }
+.np-start span { font-size: 13px; color: var(--dim); }
+.np-folder-row { display: flex; gap: 8px; }
+.np-recent { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.np-recent-h { font-size: 12px; color: var(--dim); margin: 4px 0 2px; }
+.np-row { font: inherit; display: flex; align-items: baseline; gap: 10px; text-align: left; padding: 6px 8px;
+  background: none; border: 0; border-radius: 6px; color: var(--text); cursor: pointer; min-width: 0; }
+.np-row:hover { background: var(--panel); }
+.np-row-name { font-size: 13.5px; white-space: nowrap; }
+.np-row-path { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-path { font-size: 13px; color: var(--dim); margin-top: 8px; overflow-wrap: anywhere; }
+.np-path code { color: var(--text); }
+.np-link { font: inherit; font-size: 13px; background: none; border: 0; padding: 0 0 0 6px; color: var(--text);
+  text-decoration: underline; cursor: pointer; }
+.np-note { font-size: 13px; margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--panel);
+  overflow-wrap: anywhere; }
+.np-note.warn, .np-note.found { border: 1px solid var(--line); }
+.np-hint { font-size: 12px; color: var(--dim); margin-top: 4px; }
+dialog.sheet .row-end .grow { flex: 1; }
+
+/* a fresh project's "Start here" (project.js): the first message and the cards its folder asks for */
+.pj-start { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 12px 0; background: var(--panel); }
+.pj-start-h { font: 400 17px/1.3 ui-serif, Georgia, serif; margin: 0 0 4px; }
+.pj-start .pj-card { margin: 8px 0 12px; }
+.pj-start-sub { font-size: 13px; margin: 4px 0 6px; }
+.pj-sug { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pj-sug-name { font-size: 14px; }
+.pj-sug-why { font-size: 12.5px; margin-top: 2px; }
+.pj-added { font-size: 13px; color: var(--dim); white-space: nowrap; }

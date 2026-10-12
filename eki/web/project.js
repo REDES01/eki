@@ -1,12 +1,17 @@
 // #project/<id>: one project's page — its description (Edit opens a textarea, Enter saves), a box
-// for a new chat in its folder, then Chats, Background, Pictures, Files and Changes (projecthistory.js), each one summary line
+// for a new chat in its folder (its unsent text kept by ekiDrafts under `new:<id>`, when attach.js is in), then Chats,
+// Background, Pictures, Files and Changes (projecthistory.js), each one summary line
 // that opens on click; the header's ⋯ menu deletes it (projectmenu.js). The list of projects is projectspage.js. Everything comes from
 // /api/projects (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing.
+// A fresh project (no chats yet) shows "Start here" above the sections: the ask box ("Ask for the first thing")
+// and the cards GET /api/projects/<id>/starter suggests for what is in its folder, each with its why and an
+// Add (POST …/cards {template}). The panel goes once the project has a chat.
 (function () {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-  const S = { on: null, id: null, data: null, timer: null, open: new Set(), errs: {}, last: {}, home: "", editing: false };
+  const S = { on: null, id: null, data: null, timer: null, open: new Set(), errs: {}, last: {}, home: "", editing: false,
+    starter: null };    // starter: {id, list, added: {template: "adding" | "added" | error}} for the shown project
 
   async function api(path, body) {
     const r = await fetch(path, body === undefined ? {} : {
@@ -35,12 +40,19 @@
         <div id="pj-desc" class="pj-desc"></div>
         <div id="pj-head" class="pj-headline"></div>
         <div id="pj-setup"></div>
+        <div id="pj-start" class="pj-start" hidden>
+          <h3 class="pj-start-h">Start here</h3>
+          <div id="pj-start-ask"></div>
+          <div id="pj-start-list"></div>
+        </div>
         <div id="pj-cards"></div>
+        <div id="pj-ask-home">
         <form id="pj-ask" class="pj-card" autocomplete="off">
           <textarea id="pj-ask-text" rows="2" placeholder="New chat here…"></textarea>
           <div class="pj-row"><span class="grow"></span><span id="pj-ask-err"></span>
             <button type="submit" class="pj-btn primary">New chat here</button></div>
         </form>
+        </div>
         ${["chats", "background", "pictures", "files"].map((k) => `<section class="pj-sect" id="pj-${k}">
           <h3 class="pj-h" data-sect="${k}"><span class="pj-caret"></span>${k[0].toUpperCase() + k.slice(1)}
             <span class="pj-sum dim" id="pj-${k}-sum"></span></h3>
@@ -76,7 +88,64 @@
       <div class="dim">Background: ${esc(p.background || "none")}</div>`);
     put("pj-setup", setup(p));
     $("pj-ask").hidden = !p.folder_ok;
+    fresh(p);
     sections(p);
+  }
+
+  // ---- Start here: a fresh project's first message and the cards its folder asks for -------------
+
+  const isFresh = (p) => !!p.folder_ok && !p.chats && !(((p.sections || {}).chats) || []).length;
+
+  // the ask box sits in the panel while the project is fresh, above the sections otherwise
+  function fresh(p) {
+    const on = isFresh(p);
+    const form = $("pj-ask"), home = on ? $("pj-start-ask") : $("pj-ask-home");
+    if (form.parentNode !== home) home.appendChild(form);
+    $("pj-ask-text").placeholder = on ? "Ask for the first thing" : "New chat here…";
+    $("pj-start").hidden = !on;
+    if (!on) return;
+    if (!S.starter || S.starter.id !== p.id) loadStarter(p.id);
+    put("pj-start-list", starterList());
+  }
+
+  async function loadStarter(id) {
+    S.starter = { id, list: null, added: {} };
+    let got;
+    try { got = await api("/api/projects/" + encodeURIComponent(id) + "/starter"); } catch (e) { got = { suggestions: [] }; }
+    if (!S.starter || S.starter.id !== id) return;
+    S.starter.list = got.suggestions || [];
+    put("pj-start-list", starterList());
+  }
+
+  const TITLE = { instructions: "Instructions", serve: "Serve", workflow: "Check before it lands", assets: "Assets" };
+
+  function starterList() {
+    const st = S.starter;
+    if (!st || !st.list) return "";
+    if (!st.list.length) return "";
+    return `<div class="pj-start-sub dim">Suggested for what's in the folder — add any with one click:</div>` +
+      st.list.map((s, i) => {
+        const state = st.added[s.template];
+        const right = state === "added" ? '<span class="pj-added">Added ✓</span>'
+          : `<button type="button" class="pj-btn" data-act="starter" data-i="${i}"${state === "adding" ? " disabled" : ""}>Add</button>`;
+        return `<div class="pj-sug"><div class="grow"><div class="pj-sug-name">${esc(TITLE[s.template] || s.template)} card
+          ${s.from ? `<span class="dim">· from ${esc(s.from)}</span>` : ""}</div>
+          <div class="pj-sug-why dim">${esc(s.why)}</div>
+          ${state && state !== "added" && state !== "adding" ? `<span class="pj-err">${esc(state)}</span>` : ""}</div>${right}</div>`;
+      }).join("");
+  }
+
+  async function addStarter(i) {
+    const st = S.starter, s = st && st.list && st.list[i];
+    if (!s || st.added[s.template] === "added") return;
+    st.added[s.template] = "adding";
+    put("pj-start-list", starterList());
+    try {
+      await api("/api/projects/" + encodeURIComponent(st.id) + "/cards", { template: s.template });
+      st.added[s.template] = "added";
+      if (window.projectCards && S.id === st.id) projectCards.mount($("pj-cards"), st.id);   // the grid shows it now
+    } catch (x) { st.added[s.template] = x.message || "Can't add it"; }
+    if (S.starter === st) put("pj-start-list", starterList());
   }
 
   // The description under the title; eki's is fixed, so it has no Edit.
@@ -194,6 +263,7 @@
     const b = e.target.closest("[data-act]");
     if (!b || !S.id) return;
     if (b.dataset.act === "describe") { e.preventDefault(); return editDesc(); }
+    if (b.dataset.act === "starter") return addStarter(+b.dataset.i);
     b.disabled = true;
     const base = "/api/projects/" + encodeURIComponent(S.id);
     if (b.dataset.act === "clone") {
@@ -219,6 +289,7 @@
     try {
       const got = await api("/api/ask", { prompt, project: S.id });
       $("pj-ask-text").value = "";
+      if (window.ekiDrafts) window.ekiDrafts.clear("new:" + S.id);
       put("pj-ask-err", "");
       nav.go(got.thread);
     } catch (x) { put("pj-ask-err", `<span class="pj-err">${esc(x.message)}</span>`); }
@@ -229,7 +300,7 @@
   function start(id) {
     const el = box();
     el.hidden = false;
-    if (S.id !== id) { S.open.clear(); S.errs = {}; S.data = null; }
+    if (S.id !== id) { S.open.clear(); S.errs = {}; S.data = null; S.starter = null; draft(id); }
     S.on = "project"; S.id = id; S.last = {}; S.editing = false;
     $("title").textContent = "Project";
     $("meta").textContent = "";
@@ -237,6 +308,14 @@
     clearInterval(S.timer);
     S.timer = setInterval(loadOne, 5000);
     window.projectCards && projectCards.mount(document.getElementById("pj-cards"), id);
+  }
+
+  // the ask box keeps its unsent text per project (ekiDrafts, attach.js, when it is in)
+  function draft(id) {
+    const t = $("pj-ask-text");
+    if (window.ekiDrafts && window.ekiDrafts.flush) window.ekiDrafts.flush(t);     // the last project's, before the box is reused
+    t.value = "";
+    if (window.ekiDrafts) window.ekiDrafts.bind(t, "new:" + id);
   }
 
   function hide() {

@@ -58,6 +58,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     const d = window.newProject.open();
     out.html = d.innerHTML; out.opened = d.opened;
     const f = input.fields;
+    await window.newProject.start(f.folder ? "open" : "new");     // the sheet opens on its two starts
     d.querySelector("#np-name").value = f.name; d.querySelector("#np-folder").value = f.folder || "";
     d.querySelector("#np-desc").value = f.description || "";
     await d.querySelector("form").l.submit({ preventDefault() {} });
@@ -176,8 +177,8 @@ def test_the_sheet_shows_the_apis_error(tmp_path):
 def test_choose_shows_only_in_the_mac_shell(tmp_path):
     plain = run_sheet(tmp_path, "{ ok: true, json: async () => ({ id: 'x' }) }", {"name": "a"})
     assert plain["opened"] and "Choose…" not in plain["html"]
-    for name in ("Create a project", "What are you working on?", "What are you trying to achieve?", "Use a folder",
-                 'list="np-folders"', "Cancel", "Create project"):
+    for name in ("Create a project", "Open a folder", "Start new", "What should this become?", "Name",
+                 'list="np-folders"', "Cancel", ">Create<"):
         assert name in plain["html"], name
     mac = run_sheet(tmp_path, "{ ok: true, json: async () => ({ id: 'x' }) }", {"name": "a"}, shell=True)
     assert "Choose…" in mac["html"]

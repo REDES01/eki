@@ -37,7 +37,8 @@ PROMPT_MAX = 2000
 AROUND = 60                 # lines of the fault's file on each side of the frame, for the brief
 TAIL = "The latest traceback:"
 #: an item in one of these states is still the subject of work
-OPEN = ("waiting", "building", "judging", "reviewing", "proposed", "locked", "queued", "resolving", "rechecking")
+OPEN = ("waiting", "building", "judging", "reviewing", "proposed", "locked", "queued", "resolving", "rechecking",
+        "waiting on calls")
 LANDED = ("landed", "live", "applied")
 
 

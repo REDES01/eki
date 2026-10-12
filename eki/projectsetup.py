@@ -28,7 +28,7 @@ from typing import List, Optional, Set
 
 from . import checkguess, db, github, integration, paths, projectchats, projects, selfwork, standing, store, workspace
 
-UNFINISHED = ("waiting", "building", "judging", "reviewing")
+UNFINISHED = ("waiting", "building", "judging", "reviewing", "waiting on calls")
 PLANNING = ("drafting", "planning")
 SETTLING = ("cloning", "installing")
 

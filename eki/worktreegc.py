@@ -51,7 +51,7 @@ MEASURE_EVERY = 600.0
 DONE = ("live", "applied", "dropped")
 FAILED = ("left", "unfit", "rolled back")
 #: an item in one of these may still be using its worktree
-BUSY = ("building", "judging", "reviewing", "queued", "resolving", "rechecking")
+BUSY = ("building", "judging", "reviewing", "queued", "resolving", "rechecking", "waiting on calls")
 #: a goal in one of these still uses its plan- / draft- tree
 GOAL_BUSY = ("drafting", "planning")
 

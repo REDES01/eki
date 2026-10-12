@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from . import builds, db, github, integration, projectsetup, projects, selfwork, standing, store
 
-UNFINISHED = ("waiting", "building", "judging", "reviewing")
+UNFINISHED = ("waiting", "building", "judging", "reviewing", "waiting on calls")
 PLANNING = ("drafting", "planning")
 
 

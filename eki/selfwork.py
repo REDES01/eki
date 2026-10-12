@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import (builds, db, deplinks, doccheck, integration, leftover, notify, paths, projectbrief, projects,
+from . import (builds, callwait, db, deplinks, doccheck, integration, leftover, notify, paths, projectbrief, projects,
                projectwork, review, scheduler, selfbrief, selfdraft, selfplan, store, workflow, workflowgates,
                workspace)
 
@@ -40,7 +40,7 @@ DEFAULTS = {"parallel": 4, "autonomy": "propose",
 FIT = {"propose": ("landed", "live", "applied"),
        "apply": ("landed", "live", "applied")}
 #: an item in one of these has a run going and holds its write-set
-LIVE = ("building", "judging", "reviewing")
+LIVE = ("building", "judging", "reviewing", "waiting on calls")
 #: gate 1, run in the worktree with its own (linked) venv, whatever the engine's environment says
 CHECK = '["/bin/sh", "-c", "EKI_PYTHON=$PWD/.venv/bin/python EKI_CHECK_FAST=1 exec bin/check -q"]'   # drills run once, at release (traincheck)
 
@@ -127,6 +127,7 @@ def tick(conn: sqlite3.Connection) -> List[str]:
         said += _conclude_judge(conn, it)
     for it in items_in(conn, ("reviewing",)):
         said += review.conclude(conn, it)
+    said += callwait.tick(conn)          # turns that ended with card calls out: woken once they're back
     said += _settle_applied(conn)
     said += workflowgates.started(conn, scheduler.start_ready(conn))
     return said
@@ -196,15 +197,17 @@ def _conclude_build(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
         return []
     goal = conn.execute("SELECT * FROM goals WHERE id=?", (it["goal_id"],)).fetchone()
     project = projectwork.project_of(conn, goal)
-    killed = leftover.kill(leftover.find(it["worktree"])) if it["worktree"] else []
-    left = (f"item {it['id']}: the build left background tasks running — killed: "
-            + ", ".join(f"{p['pid']} {p['cmd']}" for p in killed)) if killed else None
     with db.tx(conn):
         if conn.execute("SELECT state FROM items WHERE id=?", (it["id"],)).fetchone()["state"] != "building":
             return []
+        if run["state"] == "done" and (w := callwait.hold(conn, it, run, "building")):
+            return [w]                               # its card calls are out: woken with their answers
+        killed = leftover.kill(leftover.find(it["worktree"])) if it["worktree"] else []
+        left = (f"item {it['id']}: the build left background tasks running — killed: "
+                + ", ".join(f"{p['pid']} {p['cmd']}" for p in killed)) if killed else None
         if left:                                     # said on the board and in the thread; judging goes on
             store.add_event(conn, run["id"], run["attempt"], "note", {"text": left})
-        said = [left] if left else []
+        said = ([left] if left else []) + callwait.stopped(conn, it, run)
         if run["state"] != "done":
             _set(conn, it["id"], state="left", error=f"the build run ended {run['state']}: {run['error'] or ''}")
             return said + [f"item {it['id']}: left — the build run ended {run['state']}"]
@@ -362,7 +365,7 @@ def drop(conn: sqlite3.Connection, iid: str) -> str:
     it = store_item(conn, iid)
     if it is None:
         raise KeyError(f"no item {iid}")
-    for rid in (it["run_id"], it["gate2_run"], it["review_run"]):
+    for rid in (it["run_id"], it["gate2_run"], it["review_run"], *((callwait.waits_of(it) or {}).get("calls") or [])):
         if rid:
             store.cancel(conn, rid)
     _set(conn, it["id"], state="dropped")

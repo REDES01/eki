@@ -30,7 +30,7 @@ LOOK_BACK = 3
 #: a goal in one of these is a round still being planned
 PLANNING = ("drafting", "planning")
 #: an item in one of these is a round still being built
-BUILDING = ("waiting", "building", "judging", "reviewing")
+BUILDING = ("waiting", "building", "judging", "reviewing", "waiting on calls")
 #: a round that ended like this counts as failed
 FAILED = ("failed", "left")
 

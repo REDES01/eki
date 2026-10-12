@@ -28,7 +28,8 @@ WINDOW = 7 * DAY
 #: goals in these states have a draft or plan run going
 GOAL_BUSY = ("drafting", "planning")
 #: items in these states are work under way or about to be
-ITEM_BUSY = ("waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking")
+ITEM_BUSY = ("waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking",
+             "waiting on calls")
 #: items in these states wait on the person
 ITEM_WAITING = ("proposed", "locked")
 #: a `now` run in one of these is the person's work under way

@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a w
     files TEXT NOT NULL DEFAULT '[]',       -- the declared write-set (globs)
     deps TEXT NOT NULL DEFAULT '[]',        -- item ids that must be fit first
     independent INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | judging | proposed | applied | locked | queued | resolving | rechecking | landed | live | rolled back | unfit | left | dropped
+    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | waiting on calls | judging | proposed | applied | locked | queued | resolving | rechecking | landed | live | rolled back | unfit | left | dropped
     thread_id TEXT,
     worktree TEXT,
     branch TEXT,
@@ -295,6 +295,7 @@ ADDED = [
     ("projects", "autonomy", "TEXT"),   # apply | propose; NULL: the default (eki/projects.py)
     ("items", "landed_on", "TEXT"),     # the project branch eki landed it on; NULL otherwise
     ("items", "context", "TEXT"),       # JSON [{name, why}] knowledge cards the planner picked; NULL: all
+    ("items", "waits", "TEXT"),         # JSON {stage, run, since, calls} while waiting on calls
 ]
 
 

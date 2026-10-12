@@ -18,7 +18,8 @@ from . import db, notify
 #: how far back an end still counts
 WINDOW = 24 * 3600.0
 
-OPEN = ("waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking", "locked")
+OPEN = ("waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking", "locked",
+        "waiting on calls")
 FINISHED = ("live", "landed", "applied")
 
 _IN_OPEN = ",".join("?" * len(OPEN))

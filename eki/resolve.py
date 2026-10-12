@@ -24,7 +24,7 @@ import sqlite3
 import subprocess
 from typing import List, Optional, Tuple
 
-from . import db, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
+from . import callwait, db, landed, projectwork, rebase, resolvebrief, selfbrief, selfwork, store
 from .workspace import WorkspaceError, git
 
 #: resolve runs per item, in all, before it is left for a person
@@ -128,6 +128,17 @@ def _conclude_resolve(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if run is None or run["state"] != "done":
         state = run["state"] if run else "missing"
         return _leave(conn, it, f"the resolve run ended {state}: {(run['error'] if run else '') or ''}".strip())
+    with db.tx(conn):
+        if not _still(conn, it, "resolving"):
+            return []
+        if (w := callwait.hold(conn, it, run, "resolving")):
+            return [w]                               # its card calls are out: woken with their answers
+        stopped = callwait.stopped(conn, it, run)
+    return stopped + _resolved(conn, it, run)
+
+
+def _resolved(conn: sqlite3.Connection, it: sqlite3.Row, run: sqlite3.Row) -> List[str]:
+    """A resolve run that ended done: go on with the rebase, or say what's wrong."""
     verdict, reason, summary = selfbrief.outcome(store.answer(conn, run["id"]))
     if verdict == "person":
         return _leave(conn, it, reason or "the resolver asked for a person", person=True)

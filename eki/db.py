@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS items (          -- one piece of a goal, built in a w
     files TEXT NOT NULL DEFAULT '[]',       -- the declared write-set (globs)
     deps TEXT NOT NULL DEFAULT '[]',        -- item ids that must be fit first
     independent INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | waiting on calls | judging | proposed | applied | locked | queued | resolving | rechecking | landed | live | rolled back | unfit | left | dropped
+    state TEXT NOT NULL DEFAULT 'waiting',  -- waiting | building | waiting on calls | judging | fixing | proposed | applied | locked | queued | resolving | rechecking | landed | live | rolled back | unfit | left | dropped
     thread_id TEXT,
     worktree TEXT,
     branch TEXT,
@@ -301,6 +301,7 @@ ADDED = [
     ("projects", "chat_history", "INTEGER DEFAULT 1"),   # 1: chat turns are committed (eki/chatcommit.py)
     ("goals", "hot", "TEXT"),           # JSON: the plan's hot spots, [{file, items, generated}]
     ("goals", "dry_run", "TEXT"),       # the dry build's command run (eki/drybuild.py)
+    ("items", "fixer", "TEXT"),         # JSON {stage, failure, run, at, head, summary}: its one fixer run (eki/fixer.py)
 ]
 
 

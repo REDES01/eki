@@ -99,7 +99,8 @@ def test_ask_starts_a_registered_judge_run_beside_gate_one_and_all_passed_propos
     assert it["state"] == "judging" and it["run_id"] and it["review_run"] and it["review"] is None
     assert store.run(conn, it["run_id"])["provider"] == "command"
     run = store.run(conn, it["review_run"])
-    assert run["provider"] == "fake2" and run["row"] == "code" and run["fresh"] == 1   # never the builder's
+    # the judge role's pick, the builder's provider or not (the person's choice, 2026-10-12): a run of its own
+    assert run["provider"] == "fake" and run["row"] == "code" and run["fresh"] == 1
     assert run["thread_id"] != it["thread_id"] and run["priority"] == "now"
     cwd = store.cwd_of(conn, run["thread_id"])
     assert cwd.endswith(f"judge-{it['id']}") and workspace.head(cwd) == it["commit_sha"]
@@ -175,9 +176,9 @@ def test_review_off_or_no_judge_lets_gate_one_alone_decide(conn, src, tmp_path, 
     assert not conn.execute("SELECT 1 FROM judgings").fetchone()
     assert gate(conn, a)["state"] == "proposed"
     settle(review=True)
-    rp = paths.config("routing")                 # only the builder's provider can judge: none
+    rp = paths.config("routing")                 # the judge role's pick has no tools: no judge
     rp.write_text(json.dumps({**json.loads(rp.read_text()), "rows": [
-        {"key": "code", "title": "tools", "targets": ["fake"]}]}))
+        {"key": "code", "title": "tools", "targets": ["bare", "fake"]}]}))
     goal_with(conn, "add b", ["eki/b.py"])
     b = build(conn, tmp_path, monkeypatch, ("eki/b.py",))[0]
     assert b["review_run"] is None and b["review"].startswith("none: no judge:")

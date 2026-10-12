@@ -1,8 +1,8 @@
 """The review: an independent judge beside gate 1 (docs/self-build.md, "Judging").
 
 When a build ends, `ask` starts a judge run (eki/judge.py) in the same
-transaction as gate 1: on another backend than the builder's, in a read-only
-worktree, it files one verdict per check — `spec` and the goal checks the
+transaction as gate 1: the judge role's pick, in a run and thread of its own, in a
+read-only worktree, it files one verdict per check — `spec` and the goal checks the
 item carries — with `eki verdict` (eki/verdicts.py). items.review_run holds
 the judge run. The item stays `judging` until both have ended (`ended`);
 then `read` maps the verdicts: all passed → `ok`; any failed → `no` with

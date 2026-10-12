@@ -2,7 +2,7 @@
 (docs/self-build.md, "Judging"; eki/verdicts.py for the verdict's shape).
 
 When a build ends, review.ask calls `start_item` in the same transaction as
-gate 1: a judge run (eki/judgerun.py) on another backend than the builder's,
+gate 1: a judge run (eki/judgerun.py) on the judge role's pick, a fresh run of its own,
 in the read-only worktree `judge-<item id>` at the item's commit, registered
 in `judgings` with scope `item` for `spec` (does the change do what the
 item's spec says) and the goal checks the item carries (items.checks). It

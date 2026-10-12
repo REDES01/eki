@@ -55,13 +55,13 @@ def test_an_uncertain_check_gets_a_second_judge_elsewhere_then_you(conn, src, ho
     goal_with(conn, "add a", ["eki/a.py"], carries=("c1", "c2"))
     it = build(conn, tmp_path, monkeypatch)[0]
     first = it["review_run"]
-    assert store.run(conn, first)["provider"] == "fake2"
+    assert store.run(conn, first)["provider"] == "fake"                  # the judge role's pick
     it = judged(conn, tmp_path, monkeypatch, it, rec("spec"), rec("c1"),
                 rec("c2", "uncertain", limitation="the docs build needs a network"))
     assert it["state"] == "judging" and it["review_run"] != first           # a second judge looks
     run = store.run(conn, it["review_run"])
     j = verdicts.judging(conn, run["id"])
-    assert run["provider"] == "fake3" and json.loads(j["avoid"]) == ["fake", "fake2"]
+    assert run["provider"] == "fake2" and json.loads(j["avoid"]) == ["fake"]   # off the builder and the first judge
     assert j["scope"] == "second" and json.loads(j["checks"]) == ["c2"]
     assert "Another judge could not settle" in run["prompt"] and "c2: the docs say so" in run["prompt"]
     assert not notices(conn, it["id"])
@@ -84,9 +84,12 @@ def test_a_second_judge_that_settles_it_proposes_ok(conn, src, home, tmp_path, m
     assert item(conn, it["id"])["review"] == "ok" and item(conn, it["id"])["state"] == "proposed"
 
 
-def test_uncertain_with_no_other_backend_goes_straight_to_you(conn, src, tmp_path, monkeypatch):
+def test_uncertain_with_no_other_backend_goes_straight_to_you(conn, src, home, tmp_path, monkeypatch):
+    rp = home / "routing.json"                     # the code row holds one provider: fake builds and judges
+    rp.write_text(json.dumps({**json.loads(rp.read_text()), "rows": [
+        {"key": "code", "title": "tools", "targets": ["fake"]}]}))
     goal_with(conn, "add a", ["eki/a.py"])
-    it = build(conn, tmp_path, monkeypatch)[0]                         # fake builds, fake2 judges: no third
+    it = build(conn, tmp_path, monkeypatch)[0]
     it = judged(conn, tmp_path, monkeypatch, it, rec("spec"), rec("c1", "uncertain", limitation="no screen"))
     assert it["state"] == "proposed" and it["review"] == "uncertain: c1: no screen"
     assert len(notices(conn, it["id"])) == 1

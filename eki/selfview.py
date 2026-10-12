@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, checkslots, doccheck, notifygoals, projects, queue, selfwork, store
+from . import asks, callwait, checkslots, db, doccheck, notifygoals, projects, queue, selfwork, store
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
@@ -138,6 +138,9 @@ def _batch_of(c, it) -> str:
 
 
 def where(it) -> str:
+    if it["state"] == callwait.STATE:
+        calls = (callwait.waits_of(it) or {}).get("calls") or []
+        return f"calls {', '.join(str(x)[:8] for x in calls)}" if calls else "calls"
     if it["state"] == "reviewing":
         return f"review {it['review_run'] or '-'}"
     if it["state"] == "judging" and it["run_id"]:
@@ -193,6 +196,8 @@ def _said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
         return it["why"]
     if state in ("left", "unfit", "rolled back") and it["error"]:
         return f"! {it['error'].splitlines()[0][:150]}"
+    if state == callwait.STATE:
+        return _waiting(c, it)
     if state == "reviewing":
         return "a second reader (the reviewer role, Settings → Routing) is reading the diff"
     if state == "judging" and it["review_run"]:
@@ -230,6 +235,20 @@ def _said(it, *, c: Optional[sqlite3.Connection] = None) -> str:
     if state == "applied":
         return f"✓ in main ({(it['commit_sha'] or '')[:12]})"
     return ""
+
+
+def _waiting(c: Optional[sqlite3.Connection], it) -> str:
+    """What a waiting item waits for: each call's card, run and state, and how long of the cap."""
+    w = callwait.waits_of(it) or {}
+    ids = [str(x) for x in w.get("calls") or []]
+    rows = [store.run(c, x) for x in ids] if c is not None else [None] * len(ids)
+    calls = [r for r in rows if r is not None]
+    said = ", ".join(f"{callwait.card(r)} (run {r['id'][:8]}, {r['state']})" if r is not None
+                     else f"? (run {x[:8]})" for x, r in zip(ids, rows))
+    cap = callwait.cap_seconds(c, calls) / 60 if calls else callwait.CAP_MINUTES
+    since = w.get("since")
+    waited = int(max(0, db.now() - since) // 60) if isinstance(since, (int, float)) else 0
+    return f"waiting on calls: {said or '-'} · {waited} min of {cap:g}"
 
 
 def verdicts(c: sqlite3.Connection) -> Dict[str, str]:

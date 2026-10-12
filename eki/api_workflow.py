@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import components, pathrules, projectchats, selfview, workflow
+from . import callwait, components, pathrules, projectchats, selfview, workflow
 
 #: a check's stage title, one-line summary and what it does
 _CHECKS = {
@@ -180,6 +180,8 @@ def _place(it, checks: List[str], eki: bool) -> Optional[str]:
     s = it["state"]
     if it["pr_state"] == "open":
         return "merge"
+    if s == callwait.STATE:
+        s = "building" if (callwait.waits_of(it) or {}).get("stage") == "building" else "resolving"
     if s in ("waiting", "building", "left"):
         return "build"
     if s in ("judging", "reviewing", "unfit"):

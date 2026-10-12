@@ -166,6 +166,31 @@ then SIGKILL) and said on the board and as a note in the item's thread —
 `the build left background tasks running — killed: <pid> <command>` — and
 judging goes on unchanged.
 
+A build or resolve turn may end with card calls still running: the agent
+started `eki use <card>` in the background and ended its turn. Those calls
+are the `component` runs whose `parent` is that very turn and that are still
+active (an MCP hold ends at once, and an exclusive card's hold ends with its
+caller, so neither counts). When such a turn ends `done`, the item isn't
+concluded — no commit, no leftover kill, no judging, `tries` unchanged — but
+goes to **`waiting on calls`**, with `items.waits` saying what for
+(`{stage, run, since, calls}`; `eki/callwait.py`). It keeps its write-set and
+worktree but no agent slot. Each tick, once none of its calls is active, eki
+wakes it: a next turn of the same session (pinned to the ended run's
+program, model and effort, `parent` the ended run) whose message starts
+"The calls you started have come back." and carries each call's card, state,
+answer (2000 characters, then `eki show <id>`), output paths and error; the
+item is back in `building` (or `resolving`) and the woken turn's answer is
+read as any other. An item that has waited longer than the cap — 60 minutes,
+or the largest `wait_minutes` a waited card sets in its component.json — is
+woken anyway with what came back and a line for each call still out; those
+keep running, uncancelled, and being the old turn's they don't make the woken
+turn wait again. At most `MAX_WAITS` = 4 wakes per build try; past that the
+item is concluded as it would have been, the board saying "stopped waiting for
+calls after 4 wakes". Dropping a waiting item cancels its calls. The station
+shows `calls <id8>, …` and `waiting on calls: <card> (run <id8>, <state>), … ·
+N min of 60`. Everything lives in `items.waits` and the runs table, so a
+restart loses nothing.
+
 ## Worktrees: made, kept, removed
 
 Every item, draft, plan, gate 2 and train check works in a worktree under

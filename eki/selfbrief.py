@@ -76,6 +76,10 @@ worktree: node_modules and .venv are links to the project folder's own. If a
 dependency must change, edit package.json or the lockfile (or pyproject) and
 say so in the SUMMARY; eki installs in the project folder after the change
 lands.
+Card calls: `eki use <card>` run in the foreground blocks until the answer is
+back. Started in the background, end your turn and you will be woken with the
+answers (up to an hour, or the card's own limit). Don't end a turn saying
+you'll wait for notices any other way.
 {retry}
 End your answer with a `SUMMARY:` paragraph in plain words (what is new, how
 to use it, what to check) and then one last line:

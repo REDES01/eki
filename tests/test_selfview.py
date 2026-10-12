@@ -157,3 +157,33 @@ def test_open_prs_on_the_board_and_the_item(conn):
     assert its["i1"]["pr"] == url and its["i2"]["pr"] is None
     assert its["i1"]["note"] == f"PR open: {url}"
     assert its["i2"]["note"] == "✓ 0 files; `eki self apply i2` queues it"
+
+
+def test_an_item_waiting_on_calls_shows_them(conn):
+    from eki.cli import use
+    with db.tx(conn):
+        conn.execute("INSERT INTO goals(id, text, source, owner, state, created_at) VALUES (?,?,?,?,?,?)",
+                     ("g1", "w", "ask", "you", "planned", T))
+        item(conn, "i1", "g1", 1, "building")
+    a = use.create(conn, "playtester", [], "/tmp", caller_run="r1")
+    b = use.create(conn, "playtester", [], "/tmp", caller_run="r1")
+    store.update_run(conn, a, state="running")
+    store.update_run(conn, b, state="done")
+    waits = {"stage": "building", "run": "r1", "since": db.now() - 12 * 60 - 5, "calls": [a, b]}
+    selfwork._set(conn, "i1", state="waiting on calls", waits=json.dumps(waits))
+    it = selfwork.store_item(conn, "i1")
+    assert selfview.where(it) == f"calls {a[:8]}, {b[:8]}"
+    assert selfview._said(it, c=conn) == (f"waiting on calls: playtester (run {a[:8]}, running), "
+                                          f"playtester (run {b[:8]}, done) · 12 min of 60")
+    assert selfview.note(conn, it).endswith("· 12 min of 60")
+
+
+def test_the_workflow_places_a_waiting_item_by_its_stage():
+    from eki import api_workflow
+
+    def it(stage):
+        return {"state": "waiting on calls", "pr_state": None,
+                "waits": json.dumps({"stage": stage, "run": "r", "since": 0, "calls": []})}
+    assert api_workflow._place(it("building"), ["batch"], True) == "build"
+    assert api_workflow._place(it("resolving"), ["batch"], True) == "batch"
+    assert api_workflow._place(it("resolving"), [], True) == "merge"

@@ -67,6 +67,7 @@ eki follow <run>  ◄── events table
 | `builds` | which eki runs: immutable exports under `~/.eki/builds/<id>`, `current`/`previous` links, the healthy mark, the sweep |
 | `bin/eki-launcher` | what launchd runs: starts the engine from `current`, again after a swap, and goes back to `previous` if a new build dies before its watch window is up. Free of eki's code; eki never changes it alone |
 | `selfwork`, `selfbrief` | eki builds eki (docs/self-build.md): goals, items, and the plan / build / judge runs that carry each item to a proposed branch; what the agents are told and how their answers are read |
+| `callwait` | a build or resolve turn that ended with card calls (`eki use`) still running: the item waits in `waiting on calls` (`items.waits`), and is woken with their answers in a next turn of the same session once they end or the cap passes (60 min, or a card's `wait_minutes`), at most 4 wakes per build try |
 | `selfpick` | the loop (docs/self-build.md): when eki is idle and the switch is on, open its own next goal — a fault, then the journal's costliest cluster, then the ROADMAP entry a model ranks first — each with its why |
 | `costs` | the journal's costly clusters: handoffs on rows that could stay local, corrections by the row they corrected |
 | `roadmap` | ROADMAP.md at integration `main` as open entries, each keyed by a hash of its text |

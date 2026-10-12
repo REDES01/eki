@@ -9,7 +9,7 @@
   const ENDS = ["dropped", "applied", "landed", "live"];                            // nothing left to drop
   const RETRY = ["left", "unfit", "dropped", "rolled back"];
   const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds() };
-  const FLIGHT = ["waiting", "building", "judging", "reviewing", "queued", "resolving", "rechecking"];
+  const FLIGHT = ["waiting", "building", "waiting on calls", "judging", "reviewing", "queued", "resolving", "rechecking"];
   const YOURS = ["proposed", "locked", "left", "unfit", "rolled back"];              // waits for a person
   const GOALS_DONE_SHOWN = 3;                                                       // finished goals shown before "show all"
 

@@ -1,5 +1,5 @@
 // #project/<id>: one project's page — its description (Edit opens a textarea, Enter saves), a box
-// for a new chat in its folder, then Chats, Background, Pictures and Files, each one summary line
+// for a new chat in its folder, then Chats, Background, Pictures, Files and Changes (projecthistory.js), each one summary line
 // that opens on click; the header's ⋯ menu deletes it (projectmenu.js). The list of projects is projectspage.js. Everything comes from
 // /api/projects (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing.
 (function () {
@@ -58,6 +58,7 @@
 
   async function loadOne() {
     const id = S.id;
+    window.projectHistory && projectHistory.load(id);   // the Changes section (projecthistory.js), its own fetch
     let p;
     try { p = await api("/api/projects/" + encodeURIComponent(id)); } catch (e) {
       if (S.id === id) { $("title").textContent = "Project"; $("meta").textContent = e.message; }
@@ -259,6 +260,6 @@
     document.head.appendChild(l);
   }
 
-  window.projects = { show: start, hide };
+  window.projects = { show: start, hide, when };
   nav.register("project", { show: start, hide });
 })();

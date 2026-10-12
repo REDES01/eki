@@ -1,5 +1,7 @@
 """Component access rules: queue, exclusive, memory, conflicts — all read from the database."""
 import json
+import os
+import subprocess
 
 import pytest
 
@@ -103,7 +105,7 @@ def test_two_picture_cards_on_different_workflows_share_one_queue(conn, spawned,
     start(conn, p)
     d = use(conn, "draft")
     engine.spawn_ready(conn)
-    assert spawned == [p] and store.run(conn, d)["why"] == "waits for draft: 1 of 1 slot busy"
+    assert spawned == [p] and store.run(conn, d)["why"].startswith("waits for draft: 1 of 1 slot busy")
     end(conn, p)
     engine.spawn_ready(conn)
     assert spawned == [p, d]
@@ -246,3 +248,77 @@ def test_a_missing_component_lets_the_run_start(conn, spawned, up):
     c = use(conn, "nothing")
     engine.spawn_ready(conn)
     assert spawned == [c]
+
+
+def agent_card(name="playtester", **spec):
+    comp(name, kind="agent", target="claude:opus", **spec)
+
+
+def claude_build(conn, pid=None):
+    with db.tx(conn):
+        rid = store.create_run(conn, store.create_thread(conn, "a build", None), "build it", provider="claude")
+    store.update_run(conn, rid, state="running", started_at=db.now(), pid=pid)
+    return rid
+
+
+def test_an_agent_card_on_claude_does_not_count_claude_builds(conn, spawned, up):
+    agent_card(access="queue", slots=2)
+    for _ in range(3):
+        claude_build(conn, os.getpid())
+    c = use(conn, "playtester")
+    assert access.gate(conn, store.run(conn, c)) == (True, "")
+    engine.spawn_ready(conn)
+    assert c in spawned
+    assert access.provider_of({"kind": "agent", "target": "claude:opus"}) == ""
+    assert access._access({"kind": "agent", "target": "claude:opus"}) == "queue"
+
+
+def test_a_slot_wait_names_the_runs_and_the_machine_slots(conn, spawned, up):
+    agent_card(access="queue", slots=2)
+    calls = [use(conn, "playtester") for _ in range(3)]
+    engine.spawn_ready(conn)
+    for rid in calls[:2]:
+        store.update_run(conn, rid, state="running", pid=os.getpid())
+    ok, why = access.gate(conn, store.run(conn, calls[2]))
+    assert not ok and why.startswith("waits for playtester: 2 of 2 slots busy (runs ")
+    for rid in calls[:2]:
+        assert f"{rid} pid {os.getpid()}" in why
+    assert " · browsers 0 of " in why and " · checks 0 of " in why
+
+
+def _faults(conn):
+    return [json.loads(r["data"]) for r in conn.execute("SELECT data FROM journal WHERE kind='fault'")]
+
+
+def _no_overcount(why):
+    for n in range(3, 10):
+        assert f"{n} of 2 slots busy" not in why
+
+
+def test_more_busy_than_slots_is_a_fault_not_a_count(conn, spawned, up):
+    agent_card(access="queue", slots=2)
+    calls = [use(conn, "playtester") for _ in range(4)]
+    for rid in calls[:3]:                           # forced past the queue: three working for two slots
+        store.update_run(conn, rid, state="running", started_at=db.now(), pid=os.getpid())
+    engine.spawn_ready(conn)
+    why = store.run(conn, calls[3])["why"]
+    assert why == "waits for playtester: rechecking slots"
+    _no_overcount(why)
+    got = [f for f in _faults(conn) if f["where"] == "access.slots"]
+    assert len(got) == 1 and "3 counted for 2 slots" in got[0]["traceback"]
+    engine.spawn_ready(conn)                        # the same wait again: no second fault
+    assert len([f for f in _faults(conn) if f["where"] == "access.slots"]) == 1
+
+
+def test_counted_runs_with_no_live_pid_are_a_fault(conn, spawned, up):
+    agent_card(access="queue", slots=2)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    calls = [use(conn, "playtester") for _ in range(3)]
+    for rid in calls[:2]:
+        store.update_run(conn, rid, state="running", started_at=db.now(), pid=dead.pid)
+    ok, why = access.gate(conn, store.run(conn, calls[2]))
+    assert not ok and why == "waits for playtester: rechecking slots"
+    _no_overcount(why)
+    got = [f for f in _faults(conn) if f["where"] == "access.slots"]
+    assert len(got) == 1 and calls[0] in got[0]["traceback"]

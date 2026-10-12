@@ -1,9 +1,10 @@
 """`eki project` with no key lists every project; with a key it shows one; `--new` makes one."""
 from __future__ import annotations
 
+import shlex
 from typing import List, Optional
 
-from .. import projectchats, projects
+from .. import gitstart, projectchats, projects
 from .common import err
 
 
@@ -65,9 +66,14 @@ def resolve(c, key: str) -> Optional[str]:
     return None
 
 
-def new(c, name: str, folder: Optional[str], description: Optional[str] = None) -> int:
+def new(c, name: str, folder: Optional[str], description: Optional[str] = None, yes: bool = False) -> int:
     try:
-        pid = projectchats.create(c, name, folder, description)
+        pid = projectchats.create(c, name, folder, description, anyway=yes)
+    except gitstart.Embedded as e:
+        err(f"eki: {e}\n  to create it anyway: eki project --new {shlex.quote(name)} --folder "
+            f"{shlex.quote(e.folder)}"
+            + (f" --description {shlex.quote(description)}" if description else "") + " --yes")
+        return 1
     except ValueError as e:
         err(f"eki: {e}")
         return 1

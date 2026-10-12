@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import builds, db, github, integration, paths, store, workspace
+from . import builds, db, gitstart, github, integration, paths, projects, store, workspace
 
 SELF = "eki"
 HIDDEN = ("dropped", "merged", "deleting", "deleted")
@@ -241,9 +241,12 @@ def _clean(text: Optional[str]) -> Optional[str]:
 
 
 def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = None,
-           description: Optional[str] = None) -> str:
+           description: Optional[str] = None, anyway: bool = False) -> str:
     """A project named `name` on `folder` (default ~/<name>, made and `git init`ed when missing),
-    and what you're trying to achieve there. Nothing is written in the folder but `git init`."""
+    and what you're trying to achieve there. Nothing is written in the folder but `git init`.
+    A folder inside another repo gets its own (one project, one repo): `git init`ed at once when that
+    repo tracks nothing in it; when it does, gitstart.Embedded is the one warning, and `anyway`
+    inits it and commits the folder as it is."""
     name = (name or "").strip()
     if not name:
         raise ValueError("a project needs a name")
@@ -262,6 +265,8 @@ def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = N
         workspace.git(where, "init", "-q")
     elif not os.path.isdir(where):
         raise ValueError(f"{where} is not a folder")
+    else:
+        _own_repo(where, anyway)
     branch = ""
     if workspace.repo_of(where) is not None and workspace.git(
             where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
@@ -272,6 +277,18 @@ def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = N
                      "VALUES (?,?,?,?,?,?,?)", (pid, name, where, where, branch, db.now(), _clean(description)))
     adopt(conn)
     return pid
+
+
+def _own_repo(where: str, anyway: bool) -> None:
+    inside = gitstart.outer(where)
+    if inside is None:
+        return
+    top, tracked = inside
+    if tracked and not anyway:
+        raise gitstart.Embedded(where, top)
+    workspace.git(where, "init", "-q")
+    if tracked:
+        projects.first_commit(Path(where))
 
 
 def set_folder(conn: sqlite3.Connection, pid: str, folder: str | Path) -> str:

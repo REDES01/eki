@@ -21,6 +21,8 @@
 // sheet keeps its fields and shows the offer in place of the error line, with "Keep a history" (history
 // "start") and "Chat only" (history "none") — only "Chat only" when ask.fit is false — and what is kept out
 // in a closed details fold. Outside that fold the sheet never says git, commit, branch or worktree.
+// A folder whose files a bigger repository around it keeps comes back as {ask: {inner, offer}}: the server's one
+// warning, with "Cancel" (the offer goes, nothing made) and "Create anyway" (history "anyway").
 (function () {
   let sheet = null, seq = 0, lookSeq = 0, timer = null;
   // mode: null (the three choices), "open", "new" or "github"; parent: a parent other than the proposed one;
@@ -116,6 +118,9 @@
   // the offer for a folder with no history yet: its words, what stays out (folded), and the choices
   function offer(survey) {
     const s = survey || {};
+    if (s.inner) return `<p class="np-offer">${md.esc(s.offer || "")}</p>
+      <div class="row-end"><button type="button" class="btn" data-history="cancel">Cancel</button>
+      <button type="button" class="btn-primary" data-history="anyway">Create anyway</button></div>`;
     const out = (s.left_out || []).map((p) => `<li>${md.esc(p)}</li>`).join("");
     const fold = out ? `<details class="np-left-out"><summary>Kept out of the history (offered as the project's media pool)</summary>
         <ul>${out}</ul></details>` : "";
@@ -138,6 +143,7 @@
 
   function choice(e) {
     const b = e && e.target && e.target.closest && e.target.closest("[data-history]");
+    if (b && b.dataset.history === "cancel") { ask(null); return null; }
     if (b) return create(null, b.dataset.history);
     return null;
   }

@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import api_cards, paths, projectchats
+from . import api_cards, gitstart, paths, projectchats
 
 #: how many recent folders the proposal offers
 RECENT = 8
@@ -94,7 +94,8 @@ def proposal(conn: sqlite3.Connection, name: Optional[str] = None, folder: Optio
 
 def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/projects: the project on `folder` (else the proposal for its name); one already on
-    that folder comes back with `existing: true` and nothing new is made."""
+    that folder comes back with `existing: true` and nothing new is made. A folder whose files another
+    repo tracks comes back as {ask: {inner, offer, parent}}, nothing made, until `history` is 'anyway'."""
     name = str(body.get("name") or "").strip()
     typed = str(body.get("folder") or "").strip()
     if typed:
@@ -103,7 +104,14 @@ def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     else:
         where = os.path.join(base(conn), check_name(name))
     before = {r[0] for r in conn.execute("SELECT id FROM projects")}
-    pid = project_on(conn, where) or projectchats.create(conn, name, where, str(body.get("description") or ""))
+    pid = project_on(conn, where)
+    if pid is None:
+        try:
+            pid = projectchats.create(conn, name, where, str(body.get("description") or ""),
+                                      anyway=body.get("history") == "anyway")
+        except gitstart.Embedded as e:          # the one warning: Cancel, or Create anyway (history "anyway")
+            return {"id": None, "ask": {"inner": True, "fit": True, "offer": str(e), "parent": e.parent,
+                                        "left_out": []}}
     return {"id": pid, "folder": projectchats.folder_of(conn, pid), "existing": pid in before or pid == projectchats.SELF}
 
 

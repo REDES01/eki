@@ -239,3 +239,27 @@ def test_chat_only_posts_none(tmp_path):
     got = run(tmp_path, {"answers": [{"ask": SURVEY}, {"id": "cd34"}],
                          "steps": [["click", {"start": "new"}], ["set", "#np-name", "Atlas"], ["create"], ["history", "none"]]})
     assert got["posted"][1][1] == {"name": "Atlas", "lands": "here", "history": "none"} and got["went"] == ["project/cd34"]
+
+
+INNER = {"inner": True, "fit": True, "parent": "/Users/p", "left_out": [],
+         "offer": "This folder is part of the git repository at /Users/p. eki will start a separate history here; "
+                  "the outer repository will see this folder as changed and git may call it an embedded repository."}
+
+
+def test_a_folder_inside_another_repository_warns_once_with_cancel_and_create_anyway(tmp_path):
+    got = run(tmp_path, {"answers": [{"id": None, "ask": INNER}, {"id": "ef56", "folder": "/Users/p/kept"}],
+                         "steps": [["click", {"start": "open"}], ["set", "#np-folder", "~/kept"], ["create"],
+                                   ["history", "anyway"]], "show": ["#np-ask"]})
+    assert got["posted"][1][1] == {"name": "kept", "folder": "~/kept", "lands": "here", "history": "anyway"}
+    assert got["went"] == ["project/ef56"]
+    shown = run(tmp_path, {"steps": [["ask", INNER]], "show": ["#np-ask"]})["els"]["#np-ask"]["html"]
+    assert INNER["offer"] in shown and "Create anyway" in shown and "Cancel" in shown
+    assert "Keep a history" not in shown and "Chat only" not in shown
+
+
+def test_cancel_takes_the_warning_away_and_posts_nothing_more(tmp_path):
+    got = run(tmp_path, {"answers": [{"id": None, "ask": INNER}],
+                         "steps": [["click", {"start": "open"}], ["set", "#np-folder", "~/kept"], ["create"],
+                                   ["history", "cancel"]], "show": ["#np-ask", "#np-create"]})
+    assert len(got["posted"]) == 1 and got["went"] == [] and not got["closed"]
+    assert got["els"]["#np-ask"]["hidden"] and not got["els"]["#np-create"]["hidden"]

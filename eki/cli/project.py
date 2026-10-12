@@ -27,7 +27,8 @@ def add(p) -> None:
     p.add_argument("--autonomy", choices=projects.AUTONOMY,
                    help="a local project: apply (eki lands fit items on its branch) or propose (the branch waits)")
     p.add_argument("--retry", action="store_true", help="start the failed setup step (clone or install) again")
-    p.add_argument("--yes", action="store_true", help="with `rm`: delete without asking")
+    p.add_argument("--yes", action="store_true", help="with `rm`: delete without asking; with --new: make a "
+                                                      "folder another repo tracks its own repo anyway")
 
 
 def setup_line(project) -> str:
@@ -142,8 +143,8 @@ def run(args) -> int:
             err("eki: eki project rm <name|id|OWNER/REPO> [--yes]")
             return 1
         return remove(c, args.more[0], args.yes)
-    if args.yes:
-        err("eki: --yes goes with `eki project rm <key>`")
+    if args.yes and args.new is None:
+        err("eki: --yes goes with `eki project rm <key>` or --new")
         return 1
     if args.key == "describe" and args.more:
         if len(args.more) != 2:
@@ -158,7 +159,7 @@ def run(args) -> int:
         if args.key or github_only or args.autonomy:
             err("eki: --new takes a name and maybe --folder and --description, nothing else")
             return 1
-        return projectlist.new(c, args.new, args.folder, args.description)
+        return projectlist.new(c, args.new, args.folder, args.description, args.yes)
     if args.description is not None:
         err('eki: --description goes with --new; for a project: eki project describe <key> "text"')
         return 1

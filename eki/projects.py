@@ -52,7 +52,7 @@ def _make_branch(where: Path) -> str:
     return name
 
 
-def _first_commit(where: Path) -> None:
+def first_commit(where: Path) -> None:
     """The folder as it is, committed on the unborn branch; nothing pushed."""
     who: List[str] = []
     if not (workspace.git(where, "config", "user.name", check=False)
@@ -72,7 +72,7 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
     if not workspace.git(where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
         if not fix:
             raise NeedsBranch(where, "commit")
-        _first_commit(where)
+        first_commit(where)
     got = conn.execute("SELECT id, branch, repo, state FROM projects WHERE path=?", (str(where),)).fetchone()
     if got and got["state"] == "deleting":
         raise ValueError(f"{where} is being deleted from eki: add it again in a moment")

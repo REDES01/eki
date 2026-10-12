@@ -37,6 +37,27 @@ class Unfit(ValueError):
     """The folder can't get a history; str is the plain reason followed by CHAT_ONLY."""
 
 
+class Embedded(ValueError):
+    """The folder's files are tracked by the git repository around it (`parent`); str is the one warning.
+    Made anyway, the folder gets a history of its own (one project, one repo)."""
+
+    def __init__(self, folder: str | Path, parent: str) -> None:
+        self.folder, self.parent = str(folder), parent
+        super().__init__(f"This folder is part of the git repository at {parent}. eki will start a separate "
+                         "history here; the outer repository will see this folder as changed and git may call "
+                         "it an embedded repository.")
+
+
+def outer(folder: str | Path) -> Optional[Tuple[str, bool]]:
+    """(the top of the repo `folder` sits inside without being its top level, whether that repo tracks
+    any file in `folder`), or None for a folder that is no repo's or is a top level itself."""
+    where = Path(folder).expanduser()
+    top = workspace.repo_of(where) if where.is_dir() else None
+    if top is None or os.path.realpath(top) == os.path.realpath(where):
+        return None
+    return top, bool(workspace.git(where, "ls-files", "--", ".", check=False))
+
+
 def _state(where: Path) -> str:
     if not where.is_dir():
         return "missing"

@@ -1072,7 +1072,13 @@ housekeeping copies new and changed files to.
   added again) — media and files of 20 MiB or more under `MEDIA_BLOCK`,
   build output, caches and OS junk under `OTHER_BLOCK` — and commits
   `FIRST_COMMIT` ("the folder as it was"), as `eki` when git has no
-  identity. A folder that already has commits is used as it is. Folders
+  identity. A folder that already has commits is used as it is. A folder
+  inside a bigger repo (not its top level) gets its own: one project, one
+  repo (`gitstart.outer`). When the outer repo tracks nothing there (a home
+  kept in git for dotfiles, an ignored folder), it's `git init`ed at once;
+  when it does, one warning (`gitstart.Embedded`: the outer repository will
+  see the folder as changed and may call it embedded) with Cancel / Create
+  anyway (`--yes` on the CLI), which inits it and commits it as it is. Folders
   where a history is a bad fit are refused with the reason and chat only as
   the choice (one agent in the folder directly, no parallel work, no queue):
   inside iCloud Drive, Dropbox, Google Drive or OneDrive; mostly large

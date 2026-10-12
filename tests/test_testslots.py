@@ -145,7 +145,7 @@ def test_a_queued_judge_goes_ahead_of_an_earlier_hold(home, conn, monkeypatch):
         c = db.connect()
         with testslots.hold(c, wait=0.02):
             a_has.set()
-            release.wait(5)
+            release.wait(60)        # never let go before the judge is queued, however loaded the machine
         c.close()
 
     def b():

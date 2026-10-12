@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import builds, judgebrief, pathrules, projectwork, workflow
+from . import builds, judgebrief, pathrules, projectwork, testpick, workflow
 
 #: what an item says for the review when the project's card doesn't choose it
 NO_REVIEW = "not in this project's workflow"
@@ -65,15 +65,16 @@ def single(conn: sqlite3.Connection, project: Optional[str]) -> bool:
 
 
 def gate(wf: workflow.Workflow, title: str, touched: Optional[List[str]] = None,
-         checks: Optional[List[Tuple[str, str]]] = None) -> Optional[Tuple[str, str]]:
+         checks: Optional[List[Tuple[str, str]]] = None, root: Optional[Path] = None) -> Optional[Tuple[str, str]]:
     """Gate 1 for a project item under its card: (command run argv JSON, what it runs),
     or None when the card chooses no gate run (self only). A card with path rules runs the
-    rules matching `touched` (the item's changed files) all in one run. With the item's goal
+    rules matching `touched` (the item's changed files) all in one run; its `tests` rules run
+    the tests picked in `root`, the item's worktree (eki/testpick.py). With the item's goal
     `checks` [(id, text)] the playtester is asked for a verdict on each (judgebrief.play_line)."""
     lines, says = [], []
     if workflow.has(wf, "command") and (wf.command.strip() or wf.rules):
-        lines.append(workflow.check_line(wf, touched or []))
-        says.append(_chosen(wf, touched or []) if wf.rules else wf.command)
+        lines.append(workflow.check_line(wf, touched or [], root))
+        says.append(_chosen(wf, touched or [], root) if wf.rules else wf.command)
     if workflow.has(wf, "playtester"):
         lines.append(judgebrief.play_line(wf, title, checks) if checks else
                      f"eki use {shlex.quote(wf.playtester)} {shlex.quote(f'play the change: {title}')}")
@@ -89,18 +90,23 @@ def gate(wf: workflow.Workflow, title: str, touched: Optional[List[str]] = None,
     return json.dumps(["/bin/sh", "-c", line, "eki-judge"]), " && ".join(says) or workflow.said(wf)
 
 
-def _chosen(wf: workflow.Workflow, touched: List[str]) -> str:
+def _chosen(wf: workflow.Workflow, touched: List[str], root: Optional[Path] = None) -> str:
     """The rules gate 1 runs for these files, as judged_by says them: 'story files: npm run
-    check:story · code: …', or the NOTHING note when none matched."""
-    rules = pathrules.chosen(wf.rules, touched)
-    return " · ".join(f"{pathrules.label(r)}: {r.run}" for r in rules) or pathrules.NOTHING
+    check:story · code: …', or the NOTHING note when none matched. A card with `tests` rules
+    says the tests it picked first: 'gate 1: 4 test files for eki/queue.py'."""
+    rules = [r for r in pathrules.chosen(wf.rules, touched) if r.run]
+    runs = " · ".join(f"{pathrules.label(r)}: {r.run}" for r in rules)
+    if any(r.tests for r in wf.rules):
+        tests = testpick.said(testpick.pick(wf.rules, touched, root, wf.whole_over))
+        return f"{tests} · {runs}" if runs else tests
+    return runs or pathrules.NOTHING
 
 
 def rules_said(wf: workflow.Workflow) -> str:
     """A rules card's gate 1 for a builder brief, in the board's words with each rule's paths:
     'Each change: story files (design/script/**, …) → `npm run check:story` · …'."""
     return "Each change: " + " · ".join(
-        f"{r.name + ' (' + ', '.join(r.paths) + ')' if r.name else ', '.join(r.paths)} → `{r.run}`"
+        f"{r.name + ' (' + ', '.join(r.paths) + ')' if r.name else ', '.join(r.paths)} → `{workflow.rule_runs(r)}`"
         for r in wf.rules)
 
 

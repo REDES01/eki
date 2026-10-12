@@ -1,6 +1,8 @@
 """Path rules: a workflow card's `command` as a list of rules, so gate 1 runs only what a change touched.
 
-A rule is {"name": optional, "paths": [patterns], "run": command}. Patterns follow .gitignore:
+A rule is {"name": optional, "paths": [patterns], "run": command}, or the same with "tests" in
+place of "run": test-file patterns under the project's tests/ folder, or "all" for the whole
+suite (eki/testpick.py picks them). Patterns follow .gitignore:
 no `/` (but a trailing one) matches a name at any depth; a `/` anchors to the project root (a
 leading one is dropped); `*` and `?` stay in one folder; `**/` is zero or more folders; a
 trailing `/**` or `/` is everything under that folder. `!` patterns aren't supported.
@@ -15,14 +17,17 @@ from functools import lru_cache
 from typing import Iterable, List, Tuple
 
 NOTHING = "nothing to check for these files"
-KEYS = ("name", "paths", "run")
+KEYS = ("name", "paths", "run", "tests")
+#: a tests rule's `tests` when it asks for the whole suite
+ALL = ("all",)
 
 
 @dataclass(frozen=True)
 class Rule:
     paths: Tuple[str, ...]
-    run: str
+    run: str               # '' for a tests rule
     name: str = ""
+    tests: Tuple[str, ...] = ()   # test-file patterns; ALL is the whole suite
 
 
 def _glob(text: str) -> str:
@@ -98,7 +103,7 @@ def parse(value) -> Tuple[Rule, ...]:
     rules = []
     for n, r in enumerate(value, 1):
         if not isinstance(r, dict):
-            raise ValueError(f"command: rule {n} must be an object with paths and run")
+            raise ValueError(f"command: rule {n} must be an object with paths and run (or tests)")
         extra = sorted(set(r) - set(KEYS))
         if extra:
             raise ValueError(f"command: rule {n} has unknown keys: {', '.join(extra)} (a rule has {', '.join(KEYS)})")
@@ -110,11 +115,28 @@ def parse(value) -> Tuple[Rule, ...]:
             raise ValueError(f"paths: rule {n} needs paths, a list of non-empty text")
         if any(p.strip().startswith("!") for p in paths):
             raise ValueError("paths: `!` patterns aren't supported")
+        if "run" in r and "tests" in r:
+            raise ValueError(f"command: rule {n} has both run and tests (a rule has one of them)")
+        if "tests" in r:
+            rules.append(Rule(paths=tuple(p.strip() for p in paths), run="", name=name.strip(),
+                              tests=_tests(n, r["tests"])))
+            continue
         run = r.get("run")
         if not isinstance(run, str) or not run.strip():
-            raise ValueError(f"command: rule {n} needs run, the command to run")
+            raise ValueError(f"command: rule {n} needs run, the command to run (or tests, the test files)")
         rules.append(Rule(paths=tuple(p.strip() for p in paths), run=run, name=name.strip()))
     return tuple(rules)
+
+
+def _tests(n: int, value) -> Tuple[str, ...]:
+    """A rule's `tests`: "all" is ALL, else a non-empty list of non-empty patterns."""
+    if isinstance(value, str) and value.strip() == "all":
+        return ALL
+    if not isinstance(value, list) or not value or not all(isinstance(p, str) and p.strip() for p in value):
+        raise ValueError(f"command: rule {n}'s tests must be \"all\" or a list of test-file patterns")
+    if any(p.strip().startswith("!") for p in value):
+        raise ValueError("paths: `!` patterns aren't supported")
+    return tuple(p.strip() for p in value)
 
 
 def label(rule: Rule) -> str:
@@ -129,9 +151,9 @@ def chosen(rules: Iterable[Rule], touched: Iterable[str]) -> List[Rule]:
 
 
 def script(rules: Iterable[Rule]) -> str:
-    """The shell text running every rule, each under `== <label>: <run>`, red or not; it exits
-    non-zero when any was red. No rules: it only prints NOTHING (and exits 0)."""
-    rules = list(rules)
+    """The shell text running every `run` rule, each under `== <label>: <run>`, red or not; it
+    exits non-zero when any was red. No such rules: it only prints NOTHING (and exits 0)."""
+    rules = [r for r in rules if r.run]
     if not rules:
         return f"echo {shlex.quote(NOTHING)}"
     lines = ["s=0"]

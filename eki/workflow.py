@@ -35,6 +35,8 @@ class Workflow:
     after_merge: str = ""  # shell command run in the person's folder after eki lands ('' when none)
     rules: Tuple[pathrules.Rule, ...] = ()  # gate 1 by path when `command` is a list ('' command then)
     batch_command: str = ""  # gate 2: the card's batch_command, else command when it is text
+    test_command: str = ""   # runs a tests rule's picked files (eki/testpick.py), or the whole suite
+    whole_over: int = 25     # more touched files than this: the whole suite
 
 
 _eki: Dict[Tuple[str, str, str], bool] = {}   # (root, source, home) -> is_eki, for the process
@@ -75,6 +77,7 @@ def _of(comp) -> Workflow:
     rules = pathrules.parse(cmd) if isinstance(cmd, list) else ()
     cmd = cmd if isinstance(cmd, str) else ""
     batch = s.get("batch_command")
+    tc, over = s.get("test_command"), s.get("whole_over")
     return Workflow(router=s.get("router", kind.CHOICE_DEFAULTS["router"]),
                     target=targets.key(t) if t else "",
                     plan=s.get("plan", kind.CHOICE_DEFAULTS["plan"]),
@@ -86,7 +89,9 @@ def _of(comp) -> Workflow:
                     card=str(comp.folder),
                     after_merge=s.get("after_merge") if isinstance(s.get("after_merge"), str) else "",
                     rules=rules,
-                    batch_command=batch if isinstance(batch, str) and batch.strip() else cmd)
+                    batch_command=batch if isinstance(batch, str) and batch.strip() else cmd,
+                    test_command=tc.strip() if isinstance(tc, str) else "",
+                    whole_over=over if isinstance(over, int) and not isinstance(over, bool) and over >= 1 else 25)
 
 
 def of_root(root: Optional[Path]) -> Optional[Workflow]:
@@ -146,23 +151,37 @@ def said(wf: Workflow) -> str:
     return head + checks
 
 
-def check_line(wf: Workflow, touched: List[str]) -> Optional[str]:
+def check_line(wf: Workflow, touched: List[str], root: Optional[Path] = None) -> Optional[str]:
     """Gate 1's shell text: the string command, else the rules matching `touched` run together
-    (pathrules.script; the NOTHING note when none match), else None (no command at all)."""
+    (pathrules.script; the NOTHING note when none match), else None (no command at all). With
+    `tests` rules, the test command over the tests picked in `root` (the item's worktree; None
+    is the current folder) runs first, and any matching `run` rules after it: both must pass."""
     if wf.command:
         return wf.command
-    if wf.rules:
-        return pathrules.script(pathrules.chosen(wf.rules, touched))
-    return None
+    if not wf.rules:
+        return None
+    runs = [r for r in pathrules.chosen(wf.rules, touched) if r.run]
+    if not any(r.tests for r in wf.rules):
+        return pathrules.script(runs)
+    from . import testpick
+    tests = testpick.line(testpick.pick(wf.rules, touched, root, wf.whole_over), wf.test_command)
+    return f"( {tests}\n) && ( {pathrules.script(runs)}\n)" if runs else tests
 
 
 def each_said(wf: Workflow) -> str:
     """What gate 1 runs, in plain words: 'Each change: story files → npm run check:story · …'."""
     if wf.rules:
-        return "Each change: " + " · ".join(f"{pathrules.label(r)} → {r.run}" for r in wf.rules)
+        return "Each change: " + " · ".join(f"{pathrules.label(r)} → {rule_runs(r)}" for r in wf.rules)
     if wf.command:
         return f"Each change: {wf.command}"
     return "Each change: bin/check" if "train" in wf.checks else "Each change: no check command"  # train: eki's own
+
+
+def rule_runs(rule: pathrules.Rule) -> str:
+    """What a rule runs, in plain words: its command, its test patterns, or 'whole suite'."""
+    if rule.tests == pathrules.ALL:
+        return "whole suite"
+    return ", ".join(rule.tests) if rule.tests else rule.run
 
 
 def together_said(wf: Workflow) -> str:

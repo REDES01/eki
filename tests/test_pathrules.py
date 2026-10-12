@@ -48,6 +48,11 @@ def test_a_bang_pattern_is_refused():
     ([], "command needs at least one rule"),
     (["x"], "command: rule 1 must be an object"),
     ([{"paths": ["a"]}], "command: rule 1 needs run"),
+    ([{"paths": ["a"], "run": "x"}, {"paths": ["b"], "run": "y", "tests": "all"}],
+     "command: rule 2 has both run and tests"),
+    ([{"paths": ["a"], "tests": []}], "command: rule 1's tests must be"),
+    ([{"paths": ["a"], "tests": "some"}], "command: rule 1's tests must be"),
+    ([{"paths": ["a"], "tests": [""]}], "command: rule 1's tests must be"),
     ([{"run": "x"}], "paths: rule 1 needs paths"),
     ([{"paths": [], "run": "x"}], "paths: rule 1 needs paths"),
     ([{"paths": [""], "run": "x"}], "paths: rule 1 needs paths"),
@@ -58,6 +63,19 @@ def test_bad_rules_say_why(value, words):
     with pytest.raises(ValueError) as e:
         pathrules.parse(value)
     assert str(e.value).startswith(words)
+
+
+def test_a_tests_rule_parses_as_patterns_or_the_whole_suite():
+    queue, core = pathrules.parse([{"name": "queue", "paths": ["eki/queue*.py"], "tests": ["tests/test_queue*.py"]},
+                                   {"name": "core", "paths": ["eki/db.py"], "tests": "all"}])
+    assert queue == Rule(paths=("eki/queue*.py",), run="", name="queue", tests=("tests/test_queue*.py",))
+    assert core.tests == pathrules.ALL and core.run == ""
+
+
+def test_the_script_runs_only_run_rules():
+    rules = pathrules.parse([{"paths": ["a"], "tests": "all"}, {"paths": ["a"], "run": "true"}])
+    assert pathrules.script(rules[:1]) == pathrules.script([])
+    assert "== a: true" in pathrules.script(rules)
 
 
 GAME = [{"name": "story files", "paths": ["design/script/**", "design/quests/**", "slice/data/**"],

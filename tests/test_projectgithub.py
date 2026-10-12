@@ -137,7 +137,9 @@ def test_create_repo_is_private_by_default(conn, fake_gh, monkeypatch):
     monkeypatch.setattr(github, "_gh", gh)
     got = api_projects.create(conn, {"name": "atlas", "create_repo": True})
     made = [c for c in fake_gh.calls() if c[:2] == ["repo", "create"]]
-    assert made == [["repo", "create", "atlas", "--private", "--source", got["folder"], "--remote", "origin"]]
+    # Start new gives the folder its first commit (gitstart), so the repository is pushed it
+    assert made == [["repo", "create", "atlas", "--private", "--source", got["folder"], "--remote", "origin",
+                     "--push"]]
     assert got["lands"] == "github" and "warning" not in got
     assert projects.get(conn, got["id"])["repo"] == "me/atlas"
     pub = api_projects.create(conn, {"name": "open", "create_repo": True, "private": False})

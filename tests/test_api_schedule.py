@@ -33,7 +33,7 @@ def call(url, body=None):
 def test_add_list_and_act(srv, conn, tmp_path):
     folder = tmp_path / "work"
     folder.mkdir()
-    pid = projectchats.create(conn, "work", folder)
+    pid = projectchats.create(conn, "work", folder, history="none")
     st, got = call(srv + "/api/schedule", {"text": "Check the build\nsay what broke", "cadence": DAILY,
                                            "project": pid, "target": "fake"})
     assert st == 200
@@ -87,7 +87,7 @@ def _standing(conn, text, project=None, state="on"):
 def test_standing_goals_list_and_act(srv, conn, tmp_path):
     folder = tmp_path / "work"
     folder.mkdir()
-    pid = projectchats.create(conn, "work", folder)
+    pid = projectchats.create(conn, "work", folder, history="none")
     theirs = _standing(conn, "keep work tidy", project=pid)
     ours = _standing(conn, "keep eki fast")
     _standing(conn, "gone", state="dropped")

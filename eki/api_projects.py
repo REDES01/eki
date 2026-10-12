@@ -174,9 +174,10 @@ def _expand(folder: Optional[str]) -> Optional[str]:
 
 def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/projects {name, description?, folder?, github?, lands?, create_repo?, private?}:
-    {id, folder, lands, cloning, existing, warning?}. With `github`, the repository's clone
+    {id, folder, lands, cloning, existing, left_out, warning?}. With `github`, the repository's clone
     (projectgithub.start). Start new (no folder) with `create_repo` makes a GitHub repository for it
-    too; gh failing leaves the project made, landing here, and says why in `warning`."""
+    too; gh failing leaves the project made, landing here, and says why in `warning`. A folder with no
+    history and no `history` ("start" or "none") answers {ask: gitstart's survey} and nothing is made."""
     if str(body.get("github") or "").strip():
         return projectgithub.start(conn, body)
     lands = body.get("lands") or None
@@ -185,7 +186,10 @@ def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     typed = str(body.get("folder") or "").strip()
     if lands == "github" and not body.get("create_repo"):
         _can_github(typed)
-    made = projectstart.create(conn, body)
+    try:
+        made = projectstart.create(conn, body)
+    except projectchats.NeedsAnswer as e:
+        return {"ask": e.survey}
     pid, warning = made["id"], None
     if made.get("ask") or pid == projectchats.SELF:
         return made
@@ -201,7 +205,8 @@ def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
             warning = f"the project is made, but not its GitHub repository: {e}"
     elif lands is not None:
         projectlands.set_lands(conn, pid, lands)
-    out = {**made, "lands": projectlands.lands_of(conn, pid)["lands"], "cloning": _cloning(conn, pid)}
+    out = {**made, "lands": projectlands.lands_of(conn, pid)["lands"], "cloning": _cloning(conn, pid),
+           "left_out": projectchats.left_out(conn, pid)}
     if warning:
         out["warning"] = warning
     return out

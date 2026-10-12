@@ -26,7 +26,7 @@ def game(conn):
     folder = paths.user_home() / "game"
     make(folder, ["notes/playtest.md", "AGENTS.md", ".git/x.md", "node_modules/y.md", "src/main.py",
                   ".hidden/z.md", "docs/design.markdown"])
-    return projectchats.create(conn, "game", folder), os.path.realpath(folder)
+    return projectchats.create(conn, "game", folder, history="none"), os.path.realpath(folder)
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_empty_query_is_newest_first(conn, game):
 def test_no_project_searches_every_project(conn, game):
     other = paths.user_home() / "book"
     make(other, ["chapters/one.md"])
-    projectchats.create(conn, "book", other)
+    projectchats.create(conn, "book", other, history="none")
     got = rels(docsearch.search(conn, "", None))
     assert "chapters/one.md" in got and "notes/playtest.md" in got
 

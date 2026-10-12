@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from eki import db, history, projectchats, server, store, workspace
+from eki import db, history, projectchats, server, store
 from eki.workspace import git
 
 
@@ -112,9 +112,7 @@ def test_routes(conn, tmp_path, monkeypatch):
     monkeypatch.setenv("EKI_SOURCE", str(src))
     pid = projectchats.create(conn, "web")
     folder = projectchats.folder_of(conn, pid)
-    if not workspace.repo_of(folder):
-        git(folder, "init", "-q", "-b", "main")
-    first = commit(Path(folder), "a.txt", "one\n", "the folder as it was")
+    first = git(folder, "rev-parse", "HEAD")                 # a new folder comes with its first change
     second = commit(Path(folder), "a.txt", "two\n", "second")
     srv = server.serve(0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

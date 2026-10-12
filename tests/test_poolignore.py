@@ -50,7 +50,7 @@ def test_no_repo_gets_the_card_and_no_error(conn, tmp_path):
     folder = tmp_path / "plain"
     folder.mkdir()
     assert poolignore.settle(folder, "assets") == []
-    pid = projectchats.create(conn, "plain", folder)
+    pid = projectchats.create(conn, "plain", folder, history="none")      # chat only: the folder stays without git
     got = add(conn, pid)
     assert got["card"]["name"] == "assets"
     assert not (folder / ".gitignore").exists()

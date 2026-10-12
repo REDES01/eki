@@ -73,7 +73,7 @@ def test_add_checks(conn, tokyo, tmp_path):
 def test_missed_while_asleep_fires_once(conn, tokyo, tmp_path):
     folder = tmp_path / "work"
     folder.mkdir()
-    pid = projectchats.create(conn, "work", folder)
+    pid = projectchats.create(conn, "work", folder, history="none")
     sid = schedule.add(conn, "Check the build\nand say what broke", {"every": "daily", "at": "09:00"},
                        project=pid, target={"provider": "fake", "model": "m1", "effort": "high"})
     now = ts(2026, 10, 9, 12, 0)

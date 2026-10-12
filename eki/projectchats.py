@@ -26,6 +26,16 @@ INSTRUCTIONS = ("AGENTS.md", "CLAUDE.md")
 OVER = ("applied", "dropped", "left", "unfit", "landed", "live", "rolled back")
 #: eki's description, fixed: it can't be edited
 SELF_DESCRIPTION = "eki itself — its own source"
+#: what create() may be told about a folder with no history: keep one, or chat only
+HISTORY = ("start", "none")
+
+
+class NeedsAnswer(ValueError):
+    """The folder has no history yet and nobody said whether to keep one; `.survey` is gitstart's."""
+
+    def __init__(self, survey: dict):
+        super().__init__(survey["offer"])
+        self.survey = survey
 
 
 def norm(path: str | Path) -> str:
@@ -241,12 +251,18 @@ def _clean(text: Optional[str]) -> Optional[str]:
 
 
 def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = None,
-           description: Optional[str] = None, anyway: bool = False) -> str:
-    """A project named `name` on `folder` (default ~/<name>, made and `git init`ed when missing),
-    and what you're trying to achieve there. Nothing is written in the folder but `git init`.
+           description: Optional[str] = None, history: Optional[str] = None, anyway: bool = False) -> str:
+    """A project named `name` on `folder` (default ~/<name>), and what you're trying to achieve there.
+
+    A missing folder is made and given a history (gitstart.start). A folder with no history yet
+    raises NeedsAnswer unless `history` says: "start" gives it one, "none" makes a chat-only
+    project (one agent in the folder, no queue). Nothing is written in the folder but git and
+    its .gitignore.
     A folder inside another repo gets its own (one project, one repo): `git init`ed at once when that
     repo tracks nothing in it; when it does, gitstart.Embedded is the one warning, and `anyway`
-    inits it and commits the folder as it is."""
+    inits it and commits the folder as it is. Chat only leaves it as it is."""
+    if history is not None and history not in HISTORY:
+        raise ValueError(f"history is one of {', '.join(HISTORY)}, not {history!r}")
     name = (name or "").strip()
     if not name:
         raise ValueError("a project needs a name")
@@ -260,17 +276,19 @@ def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = N
     got = _same_folder(conn, where)
     if got is not None:
         return got
-    if not os.path.exists(where):
-        os.makedirs(where)
-        workspace.git(where, "init", "-q")
-    elif not os.path.isdir(where):
+    if os.path.exists(where) and not os.path.isdir(where):
         raise ValueError(f"{where} is not a folder")
-    else:
-        _own_repo(where, anyway)
+    inited = history != "none" and os.path.isdir(where) and _own_repo(where, anyway)
+    seen = gitstart.survey(where)
     branch = ""
-    if workspace.repo_of(where) is not None and workspace.git(
-            where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
+    if seen["state"] == "git":
         branch = workspace.git(where, "symbolic-ref", "--short", "-q", "HEAD", check=False)
+    elif history == "none":
+        os.makedirs(where, exist_ok=True)
+    elif seen["state"] == "missing" or history == "start":
+        branch = gitstart.start(where)["branch"]
+    elif not inited:                    # one inited silently inside another repo is used as it is
+        raise NeedsAnswer(seen)
     pid = store.new_id()
     with db.tx(conn):
         conn.execute("INSERT INTO projects(id, name, path, folder, branch, created_at, description) "
@@ -279,16 +297,25 @@ def create(conn: sqlite3.Connection, name: str, folder: Optional[str | Path] = N
     return pid
 
 
-def _own_repo(where: str, anyway: bool) -> None:
+def _own_repo(where: str, anyway: bool) -> bool:
+    """Whether `where`, inside another repo, was just `git init`ed (and committed, when that repo tracks it)."""
     inside = gitstart.outer(where)
     if inside is None:
-        return
+        return False
     top, tracked = inside
     if tracked and not anyway:
         raise gitstart.Embedded(where, top)
     workspace.git(where, "init", "-q")
     if tracked:
         projects.first_commit(Path(where))
+    return True
+
+
+def left_out(conn: sqlite3.Connection, pid: str) -> List[str]:
+    """What the project's history leaves out (offered as its media pool); [] for a chat-only one."""
+    p = conn.execute("SELECT branch FROM projects WHERE id=?", (pid,)).fetchone()
+    folder = folder_of(conn, pid) if p is not None and p["branch"] else None
+    return gitstart.left_out(folder) if folder and os.path.isdir(folder) else []
 
 
 def set_folder(conn: sqlite3.Connection, pid: str, folder: str | Path) -> str:

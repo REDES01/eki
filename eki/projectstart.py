@@ -106,9 +106,10 @@ def create(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     before = {r[0] for r in conn.execute("SELECT id FROM projects")}
     pid = project_on(conn, where)
     if pid is None:
+        history = body.get("history") or None
         try:
             pid = projectchats.create(conn, name, where, str(body.get("description") or ""),
-                                      anyway=body.get("history") == "anyway")
+                                      None if history == "anyway" else history, anyway=history == "anyway")
         except gitstart.Embedded as e:          # the one warning: Cancel, or Create anyway (history "anyway")
             return {"id": None, "ask": {"inner": True, "fit": True, "offer": str(e), "parent": e.parent,
                                         "left_out": []}}

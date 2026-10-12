@@ -40,17 +40,20 @@ def test_add_is_idempotent_and_defaults(conn, proj):
     assert projects.base(p) == workspace.head(proj)
 
 
-def test_add_refuses_a_folder_that_is_no_repo_and_offers_a_first_commit(conn, tmp_path):
+def test_add_refuses_a_folder_with_no_history_in_plain_words_and_offers_a_first_commit(conn, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="has no history yet: `eki project --new NAME") as e:
         projects.add(conn, plain)
+    assert "git" not in str(e.value).replace(str(plain.resolve()), "")
     empty = tmp_path / "empty"
     empty.mkdir()
     workspace.git(empty, "init", "-q")
     with pytest.raises(projects.NeedsBranch) as e:
         projects.add(conn, empty)
     assert e.value.offer == "commit" and "has no commit yet" in str(e.value)
+    with pytest.raises(ValueError, match="is not a folder"):
+        projects.add(conn, tmp_path / "missing")
     assert projects.all(conn) == []
 
 

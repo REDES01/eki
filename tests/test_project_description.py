@@ -73,9 +73,9 @@ def test_set_description_changes_clears_and_refuses_eki(conn, src):
         projectchats.set_description(conn, "nope", "anything")
 
 
-def test_create_writes_nothing_but_git_init(conn, src):
+def test_create_writes_nothing_but_git_and_its_ignore_file(conn, src):
     pid = projectchats.create(conn, "fresh", description="Ship it")
-    assert os.listdir(projectchats.folder_of(conn, pid)) == [".git"]
+    assert sorted(os.listdir(projectchats.folder_of(conn, pid))) == [".git", ".gitignore"]
 
 
 def test_the_instructions_prompt_leads_with_the_description(conn, src):
@@ -90,7 +90,7 @@ def test_the_instructions_prompt_leads_with_the_description(conn, src):
     got = api_projects.write_instructions(conn, pid)
     text = conn.execute("SELECT prompt FROM runs WHERE id=?", (got["run"],)).fetchone()[0]
     assert text == prompt
-    assert os.listdir(projectchats.folder_of(conn, pid)) == [".git"]
+    assert sorted(os.listdir(projectchats.folder_of(conn, pid))) == [".git", ".gitignore"]
 
 
 def test_post_create_and_describe_round_trip(srv):

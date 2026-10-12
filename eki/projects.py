@@ -16,7 +16,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import builds, db, github, integration, paths, store, workspace
+from . import builds, db, gitstart, github, integration, paths, store, workspace
 
 #: untracked folders a worktree needs to run, linked from the project folder
 DEPS = (".venv", "node_modules")
@@ -67,8 +67,14 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
     """Record the git folder at `path`; the same path again is the same project. A repo with
     no commit or on no branch raises NeedsBranch, unless `fix` says yes to its offer."""
     where = Path(path).expanduser().resolve()
-    if not where.is_dir() or workspace.repo_of(where) is None:
-        raise ValueError(f"{where} is not a git repo")
+    if not where.is_dir():
+        raise ValueError(f"{where} is not a folder")
+    if workspace.repo_of(where) is None:
+        seen = gitstart.survey(where)
+        if not seen["fit"]:
+            raise ValueError(f"{where}: {seen['offer']}")
+        raise ValueError(f"{where} has no history yet: "
+                         f"`eki project --new NAME --folder {where} --yes` gives it one")
     if not workspace.git(where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
         if not fix:
             raise NeedsBranch(where, "commit")

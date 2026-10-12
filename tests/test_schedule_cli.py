@@ -18,7 +18,7 @@ def out(capsys, *argv):
 def test_round_trip(conn, capsys, tmp_path):
     folder = tmp_path / "work"
     folder.mkdir()
-    pid = projectchats.create(conn, "work", folder)
+    pid = projectchats.create(conn, "work", folder, history="none")
     said = out(capsys, "add", "Check the build", "--every", "weekly", "--day", "mon", "--at", "9:00",
                "--project", "work", "--to", "fake:m1", "--effort", "high")
     sid = said.splitlines()[0].strip()

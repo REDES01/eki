@@ -147,6 +147,7 @@ def test_instructions_without_a_folder_say_why(conn, src):
 
 def test_create_and_set_folder_take_tilde_as_your_home(conn, src, tmp_path):
     got = api_projects.create(conn, {"name": "notes", "folder": "~/notes"})
+    assert got["left_out"] == []                     # a new folder: a history, nothing left out
     assert got["folder"] == projectchats.folder_of(conn, got["id"]) == os.path.realpath(paths.user_home() / "notes")
     (paths.user_home() / "elsewhere").mkdir()
     moved = api_projects.set_folder(conn, got["id"], {"folder": "~/elsewhere"})

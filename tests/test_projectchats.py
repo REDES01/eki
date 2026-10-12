@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from eki import builds, db, paths, projectchats, projects, projectsetup, standing, store, workspace
+from eki import builds, db, gitstart, paths, projectchats, projects, projectsetup, standing, store, workspace
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_listing_entries_and_background_lines(conn, src, proj, tmp_path):
 
 def test_a_folder_on_github_shows_its_repo(conn, src, tmp_path):
     f = git_folder(tmp_path / "tb", "https://github.com/me/tokenbar.git")
-    pid = projectchats.create(conn, "tb", f)
+    pid = projectchats.create(conn, "tb", f, history="none")
     e = next(e for e in projectchats.listing(conn) if e["id"] == pid)
     assert e["repo"] == "me/tokenbar" and e["kind"] == "folder"
 
@@ -163,20 +163,29 @@ def test_engine_threads_never_join_even_on_a_matching_folder(conn, src, tmp_path
 
 # ---- create / set_folder / find ---------------------------------------------------------------
 
-def test_create_makes_your_folder_with_git(conn, src):
+def test_create_makes_your_folder_with_a_history(conn, src):
     pid = projectchats.create(conn, "tokenbar")
     where = paths.user_home() / "tokenbar"
     assert (where / ".git").is_dir()
+    assert workspace.git(where, "log", "-1", "--format=%s") == gitstart.FIRST_COMMIT
     row = projects.get(conn, pid)
-    assert row["path"] == row["folder"] == norm(where) and row["branch"] == "" and row["repo"] is None
+    assert row["path"] == row["folder"] == norm(where) and row["repo"] is None
+    assert row["branch"] == workspace.git(where, "symbolic-ref", "--short", "HEAD") != ""
     assert projectchats.create(conn, "again", where) == pid
 
 
-def test_create_takes_an_existing_folder_as_it_is(conn, src, tmp_path, proj):
+def test_create_asks_before_giving_a_folder_a_history(conn, src, tmp_path, proj):
     plain = tmp_path / "plain"
     plain.mkdir()
-    pid = projectchats.create(conn, "plain", plain)
+    with pytest.raises(projectchats.NeedsAnswer) as asked:
+        projectchats.create(conn, "plain", plain)
+    assert asked.value.survey["state"] == "plain" and not (plain / ".git").exists()
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
+    with pytest.raises(ValueError, match="history is one of"):
+        projectchats.create(conn, "plain", plain, history="maybe")
+    pid = projectchats.create(conn, "plain", plain, history="none")
     assert not (plain / ".git").exists() and projects.get(conn, pid)["branch"] == ""
+    assert projectchats.left_out(conn, pid) == []
     assert projects.get(conn, projectchats.create(conn, "proj", proj))["branch"] == "trunk"
 
 

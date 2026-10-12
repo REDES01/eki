@@ -53,7 +53,7 @@ def test_exists_and_project_flags(conn, src):
     (paths.user_home() / "Projects" / "plain").mkdir(parents=True)
     got = projectstart.proposal(conn, name="plain")
     assert got["exists"] is True and got["project"] is None
-    pid = projectchats.create(conn, "plain", got["folder"])
+    pid = projectchats.create(conn, "plain", got["folder"], history="none")
     by_folder = projectstart.proposal(conn, folder="~/Projects/plain/")
     assert by_folder["folder"] == home("Projects", "plain")
     assert by_folder["exists"] is True and by_folder["project"] == pid
@@ -76,7 +76,7 @@ def test_create_with_no_folder_lands_in_projects(conn, src):
 
 def test_the_same_folder_twice_is_one_project(conn, src):
     (paths.user_home() / "site").mkdir()
-    first = projectstart.create(conn, {"folder": "~/site"})
+    first = projectstart.create(conn, {"folder": "~/site", "history": "none"})
     again = projectstart.create(conn, {"name": "other", "folder": str(paths.user_home() / "site")})
     assert first["existing"] is False and again == {**first, "existing": True}
     assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1

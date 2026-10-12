@@ -114,7 +114,7 @@ def test_new_makes_a_folder_in_your_home(conn, capsys):
 def test_new_takes_a_folder(conn, capsys, tmp_path):
     mine = tmp_path / "elsewhere"
     mine.mkdir()
-    assert main(["project", "--new", "work", "--folder", str(mine)]) == 0
+    assert main(["project", "--new", "work", "--folder", str(mine), "--chat-only"]) == 0
     assert projectchats.folder_of(conn, projectchats.find(conn, "work")) == projectchats.norm(mine)
 
 

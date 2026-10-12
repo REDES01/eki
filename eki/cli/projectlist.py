@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from typing import List, Optional
 
 from .. import gitstart, projectchats, projects
@@ -66,9 +67,41 @@ def resolve(c, key: str) -> Optional[str]:
     return None
 
 
-def new(c, name: str, folder: Optional[str], description: Optional[str] = None, yes: bool = False) -> int:
+def left_line(left: List[str]) -> str:
+    return (f"{len(left)} left out of the history (offered as the project's media pool): "
+            + ", ".join(left))
+
+
+def _answer(survey: dict) -> Optional[str]:
+    """Ask once on a terminal whether to keep a history: "start", "none", or None to stop."""
+    print(survey["offer"])
+    if survey["left_out"]:
+        print(left_line(survey["left_out"]))
+    if not sys.stdin.isatty():
+        err("eki: run again with --yes, or --chat-only" if survey["fit"] else "eki: run again with --chat-only")
+        return None
+    question = "Keep a history? [y/N] " if survey["fit"] else "Work in it chat only? [y/N] "
     try:
-        pid = projectchats.create(c, name, folder, description, anyway=yes)
+        reply = input(question).strip().lower() in ("y", "yes")
+    except EOFError:
+        reply = False
+    if survey["fit"]:
+        return "start" if reply else "none"
+    return "none" if reply else None
+
+
+def new(c, name: str, folder: Optional[str], description: Optional[str] = None,
+        history: Optional[str] = None) -> int:
+    """Make a project; a folder with no history asks (or says how to answer) unless `history` says.
+    --yes (history "start") also makes a folder another repo tracks its own repo anyway."""
+    try:
+        try:
+            pid = projectchats.create(c, name, folder, description, history, anyway=history == "start")
+        except projectchats.NeedsAnswer as e:
+            history = _answer(e.survey)
+            if history is None:
+                return 1
+            pid = projectchats.create(c, name, folder, description, history)
     except gitstart.Embedded as e:
         err(f"eki: {e}\n  to create it anyway: eki project --new {shlex.quote(name)} --folder "
             f"{shlex.quote(e.folder)}"
@@ -78,6 +111,9 @@ def new(c, name: str, folder: Optional[str], description: Optional[str] = None, 
         err(f"eki: {e}")
         return 1
     print(f"{name}: project {pid} in {projectchats.folder_of(c, pid)}")
+    left = projectchats.left_out(c, pid)
+    if left:
+        print(left_line(left))
     return 0
 
 

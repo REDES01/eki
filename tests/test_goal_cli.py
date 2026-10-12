@@ -40,7 +40,7 @@ def test_add_refuses_a_folder_that_isnt_a_repo(conn, capsys, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert main(["goal", "add", str(plain), "anything"]) == 1
-    assert "not a git repo" in capsys.readouterr().err
+    assert "has no history yet" in capsys.readouterr().err
     assert conn.execute("SELECT COUNT(*) FROM standing").fetchone()[0] == 0
 
 

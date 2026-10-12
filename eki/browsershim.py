@@ -4,6 +4,7 @@ executable waits for a browser slot (browserslots.py) before it starts.
 Every run eki starts gets PLAYWRIGHT_BROWSERS_PATH=mirror(), so Playwright's
 normal lookup — in scripts and in the Playwright MCP — goes through it. The
 executable is the one place every browser launch passes, whoever asked for it.
+After its slot, the wrapper also waits for memory (eki/memadmit.py's rule).
 
 The mirror: every entry of real() is a symlink, except the browser folders
 (chromium-*, chromium_headless_shell-*, chrome-*, firefox-*, webkit-*). In
@@ -37,44 +38,55 @@ MARK = ".eki-shim"
 INSTALL_LOCK = "__dirlock"
 
 WRAPPER = '''#!{python} -I
-"""eki's browser shim: wait for a free browser slot, then become the real browser.
-Settings -> Machine -> Browsers at once sets how many may be open."""
-import fcntl, json, os, random, sys, time
+"""eki's browser shim: wait for a free browser slot and for memory, then become the
+real browser. Settings -> Machine sets how many may be open and the memory floor;
+the rule is eki/memadmit.py's, kept here: this script stands alone."""
+import fcntl, json, os, random, re, sqlite3, subprocess, sys, time, urllib.parse
 
 REAL = {real!r}
 SLOTS = {slots!r}
 ROUTING = {routing!r}
+DB = {db!r}
 COUNT, DEFAULT, MOST = 32, 3, 16
+ESTIMATE, GRACE = 1.1, 60
+
+
+def setting(key, default, most):
+    try:
+        v = json.load(open(ROUTING))["machine"][key]
+        if isinstance(v, bool):
+            return default
+        return min(most, max(1, int(v)))
+    except Exception:
+        return default
 
 
 def cap():
+    return setting("browsers", DEFAULT, MOST)
+
+
+def locked(i):
+    """The slot's mtime when someone holds it, else None."""
+    path = os.path.join(SLOTS, "%d.lock" % i)
     try:
-        v = json.load(open(ROUTING))["machine"]["browsers"]
-        if isinstance(v, bool):
-            return DEFAULT
-        return min(MOST, max(1, int(v)))
-    except Exception:
-        return DEFAULT
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return None
+    except OSError:
+        return os.fstat(fd).st_mtime
+    finally:
+        os.close(fd)
 
 
 def held():
-    n = 0
-    for i in range(COUNT):
-        try:
-            fd = os.open(os.path.join(SLOTS, "%d.lock" % i), os.O_RDONLY)
-        except OSError:
-            continue
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            n += 1
-        finally:
-            os.close(fd)
-    return n
+    return sum(locked(i) is not None for i in range(COUNT))
 
 
 def take(limit):
-    """A slot's fd, or None when none is free or taking one puts us over limit."""
+    """(index, fd) of a slot, or None when none is free or taking one puts us over limit."""
     for i in range(COUNT):
         try:
             fd = os.open(os.path.join(SLOTS, "%d.lock" % i), os.O_RDWR | os.O_CREAT, 0o644)
@@ -90,8 +102,70 @@ def take(limit):
         if held() > limit:                    # someone else took one at the same moment
             os.close(fd)
             return None
-        return fd
+        return i, fd
     return None
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+
+def free_gb():
+    """free + inactive + purgeable + speculative pages, in GB; EKI_FREE_GB overrides."""
+    if os.environ.get("EKI_FREE_GB"):
+        return float(os.environ["EKI_FREE_GB"])
+    size, pages = 4096, 0
+    for line in run("vm_stat").splitlines():
+        if "page size of" in line:
+            size = int(re.sub(r"\\D", "", line.split("page size of")[1]) or 4096)
+        elif line.startswith(("Pages free:", "Pages inactive:", "Pages purgeable:",
+                              "Pages speculative:")):
+            pages += int(re.sub(r"\\D", "", line.split(":")[1]) or 0)
+    return pages * size / 2.0 ** 30 if pages else float("inf")
+
+
+def swap_pct():
+    """Percent of swap in use, from sysctl vm.swapusage; EKI_SWAP_PCT overrides."""
+    if os.environ.get("EKI_SWAP_PCT"):
+        return int(float(os.environ["EKI_SWAP_PCT"]))
+    unit = {{"": 1.0, "K": 1 / 1024.0, "M": 1.0, "G": 1024.0, "T": 1024.0 ** 2}}
+    got = {{m.group(1): float(m.group(2)) * unit[m.group(3)]
+           for m in re.finditer(r"(total|used)\\s*=\\s*([\\d.]+)([KMGT]?)",
+                                run("sysctl", "-n", "vm.swapusage"))}}
+    if not got.get("total"):
+        return 0
+    return int(round(100 * got.get("used", 0.0) / got["total"]))
+
+
+def estimate():
+    """The browser's learned GB in the database at DB, read-only; else ESTIMATE."""
+    try:
+        conn = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(DB), uri=True, timeout=2)
+        try:
+            row = conn.execute("SELECT gb FROM mem_estimates WHERE kind='browser'").fetchone()
+        finally:
+            conn.close()
+        return float(row[0]) if row else ESTIMATE
+    except Exception:
+        return ESTIMATE
+
+
+def memory(own):
+    """(admitted, free GB, swap %): a browser fits above the floor, counting each other
+    slot taken under GRACE seconds ago as one more browser that hasn't grown yet."""
+    free, swap, each = free_gb(), swap_pct(), estimate()
+    now = time.time()
+    fresh = 0
+    for i in range(COUNT):
+        if i != own:
+            at = locked(i)
+            fresh += at is not None and now - at < GRACE
+    ok = (swap <= setting("swap_max", 60, 100)
+          and free - fresh * each - each >= setting("floor_gb", 6, 64))
+    return ok, free, swap
 
 
 def main():
@@ -99,14 +173,26 @@ def main():
         os.makedirs(SLOTS, exist_ok=True)
     except OSError:
         pass
-    said = False
+    said = told = False
     while True:
         limit = cap()
         now = held()
-        fd = take(limit) if now < limit else None
-        if fd is not None:
-            break
-        if not said:
+        if now < limit:
+            ok, free, swap = memory(None)     # plainly short: don't even take a slot
+            got = take(limit) if ok else None
+            if got is not None:
+                ok, free, swap = memory(got[0])
+                if ok:
+                    fd = got[1]
+                    break
+                os.close(got[1])
+            if not ok and not told:
+                sys.stderr.write("eki: waiting for memory (%.1f GB free, swap %d%%) \\u2014 "
+                                 "Settings \\u2192 Machine sets the floor; "
+                                 "Playwright's launch timeout still counts\\n" % (free, swap))
+                sys.stderr.flush()
+                told = True
+        elif not said:
             sys.stderr.write("eki: waiting for a browser slot \\u2014 %d of %d browsers open "
                              "(Settings \\u2192 Machine \\u2192 Browsers at once); "
                              "Playwright's launch timeout still counts\\n" % (now, limit))
@@ -152,7 +238,7 @@ def _is_browser(name: str) -> bool:
 def _bake() -> List[str]:
     """What the wrappers have baked in; a change rebuilds them."""
     return [sys.executable, str(browserslots.folder()), str(paths.config("routing")),
-            str(len(WRAPPER))]
+            str(paths.db()), str(len(WRAPPER))]
 
 
 def _entries(folder: Path) -> Dict[str, int]:
@@ -178,7 +264,7 @@ def _stamp(src: Path, dst: Path) -> dict:
 def _wrapper(target: Path) -> str:
     return WRAPPER.format(python=sys.executable, real=str(target),
                           slots=str(browserslots.folder()),
-                          routing=str(paths.config("routing")))
+                          routing=str(paths.config("routing")), db=str(paths.db()))
 
 
 def executables(folder: Path) -> List[Path]:

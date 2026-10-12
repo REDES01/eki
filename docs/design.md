@@ -1519,7 +1519,8 @@ checks: self · merge auto") and that link. The page is a dark canvas — pan by
 drag or two-finger scroll, zoom by pinch or ⌘-scroll, fit to view on open —
 with the stages left to right as boxes (a title, a one-line summary) joined
 by arrows: Request in → Router (or "straight to <target>") → Planner / Single
-item → Build ("4 in parallel") → each check in order → Merge → After-merge.
+item → Build ("4 in parallel") → each check in order → Merge → After-merge
+→ Acceptance (after Train on eki).
 When one row would be too small to read, fit wraps the stages into rows like
 text (an arrow from a row's end to the next row's start), picking the row
 length that shows the graph largest; it fits again when the side panel opens
@@ -1550,7 +1551,16 @@ items tables; it holds nothing. Where a goal or item is drawn:
 | `queued`, `resolving`, `rechecking` | Batch if checked, else Merge |
 | `landed`, `rolled back` on eki | Train |
 | `proposed`, `locked` (red dot), an open PR | Merge |
+| goal `accepting`, `judgment` (red dot) | Acceptance |
 | `applied`, `live`, `dropped`, `landed` elsewhere | not drawn: over |
+
+**Goal states with checks.** A goal whose draft wrote checks (docs/self-build.md,
+"Checks and verdicts") is not done when its items land: it goes `planned` →
+`accepting` (a final judge run, on another backend than its builders, files
+one verdict per check) → `accepted` when every check passed, the only done
+state it has; or `judgment` when a check stays uncertain after a second
+judge, or fails again after its fix items — the person decides (`eki self
+accept`, `eki self retry`). A goal with no checks ends as before.
 
 **The stages and their choices**, in the order they run:
 
@@ -1567,12 +1577,17 @@ items tables; it holds nothing. Where a goal or item is drawn:
   (`machine.agents`, Scheduling) is separate and wins.
 - `checks`: an ordered list, each optional but `self`:
   `self` (the building agent verifies its own work — screenshots, its tests —
-  before it finishes; always on), `review` (a second reader agent,
-  docs/self-build.md "The review"), `command` (the project's check command,
+  before it finishes; always on), `review` (a judge reads each item: an
+  independent judge run on another backend files one verdict per check —
+  the item's spec and the goal checks it delivers — docs/self-build.md
+  "Checks and verdicts"; off, items get no per-item judge but the goal still
+  gets final acceptance), `command` (the project's check command,
   the card's `command` field, as gate 1), `batch` (the queue checks queued
   changes together on the stack's tip and bisects on red, running
   `batch_command`), `playtester` (the
-  project's playtester card, `playtester` naming it, plays the change),
+  project's playtester card, `playtester` naming it, plays the change; with
+  checks, its message carries them and its `VERDICT:` lines are filed
+  through `eki verdict --lines`),
   `train` (build + drills + swap — only eki's own project has it).
 - `command`: gate 1's check, either one line of text (run as it is) or a
   list of path rules, so a change runs only the checks for what it touched:

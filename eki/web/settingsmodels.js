@@ -5,9 +5,9 @@
 // changes; Save writes through /api/settings/ as ever.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const ROLES = ["router", "planner", "reviewer", "chores"];                    // roles.ROLES
+  const ROLES = ["router", "planner", "reviewer", "chores", "judge"];           // roles.ROLES
   const OFFABLE = ["reviewer", "chores"];                                       // roles.OFFABLE
-  const LABELS = { router: "Router", planner: "Planner", reviewer: "Reviewer", chores: "Chores" };
+  const LABELS = { router: "Router", planner: "Planner", reviewer: "Reviewer", chores: "Chores", judge: "Judge" };
   const M = { got: null, err: "" };
   const amber = (s) => (s ? `<div class="set-amber">${esc(s)}</div>` : "");
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "never");
@@ -41,7 +41,7 @@
 
   function roles(d) {
     if (!M.got) return `<div class="dim">${esc(M.err || "Reading the model lists…")}</div>`;
-    // four lines, always shown: each of eki's jobs is a thing you set, not a detail to unfold
+    // one line per role, always shown: each of eki's jobs is a thing you set, not a detail to unfold
     return `<div data-roles>${settingsForm.group("Who does eki's jobs", ROLES.map((r) => picker(d, r)).join(""))}</div>`;
   }
 

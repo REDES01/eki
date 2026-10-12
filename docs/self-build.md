@@ -465,47 +465,105 @@ build that made things worse is flagged in `eki builds` and the digest and
 offered for undo. It is a trailing judgment, never a gate: nothing waits
 for it and nothing is undone by itself.
 
-**The review — a second reader** (`eki/review.py`). The gates judge
-whether a change works, not whether it does what it was asked. The review
-starts *with* gate 1, not after it: when a build turn ends, the gate 1 run
-(`bin/check` or the doccheck) and a `review` chore (docs/design.md,
-"Chores") start in the same transaction, and the item goes to `judging`
-with `run_id` the gate 1 run and `review_run` the review's. The chore asks
-the local model — at `now` priority for your goals, `background` for eki's.
-It is given the goal (first 2000 characters), the item's title, spec and
-`SUMMARY:`, and the diff `<base>..<commit>` from the integration repo
-(40 000 characters at most, with a note of what was cut), told the checks
-are running beside it, and asked whether the diff does what the spec and
-summary say, without obvious bugs, missing tests or stray changes. Its last
-`REVIEW:` line is its verdict.
+**Checks and verdicts** (`eki/verdicts.py`). Work is judged by an
+independent judge, against checks written before the work started, and
+every judgment has one fixed shape. A builder or planner never marks its
+own goal done.
 
-The item waits in `judging` until both runs have ended — when gate 1 goes
-red first, it still waits for the review rather than cancelling it. Then:
+- *Checks are written at draft time.* The drafter ends the goal with a
+  fifth part, a `Checks` heading and 3–8 lines `C<n>: <one concrete,
+  checkable statement — what to run or look at, and what must be seen>`.
+  `verdicts.checks_in` reads only those lines; `selfdraft` stores them
+  (`checks` table: `goal_id, id, n, text`) in the transaction that writes
+  `goals.text`. A goal with none — old goals, `--as-is`, faults, standing
+  rounds — has no checks, keeps the behaviour below without acceptance, and
+  `eki self show` says "no checks — not judged".
+- *Each item carries the checks it delivers*: the plan's ITEMS entries may
+  say `"checks": ["c1", "c3"]`, kept in `items.checks`. An item also has its
+  own check, `spec`: does the diff do what its spec says.
+- *One verdict shape.* A JSON object with exactly `check_id`, `verdict`
+  (`passed | failed | uncertain`), `evidence` (what the judge observed: a
+  command and its output, `file:line`, a screen; never empty), `reasoning`
+  (never empty), `counter_evidence` (may say "none found"), `limitation`
+  (what couldn't be verified; required when uncertain) and `suggestion` (a
+  concrete fix; required when failed or uncertain). Unknown or missing
+  keys, non-strings and strings over 4000 characters are rejected.
+- *One way in: `eki verdict`* (`eki/cli/verdict.py`). The caller is the run
+  in `EKI_RUN`; `verdicts.submit` takes a verdict only from a run registered
+  in `judgings` (`run_id, goal_id, item_id, scope, checks, round, avoid`),
+  still active, for a check in its list, once per check. `--lines` files
+  every `VERDICT: {json}` line on stdin (the playtester's pipe), `--checks`
+  lists what is left. Free text is never read as a verdict; build, fix and
+  resolve runs are never in `judgings`, so `SUMMARY:` and `ITEM: done`
+  close nothing.
+- *The judge is its own run on its own backend* (`eki/judgerun.py`). Role
+  `judge` (eki/roles.py; default the `code` row's first target), picked by
+  `roles.pick_other` with `avoid` = the builder's provider (and a first
+  judge's): the role's pick when it isn't avoided, else the first able
+  `code` target that isn't, else the same provider on another model, else
+  nobody. An agent run on a new thread, `fresh`, in a read-only worktree
+  `judge-<item>` at the item's commit or `accept-<goal>` at the landed head,
+  briefed by `eki/judgebrief.py`: the goal, the checks by id, the item and
+  its `git diff` command, the builder's summary as "the builder's claim —
+  not evidence", and the rules — change nothing, tests only through
+  `eki slot --`, one `eki verdict` per check, end with `JUDGED: <n>`.
+- *Scopes:* `item` (per item, `spec` plus its checks), `final` (every check,
+  at acceptance), `second` (only the uncertain checks, on another backend),
+  `play` (the playtester's command run). Within a round a check's result is
+  the worst of its verdicts (failed > uncertain > passed); a check with no
+  verdict counts as uncertain ("the judge filed no verdict").
 
-| gate 1 | review | the item |
+**The judge — per item** (`eki/judge.py` behind `eki/review.py`'s `ask`,
+`ended`, `read`, `objection`). The gates judge whether a change works, not
+whether it does what it was asked. The judge starts *with* gate 1: when a
+build turn ends, the gate 1 run and a judge run (scope `item`, checks
+`spec` + `items.checks`) start in the same transaction, and the item goes to
+`judging` with `run_id` gate 1's run and `review_run` the judge's. Its
+verdicts are read as `ok` (all passed), `no: <check: suggestion>` (any
+failed) or `none: <why>` (a missing verdict, a failed judge run, no judge
+that can run, `self.review: false`). The `REVIEW:` line is no longer asked
+for; `review.verdict` reads it only for items left in the old `reviewing`.
+
+The item waits in `judging` until both runs have ended. Then:
+
+| gate 1 | judge | the item |
 |---|---|---|
-| green | `ok` or `none` | `proposed` |
-| green | first `no` | back to `waiting` for one rebuild, `reviews=1`, with "A second reader objected: … Answer it in the change, or say in SUMMARY why it's wrong" in the build brief; the rebuild is free (`tries - reviews` is what's compared) |
-| green | second `no` | `proposed` with the objection kept; the queue never takes it by itself, even under `apply` |
-| red | any | gate 1's path: one retry with the failure in the brief, else `unfit`; a `no` objection is written to `items.review` too and also reaches the rebuild brief, and that rebuild counts as gate 1's retry, not the review's |
+| green | all `passed`, or `none` | `proposed` |
+| green | first `failed` | back to `waiting` for one rebuild, `reviews=1`, with "A judge found check <id> failed: <suggestion>" in the build brief; the rebuild is free (`tries - reviews` is what's compared) |
+| green | second `failed` | `proposed` with the objection kept; the queue never takes it by itself, even under `apply` |
+| green | `uncertain` | one `second` judge on another backend (avoiding the builder's and the first judge's) for only those checks; `review_run` moves to it, the item stays `judging` |
+| green | still `uncertain`, or no other backend | `proposed` with `review = "uncertain: <id>: <limitation>"` and the needs-you notice; the queue never takes it by itself |
+| red | any | gate 1's path: one retry with the failure in the brief, else `unfit`; a failed check's suggestion also reaches the rebuild brief, and that rebuild counts as gate 1's retry, not the judge's |
 
-The review chore is closed in every case. An item proposed with a second
-`no` is listed by the long digest page under **Waits for you** with the
-objection; `eki self apply <id>` is the person's call. A review that can't
-run — no local model, `self.review: false`, the reviewer role off or unable
-to run, no chore — is `none: <why>` at once, when the build concludes, and
-gate 1 alone decides; a review that ran but couldn't judge (a failed or
-cancelled run, an answer without the line) is `none: <why>` too. The reviewer
-never holds an item it couldn't judge.
+An item the judge couldn't judge is never held by it: gate 1 alone
+decides. A project whose workflow card leaves `review` out of `checks` gets
+no per-item judge; a card with `playtester` passes the item's checks into
+gate 1's `eki use` message, piped into `eki verdict --lines` (scope
+`play`). The board names both runs of a `judging` item and shows the
+verdict under a proposed item. Like every stage it resumes from the item,
+its runs and the `verdicts` table: a restart mid-judging loses nothing.
 
-Docs-only items are reviewed too. A project item gets the same parallel
-review; one with no check is still proposed directly. The board names both
-runs of a `judging` item (e.g. "gate 1 run X · review run Y"), still says
-"waiting for a check slot" while gate 1 is held, and shows the verdict
-under a proposed item. Items left in the old `reviewing` state from before
-this change still conclude the old way (`review.conclude`). Like every
-stage it resumes from the item and its runs: a restart mid-review loses
-nothing.
+**Final acceptance** (`eki/acceptance.py`, a step of the engine's tick).
+A `planned` goal with checks, whose non-dropped items are all `landed`,
+`live` or `applied`, goes to `accepting` (`goals.accept`: `{round, runs,
+fixes}`) and gets a `final` judge run for every check in `accept-<goal>`
+at integration main (eki) or the project's branch — plus, when the
+project's card has `playtester`, a `play` command run
+(`judgebrief.play_line`: `eki use <playtester> '<message>' | eki verdict
+--lines`). Then:
+
+| the checks | the goal |
+|---|---|
+| all `passed` | `accepted` — the only done state of a goal with checks |
+| any `uncertain` | one `second` run on another backend; still uncertain → `judgment`, the needs-you notice and "needs you: <id>: <limitation>" |
+| any `failed`, round 1 | one fix item per failed check ("Fix check <id>: …", spec with the evidence and suggestion, `items.checks = [id]`); the goal goes back to `planned`, `round = 2`, and acceptance runs again once they land |
+| any `failed`, round 2 | `judgment` |
+
+`eki self accept <goal>` marks a `judgment` goal accepted by you
+(`goals.accept.by = "you"`); `eki self retry <goal>` reruns acceptance.
+Every move is read from the tables and made under `db.tx` with a state
+recheck, so a goal whose judge ended while the engine was down concludes
+on the next tick.
 
 ## The fixer
 

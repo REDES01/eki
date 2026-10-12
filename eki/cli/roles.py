@@ -1,4 +1,4 @@
-"""`eki roles` — eki's own jobs (router, planner, reviewer, chores) and who does each.
+"""`eki roles` — eki's own jobs (router, planner, reviewer, chores, judge) and who does each.
 
 With no arguments it lists each role: its target, what that comes to
 (`claude · Haiku 4.5 · low`), whether it's the default, and why when the
@@ -18,7 +18,7 @@ from .. import modellist, providers, roles, targets
 from .common import conn, err
 
 NAME = "roles"
-HELP = "eki's own jobs (router, planner, reviewer, chores): show them, or set one to a target"
+HELP = "eki's own jobs (router, planner, reviewer, chores, judge): show them, or set one to a target"
 
 
 def add(p) -> None:

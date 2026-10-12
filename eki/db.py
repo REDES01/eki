@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS goals (          -- eki builds eki: what was asked fo
     text TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'ask',     -- ask | roadmap | fault | journal
     owner TEXT NOT NULL DEFAULT 'you',      -- you | eki
-    state TEXT NOT NULL DEFAULT 'planning', -- drafting | planning | planned | left | failed
+    state TEXT NOT NULL DEFAULT 'planning', -- drafting | planning | planned | accepting | accepted | judgment | left | failed
     thread_id TEXT,
     plan_run TEXT,
     error TEXT,
@@ -225,6 +225,20 @@ CREATE TABLE IF NOT EXISTS schedules (      -- a prompt sent on a clock (eki/sch
     why TEXT,                               -- why the last firing was skipped
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS checks (         -- a goal's checks, written at draft time (eki/verdicts.py)
+    goal_id TEXT NOT NULL, id TEXT NOT NULL, n INTEGER NOT NULL, text TEXT NOT NULL,   -- id: c1, c2, …
+    created_at REAL NOT NULL, PRIMARY KEY (goal_id, id));
+CREATE TABLE IF NOT EXISTS judgings (       -- a judge run and the checks it may file verdicts for
+    run_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, item_id TEXT,   -- item_id NULL: final acceptance
+    scope TEXT NOT NULL,                    -- item | final | second | play
+    checks TEXT NOT NULL DEFAULT '[]', round INTEGER NOT NULL DEFAULT 1,   -- JSON check ids ('spec': the item's own)
+    avoid TEXT NOT NULL DEFAULT '[]', created_at REAL NOT NULL);           -- JSON providers kept off
+CREATE TABLE IF NOT EXISTS verdicts (       -- one judgment of one check by one judge run (eki verdict)
+    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, goal_id TEXT NOT NULL, item_id TEXT, check_id TEXT NOT NULL,
+    scope TEXT NOT NULL, round INTEGER NOT NULL DEFAULT 1, verdict TEXT NOT NULL,   -- passed | failed | uncertain
+    evidence TEXT NOT NULL, reasoning TEXT NOT NULL, counter_evidence TEXT NOT NULL, limitation TEXT NOT NULL,
+    suggestion TEXT NOT NULL, provider TEXT, model TEXT, created_at REAL NOT NULL, UNIQUE (run_id, check_id));
+CREATE INDEX IF NOT EXISTS verdicts_goal ON verdicts(goal_id, check_id, created_at);
 CREATE TABLE IF NOT EXISTS sensitive (path TEXT PRIMARY KEY, state TEXT NOT NULL, by TEXT NOT NULL, score REAL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS mem_estimates (kind TEXT PRIMARY KEY, gb REAL NOT NULL, samples INTEGER NOT NULL, at REAL NOT NULL);  -- what each kind of work was learned to need (eki/memadmit.py)
 CREATE TABLE IF NOT EXISTS mem_peaks (key TEXT PRIMARY KEY, kind TEXT NOT NULL, peak_gb REAL NOT NULL, at REAL NOT NULL);  -- the peak seen so far of each running process tree (eki/memlearn.py)
@@ -304,6 +318,8 @@ ADDED = [
     ("goals", "hot", "TEXT"),           # JSON: the plan's hot spots, [{file, items, generated}]
     ("goals", "dry_run", "TEXT"),       # the dry build's command run (eki/drybuild.py)
     ("items", "fixer", "TEXT"),         # JSON {stage, failure, run, at, head, summary}: its one fixer run (eki/fixer.py)
+    ("items", "checks", "TEXT"),        # JSON list of the goal's check ids the item delivers (eki/verdicts.py)
+    ("goals", "accept", "TEXT"),        # JSON {round, runs, fixes, by?}: final acceptance (eki/acceptance.py)
 ]
 
 

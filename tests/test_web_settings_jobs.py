@@ -36,7 +36,8 @@ def test_every_role_is_a_line_with_who_has_it_now(tmp_path):
     who = {"router": ("claude", "claude · Opus 5.5 · high", "router local can't run (local: down) → claude"),
            "planner": ("claude", "claude · Opus 5.5 · high", ""),
            "reviewer": ("codex", "codex · its default", ""),
-           "chores": (None, "", "off")}
+           "chores": (None, "", "off"),
+           "judge": ("claude", "claude · Opus 5.5 · high", "")}
     got = {"providers": {"claude": {"kind": "claude_code", "lists": False, "listed": None, "read_at": None},
                          "codex": {"kind": "codex", "lists": False, "listed": None, "read_at": None}},
            "roles": {r: {"target": p, "provider": p, "model": None, "effort": None, "shown": s,
@@ -47,7 +48,7 @@ def test_every_role_is_a_line_with_who_has_it_now(tmp_path):
                           str(WEB / "settingsmodels.js"), json.dumps(got)],
                          capture_output=True, text=True, timeout=30, check=True)
     html = json.loads(out.stdout)
-    assert html.count('class="set-line"') == 4 and 'class="set-group"' in html
+    assert html.count('class="set-line"') == len(roles.ROLES) and 'class="set-group"' in html
     at = [html.index(f'data-role="{r}"') for r in roles.ROLES]
     assert at == sorted(at)                                         # in ROLES order, all shown
     assert "now claude · Opus 5.5 · high" in html and "now codex · its default" in html and "nobody" in html

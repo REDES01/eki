@@ -4,20 +4,22 @@
     planner    draft and plan runs (eki/selfdraft.py)
     reviewer   the review chore (eki/review.py)
     chores     digest prose, fault briefs, PR-comment triage
+    judge      judge runs: one verdict per check (eki/judgerun.py, eki/verdicts.py)
 
 The setting is routing.json `"roles": {"router": "claude:fast", ...}`,
 holding only the roles you set; a target with an effort is an object,
 `{"provider": "claude", "model": "opus", "effort": "high"}` (eki/targets.py). With no entry a role reads the old settings,
 which are never rewritten: router the top-level `checker` (else "local");
 planner `self.planner` {provider, model} (else the `code` row's first
-target); reviewer and chores `self.local` (else the first `local` provider).
+target); judge the `code` row's first target; reviewer and chores `self.local` (else the first `local` provider).
 "off" is allowed for reviewer and chores.
 
 A pick is recomputed from the settings at every use, and its model and
 effort are checked against the read model list (targets.choose()): when the
 target can't run, the role falls back to its default and says why; when that can't run
 either, the pick has no provider. Timings of the calls made for a role live
-in the role_calls table.
+in the role_calls table. `pick_other` keeps a role off given providers: a
+judge never runs on the backend whose work it judges.
 
 This module reads routing.json itself and never imports eki.routing.
 """
@@ -33,13 +35,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import modellist, paths, providers, targets
 
-ROLES = ("router", "planner", "reviewer", "chores")
+ROLES = ("router", "planner", "reviewer", "chores", "judge")
 #: roles that may be "off"
 OFFABLE = ("reviewer", "chores")
 #: roles that only need text back: their provider must have complete()
 TEXT_ROLES = ("router", "reviewer", "chores")
 #: kinds whose provider answers a one-shot text call
 TEXT_KINDS = ("local", "claude_code", "codex")
+#: roles whose runs are agent runs: their provider must have tools
+TOOL_ROLES = ("planner", "judge")
 #: the code row's first target when routing.json has no rows (eki/routing/table.py)
 CODE_FIRST = "claude"
 
@@ -66,16 +70,19 @@ def _known(role: str) -> None:
         raise KeyError(f"no role named {role!r}; the roles are {', '.join(ROLES)}")
 
 
-def _code_first(data: Dict[str, Any]) -> Union[str, Dict[str, str]]:
-    """The `code` row's first target (else `general`'s), as table.row() picks it;
+def _code_row(data: Dict[str, Any]) -> List[Union[str, Dict[str, str]]]:
+    """The `code` row's targets (else `general`'s), as table.row() picks it;
     an object target is kept as it is."""
     rows = [r for r in (data.get("rows") or []) if isinstance(r, dict)]
     for key in ("code", "general"):
         for r in rows:
             if r.get("key") == key and r.get("targets"):
-                first = r["targets"][0]
-                return first if isinstance(first, dict) else str(first)
-    return CODE_FIRST
+                return [t if isinstance(t, dict) else str(t) for t in r["targets"]]
+    return [CODE_FIRST]
+
+
+def _code_first(data: Dict[str, Any]) -> Union[str, Dict[str, str]]:
+    return _code_row(data)[0]
 
 
 def default(role: str) -> Union[str, Dict[str, str]]:
@@ -85,6 +92,8 @@ def default(role: str) -> Union[str, Dict[str, str]]:
     own = data.get("self") if isinstance(data.get("self"), dict) else {}
     if role == "router":
         return str(data.get("checker") or "local")
+    if role == "judge":
+        return _code_first(data)
     if role == "planner":
         want = own.get("planner") if isinstance(own.get("planner"), dict) else {}
         provider = str(want.get("provider") or "").strip()
@@ -170,7 +179,7 @@ def _cannot(role: str, target: Any, status: Optional[Dict[str, Tuple[bool, str]]
         cls = providers.KINDS.get(kind)
         if kind not in TEXT_KINDS and not (cls is not None and hasattr(cls, "complete")):
             return f"{name}: can't answer a one-shot text call"
-    if role == "planner" and "tools" not in providers.capabilities(name, cfg):
+    if role in TOOL_ROLES and "tools" not in providers.capabilities(name, cfg):
         return f"{name}: has no tools"
     if status is not None:
         ok, why = status.get(name, (False, "not available"))
@@ -208,6 +217,49 @@ def pick(role: str, conn: Optional[sqlite3.Connection] = None, *, background: bo
     if c.note:
         why = f"{why}; {c.note}" if why else c.note
     return Pick(name, c.model, target, why, c.effort)
+
+
+def pick_other(role: str, conn: Optional[sqlite3.Connection], avoid: Any,
+               background: bool = False) -> Pick:
+    """Who does `role` off the providers in `avoid`: the role's pick, else the code row's first
+    able target not in `avoid`, else the same provider on another model of its list, else nobody."""
+    avoid = {str(a) for a in (avoid or ()) if a}
+    first = pick(role, conn, background=background)
+    if first.provider is not None and first.provider not in avoid:
+        return first
+    kept = f"{role} {first.provider or shown(first.target) or '(none)'} is the one judged" \
+        if first.provider else first.why
+    status = None
+    if conn is not None:
+        from . import capacity
+        status = capacity.status(conn, background=background)
+    for t in _code_row(_settings()):
+        try:
+            name = targets.parse(t).provider
+        except ValueError:
+            continue
+        if name in avoid or _cannot(role, t, status) is not None:
+            continue
+        c = targets.choose(t, providers.config().get(name) or {}, _listed(conn, name))
+        why = f"{kept} → {shown(t)}" + (f"; {c.note}" if c.note else "")
+        return Pick(name, c.model, t, why, c.effort)
+    if first.provider is not None:
+        other = _other_model(conn, first.provider, first.model)
+        if other:
+            return Pick(first.provider, other, f"{first.provider}:{other}",
+                        f"{kept}; no other provider can → {first.provider} on {other}")
+    return Pick(None, None, first.target, f"{kept}; no other provider or model can")
+
+
+def _other_model(conn: Optional[sqlite3.Connection], name: str, model: Optional[str]) -> Optional[str]:
+    """A model of `name` other than `model` (and its default): from its read list, else providers.json."""
+    listed = _listed(conn, name) or []
+    have = [str(m.get("model")) for m in listed
+            if m.get("model") and m.get("model") != "default" and not m.get("is_default")]
+    if not have:
+        tiers = (providers.config().get(name) or {}).get("models")
+        have = [str(v) for v in tiers.values()] if isinstance(tiers, dict) else []
+    return next((m for m in have if m != model), None)
 
 
 def problems(data: Any, known: set) -> List[str]:

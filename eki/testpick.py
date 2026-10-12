@@ -2,9 +2,7 @@
 
 A touched file under a tests rule draws that rule's test files (its patterns matched against the
 files under root/tests, found by listing them). A touched file under no tests rule draws the
-tests whose text imports it (`importers`, a plain text scan: nothing is imported or run). A rule
-that holds the file only through a folder-wide pattern (`eki/**`, `eki/`) adds its tests on top
-of that scan rather than standing in for it, so a card can run one test on every change. The
+tests whose text imports it (`importers`, a plain text scan: nothing is imported or run). The
 whole suite runs when a matching rule says "all", when more than `whole_over` files changed, or
 when a module outside tests/ has no tests at all. Stdlib only.
 """
@@ -27,15 +25,6 @@ class Picked:
     whole: bool                 # run the whole suite
     files: Tuple[str, ...]      # repo-relative test files, sorted, each once
     because: Tuple[str, ...]    # the touched files that drew tests (or the reason for whole)
-
-
-def _broad(pattern: str) -> bool:
-    return pattern.endswith("/") or pattern.endswith("/**") or pattern == "**"
-
-
-def _names_it(rule, path: str) -> bool:
-    """Does `rule` hold `path` through a pattern narrower than a whole folder?"""
-    return any(pathrules.matches(p, path) and not _broad(p) for p in rule.paths)
 
 
 def _listed(root: Path) -> List[str]:
@@ -120,13 +109,12 @@ def pick(rules, touched: List[str], root: Optional[Path], whole_over: int = 25) 
     core = [t for t in touched if any(r.tests == pathrules.ALL for r in hit[t])]
     if core:
         return Picked(True, (), tuple(core))
-    named = {t: any(_names_it(r, t) for r in hit[t]) for t in touched}
     listed = _listed(root) if any(hit.values()) else []
-    texts = _texts(root) if not all(named.values()) else {}
+    texts = _texts(root) if not all(hit.values()) else {}
     files, because = set(), []
     for t in touched:
         got = [f for f in listed if any(pathrules.matches(p, f) for r in hit[t] for p in r.tests)]
-        if not named[t]:
+        if not hit[t]:
             scanned = _importers(texts, t)
             if not scanned and t.endswith(".py") and not t.startswith(TESTS + "/"):
                 return Picked(True, (), (f"{t} has no tests",))

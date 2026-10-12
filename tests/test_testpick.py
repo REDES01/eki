@@ -125,10 +125,10 @@ def test_run_rules_follow_the_tests_and_both_must_pass(repo):
         "Each change: core → whole suite · queue → tests/test_queue*.py · lint → true"
 
 
-def test_a_folder_wide_rule_adds_its_tests_on_top_of_the_scan(repo):
+
+def test_any_matching_tests_rule_stands_in_for_the_scan(repo):
     rules = pathrules.parse([{"name": "size", "paths": ["eki/**"], "tests": ["tests/test_db.py"]},
                              {"name": "queue", "paths": ["eki/queue*.py"], "tests": ["tests/test_queue.py"]}])
-    assert testpick.pick(rules, ["eki/x.py"], repo).files == \
-        ("tests/test_db.py", "tests/test_dotted.py", "tests/test_from_list.py")
+    assert testpick.pick(rules, ["eki/x.py"], repo).files == ("tests/test_db.py",)
     assert testpick.pick(rules, ["eki/queue.py"], repo).files == ("tests/test_db.py", "tests/test_queue.py")
-    assert testpick.pick(rules, ["eki/newmod.py"], repo).whole
+    assert not testpick.pick(rules, ["eki/newmod.py"], repo).whole

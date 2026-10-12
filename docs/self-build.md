@@ -200,8 +200,13 @@ restart loses nothing.
 ## Worktrees: made, kept, removed
 
 Every item, draft, plan, gate 2 and train check works in a worktree under
-`~/.eki/work/<key>`, for eki and for projects alike. There are hundreds of
-them at once, so each must cost almost nothing.
+`~/.eki/work.noindex/<key>`, for eki and for projects alike. There are hundreds of
+them at once, so each must cost almost nothing. The folder's name ends in
+`.noindex` because Spotlight never indexes such a folder, and its indexer
+(mds_stores) had grown to 4.4 GB indexing trees eki makes and deletes all day;
+`~/.eki/builds`, `~/.eki/scratch` and `~/.eki/self` can't be renamed, so they
+hold a `.metadata_never_index` marker instead, and `eki/noindex.py` moves an
+older `~/.eki/work` over, leaving a symlink by the old name.
 
 **Made as clones.** `workspace.add` runs `git worktree add --no-checkout`,
 then `clonetree.fill` (`eki/clonetree.py`) clones the source checkout's
@@ -233,7 +238,7 @@ in an item is fine: after eki lands in your folder, the after-merge run
   commit in main, once no active run uses it;
 - `plan-`/`draft-` trees once their goal is past planning, and `gate2-`/`train-`
   trees once nothing checks in them;
-- unknown folders under `~/.eki/work` older than 2 days.
+- unknown folders under `~/.eki/work.noindex` older than 2 days.
 
 A failed item's worktree (left, unfit, rolled back) is kept 2 days, so you
 can look at what it left, then removed too. The branch goes with the
@@ -853,7 +858,7 @@ at GitHub — never into `~/eki`. As each change lands eki pushes `main`, and
 fast-forwards `~/eki` only when it's clean and on `main`; otherwise you
 pull. Your checkout is one more git peer, so your own commits reach eki the
 usual way: eki fetches before every rebase. Item worktrees are made from
-this repo, under `~/.eki/work/<id>` ("Worktrees" above).
+this repo, under `~/.eki/work.noindex/<id>` ("Worktrees" above).
 
 **Read-only mirror PRs.** With `self.pr_mirror` on (off by default) and the
 integration repo's origin on GitHub with `gh` logged in, eki's own work can

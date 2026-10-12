@@ -182,7 +182,7 @@ def _withdraw(conn: sqlite3.Connection, p: sqlite3.Row) -> int:
 
 
 def _worktrees(conn: sqlite3.Connection, p: sqlite3.Row) -> List[str]:
-    """eki's worktrees of the project's items under ~/.eki/work; every branch is kept."""
+    """eki's worktrees of the project's items under ~/.eki/work.noindex; every branch is kept."""
     repo = Path(_path(p))
     removed: List[str] = []
     for gid in _goal_ids(conn, p["id"]):

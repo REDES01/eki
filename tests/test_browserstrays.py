@@ -20,8 +20,8 @@ def _ps():
 
 
 def _lsof():
-    work = paths.home() / "work"
-    rows = {101: work / "abc", 102: work / "abc", 103: work / "def", 104: "/", 105: "/tmp/elsewhere",
+    work, old = paths.work(), paths.home() / "work"
+    rows = {101: work / "abc", 102: work / "abc", 103: old / "def", 104: "/", 105: "/tmp/elsewhere",
             106: work / "abc", 107: work / "abc"}
     return "\n".join(f"p{pid}\nfcwd\nn{cwd}" for pid, cwd in rows.items())
 

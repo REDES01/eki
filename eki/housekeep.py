@@ -25,7 +25,8 @@ sync (eki/syncstate.py), and measure every assets pool's size on a thread of its
 own at most every five minutes, so no request ever walks one
 (eki/components/assets.py), and copy each pool's new and changed files to its
 card's backup folder, if it has one, on a thread of its own as often
-(eki/components/assetsbackup.py), and remove the worktrees under EKI_HOME/work that
+(eki/components/assetsbackup.py), and move what an older eki left in EKI_HOME/work
+into work.noindex, out of Spotlight's way (eki/noindex.py), and remove the worktrees under EKI_HOME/work.noindex that
 are done with, a few a pass, and measure the disk they take
 (eki/worktreegc.py), and keep the browser shim's mirror of Playwright's browsers
 folder current, so a newly installed browser version waits for a slot too
@@ -43,7 +44,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Tuple
 
-from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, notify, notifygoals, observe, picturecheck,
+from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, noindex, notify, notifygoals, observe, picturecheck,
                prfollow, prmirror, projectdelete, projectlands, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
                threadkeep, worktreegc)
 from .components import assets, assetsbackup, serve, servers
@@ -126,6 +127,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("poolsizes", assets.tick),
     ("poolbackup", assetsbackup.tick),
     ("picturecheck", picturecheck.tick),
+    ("noindex", noindex.migrate),
     ("worktrees", worktreegc.tick),
     ("browsershim", lambda conn: browsershim.ensure() and []),
     ("browserstrays", lambda conn: browserstrays.note()),

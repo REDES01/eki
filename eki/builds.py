@@ -35,9 +35,8 @@ KEEP_DAYS = 7
 
 
 def root() -> Path:
-    p = paths.home() / "builds"
-    p.mkdir(exist_ok=True)
-    return p
+    # marked, not renamed: the launcher, launchd and the symlinks point here
+    return paths.never_index(paths.home() / "builds")
 
 
 def source() -> Path:

@@ -1,7 +1,7 @@
 """Git worktrees for runs that must not collide.
 
-A piece of work on a repo gets a checkout of its own under `EKI_HOME/work/
-<key>/`: a `git worktree` on a branch of its own, from a chosen base. Two
+A piece of work on a repo gets a checkout of its own under `EKI_HOME/
+work.noindex/<key>/`: a `git worktree` on a branch of its own, from a chosen base. Two
 agents in two worktrees of one repo never overwrite each other; what each
 did is a branch, brought together by the queue (docs/self-build.md), not by
 luck. Ignored folders a checkout needs to run (`.venv`, `node_modules`) are
@@ -83,7 +83,7 @@ def _mark(key: str) -> Path:
 
 
 def add(repo: str | Path, key: str, *, base: str = "HEAD", branch: Optional[str] = None) -> Path:
-    """A worktree of `repo` at `base`, on `branch` (default `eki/<key>`), under EKI_HOME/work.
+    """A worktree of `repo` at `base`, on `branch` (default `eki/<key>`), under EKI_HOME/work.noindex.
     Already there: returned as it is."""
     dest = path_for(key)
     if (dest / ".git").exists():
@@ -205,7 +205,7 @@ def commit_all(where: str | Path, message: str) -> Optional[str]:
 
 
 def sweep(repo: str | Path, days: float = IDLE_DAYS) -> List[str]:
-    """Remove worktrees of `repo` under EKI_HOME/work untouched for `days`."""
+    """Remove worktrees of `repo` under EKI_HOME/work.noindex untouched for `days`."""
     gone = []
     for d in sorted(paths.work().iterdir()) if paths.work().exists() else []:
         mark = _mark(d.name)

@@ -4,7 +4,7 @@ A script that builds Playwright's cache path itself (~/Library/Caches/ms-playwri
 skips the browser shim (browsershim.py), so its browser never waits for a slot.
 Housekeeping notes them: a browser main process (a Chrome, Chromium or headless-shell
 command line without `--type=`, which only its helpers carry) whose working directory
-is under EKI_HOME/work and whose pid holds no slot (browserslots.pids()). It only
+is under EKI_HOME/work.noindex (or the old EKI_HOME/work) and whose pid holds no slot (browserslots.pids()). It only
 says so; it never kills one. `ps` and `lsof` output can be handed in, for tests.
 """
 from __future__ import annotations
@@ -73,8 +73,8 @@ def strays(ps_out: Optional[str] = None, lsof_out: Optional[str] = None) -> List
     if not found:
         return []
     where = cwds(_lsof(found) if lsof_out is None else lsof_out)
-    work = paths.home() / "work"
-    roots = [work, work.resolve()]
+    old, new = paths.home() / "work", paths.work()          # the old name may still be a browser's cwd
+    roots = [old, old.resolve(), new, new.resolve()]
     held = browserslots.pids()
     return sorted(p for p in found if p not in held and where.get(p) and _under(where[p], roots))
 

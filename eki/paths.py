@@ -45,18 +45,28 @@ def config(name: str) -> Path:
     return home() / f"{name}.json"
 
 
+def never_index(p: Path) -> Path:
+    """Folder `p`, made if missing, with a `.metadata_never_index` marker so
+    Spotlight leaves it alone (eki makes and deletes folders in it all day)."""
+    p.mkdir(parents=True, exist_ok=True)
+    marker = p / ".metadata_never_index"
+    if not marker.exists():
+        marker.touch()
+    return p
+
+
 def work() -> Path:
-    """Worktrees for runs that must not collide (eki/workspace.py)."""
-    p = home() / "work"
+    """Worktrees for runs that must not collide (eki/workspace.py). A folder
+    whose name ends in .noindex is never indexed by Spotlight; the old
+    `work` becomes a symlink to it (eki/noindex.py)."""
+    p = home() / "work.noindex"
     p.mkdir(exist_ok=True)
     return p
 
 
 def scratch() -> Path:
     """Where a run with no folder works."""
-    p = home() / "scratch"
-    p.mkdir(exist_ok=True)
-    return p
+    return never_index(home() / "scratch")
 
 
 def attachments() -> Path:

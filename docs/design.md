@@ -47,7 +47,7 @@ eki follow <run>  ◄── events table
 | `worker` | one detached process per run: starts the program, reads its output, writes events, records the session id so a resume is possible |
 | `engine` | a manager, not a parent: reap dead workers (interrupted → queued for resume), route queued runs, check gates, spawn workers within the per-kind limits, with no overall cap unless `EKI_MAX_PARALLEL` is set |
 | `providers/*` | how to run each program and read what it prints: `claude_code`, `codex`, `local` (OpenAI-compatible, e.g. MLX), `comfyui` (pictures, over ComfyUI's HTTP API), `codex_local` (Codex's harness on the local model, rung 2), `fake` (tests), `command` (an argv in a folder, built in — a check or a build as a run); `oneshot` (one call with no tools through the `claude` or `codex` CLI, for eki's own text jobs) |
-| `workspace` | git worktrees under `~/.eki/work/<key>` for work that must not collide, made cheap: `git worktree add --no-checkout`, then `clonetree.fill`; `.venv`/`node_modules` linked from the source folder; runs in one folder otherwise take turns |
+| `workspace` | git worktrees under `~/.eki/work.noindex/<key>` for work that must not collide, made cheap: `git worktree add --no-checkout`, then `clonetree.fill`; `.venv`/`node_modules` linked from the source folder; runs in one folder otherwise take turns |
 | `clonetree` | fills a `--no-checkout` worktree with APFS clones (`clonefile`) of the source checkout's tracked files, so no data is copied until a file changes; a file that differs from the base is checked out normally, the whole tree when clones aren't possible; byte-identical, `git status` clean |
 | `deplinks` | `.venv`/`node_modules` stay links: one an item replaced with a real folder is put back before gate 1, and the board says `relinked …` |
 | `worktreegc` | the housekeeping step `worktrees`: removes finished, unreferenced worktrees (and their branches) a few per pass; a failed item's kept 2 days; the disk worktrees use, for `eki self` |
@@ -933,7 +933,7 @@ untouched; they're looked at again when `gh` is back.
 **The local path — eki lands it.** For folders not on GitHub (origin
 elsewhere or none; also a GitHub project while `gh` is missing or logged
 out) eki works in your folder, and no `gh` is started for it. A project item
-builds in `~/.eki/work/<item id>` on branch `eki/<item id>` of the project's
+builds in `~/.eki/work.noindex/<item id>` on branch `eki/<item id>` of the project's
 own repo (`.venv` and `node_modules` linked from the folder when
 untracked). Its gate 1 is the project's `--check`, else its executable
 `bin/check`, else none: the item is proposed "no check configured — not
@@ -1048,7 +1048,7 @@ housekeeping copies new and changed files to.
   and after `create`/`set_folder`) sets `threads.project` on threads with
   none whose realpath(cwd) is a project's folder. It never moves a thread
   that has a project, and runs again harmlessly. Engine threads (clones,
-  installs under `~/.eki/projects`, builds under `~/.eki/work`) never match,
+  installs under `~/.eki/projects`, builds under `~/.eki/work.noindex`) never match,
   and no folder under `EKI_HOME` can be a project's.
 - **Your clone is found, not made.** A GitHub row with no folder gets one
   from `home_clone`, only when asked (`listing(scan=True)`: the project

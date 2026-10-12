@@ -1,6 +1,6 @@
 """Worktrees that are done with go: housekeeping removes them a few at a time.
 
-Every folder under EKI_HOME/work (but the dot-folders) is looked at each pass
+Every folder under EKI_HOME/work.noindex (but the dot-folders) is looked at each pass
 and removed when nothing will need it again (docs/self-build.md: worktrees):
 
 - an item's worktree (its folder is the item id, or items.worktree says so) once
@@ -18,10 +18,10 @@ reviewing, queued, resolving or rechecking. A removed item keeps its row and
 its `worktree` column: retry() takes a missing folder as starting afresh.
 
 A restart loses nothing: before a removal starts, what it will do is written to
-work/.gc/<key>.json, and the next pass finishes any it finds there (rmtree,
+work.noindex/.gc/<key>.json, and the next pass finishes any it finds there (rmtree,
 `git worktree prune`, branch delete — each harmless twice). The disk the
 folders take is measured at most every MEASURE_EVERY seconds, on a thread, into
-work/.disk.json; `disk_line` reads it for `eki self`.
+work.noindex/.disk.json; `disk_line` reads it for `eki self`.
 """
 from __future__ import annotations
 

@@ -241,7 +241,7 @@ def marked_lines(worktree: str | Path, f: str) -> str:
 
 
 def gate_tree(repo: str | Path, key: str, sha: str) -> Path:
-    """A fresh detached worktree of `repo` at `sha` under EKI_HOME/work/<key>,
+    """A fresh detached worktree of `repo` at `sha` under EKI_HOME/work.noindex/<key>,
     the linked folders symlinked from `repo`. Removal: workspace.remove(repo, key)."""
     dest = paths.work() / key
     workspace.remove(repo, key)

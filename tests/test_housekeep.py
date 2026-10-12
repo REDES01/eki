@@ -148,3 +148,10 @@ def test_the_browser_steps_each_stand_alone(conn, monkeypatch, broken):
     assert [json.loads(r["data"])["where"] for r in conn.execute("SELECT data FROM journal WHERE kind='fault'")] \
         == [f"housekeep.{broken}"]
     assert ("browsers: 1" in lines) == (broken == "browsershim")
+
+
+def test_the_spotlight_migration_is_a_step_before_the_worktrees(conn, monkeypatch):
+    from eki import noindex
+    names = [name for name, _ in housekeep.STEPS]
+    assert ("noindex", noindex.migrate) in housekeep.STEPS
+    assert names.index("noindex") < names.index("worktrees")

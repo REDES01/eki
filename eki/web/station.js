@@ -8,10 +8,9 @@
   const KINDS = ["fault", "handoff", "correction", "limit", "run", "regression"];   // observe.KINDS
   const ENDS = ["dropped", "applied", "landed", "live"];                            // nothing left to drop
   const RETRY = ["left", "unfit", "dropped", "rolled back"];
-  const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds() };
+  const S = { on: false, timer: null, busy: false, errs: {}, open: new Set(), asks: "", folds: folds(), allGoals: new Set() };
   const FLIGHT = ["waiting", "building", "waiting on calls", "judging", "reviewing", "queued", "resolving", "rechecking"];
   const YOURS = ["proposed", "locked", "left", "unfit", "rolled back"];              // waits for a person
-  const GOALS_DONE_SHOWN = 3;                                                       // finished goals shown before "show all"
 
   // Which sections are open: Self by default; the choice is kept in this browser only.
   function folds() {
@@ -81,10 +80,18 @@
 
   // ---- what it shows ------------------------------------------------------------------------
 
-  function self(s) {
+  // the machine line (machinenow.station): in use / at once, and the load; it opens Settings → Machine
+  function machine(m) {
+    if (!m) return "";
+    return `<a class="st-machine" href="#settings/machine" title="Settings → Machine">${esc(m.agents)}/${esc(m.agents_cap)} agents working
+        · ${esc(m.checks)}/${esc(m.checks_cap)} test runs · ${esc(m.browsers)}/${esc(m.browsers_cap)} browsers
+        · load ${esc(Number(m.load).toFixed(1))} on ${esc(m.cores)} cores</a>`;
+  }
+
+  function self(s, m) {
     const top = `<div class="st-line">autonomy <b>${esc(s.autonomy)}</b>
         ${btn("autonomy", s.autonomy === "apply" ? "switch to propose" : "switch to apply", s.autonomy === "apply" ? "propose" : "apply", "small")}
-        · ${esc(s.parallel)} at once · source <code>${esc(s.source)}</code>
+        · ${machine(m)}
         <span class="grow"></span>${err("autonomy")}${s.autonomy === "propose"
           ? `${err("release")}${btn("release", "Release a train now", "", "small")}` : ""}</div>`;
     // under "apply" the train goes by itself every few minutes: the button would only mean "sooner"
@@ -93,16 +100,10 @@
         <span class="dim">on ${esc((q.head || "").slice(0, 8) || "-")}</span>
         <span class="st-stage">${esc(q.stage)}</span><span class="st-t">${esc(q.title)}</span>
         ${q.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(q.thread)}</div>`).join("") : "";
-    // busy goals always; finished ones only the last few, the rest behind "show all"
-    const busyGoal = (g) => g.items.some((it) => !ENDS.includes(it.state)) || ["drafting", "planning", "failed"].includes(g.state) || g.drafting || g.error;
-    let done = 0;
-    const shownGoals = S.allGoals ? s.goals : s.goals.filter((g) => busyGoal(g) || done++ < GOALS_DONE_SHOWN);
-    const hidden = s.goals.length - shownGoals.length;
-    const goals = (s.goals.length ? shownGoals.map(goal).join("") :
-      '<div class="dim">nothing yet — the box above asks for a change</div>') +
-      (hidden > 0 ? `<div class="st-line">${btn("goals-all", `show ${hidden} older goal${hidden === 1 ? "" : "s"}`, "", "small")}</div>` :
-        (S.allGoals && s.goals.length > GOALS_DONE_SHOWN ? `<div class="st-line">${btn("goals-few", "show fewer", "", "small")}</div>` : ""));
-    const items = s.goals.flatMap((g) => g.items);
+    // every project's goals, grouped (stationgroups.js): busy goals always, finished ones behind "show all"
+    const groups = s.groups || [{ project: null, name: "eki", goals: s.goals }];
+    const goals = stationGroups.render(groups, { goal, btn, all: S.allGoals });
+    const items = groups.flatMap((grp) => grp.goals.flatMap((g) => g.items));
     const n = (states) => items.filter((it) => states.includes(it.state)).length;
     const yours = n(YOURS), flight = n(FLIGHT);
     sum("self", [yours ? `${yours} for you` : "", flight ? `${flight} in flight` : "", prs.summary(s.prs), `${n(["live", "applied"])} live`, `autonomy ${s.autonomy}`]
@@ -221,7 +222,7 @@
           sum("asks", st.asks.length ? `${st.asks.length} waiting for your answer` : "none");
           if (st.asks.length && !S.folds.has("asks")) fold("asks", true);     // a question opens its section
           $("meta").textContent = `autonomy ${st.self.autonomy} · ${st.self.queue.length} in line · ${st.asks.length} open question${st.asks.length === 1 ? "" : "s"}`;
-          return self(st.self);
+          return self(st.self, st.machine);
         }),
         part("builds", "/api/builds", builds),
         part("route", "/api/route", table),
@@ -267,7 +268,7 @@
     if (a === "drop" || a === "retry") return act(id, `/api/self/items/${encodeURIComponent(id)}/${a}`);
     if (a === "release") return act("release", "/api/self/release");
     if (a === "builds-all" || a === "builds-few") { S.allBuilds = a === "builds-all"; return load(); }
-    if (a === "goals-all" || a === "goals-few") { S.allGoals = a === "goals-all"; return load(); }
+    if (a === "goals-all" || a === "goals-few") { a === "goals-all" ? S.allGoals.add(id) : S.allGoals.delete(id); return load(); }
     if (a === "autonomy") return act("autonomy", "/api/self/autonomy", { mode: id });
     if (a === "undo" && confirm(`Undo build ${id}? eki plans a goal to take its changes back.`))
       return act("undo:" + id, `/api/builds/${encodeURIComponent(id)}/undo`);

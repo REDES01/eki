@@ -77,3 +77,16 @@ def test_now_counts_a_browser_slot_held_by_another_process(conn):
         child.stdin.close()
         child.wait(timeout=10)
     assert machinenow.now(conn)["browsers"] == 0
+
+
+def test_station_says_in_use_beside_at_once(conn, monkeypatch):
+    from eki import machinecaps
+    monkeypatch.setattr(machinecaps, "settings", lambda: {"agents": 7, "checks": 3, "browsers": 2})
+    monkeypatch.setattr(browserslots, "held", lambda: 1)
+    with conn:
+        _item(conn, "a", "building")
+        _item(conn, "b", "queued")
+    got = machinenow.station(conn)
+    assert {k: got[k] for k in ("agents", "agents_cap", "checks_cap", "browsers", "browsers_cap")} == \
+        {"agents": 1, "agents_cap": 7, "checks_cap": 3, "browsers": 1, "browsers_cap": 2}
+    assert isinstance(got["load"], float) and got["cores"] >= 1 and got["checks"] == 0

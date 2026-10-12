@@ -10,17 +10,19 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import asks, builds, db, digest, observe, patchnotes, queue, score, selfview, selfwork, traincheck, train
+from . import asks, builds, db, digest, machinenow, observe, patchnotes, queue, score, selfview, selfwork, traincheck, train
 
 
 # ---- what it shows ------------------------------------------------------------------------
 
 def station(conn: sqlite3.Connection) -> Dict[str, Any]:
-    """The self board, and the open questions its draft, plan, build and gate-2 runs ask."""
+    """The self board with every project's goals, the open questions their draft, plan, build
+    and gate-2 runs ask, and the machine line."""
     board = selfview.board(conn)
-    runs = {r for g in selfview.goals(conn) for r in (g["draft_run"], g["plan_run"]) if r}
+    runs = {r for _, _, gs in selfview.grouped(conn) for g in gs for r in (g["draft_run"], g["plan_run"]) if r}
     runs |= {r for it in conn.execute("SELECT run_id, gate2_run FROM items") for r in it if r}
-    return {"self": board, "asks": [asks.view(a) for a in asks.open_asks(conn) if a["run_id"] in runs]}
+    return {"self": board, "asks": [asks.view(a) for a in asks.open_asks(conn) if a["run_id"] in runs],
+            "machine": machinenow.station(conn)}
 
 
 def builds_view(conn: sqlite3.Connection) -> Dict[str, Any]:

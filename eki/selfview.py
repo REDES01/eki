@@ -14,7 +14,23 @@ def board(c: sqlite3.Connection) -> Dict[str, Any]:
     s = selfwork.settings()
     return {"autonomy": s["autonomy"], "parallel": s["parallel"], "source": str(selfwork.source()),
             "queue": [_lined(c, n, it) for n, it in enumerate(lined(c), 1)],
-            "goals": [_goal(c, g) for g in goals(c)], "prs": projects.open_prs(c)}
+            "goals": [_goal(c, g) for g in goals(c)], "groups": groups(c), "prs": projects.open_prs(c)}
+
+
+def grouped(c: sqlite3.Connection) -> List[tuple]:
+    """(project id or None, name, the last 20 goals of each): eki itself first, then each
+    project that has goals, by its name."""
+    names = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects")}
+    pids = [r[0] for r in c.execute("SELECT DISTINCT project FROM goals")]
+    order = sorted(pids, key=lambda p: (p is not None, (names.get(p) or p or "").lower(), p or ""))
+    return [(p, "eki" if p is None else names.get(p) or p,
+             c.execute("SELECT * FROM goals WHERE project IS ? ORDER BY created_at DESC LIMIT 20", (p,)).fetchall())
+            for p in order]
+
+
+def groups(c: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """The goals by project, for the Station page: [{project, name, goals}]."""
+    return [{"project": p, "name": name, "goals": [_goal(c, g) for g in gs]} for p, name, gs in grouped(c)]
 
 
 def goals(c: sqlite3.Connection) -> List[sqlite3.Row]:

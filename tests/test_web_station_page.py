@@ -71,3 +71,17 @@ def test_a_row_target_object_shows_as_its_key():
     out = subprocess.run([node, "-e", fn + f"console.log(JSON.stringify({json.dumps(cases)}.map(targetName)))"],
                          capture_output=True, text=True, check=True).stdout
     assert json.loads(out) == ["claude", "claude:opus@high", "codex"]
+
+
+def test_the_top_line_is_the_machine_line_and_goals_group_by_project(web):
+    js = get(web + "/ui/station.js")[1]
+    assert "at once · source" not in js and "s.parallel" not in js and "s.source" not in js
+    body = js[js.index("function machine(m)"):js.index("function self(s")]
+    assert 'href="#settings/machine"' in body
+    for k in ("m.agents_cap", "m.checks_cap", "m.browsers", "m.browsers_cap", "m.load", "m.cores"):
+        assert k in body, k
+    assert "stationGroups.render(" in js
+    code, groups = get(web + "/ui/stationgroups.js")
+    assert code == 200 and "st-group-h" in groups and "grp.name" in groups and '"goals-all"' in groups
+    page = get(web + "/")[1]
+    assert page.index('<script src="/ui/stationgroups.js">') < page.index('<script src="/ui/station.js">')

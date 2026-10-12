@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from . import browserslots, checkslots, machine, providers, quota
+from . import browserslots, checkslots, machine, machinecaps, providers, quota
 
 
 def _total_gb() -> Optional[float]:
@@ -63,6 +63,14 @@ def now(conn: sqlite3.Connection) -> Dict[str, Any]:
     if left:
         out["quota"] = left
     return out
+
+
+def station(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """The Station page's machine line: what is in use beside how many may be at once."""
+    n, caps = now(conn), machinecaps.settings()
+    return {"agents": n["agents"], "agents_cap": caps["agents"], "checks": n["checks"],
+            "checks_cap": caps["checks"], "browsers": browserslots.held(), "browsers_cap": caps["browsers"],
+            "load": n["load"], "cores": n["cores"]}
 
 
 def _n(count: int, word: str) -> str:

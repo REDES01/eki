@@ -9,7 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import (api_threads, asking, buildcap, builds, asks, attachments, capacity, digest, engine, gallery, machine, machinecaps,
-               machinenow, modellist, models, paths, projects, providers, quota, routing, store, targets, testslots)
+               machinenow, memadmit, modellist, models, paths, projects, providers, quota, routing, store, targets, testslots)
 
 TERMINAL = ("done", "failed", "cancelled", "handed_off")
 
@@ -186,6 +186,10 @@ def pictures(conn: sqlite3.Connection, limit: int = 60, before: Optional[float] 
 
 
 def machine_view(conn: sqlite3.Connection) -> Dict[str, Any]:
-    """Settings → Machine: the two caps as saved, what runs now, and that in one line."""
-    got = machinenow.now(conn)
-    return {**machinecaps.settings(), "now": got, "line": machinenow.line(got)}
+    """Settings → Machine: the caps as saved, what runs now, that in one line, and memory:
+    the reading, the floor, why new work waits (or null) and each kind's estimate."""
+    got, caps = machinenow.now(conn), machinecaps.settings()
+    r = {"free_gb": got["free_gb"], "swap_pct": got["swap_pct"]}
+    mem = {**r, "floor_gb": caps["floor_gb"], "swap_max": caps["swap_max"],
+           "waiting": memadmit.low(r), "estimates": memadmit.estimates(conn)}
+    return {**caps, "now": got, "line": machinenow.line(got), "memory": mem}

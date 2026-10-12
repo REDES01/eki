@@ -1,7 +1,7 @@
 """What the Mac is doing right now, for Settings → Machine's live line.
 
 `now(conn)` reads it all fresh — items building across every project, test
-runs holding a check slot, browsers holding a browser slot, the load, memory used and what is left of each
+runs holding a check slot, browsers holding a browser slot, the load, memory used, free and swap, and what is left of each
 subscription — and `line(now)` says it in one sentence. Nothing is kept.
 `EKI_MEMORY_TOTAL_GB` overrides the Mac's total memory and `EKI_MDS_STORES_GB` what
 Spotlight's indexer holds (tests).
@@ -13,7 +13,7 @@ import sqlite3
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from . import browserslots, checkslots, machine, machinecaps, providers, quota
+from . import browserslots, checkslots, machine, machinecaps, memadmit, providers, quota
 
 
 def _total_gb() -> Optional[float]:
@@ -81,7 +81,7 @@ def now(conn: sqlite3.Connection) -> Dict[str, Any]:
     out: Dict[str, Any] = {"agents": int(agents), "checks": checkslots.busy(conn),
                            "browsers": browserslots.held(),
                            "load": round(os.getloadavg()[0], 1), "cores": os.cpu_count() or 1,
-                           "memory": memory()}
+                           "memory": memory(), **memadmit.reading()}
     left = _quota(conn)
     if left:
         out["quota"] = left
@@ -93,7 +93,8 @@ def station(conn: sqlite3.Connection) -> Dict[str, Any]:
     n, caps = now(conn), machinecaps.settings()
     out = {"agents": n["agents"], "agents_cap": caps["agents"], "checks": n["checks"],
            "checks_cap": caps["checks"], "browsers": browserslots.held(), "browsers_cap": caps["browsers"],
-           "load": n["load"], "cores": n["cores"]}
+           "load": n["load"], "cores": n["cores"],
+           "memory": memadmit.low({"free_gb": n["free_gb"], "swap_pct": n["swap_pct"]})}
     gb = spotlight_gb()
     if gb is not None and gb > 2.0:
         out["spotlight_gb"] = round(gb, 1)
@@ -105,10 +106,13 @@ def _n(count: int, word: str) -> str:
 
 
 def line(now: Dict[str, Any]) -> str:
-    """now: 3 agents working · 1 test run · 2 browsers · load 9.2 on 18 cores · memory 64% · quota left claude 70%"""
+    """now: 3 agents working · 1 test run · 2 browsers · load 9.2 on 18 cores · memory 64% · 11.5 GB free · swap 3%
+    · quota left claude 70%"""
     parts = [f"{_n(now['agents'], 'agent')} working", _n(now["checks"], "test run"),
              _n(now.get("browsers", 0), "browser"),
              f"load {now['load']:.1f} on {_n(now['cores'], 'core')}", f"memory {now['memory']}%"]
+    if "free_gb" in now:
+        parts.append(f"{now['free_gb']:.1f} GB free · swap {now.get('swap_pct', 0)}%")
     if now.get("quota"):
         parts.append("quota left " + ", ".join(f"{q['provider']} {q['left']}%" for q in now["quota"]))
     return "now: " + " · ".join(parts)

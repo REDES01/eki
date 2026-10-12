@@ -32,7 +32,9 @@ def test_station_has_the_machine_line_and_goals_by_project(web, conn):
     code, body = get(web + "/api/station")
     st = json.loads(body)
     m = st["machine"]
-    assert set(m) == {"agents", "agents_cap", "checks", "checks_cap", "browsers", "browsers_cap", "load", "cores"}
+    assert set(m) == {"agents", "agents_cap", "checks", "checks_cap", "browsers", "browsers_cap", "load", "cores",
+                      "memory"}
+    assert m["memory"] is None                  # EKI_FREE_GB=64: nothing waits for memory
     assert m["agents"] == 1 and m["agents_cap"] >= 1 and m["browsers_cap"] >= 1
     groups = st["self"]["groups"]
     assert [(g["project"], g["name"]) for g in groups] == [(None, "eki"), ("p1", "Apples"), ("p2", "zebra")]

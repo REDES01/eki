@@ -1,7 +1,7 @@
 """Settings → Machine: the three machine caps in routing.json, and the live line at /api/machine."""
 import json
 
-from eki import machinecaps
+from eki import db, machinecaps, memadmit
 from test_web import get, post, web  # noqa: F401  (the fixture)
 from test_web_settings import _read
 
@@ -12,6 +12,8 @@ CHECKS_WHY = ("how many test runs — eki's checks and the agents' own tests —
 BROWSERS_WHY = ("how many browsers eki's runs may have open at once (Playwright, in an agent's script or the "
                 "playtester's MCP); each renders the game, so a few already load the machine; a browser past the "
                 "cap waits for one to close")
+
+FLOOR_WHY = "new agents, test runs and browsers wait while free memory is below this; running work is never stopped"
 
 
 def test_the_page_loads_the_machine_section(web):
@@ -28,7 +30,10 @@ def test_the_section_explains_the_three_caps_and_reads_the_live_line(web):
     for want in (AGENTS_WHY, CHECKS_WHY, BROWSERS_WHY, "Browsers at once", '"browsers"', "browsers: 16",
                  "BROWSERS = 3", '"browser")} at once', 'settings.section("machine"', 'title: "Machine"', 'file: "routing"',
                  "Agents at once", "Test runs at once", 'data-f="${f}"', '"agents"', '"checks"', 'min="1"',
-                 "settingsForm.fold", "/api/machine", "delete d.machine", "at once"):
+                 "settingsForm.fold", "/api/machine", "delete d.machine", "at once", "Memory floor (GB)", "Swap at most (%)",
+                 FLOOR_WHY, "floor_gb: 64", "swap_max: 100", "FLOOR_GB = 6", "SWAP_MAX = 60", "data-machine-mem",
+                 "mem.estimates", "(default)", '"run"', "mem.waiting",
+                 "the counts above stay as upper bounds"):
         assert want in js, want
 
 
@@ -88,3 +93,24 @@ def test_the_files_stay_small():
     root = Path(__file__).resolve().parent.parent / "eki"
     for p in (root / "web" / "settingsmachine.js", root / "machinenow.py"):
         assert len(p.read_text().splitlines()) < 400, p
+
+
+def test_api_machine_says_the_memory_floor_and_the_estimates(web, monkeypatch):
+    conn = db.connect()
+    with conn:
+        memadmit.learn(conn, "browser", 1.1)
+    conn.close()
+    got = json.loads(get(web + "/api/machine")[1])["memory"]
+    assert {k: got[k] for k in ("free_gb", "swap_pct", "floor_gb", "swap_max", "waiting")} == \
+        {"free_gb": 64.0, "swap_pct": 0, "floor_gb": 6, "swap_max": 60, "waiting": None}
+    est = {e["kind"]: e for e in got["estimates"]}
+    assert est["browser"] == {"kind": "browser", "gb": 1.1, "samples": 1, "learned": True}
+    assert est["agent"] == {"kind": "agent", "gb": 0.3, "samples": 0, "learned": False}
+    monkeypatch.setenv("EKI_FREE_GB", "3")
+    assert json.loads(get(web + "/api/machine")[1])["memory"]["waiting"] == \
+        "waiting for memory (3.0 GB free, swap 0%)"
+
+
+def test_the_station_line_says_when_work_waits_for_memory(web):
+    _, js = get(f"{web}/ui/station.js")
+    assert "m.memory" in js and "st-memory" in js

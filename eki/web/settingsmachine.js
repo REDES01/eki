@@ -1,11 +1,14 @@
 // Settings → Machine: routing.json's "machine" block (eki/machinecaps.py) — how many agents may
-// work at once across all projects, how many test runs, and how many browsers. One fold; open, it
-// shows the three caps and the live line from /api/machine (eki/machinenow.py), read again every
-// few seconds while open.
+// work at once across all projects, how many test runs, how many browsers, and the memory floor
+// (eki/memadmit.py) below which new work waits. One fold; open, it shows the caps, the floor and the
+// live line from /api/machine (eki/machinenow.py) with each kind's learned memory estimate, read
+// again every few seconds while open.
 // A field left empty is dropped, and an empty block drops the machine key.
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
-  const AGENTS = 12, BROWSERS = 3, MOST = { agents: 64, checks: 32, browsers: 16 };  // machinecaps.AGENTS, BROWSERS, MOST
+  const AGENTS = 12, BROWSERS = 3, FLOOR_GB = 6, SWAP_MAX = 60;  // machinecaps.AGENTS, BROWSERS, FLOOR_GB, SWAP_MAX
+  const MOST = { agents: 64, checks: 32, browsers: 16, floor_gb: 64, swap_max: 100 };  // machinecaps.MOST
+  const KEYS = Object.keys(MOST);
   const EVERY = 4000;
   const block = (d) => (d.machine && typeof d.machine === "object" ? d.machine : {});
   let open = false, got = null, timer = null;
@@ -30,9 +33,29 @@
         "how many test runs — eki's checks and the agents' own tests — may run at the same time; each takes several cores, so keep this low enough that load stays near the core count") +
       line("Browsers at once", num("browsers", m.browsers, got ? got.browsers : BROWSERS),
         "how many browsers eki's runs may have open at once (Playwright, in an agent's script or the playtester's MCP); each renders the game, so a few already load the machine; a browser past the cap waits for one to close") +
-      `<div class="set-sub" data-machine-now>${esc(got ? got.line : "now: reading…")}</div>`);
+      line("Memory floor (GB)", num("floor_gb", m.floor_gb, FLOOR_GB),
+        "new agents, test runs and browsers wait while free memory is below this; running work is never stopped") +
+      line("Swap at most (%)", num("swap_max", m.swap_max, SWAP_MAX),
+        "new agents, test runs and browsers wait while more of the swap than this is in use; running work is never stopped") +
+      `<div class="set-sub" data-machine-now>${esc(got ? got.line : "now: reading…")}</div>` +
+      `<div class="set-sub" data-machine-mem>${memory()}</div>`);
     setTimeout(live, 0);
     return `<div data-machine>${settingsForm.fold("machine", `<span data-machine-sum>${esc(summary(d))}</span>`, body, open)}</div>`;
+  }
+
+  // each kind's memory estimate ('browser 1.1 GB (12 runs)', 'agent 0.3 GB (default)'), why new
+  // work waits if it does, and that the counts stay as upper bounds
+  function estimate(e) {
+    const gb = `${e.kind} ${Number(e.gb).toFixed(1)} GB`;
+    return e.learned ? `${gb} (${plural(e.samples, "run")})` : `${gb} (default)`;
+  }
+  function memory() {
+    const mem = got && got.memory;
+    if (!mem) return "";
+    const est = (mem.estimates || []).map(estimate).join(" · ");
+    return (mem.waiting ? `<div class="set-memwait"><b>${esc(mem.waiting)}</b></div>` : "") +
+      (est ? `<div>memory each needs: ${esc(est)}</div>` : "") +
+      `<div class="dim">new work starts only if its estimate fits above the floor; the counts above stay as upper bounds</div>`;
   }
 
   // the live line, read now and again every few seconds while the fold is open and on the page
@@ -47,6 +70,8 @@
     } catch (e) { /* the next tick tries again */ }
     const now = document.querySelector("[data-machine-now]");
     if (now && got) now.textContent = got.line;
+    const mem = document.querySelector("[data-machine-mem]");
+    if (mem && got) mem.innerHTML = memory();
     const sum = document.querySelector("[data-machine-sum]");
     if (sum && window.settings && settings.draft) sum.textContent = summary(settings.draft("routing") || {});
     if (now && open) timer = setTimeout(live, EVERY);
@@ -61,7 +86,7 @@
   // one input changed: put it in d.machine, or take it out when empty
   function edit(el, d) {
     const f = el.dataset.f;
-    if (!["agents", "checks", "browsers"].includes(f)) return false;
+    if (!KEYS.includes(f)) return false;
     const m = block(d), v = el.value.trim();
     if (v === "" || !isFinite(+v)) delete m[f]; else m[f] = Math.max(1, Math.min(MOST[f], Math.round(+v)));
     if (Object.keys(m).length) d.machine = m; else delete d.machine;

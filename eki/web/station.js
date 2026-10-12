@@ -80,13 +80,15 @@
 
   // ---- what it shows ------------------------------------------------------------------------
 
-  // the machine line (machinenow.station): in use / at once, and the load; it opens Settings → Machine
+  // the machine line (machinenow.station): in use / at once, and the load; it opens Settings → Machine.
+  // When new work waits for memory, it ends with why ('waiting for memory (x GB free, swap y%)').
   function machine(m) {
     if (!m) return "";
     return `<a class="st-machine" href="#settings/machine" title="Settings → Machine">${esc(m.agents)}/${esc(m.agents_cap)} agents working
         · ${esc(m.checks)}/${esc(m.checks_cap)} test runs · ${esc(m.browsers)}/${esc(m.browsers_cap)} browsers
         · load ${esc(Number(m.load).toFixed(1))} on ${esc(m.cores)} cores</a>${m.spotlight_gb == null ? ""
-        : ` · <span class="st-spotlight" title="eki keeps its own working folders out of Spotlight; the rest is the Mac indexing other folders">Spotlight's indexer uses ${esc(Number(m.spotlight_gb).toFixed(1))} GB</span>`}`;
+        : ` · <span class="st-spotlight" title="eki keeps its own working folders out of Spotlight; the rest is the Mac indexing other folders">Spotlight's indexer uses ${esc(Number(m.spotlight_gb).toFixed(1))} GB</span>`}${m.memory
+        ? ` · <span class="st-memory" title="new agents, test runs and browsers wait for memory; running work is never stopped (Settings → Machine)">${esc(m.memory)}</span>` : ""}`;
   }
 
   // The fixer's count (eki/fixer.py daily): today, and the days shown (newest first).

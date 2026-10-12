@@ -54,6 +54,8 @@ def test_now_counts_building_items_across_projects_and_reads_memory(conn, monkey
     assert got["agents"] == 3 and got["checks"] == 0 and got["browsers"] == 0
     assert "· 0 browsers ·" in machinenow.line(got)
     assert got["memory"] == 75
+    assert got["free_gb"] == 8.0 and got["swap_pct"] == 0
+    assert "· memory 75% · 8.0 GB free · swap 0%" in machinenow.line(got)
     assert isinstance(got["load"], float) and got["cores"] >= 1
     assert "quota" not in got
 
@@ -81,7 +83,8 @@ def test_now_counts_a_browser_slot_held_by_another_process(conn):
 
 def test_station_says_in_use_beside_at_once(conn, monkeypatch):
     from eki import machinecaps
-    monkeypatch.setattr(machinecaps, "settings", lambda: {"agents": 7, "checks": 3, "browsers": 2})
+    monkeypatch.setattr(machinecaps, "settings",
+                        lambda: {"agents": 7, "checks": 3, "browsers": 2, "floor_gb": 6, "swap_max": 60})
     monkeypatch.setattr(browserslots, "held", lambda: 1)
     with conn:
         _item(conn, "a", "building")
@@ -122,3 +125,17 @@ def test_a_ps_failure_gives_none(monkeypatch):
     monkeypatch.setattr(machinenow.subprocess, "run",
                         lambda *a, **kw: subprocess.CompletedProcess(a, 1, stdout="", stderr="x"))
     assert machinenow.spotlight_gb() is None
+
+
+def test_the_line_says_free_and_swap_after_memory():
+    assert machinenow.line(_now(free_gb=11.5, swap_pct=3)) == \
+        "now: 3 agents working · 1 test run · 2 browsers · load 9.2 on 18 cores · memory 64% · 11.5 GB free · swap 3%"
+
+
+def test_station_says_when_new_work_waits_for_memory(conn, monkeypatch):
+    monkeypatch.setenv("EKI_FREE_GB", "3")
+    assert machinenow.station(conn)["memory"] == "waiting for memory (3.0 GB free, swap 0%)"
+    monkeypatch.setenv("EKI_FREE_GB", "64")
+    assert machinenow.station(conn)["memory"] is None
+    monkeypatch.setenv("EKI_SWAP_PCT", "75")
+    assert machinenow.station(conn)["memory"] == "waiting for memory (64.0 GB free, swap 75%)"

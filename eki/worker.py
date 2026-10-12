@@ -150,7 +150,9 @@ def _serving_link(conn: sqlite3.Connection, r: sqlite3.Row, turn: Turn) -> None:
         return
     turn.extra["env"] = {**(turn.extra.get("env") or {}), "EKI_SERVE_URL": url}
     line = (f"Your own copy of the project is served at {url} (EKI_SERVE_URL); open that in a browser "
-            "for screenshots and tests, not the person's own server (e.g. :4200).")
+            "for screenshots and tests, not the person's own server (e.g. :4200). To ask the playtester "
+            "for a part, give it a start path/query, never a URL: `eki use playtester \"?jump=s25 <focus>\"`; "
+            "eki joins it onto the build it serves for that call.")
     turn.extra["note"] = (turn.extra["note"] + "\n\n" + line) if turn.extra.get("note") else line
 
 

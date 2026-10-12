@@ -1432,7 +1432,14 @@ its path) marks the session `tainted: opened <url>` in its `session.json`
 and on the printed result. It plays, takes notes as it
 goes, records how it feels at each moment (emotion + why, timestamped), and
 ends with an honest review. `eki use playtester ["what to play / focus
-on"]`. Each session's notes, emotion log, review and screenshots are kept
+on"]`. A focus may begin with a start path/query — `eki use playtester
+"?jump=s25 play the end"` — never a URL: eki joins it onto the build it
+serves for that call (`agent.split_start`), and a loopback URL pasted into
+a focus (a builder's `EKI_SERVE_URL`) loses its host and port, so the
+playtester never plays another copy's server. Any other URL stays words.
+A navigate to the played page that differs only in its query is no taint.
+The worker's serving-link line and the plan brief (when the project has a
+playtester) tell agents so. Each session's notes, emotion log, review and screenshots are kept
 under `~/.eki/components/sessions/<name>/<session>/`, one folder per call,
 and the call prints the review and that path.
 

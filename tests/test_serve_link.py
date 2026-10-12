@@ -46,6 +46,7 @@ def test_a_run_in_a_worktree_gets_its_own_link(game, conn):
     url = turn.extra["env"]["EKI_SERVE_URL"]
     assert url.startswith("http://127.0.0.1:") and url.endswith("/chapter1/")
     assert url in turn.extra["note"] and "EKI_SERVE_URL" in turn.extra["note"] and ":4200" in turn.extra["note"]
+    assert '"?jump=s25 <focus>"' in turn.extra["note"] and "never a URL" in turn.extra["note"]
     import urllib.request
     with urllib.request.urlopen(url, timeout=5) as resp:          # the real server, serving the worktree
         assert resp.read() == b"<h1>trunk</h1>\n"
@@ -155,3 +156,59 @@ def test_open_must_stay_inside_the_folder(tmp_path):
         assert any('"open"' in e for e in serve.validate({"kind": "serve", "about": "x", "open": bad}, tmp_path))
     assert not any('"open"' in e for e in serve.validate({"kind": "serve", "about": "x", "open": "slice/index.html"},
                                                          tmp_path))
+
+
+FOCUS = "Start here: http://127.0.0.1:49666/chapter1/slice/index.html?jump=s25 — play the end"
+
+
+def test_split_start_drops_a_loopback_host_and_port():
+    start, rest = agent.split_start(FOCUS)
+    assert start == "/chapter1/slice/index.html?jump=s25"
+    assert "49666" not in start + rest and "http" not in rest
+    assert rest == "Start here: — play the end"
+    assert agent.split_start("go http://localhost:5/a?b=1") == ("/a?b=1", "go")
+    assert agent.split_start("see http://[::1]:7/x.") == ("/x", "see .")
+
+
+def test_split_start_takes_a_first_word_path_or_query():
+    assert agent.split_start("?jump=s25 play") == ("?jump=s25", "play")
+    assert agent.split_start("/chapter1/b.html look") == ("/chapter1/b.html", "look")
+    assert agent.split_start("play the end") == ("", "play the end")
+    assert agent.split_start("") == ("", "")
+
+
+def test_split_start_never_takes_another_host():
+    text = "compare with https://example.com/x?jump=1 please"
+    assert agent.split_start(text) == ("", text)
+
+
+def test_the_playtester_plays_the_start_on_its_own_link(game, home, monkeypatch):
+    served = "http://127.0.0.1:62461/chapter1/slice/index.html"
+    monkeypatch.setattr(serve, "link_for", lambda *a, **k: (served, ""))
+    s = home / "s"
+    s.mkdir()
+    c = call_from(game)
+    c.args = [FOCUS]
+    comp = playtester_in(game)
+    _, turn = agent.turn_for(comp, c, s)
+    assert f"{served}?jump=s25" in turn.extra["system_prompt"]
+    assert "49666" not in turn.extra["system_prompt"] and "49666" not in turn.prompt
+    assert turn.prompt == "Start here: — play the end"
+    assert agent.play_url(comp, c) == f"{served}?jump=s25"
+
+
+def test_the_journal_keeps_the_joined_link(game, home, monkeypatch):
+    monkeypatch.setattr(serve, "link_for", lambda *a, **k: ("http://127.0.0.1:62461/chapter1/", ""))
+
+    class Done:
+        def take(self, turn, emit):
+            from eki.providers.base import Outcome
+            return Outcome(state="done")
+    from eki import providers
+    monkeypatch.setattr(providers, "get", lambda name: Done())
+    c = call_from(game)
+    c.args = ["?jump=s25", "play"]
+    res = agent.call(playtester_in(game), c)
+    kept = json.loads((Path(res.paths[0]) / "session.json").read_text())
+    assert kept["url"] == "http://127.0.0.1:62461/chapter1/?jump=s25"
+

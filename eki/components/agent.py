@@ -6,6 +6,9 @@ An agent folder holds prompt.md, optional skills/, and in component.json a
 `deny_tools`, `allow_tools` (a bare agent's whole tool list) and an optional `url` ("{url}" in prompt.md becomes it).
 An agent with a `url` (the playtester) plays the caller's own serving link
 when the caller's project has a serve card; its `url` is only the fallback.
+The focus may start with a start path/query ("?jump=s25 play the end"); it is
+joined onto that link, and a loopback URL in the focus loses its host and port
+(split_start), so the playtester never plays another copy's server.
 When that card can't serve (its build failed) the call fails with why: the
 playtester never plays a broken build.
 
@@ -18,8 +21,10 @@ gets prompt.md as its note and its skills/ beside eki's, in the caller's folder.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urljoin, urlsplit
 
 from . import Call, Component, Result, NAME, journal
 
@@ -106,9 +111,41 @@ def prompt_text(comp: Component, url: Optional[str] = None) -> str:
     return text.replace('{url}', str(comp.spec.get('url') or '') if url is None else url)
 
 
+_URL = re.compile(r'https?://\S+', re.I)
+_LOOPBACK = {'127.0.0.1', 'localhost', '::1'}
+
+
+def split_start(text: str) -> Tuple[str, str]:
+    """(start, rest) of a focus: the start path/query to join onto the played link — a first
+    word beginning with '?' or '/', else the path and query of the first loopback http(s) URL
+    (its host and port dropped) — and the focus without it. Any other URL stays as words."""
+    text = text or ''
+    words = text.split()
+    if words and words[0][0] in '?/':
+        return words[0], ' '.join(words[1:])
+    for m in _URL.finditer(text):
+        raw = m.group(0).rstrip('.,;:!)]\'"')
+        try:
+            u = urlsplit(raw)
+            host = (u.hostname or '').lower()
+        except ValueError:
+            continue
+        if host not in _LOOPBACK:
+            continue
+        start = (u.path or '/') + (f'?{u.query}' if u.query else '')
+        rest = text[:m.start()] + text[m.start() + len(raw):]
+        return start, ' '.join(rest.split())
+    return '', text
+
+
+def _focus(c: Call) -> Tuple[str, str]:
+    return split_start(' '.join(c.args))
+
+
 def play_url(comp: Component, c: Call) -> str:
-    """What an agent with a `url` plays: the caller's serving link, else its own `url`.
-    Raises ValueError when the caller's serve card can't serve (a failed build)."""
+    """What an agent with a `url` plays: the caller's serving link, else its own `url`, with the
+    focus's start path/query joined on. Raises ValueError when the caller's serve card can't
+    serve (a failed build)."""
     own = str(comp.spec.get('url') or '')
     if 'url' not in comp.spec:
         return own
@@ -116,7 +153,9 @@ def play_url(comp: Component, c: Call) -> str:
     url, why = serve.link_for(c.caller_dir, by=c.caller_run or c.run_id)
     if why:
         raise ValueError(f'{comp.name}: no build to play: {why}')
-    return url or own
+    base = url or own
+    start, _ = _focus(c)
+    return urljoin(base, start) if start and base else base
 
 
 def mcp_file(comp: Component, session: Path) -> Path:
@@ -163,7 +202,7 @@ def turn_for(comp: Component, c: Call, session: Path, url: Optional[str] = None)
         extra['model'] = choice.model
     if choice.effort:
         extra['effort'] = choice.effort
-    prompt = ' '.join(c.args) or 'Begin.'
+    prompt = (_focus(c)[1] if 'url' in comp.spec else ' '.join(c.args)) or 'Begin.'
     url = play_url(comp, c) if url is None else url
     if comp.spec.get('bare'):
         scratch = session / 'scratch'

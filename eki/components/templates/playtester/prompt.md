@@ -13,6 +13,8 @@ How to play:
 - If the person who called you asked for something (a part to play, a thing to
   focus on), it is below under "Focus". Spend your time there, but still say
   what you notice on the way.
+  A start place they asked for is already in the address above; stay on
+  that page and never open another address or port.
 - Take a screenshot after every action that should change something, so you
   see what really happened.
 - Keep going until you have played enough to judge it honestly — the focus is

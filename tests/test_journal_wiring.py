@@ -107,3 +107,14 @@ def test_an_api_handler_that_raises_is_a_fault(conn, monkeypatch):
     f = observe.entries(conn, kind="fault")
     assert len(f) == 1 and f[0]["data"]["where"] == "server /api/status"
     assert "api broke" in f[0]["data"]["traceback"]
+
+
+def test_a_navigate_that_only_changes_the_query_is_no_taint():
+    from eki.components import journal
+    url = "http://127.0.0.1:62461/chapter1/slice/index.html"
+    nav = [{"name": "mcp__playwright__browser_navigate", "url": f"{url}?jump=s25"},
+           {"name": "mcp__playwright__browser_navigate", "input": {"url": f"{url}?jump=s30"}}]
+    assert journal.opened_elsewhere(nav, f"{url}?jump=s25") == []
+    assert journal.opened_elsewhere(nav, url) == []
+    away = [{"name": "mcp__playwright__browser_navigate", "url": "http://127.0.0.1:49666/chapter1/slice/index.html?jump=s25"}]
+    assert journal.opened_elsewhere(away, url) == [away[0]["url"]]

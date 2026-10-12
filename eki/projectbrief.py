@@ -148,14 +148,25 @@ def _check(project) -> str:
     return "run the project's own tests before you finish and leave them green"
 
 
-def _cards(project) -> list:
-    """The project's own knowledge cards; [] when it has none or they can't be read."""
+def _cards(project, kind: str = "knowledge") -> list:
+    """The project's own cards of `kind` (knowledge by default); [] when it has none or they can't be read."""
     try:
         from . import components
         found, _ = components.own(Path(project["path"]))
-        return [c for c in found.values() if c.kind == "knowledge"]
+        return [c for c in found.values() if c.kind == kind]
     except Exception:  # reading the cards never breaks the plan brief
         return []
+
+
+def _playtest_line(project) -> str:
+    """One line for a project with a playtester (an agent card with a `url`): items that ask it
+    to play a part pass a start path/query, never a URL — eki joins it onto the build it serves."""
+    names = sorted(c.name for c in _cards(project, "agent") if "url" in c.spec)
+    if not names:
+        return ""
+    return (f"\nWhen an item asks the {names[0]} card to play a part, it passes a start path/query, never "
+            f"a URL or port: `eki use {names[0]} \"?jump=s25 <focus>\"`; eki plays the build it serves for "
+            "that item.\n")
 
 
 def _doc_lines(cards) -> List[str]:
@@ -199,7 +210,8 @@ def plan(goal: str, base: str, project, *, standing: bool = False,
     known = KNOWLEDGE.format(cards="\n".join(lines)) if lines else ""
     return (PLAN.format(name=project["name"], path=project["path"], branch=project["branch"],
                         base=base[:12], goal=goal.strip(), split=selfbrief.SPLIT_RULES,
-                        rest=REST if standing else "") + known + selfbrief.plan_checks(checks) + "\n"
+                        rest=REST if standing else "") + known + _playtest_line(project)
+            + selfbrief.plan_checks(checks) + "\n"
             + ENDING.format(context=CONTEXT_KEY if lines else "",
                             checks=selfbrief.CHECKS_KEY if checks else ""))
 

@@ -88,3 +88,12 @@ def test_the_workflow_card_says_first(conn, proj):
     projects.set_autonomy(conn, pid, "apply")
     _card(proj, "workflow", {"kind": "workflow", "about": "how work runs", "merge": "person"})
     assert projectbrief.landing(projects.get(conn, pid)) == "person"
+
+
+def test_a_playtester_card_adds_the_start_path_line(conn, proj):
+    p = projects.get(conn, projects.add(conn, proj))
+    assert "?jump=s25" not in projectbrief.plan("fix it", "0" * 40, p)
+    _card(proj, "playtester", {"kind": "agent", "about": "plays", "url": "http://127.0.0.1:4200/"})
+    (proj / "components" / "playtester" / "prompt.md").write_text("Play {url}.\n")
+    text = projectbrief.plan("fix it", "0" * 40, p)
+    assert '`eki use playtester "?jump=s25 <focus>"`' in text and "never a URL" in text

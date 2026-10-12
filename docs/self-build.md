@@ -512,12 +512,16 @@ own goal done.
   lists what is left. Free text is never read as a verdict; build, fix and
   resolve runs are never in `judgings`, so `SUMMARY:` and `ITEM: done`
   close nothing.
-- *The judge is its own run on its own backend* (`eki/judgerun.py`). Role
-  `judge` (eki/roles.py; default the `code` row's first target), picked by
-  `roles.pick_other` with `avoid` = the builder's provider (and a first
-  judge's): the role's pick when it isn't avoided, else the first able
-  `code` target that isn't, else the same provider on another model, else
-  nobody. An agent run on a new thread, `fresh`, in a read-only worktree
+- *The judge is its own run, in a thread of its own* (`eki/judgerun.py`).
+  The first judge runs on role `judge`'s own pick (eki/roles.py; default
+  the `code` row's first target, usually the builder's provider): a fresh
+  run and thread that never sees the builder's conversation (the person's
+  choice, 2026-10-12). Only the `second` opinion on an uncertain check
+  goes to another backend, picked by `roles.pick_other` with `avoid` = the
+  builder's provider and the first judge's: the role's pick when it isn't
+  avoided, else the first able `code` target that isn't, else the same
+  provider on another model, else nobody. An agent run on a new thread,
+  `fresh`, in a read-only worktree
   `judge-<item>` at the item's commit or `accept-<goal>` at the landed head,
   briefed by `eki/judgebrief.py`: the goal, the checks by id, the item and
   its `git diff` command, the builder's summary as "the builder's claim —

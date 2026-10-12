@@ -1,6 +1,7 @@
 """`eki goal` — standing goals: a goal in words on a git folder, worked on in rounds (eki/standing.py)."""
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -26,6 +27,8 @@ def add(p) -> None:
                    "are taken")
     a.add_argument("--check", help="the shell command that judges an item (default: its bin/check, or the guess)")
     a.add_argument("--branch", help="the branch eki works from (default: the folder's current one)")
+    a.add_argument("--yes", action="store_true", help="on a folder with no branch or no commit yet: "
+                   "let eki make a branch 'main' or commit the folder as it is")
     for action, text in (("pause", "stop opening rounds"), ("resume", "on again, stuck and rest cleared"),
                          ("now", "clear the rest: a round when the Mac and budget allow")):
         sub.add_parser(action, help=text).add_argument("id", help="the standing goal's id (or its start)")
@@ -140,8 +143,7 @@ def _add(c, args) -> int:
     repo = None if projects.is_self(folder) or not folder.is_dir() else github.repo_of(folder)
     try:
         if repo is None:
-            print(standing.add(c, args.folder, args.text, check=args.check, branch=args.branch))
-            return 0
+            return _add_folder(c, args)
         if repo == integration.own_repo():            # eki's own repo: a self goal, no row, no clone
             sid = standing.add(c, str(builds.source()), args.text, issue=None)
             print(f"{repo} is eki's own repo: on eki's own queue")
@@ -160,6 +162,32 @@ def _add(c, args) -> int:
         err(f"eki: {e}")
         return 1
     print(f"{repo}: working in eki's own clone at {projects.clone_path(repo)}, not {folder}")
+    print(sid)
+    return 0
+
+
+def _add_folder(c, args) -> int:
+    """A standing goal on a local git folder; a folder with nowhere to land gets eki's offer,
+    taken with --yes or a y at the terminal."""
+    fix = bool(args.yes)
+    try:
+        sid = standing.add(c, args.folder, args.text, check=args.check, branch=args.branch, fix=fix)
+    except projects.NeedsBranch as e:
+        if not sys.stdin.isatty():
+            err(f"eki: {e}")
+            text = args.text.replace('"', '\\"')
+            err(f'Say yes: eki goal add {args.folder} "{text}" --yes')
+            return 1
+        print(e)
+        if input("Do it? [y/N] ").strip().lower() not in ("y", "yes"):
+            return 1
+        fix = True
+        sid = standing.add(c, args.folder, args.text, check=args.check, branch=args.branch, fix=fix)
+    if fix:
+        st = c.execute("SELECT project FROM standing WHERE id=?", (sid,)).fetchone()
+        p = projects.get(c, st["project"]) if st and st["project"] else None
+        if p is not None:
+            print(f"{p['path']}: eki works on branch {p['branch']}, nothing pushed")
     print(sid)
     return 0
 

@@ -38,16 +38,19 @@ FAILED = ("failed", "left")
 # ---- in ---------------------------------------------------------------------------------------
 
 def add(conn: sqlite3.Connection, folder: str, text: str, *, check: Optional[str] = None,
-        branch: Optional[str] = None, issue: Optional[int] = None, project: Optional[str] = None) -> str:
+        branch: Optional[str] = None, issue: Optional[int] = None, project: Optional[str] = None,
+        fix: bool = False) -> str:
     """A standing goal on `folder` (from GitHub issue `issue`, if any); ValueError when it
-    isn't a git repo with a commit. With `project` (a projects.id) the folder isn't looked at."""
+    isn't a git repo, projects.NeedsBranch when it has nowhere to land (`fix` says yes to the offer).
+    With `project` (a projects.id) the folder isn't looked at."""
     text = (text or "").strip()
     if not text:
         raise ValueError("a standing goal needs words")
     if project is not None:
         pid = project
     else:
-        pid = None if projects.is_self(folder) else projects.add(conn, folder, check=check, branch=branch)
+        pid = None if projects.is_self(folder) else projects.add(
+            conn, folder, check=check, branch=branch, fix=fix)
     sid = store.new_id()
     with db.tx(conn):
         conn.execute("INSERT INTO standing(id, project, text, state, created_at, issue) "

@@ -40,7 +40,7 @@ def test_add_is_idempotent_and_defaults(conn, proj):
     assert projects.base(p) == workspace.head(proj)
 
 
-def test_add_refuses_a_folder_that_is_no_repo_or_has_no_commit(conn, tmp_path):
+def test_add_refuses_a_folder_that_is_no_repo_and_offers_a_first_commit(conn, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     with pytest.raises(ValueError):
@@ -48,8 +48,9 @@ def test_add_refuses_a_folder_that_is_no_repo_or_has_no_commit(conn, tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     workspace.git(empty, "init", "-q")
-    with pytest.raises(ValueError):
+    with pytest.raises(projects.NeedsBranch) as e:
         projects.add(conn, empty)
+    assert e.value.offer == "commit" and "has no commit yet" in str(e.value)
     assert projects.all(conn) == []
 
 

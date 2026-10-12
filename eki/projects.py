@@ -24,15 +24,55 @@ DEPS = (".venv", "node_modules")
 #: apply: eki lands fit items on the branch; propose: the branch waits for the person
 AUTONOMY = ("apply", "propose")
 
+#: the message of the commit eki makes in a repo with none yet, when the person says yes
+FIRST = "eki: the folder as it was"
+
+
+class NeedsBranch(ValueError):
+    """The folder has nowhere for work to land; `offer` is what eki can do about it:
+    'branch' (a detached HEAD: make a branch 'main') or 'commit' (no commit yet: commit the folder)."""
+
+    def __init__(self, folder: Path, offer: str) -> None:
+        self.folder, self.offer = str(folder), offer
+        if offer == "branch":
+            text = (f"{folder} isn't on a branch (a detached HEAD), so eki has nowhere to land work. "
+                    f"eki can make a branch 'main' here at this commit.")
+        else:
+            text = f"{folder} has no commit yet. eki can commit the folder as it is, so work has a starting point."
+        super().__init__(text)
+
+
+def _make_branch(where: Path) -> str:
+    """A new branch 'main' (or main-<n> when main is taken) at the detached HEAD, switched to."""
+    name, n = "main", 1
+    while workspace.git(where, "rev-parse", "--verify", "-q", f"refs/heads/{name}", check=False):
+        n += 1
+        name = f"main-{n}"
+    workspace.git(where, "switch", "-q", "-c", name)
+    return name
+
+
+def _first_commit(where: Path) -> None:
+    """The folder as it is, committed on the unborn branch; nothing pushed."""
+    who: List[str] = []
+    if not (workspace.git(where, "config", "user.name", check=False)
+            and workspace.git(where, "config", "user.email", check=False)):
+        who = ["-c", "user.name=eki", "-c", "user.email=eki@localhost"]
+    workspace.git(where, "add", "-A")
+    workspace.git(where, *who, "commit", "-q", "--allow-empty", "--no-verify", "-m", FIRST)
+
 
 def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = None,
-        branch: Optional[str] = None, name: Optional[str] = None) -> str:
-    """Record the git folder at `path`; the same path again is the same project."""
+        branch: Optional[str] = None, name: Optional[str] = None, fix: bool = False) -> str:
+    """Record the git folder at `path`; the same path again is the same project. A repo with
+    no commit or on no branch raises NeedsBranch, unless `fix` says yes to its offer."""
     where = Path(path).expanduser().resolve()
     if not where.is_dir() or workspace.repo_of(where) is None:
         raise ValueError(f"{where} is not a git repo")
     if not workspace.git(where, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False):
-        raise ValueError(f"{where} has no commit yet")
+        if not fix:
+            raise NeedsBranch(where, "commit")
+        _first_commit(where)
     got = conn.execute("SELECT id, branch, repo, state FROM projects WHERE path=?", (str(where),)).fetchone()
     if got and got["state"] == "deleting":
         raise ValueError(f"{where} is being deleted from eki: add it again in a moment")
@@ -40,7 +80,9 @@ def add(conn: sqlite3.Connection, path: str | Path, *, check: Optional[str] = No
         return got["id"]
     branch = branch or workspace.git(where, "symbolic-ref", "--short", "-q", "HEAD", check=False)
     if not branch:
-        raise ValueError(f"{where} is on no branch: say which with --branch")
+        if not fix:
+            raise NeedsBranch(where, "branch")
+        branch = _make_branch(where)
     if got:                                              # a chat-only project: its background work starts here
         with db.tx(conn):
             conn.execute("UPDATE projects SET branch=?, check_cmd=COALESCE(?, check_cmd) WHERE id=?",

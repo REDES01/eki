@@ -132,3 +132,54 @@ def test_any_matching_tests_rule_stands_in_for_the_scan(repo):
     assert testpick.pick(rules, ["eki/x.py"], repo).files == ("tests/test_db.py",)
     assert testpick.pick(rules, ["eki/queue.py"], repo).files == ("tests/test_db.py", "tests/test_queue.py")
     assert not testpick.pick(rules, ["eki/newmod.py"], repo).whole
+
+
+@pytest.mark.parametrize("files", [
+    {"pkg/mid.py": "from . import low\n"},
+    {"pkg/mid.py": "from . import (\n    other,\n    low,\n)\n"},
+    {"pkg/mid.py": "from .low import x\n"},
+    {"pkg/mid.py": "from pkg.sub import top\n", "pkg/sub/__init__.py": "", "pkg/sub/top.py": "from .. import low\n"},
+    {"pkg/mid.py": "import pkg.low\n"},
+])
+def test_a_module_draws_the_tests_of_the_modules_importing_it(tmp_path, files):
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pkg" / "__init__.py").parent.mkdir()
+    (root / "pkg" / "__init__.py").write_text("")
+    (root / "pkg" / "low.py").write_text("x = 1\n")
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text)
+    (root / "tests" / "test_mid.py").write_text("from pkg import mid\n")
+    (root / "tests" / "test_other.py").write_text("import pkg.other\n")
+    (root / "tests" / "__pycache__").mkdir()
+    (root / "tests" / "__pycache__" / "x.py").write_text("from pkg import low\n")
+    got = testpick.pick([], ["pkg/low.py"], root)
+    assert got == Picked(False, ("tests/test_mid.py",), ("pkg/low.py",))
+    assert testpick.said(got) == "gate 1: 1 test file for pkg/low.py"
+    assert testpick.pick([], ["pkg/mid.py"], root).files == ("tests/test_mid.py",)
+
+
+def test_only_one_level_up_and_unrelated_relatives_do_not_count(tmp_path):
+    root = tmp_path / "repo"
+    for path, text in {"pkg/__init__.py": "", "pkg/low.py": "", "pkg/mid.py": "from . import low\n",
+                       "pkg/top.py": "from . import mid\n", "pkg/near.py": "from .lowish import y\n",
+                       "other/__init__.py": "", "other/m.py": "from . import low\n",
+                       "tests/test_top.py": "from pkg import top\n",
+                       "tests/test_near.py": "from pkg import near\n",
+                       "tests/test_m.py": "from other import m\n"}.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text)
+    got = testpick.pick([], ["pkg/low.py"], root)
+    assert got.whole and testpick.said(got) == "gate 1: whole fast suite (pkg/low.py has no tests)"
+
+
+def test_on_eki_itself_a_plan_change_draws_the_gate_tests_without_the_whole_suite():
+    from pathlib import Path
+    import time
+    root = Path(__file__).resolve().parent.parent
+    start = time.monotonic()
+    got = testpick.pick([], ["eki/selfplan.py"], root)
+    assert time.monotonic() - start < 1.5
+    assert not got.whole
+    assert {"tests/test_project_goals.py", "tests/test_workflow_gates.py"} <= set(got.files)

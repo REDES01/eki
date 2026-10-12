@@ -2,9 +2,11 @@
 
 A touched file under a tests rule draws that rule's test files (its patterns matched against the
 files under root/tests, found by listing them). A touched file under no tests rule draws the
-tests whose text imports it (`importers`, a plain text scan: nothing is imported or run). The
-whole suite runs when a matching rule says "all", when more than `whole_over` files changed, or
-when a module outside tests/ has no tests at all. Stdlib only.
+tests whose text imports it (`importers`, a plain text scan: nothing is imported or run), plus,
+for a .py file, the tests that import any module outside tests/ that imports it (one level up,
+relative imports resolved against the module's package). The whole suite runs when a matching
+rule says "all", when more than `whole_over` files changed, or when a module outside tests/ has
+no tests at either level. Stdlib only.
 """
 from __future__ import annotations
 
@@ -18,6 +20,9 @@ from typing import Dict, List, Optional, Tuple
 from . import pathrules
 
 TESTS = "tests"
+SKIP = {TESTS, ".git", "__pycache__", "node_modules"}
+_LIST = r"(\([^)]*\)|[^\n]*(?:\\\n[^\n]*)*)"
+_RELATIVE = re.compile(r"(?m)^\s*from\s+(\.+)([\w.]*)\s+import\s+" + _LIST)
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,23 @@ def _texts(root: Path) -> Dict[str, str]:
     return out
 
 
+def _modules(root: Path) -> Dict[str, str]:
+    """The text of every .py file under root outside tests/, .git, __pycache__, node_modules and
+    dot folders, by repo-relative path."""
+    out, root = {}, Path(root)
+    for here, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP and not d.startswith("."))
+        rel = Path(here).relative_to(root).as_posix()
+        for f in files:
+            if f.endswith(".py"):
+                path = f if rel == "." else f"{rel}/{f}"
+                try:
+                    out[path] = (root / path).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+    return out
+
+
 def _is_test(path: str) -> bool:
     name = path.rsplit("/", 1)[-1]
     return path.startswith(TESTS + "/") and name.endswith(".py") and (
@@ -61,14 +83,34 @@ def _names(listed: str) -> List[str]:
     return [n.split()[0] for n in (p.strip() for p in listed.split(",")) if n]
 
 
+def _dotted(path: str) -> List[str]:
+    """The module parts of a repo-relative .py path: 'eki/a/__init__.py' → ['eki', 'a']."""
+    parts = path[:-3].split("/")
+    return parts[:-1] if parts[-1] == "__init__" else parts
+
+
+def _relative(path: str, text: str) -> set:
+    """The dotted modules the relative imports in `path`'s text name, resolved against its package:
+    in pkg/sub/m.py, `from .. import a` → pkg.a, `from .a import x` → pkg.sub.a and pkg.sub.a.x."""
+    package = path.split("/")[:-1]
+    out = set()
+    for m in _RELATIVE.finditer(text):
+        up = len(m.group(1)) - 1
+        if up > len(package):
+            continue
+        base = package[:len(package) - up] + [p for p in m.group(2).split(".") if p]
+        if m.group(2):
+            out.add(".".join(base))
+        out.update(".".join(base + [n]) for n in _names(m.group(3)) if n != "*")
+    return out
+
+
 def _finder(path: str):
     """A test (text → bool) for "this text imports `path`"."""
     if not path.endswith(".py"):
         base = path.rsplit("/", 1)[-1]
         return lambda text: base in text
-    parts = path[:-3].split("/")
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
+    parts = _dotted(path)
     if not parts:
         return lambda text: False
     dotted = re.compile(r"(?<![\w.])" + re.escape(".".join(parts)) + r"(?!\w)")
@@ -91,6 +133,22 @@ def _importers(texts: Dict[str, str], path: str) -> List[str]:
     return sorted(f for f, text in texts.items() if _is_test(f) and f != path and finds(text))
 
 
+def _users(modules: Dict[str, str], path: str) -> List[str]:
+    """The modules outside tests/ that import `path` (a .py file), absolute or relative."""
+    finds, dotted = _finder(path), ".".join(_dotted(path))
+    return sorted(m for m, text in modules.items()
+                  if m != path and (finds(text) or (dotted and dotted in _relative(m, text))))
+
+
+def _drawn(texts: Dict[str, str], modules: Dict[str, str], path: str) -> List[str]:
+    """The tests importing `path`, plus for a module the tests importing a module that imports it."""
+    got = set(_importers(texts, path))
+    if path.endswith(".py") and not _is_test(path):
+        for m in _users(modules, path):
+            got.update(_importers(texts, m))
+    return sorted(got)
+
+
 def importers(root: Path, path: str) -> List[str]:
     """The test files under root/tests whose text imports `path` (a repo-relative file): for
     `eki/a/b.py`, `eki.a.b` as a whole word or a `from eki.a import … b …` list; for any other
@@ -111,11 +169,13 @@ def pick(rules, touched: List[str], root: Optional[Path], whole_over: int = 25) 
         return Picked(True, (), tuple(core))
     listed = _listed(root) if any(hit.values()) else []
     texts = _texts(root) if not all(hit.values()) else {}
+    scan = any(not hit[t] and t.endswith(".py") and not _is_test(t) for t in touched)
+    modules = _modules(root) if scan else {}
     files, because = set(), []
     for t in touched:
         got = [f for f in listed if any(pathrules.matches(p, f) for r in hit[t] for p in r.tests)]
         if not hit[t]:
-            scanned = _importers(texts, t)
+            scanned = _drawn(texts, modules, t)
             if not scanned and t.endswith(".py") and not t.startswith(TESTS + "/"):
                 return Picked(True, (), (f"{t} has no tests",))
             got += scanned

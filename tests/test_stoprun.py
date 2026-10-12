@@ -38,6 +38,8 @@ def test_a_failing_check_is_judgment_not_a_crash():
     for text in ("exited 1", "Traceback (most recent call last):\n  timed out"):
         stop = stopkind.classify(stopkind.Failure(state="failed", error=text, provider="command", now=1.0))
         assert stop.kind == "judgment"
+    card = stopkind.Failure(state="failed", error="bad exited 3: no voice", provider="component")
+    assert stopkind.classify(card).kind == "judgment"
     gone = "couldn't start bin/check: [Errno 2] No such file or directory: '/x/wt'"
     assert stopkind.classify(stopkind.Failure(state="failed", error=gone, provider="command")).kind == "environment"
 

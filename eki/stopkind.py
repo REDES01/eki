@@ -66,7 +66,7 @@ def classify(f: Failure) -> Stop:
         return Stop("judgment", None, "")
     if fix := _environment(text, f.provider):
         return Stop("environment", None, fix)
-    if f.provider == "command":                     # a check: its exit and output are the verdict
+    if f.provider in ("command", "component"):      # a check or a card call: its exit is the answer
         return Stop("judgment", None, "")
     low = text.lower()
     if any(k in low for k in _PASSING) or _CRASH.search(text) or ("api error" in low and _SERVER.search(low)):

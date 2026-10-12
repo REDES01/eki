@@ -299,6 +299,8 @@ ADDED = [
     ("items", "waits", "TEXT"),         # JSON {stage, run, since, calls} while waiting on calls
     ("projects", "lands", "TEXT"),      # here | github; NULL: not said yet (eki/projectlands.py)
     ("projects", "chat_history", "INTEGER DEFAULT 1"),   # 1: chat turns are committed (eki/chatcommit.py)
+    ("goals", "hot", "TEXT"),           # JSON: the plan's hot spots, [{file, items, generated}]
+    ("goals", "dry_run", "TEXT"),       # the dry build's command run (eki/drybuild.py)
 ]
 
 

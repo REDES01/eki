@@ -67,4 +67,5 @@ def _queue(c) -> None:
         pos = f"{n}." if it["state"] == "queued" else "-"
         head = (it["head"] or "")[:8] or "-"
         docs = " (docs only)" if doccheck.of_item(it) else ""
+        docs += f"  {selfview.judged(it)}" if selfview.judged(it) else ""
         print(f"  {pos:<3} {it['id']}  on {head:<8}  {stage(c, it):<42} {it['title'][:40]}{docs}")

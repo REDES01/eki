@@ -138,6 +138,7 @@ def show(c, iid: str) -> int:
     print(f"touched:  {', '.join(json.loads(it['touched'] or '[]')) or '-'}")
     print(f"worktree: {it['worktree'] or '-'}  branch {it['branch'] or '-'}  base {(it['base'] or '')[:12]}")
     print(f"commit:   {it['commit_sha'] or '-'}   tries {it['tries']}   run {it['run_id'] or '-'}")
+    print(f"gate 1:   {selfview.judged(it) or '-'}")
     stopped = itemhold.line(c, it)
     if stopped:
         print(f"stopped:  {stopped}")

@@ -72,22 +72,28 @@ def _values(spec: dict, eki: bool) -> Dict[str, Any]:
     am = spec.get("after_merge")
     cmd, batch = spec.get("command"), spec.get("batch_command")
     try:
-        rules = pathrules.parse(cmd) if isinstance(cmd, list) and not eki else ()
+        rules = pathrules.parse(cmd) if isinstance(cmd, list) else ()
     except ValueError:
         rules = ()
-    cmd = (cmd if isinstance(cmd, str) else "") or ("bin/check" if eki else "")
-    batch = batch if isinstance(batch, str) and batch.strip() and not eki else cmd
+    cmd = (cmd if isinstance(cmd, str) else "") or ("bin/check" if eki and not rules else "")
+    tc, over = spec.get("test_command"), spec.get("whole_over")
+    tc = tc.strip() if isinstance(tc, str) else ""
+    over = over if isinstance(over, int) and not isinstance(over, bool) and over >= 1 else 25
+    batch = "bin/check" if eki else batch if isinstance(batch, str) and batch.strip() else cmd   # eki: queue.GATE2
     out = {"router": spec.get("router", kind.CHOICE_DEFAULTS["router"]), "target": targets.key(t) if t else "",
            "plan": spec.get("plan", kind.CHOICE_DEFAULTS["plan"]), "parallel": spec.get("parallel", kind.PARALLEL),
            "checks": [c for c in checks if isinstance(c, str)] or ["self"],
-           "command": cmd, "rules": [{"name": r.name, "paths": list(r.paths), "run": r.run} for r in rules],
+           "command": cmd, "rules": [{"name": r.name, "paths": list(r.paths), "run": r.run, "tests": list(r.tests)}
+                                     for r in rules],
+           "test_command": tc, "whole_over": over,
            "batch_command": batch,
            "merge": spec.get("merge", kind.CHOICE_DEFAULTS["merge"]),
            "playtester": spec.get("playtester") or kind.PLAYTESTER,
            "after_merge": am.strip() if isinstance(am, str) else ""}
     wf = workflow.Workflow(router=out["router"], target=out["target"], plan=out["plan"], parallel=out["parallel"],
                            checks=tuple(out["checks"]), command=cmd, merge=out["merge"],
-                           playtester=out["playtester"], card="", rules=rules, batch_command=batch)
+                           playtester=out["playtester"], card="", rules=rules, batch_command=batch,
+                           test_command=tc, whole_over=over)
     out["each"], out["together"] = workflow.each_said(wf), workflow.together_said(wf)
     return out
 

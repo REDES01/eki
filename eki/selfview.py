@@ -49,7 +49,7 @@ def lined(c: sqlite3.Connection) -> List[sqlite3.Row]:
 def _lined(c, n: int, it) -> Dict[str, Any]:
     return {"id": it["id"], "pos": n if it["state"] == "queued" else None, "state": it["state"],
             "head": it["head"], "stage": stage(c, it), "title": it["title"],
-            "docs_only": bool(doccheck.of_item(it)), "run": it["run_id"],
+            "docs_only": bool(doccheck.of_item(it)), "judged_by": judged(it), "run": it["run_id"],
             "thread": _thread(c, it["run_id"])}
 
 
@@ -84,9 +84,15 @@ def stands(c, g) -> str:
 
 def _item(c, it) -> Dict[str, Any]:
     return {"id": it["id"], "state": it["state"], "title": it["title"], "where": where(it),
-            "note": note(c, it), "docs_only": bool(doccheck.of_item(it)), "run": it["run_id"],
+            "note": note(c, it), "docs_only": bool(doccheck.of_item(it)), "judged_by": judged(it),
+            "run": it["run_id"],
             "thread": _thread(c, it["run_id"]), "branch": it["branch"], "pr": it["pr"],
             "context": [x["name"] for x in context(it)] or None}
+
+
+def judged(it) -> Optional[str]:
+    """What gate 1 ran on the item, as items.judged_by says it ('gate 1: 4 test files for eki/queue.py')."""
+    return (it["judged_by"] or None) if "judged_by" in it.keys() else None
 
 
 def context(it) -> List[Dict[str, str]]:

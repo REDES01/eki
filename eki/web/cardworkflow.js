@@ -40,10 +40,13 @@
   // a rule's label: its name, else its paths joined (eki/pathrules.py label)
   const label = (r) => String(r.name || "").trim() || (r.paths || []).map((p) => String(p).trim()).join(", ");
 
-  // "Each change: story files → npm run check:story · code → …", or "Each change: <command>"
+  // what a rule runs (eki/workflow.py rule_runs): its test patterns, "whole suite" for "all", or its command
+  const runs = (r) => (r.tests === "all" || (Array.isArray(r.tests) && r.tests.length === 1 && r.tests[0] === "all") ? "whole suite"
+    : Array.isArray(r.tests) && r.tests.length ? r.tests.join(", ") : r.run);
+  // "Each change: story files → npm run check:story · core → whole suite · …", or "Each change: <command>"
   function each(spec) {
     const s = spec || {}, cmd = s.command;
-    if (Array.isArray(cmd) && cmd.length) return "Each change: " + cmd.map((r) => `${label(r || {})} → ${(r || {}).run}`).join(" · ");
+    if (Array.isArray(cmd) && cmd.length) return "Each change: " + cmd.map((r) => `${label(r || {})} → ${runs(r || {})}`).join(" · ");
     if (text(cmd)) return `Each change: ${cmd}`;
     return checksOf(s).includes("train") ? "Each change: bin/check" : "Each change: no check command";
   }

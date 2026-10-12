@@ -197,10 +197,20 @@ def test_unknown_project_is_a_keyerror(conn):
         graph(conn, "nope")
 
 
-def test_ekis_own_project_has_train_and_its_locked_stages(conn, tmp_path, monkeypatch):
+def _eki_card(tmp_path, monkeypatch, **spec):
+    """eki's own card copied into a tmp EKI_SOURCE, its gate-1 keys replaced by `spec`'s."""
     eki = tmp_path / "eki"
     shutil.copytree(builds.source() / "components" / "workflow", eki / "components" / "workflow")
+    path = eki / "components" / "workflow" / "component.json"
+    card = {k: v for k, v in json.loads(path.read_text()).items()
+            if k not in ("command", "test_command", "whole_over")}
+    path.write_text(json.dumps({**card, **spec}))
     monkeypatch.setenv("EKI_SOURCE", str(eki))
+    return eki
+
+
+def test_ekis_own_project_has_train_and_its_locked_stages(conn, tmp_path, monkeypatch):
+    _eki_card(tmp_path, monkeypatch)
     _goal(conn, "g0", "planned", project=None)
     _item(conn, "n", "landed")
     _item(conn, "rb", "rolled back")
@@ -265,7 +275,8 @@ def test_values_carry_the_rules_and_the_lines():
     from eki import api_workflow
     v = api_workflow._values({"checks": ["self", "command", "batch"], "command": GAME, "batch_command": "b"}, False)
     assert v["command"] == "" and v["batch_command"] == "b"
-    assert v["rules"] == GAME and v["each"] == EACH and v["together"] == "Together, before merging: b"
+    assert v["rules"] == [{**r, "tests": []} for r in GAME] and v["each"] == EACH
+    assert v["together"] == "Together, before merging: b" and (v["test_command"], v["whole_over"]) == ("", 25)
     v = api_workflow._values({"checks": ["self"]}, False)
     assert v["rules"] == [] and v["each"] == "Each change: no check command"
 
@@ -361,3 +372,41 @@ def test_the_project_background_carries_each_goals_checks(conn, proj):
     assert bg["g0"]["checks"] == [{"id": "c1", "text": "bin/check passes", "verdict": "passed", "scope": "final",
                                    "round": 1, "provider": "codex", "model": "gpt-5", "at": 100.0}]
     assert bg["g1"]["checks"] == []
+
+
+EKI_RULES = [{"name": "core", "paths": ["bin/check", "eki/db.py"], "tests": "all"},
+             {"name": "queue", "paths": ["eki/queue*.py"], "tests": ["tests/test_queue*.py"]},
+             {"paths": ["eki/web/**"], "run": "npm run lint"}]
+EKI_TC = "EKI_CHECK_FAST=1 bin/check -q"
+
+
+def test_ekis_rules_are_shown_like_a_projects(conn, tmp_path, monkeypatch):
+    from eki.components import workflow as kind
+    told = kind._command                  # rules on eki's card are good (eki/components/workflow.py _command)
+    monkeypatch.setattr(kind, "_command", lambda spec, checks, eki: [
+        e for e in told(spec, checks, eki) if "rules are for projects" not in e])
+    _eki_card(tmp_path, monkeypatch, checks=["self", "review", "command", "batch", "train"],
+              command=EKI_RULES, test_command=EKI_TC, whole_over=30)
+    _goal(conn, "g0", "planned", project=None)
+    conn.commit()
+    g = graph(conn, "eki")
+    by = stages(g)
+    assert g["eki"] is True and g["spec"]["command"] == EKI_RULES
+    assert by["command"]["on"] and by["command"]["summary"] == \
+        "Each change: core → whole suite · queue → tests/test_queue*.py · eki/web/** → npm run lint"
+    assert by["batch"]["summary"] == "Together, before merging: bin/check"           # gate 2: the whole suite
+    side = {f["card"]: f for f in g["feeds"]}[""]
+    assert side["label"] == by["command"]["summary"]
+
+
+def test_ekis_values_carry_tests_rules_test_command_and_whole_over():
+    from eki import api_workflow
+    v = api_workflow._values({"checks": ["self", "command", "batch", "train"], "command": EKI_RULES,
+                              "test_command": EKI_TC, "whole_over": 30}, True)
+    assert v["rules"] == [{"name": "core", "paths": ["bin/check", "eki/db.py"], "run": "", "tests": ["all"]},
+                          {"name": "queue", "paths": ["eki/queue*.py"], "run": "", "tests": ["tests/test_queue*.py"]},
+                          {"name": "", "paths": ["eki/web/**"], "run": "npm run lint", "tests": []}]
+    assert (v["command"], v["test_command"], v["whole_over"], v["batch_command"]) == ("", EKI_TC, 30, "bin/check")
+    v = api_workflow._values({"checks": ["self", "batch", "train"]}, True)          # no rules: eki's bin/check
+    assert (v["command"], v["rules"], v["whole_over"]) == ("bin/check", [], 25)
+    assert v["each"] == "Each change: bin/check"

@@ -1,17 +1,32 @@
 // The check command in the workflow stage panel (workflowinspect.js draws it, for the Check command and
 // Batch stages): either one line of text, or path rules as rows — name, paths (separated by commas or new
 // lines, .gitignore patterns as eki/pathrules.py reads them) and the command — with add row, remove row and
-// a switch between the two. It holds the rows being edited; what it hands back is the settings to save
+// a switch between the two. A rule that names tests ({paths, tests}: test-file patterns, or "all" for the
+// whole suite) keeps its tests in place of the command, and saves them back as tests. It holds the rows being edited; what it hands back is the settings to save
 // into the workflow card (POST …/cards/<card> {"settings": …}): {command: "text"}, or {command: [{name?,
-// paths, run}]} with no name key when the name is blank — and nothing while a row still lacks paths or a
-// command, so a half-typed row is never sent. Plus the batch_command field: what gate 2 runs together.
+// paths, run | tests}]} with no name key when the name is blank — and nothing while a row still lacks paths or a
+// command, so a half-typed row is never sent. Plus the batch_command field: what gate 2 runs together. eki's
+// own rules are drawn read-only, each as its paths → its tests ("whole suite" for "all") or its command.
 //   window.workflowRules = { start(command), html(state, opts), batch(spec, opts), change(state, ds, value),
-//                            click(state, ds), list(rows), hint(state) }
+//                            click(state, ds), list(rows), hint(state), runs(rule) }
 (function () {
   const esc = (s) => md.esc(String(s == null ? "" : s));
   const row = (r) => ({ name: (r && typeof r.name === "string") ? r.name : "",
                         paths: (r && Array.isArray(r.paths) ? r.paths : []).join("\n"),
-                        run: (r && typeof r.run === "string") ? r.run : "" });
+                        run: (r && typeof r.run === "string") ? r.run : "",
+                        ...(named(r) ? { tests: tests(r.tests).join("\n") } : {}) });
+  // a rule that names tests rather than a command
+  const named = (r) => !!r && (Array.isArray(r.tests) ? r.tests.length > 0 : typeof r.tests === "string" && !!r.tests.trim());
+  // a rule's tests as a list: "all" (or ["all"]) is ["all"], the whole suite
+  const tests = (t) => (Array.isArray(t) ? t.map((p) => String(p).trim()).filter(Boolean) : split(t));
+  // what a rule runs, in plain words (eki/workflow.py rule_runs): its tests, "whole suite", or its command
+  function runs(r) {
+    if (named(r)) {
+      const t = tests(r.tests);
+      return t.length === 1 && t[0] === "all" ? "whole suite" : t.join(", ");
+    }
+    return String((r && r.run) || "");
+  }
 
   // the editing state for a card's `command`: text or rules
   function start(command) {
@@ -26,8 +41,17 @@
     if (!rows.length) return null;
     const out = [];
     for (const r of rows) {
-      const paths = split(r.paths), run = String(r.run || "").trim(), name = String(r.name || "").trim();
-      if (!paths.length || !run) return null;
+      const paths = split(r.paths), name = String(r.name || "").trim();
+      if (!paths.length) return null;
+      if ("tests" in r) {
+        const t = tests(r.tests);
+        if (!t.length) return null;
+        const named = t.length === 1 && t[0] === "all" ? "all" : t;
+        out.push(name ? { name, paths, tests: named } : { paths, tests: named });
+        continue;
+      }
+      const run = String(r.run || "").trim();
+      if (!run) return null;
       out.push(name ? { name, paths, run } : { paths, run });
     }
     return out;
@@ -44,13 +68,18 @@
     return st.rows.map((r, i) => `<div class="wr-row">
       <input class="set-in wr-name" data-wr-row="${i}" data-wr-key="name" value="${esc(r.name)}" placeholder="name (optional)" spellcheck="false"${dis}>
       <textarea class="set-in wr-paths" data-wr-row="${i}" data-wr-key="paths" rows="2" placeholder="design/script/**, *.md" spellcheck="false"${dis}>${esc(r.paths)}</textarea>
-      <input class="set-in wi-text wr-run" data-wr-row="${i}" data-wr-key="run" value="${esc(r.run)}" placeholder="npm run check" spellcheck="false"${dis}>
+      ${"tests" in r
+        ? `<textarea class="set-in wr-tests" data-wr-row="${i}" data-wr-key="tests" rows="2" placeholder="tests/test_x*.py, or all" spellcheck="false"${dis}>${esc(r.tests)}</textarea>`
+        : `<input class="set-in wi-text wr-run" data-wr-row="${i}" data-wr-key="run" value="${esc(r.run)}" placeholder="npm run check" spellcheck="false"${dis}>`}
       <button type="button" class="wr-del" data-wr-del="${i}" title="remove this rule"${dis}>×</button></div>`).join("");
   }
 
   // the command field's control: the switch, then the line or the rows (opts: dis, eki, wait)
   function html(st, opts) {
     const o = opts || {}, dis = o.dis || "";
+    if (o.eki && st.mode === "rules" && st.rows.length) {
+      return `<div class="wr-rows">${st.rows.map((r) => `<div class="wr-ro"><code>${esc(split(r.paths).join(", "))}</code> → ${esc(runs(r))}</div>`).join("")}</div>`;
+    }
     if (o.eki) {
       return `<input class="set-in wi-text" data-wi="command" value="${esc(st.text)}" placeholder="bin/check" spellcheck="false"${dis}>`;
     }
@@ -100,5 +129,5 @@
     return null;
   }
 
-  window.workflowRules = { start, html, batch, change, click, list, hint };
+  window.workflowRules = { start, html, batch, change, click, list, hint, runs };
 })();

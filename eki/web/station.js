@@ -110,7 +110,7 @@
         <span class="st-pos">${q.pos ? q.pos + "." : "-"}</span><code>${esc(q.id)}</code>
         <span class="dim">on ${esc((q.head || "").slice(0, 8) || "-")}</span>
         <span class="st-stage">${esc(q.stage)}</span><span class="st-t">${esc(q.title)}</span>
-        ${q.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(q.thread)}</div>`).join("") : "";
+        ${q.docs_only ? '<span class="st-tag">docs only</span>' : ""}${q.judged_by ? `<span class="dim st-gate">${esc(q.judged_by)}</span>` : ""}${tlink(q.thread)}</div>`).join("") : "";
     // every project's goals, grouped (stationgroups.js): busy goals always, finished ones behind "show all"
     const groups = s.groups || [{ project: null, name: "eki", goals: s.goals }];
     const goals = stationGroups.render(groups, { goal, btn, all: S.allGoals });
@@ -143,7 +143,7 @@
     return `<div class="st-item" data-state="${esc(it.state)}"><div class="st-ihead"><code>${esc(it.id)}</code>
         <span class="st-state s-${esc(it.state.replace(/\s/g, "-"))}">${esc(it.state)}</span>
         <span class="dim st-where">${it.pr ? prs.link(it.pr) : esc(it.where)}</span><span class="st-t">${esc(it.title)}</span>
-        ${it.docs_only ? '<span class="st-tag">docs only</span>' : ""}${tlink(it.thread)}
+        ${it.docs_only ? '<span class="st-tag">docs only</span>' : ""}${it.judged_by ? `<span class="dim st-gate">${esc(it.judged_by)}</span>` : ""}${tlink(it.thread)}
         <span class="grow"></span>${err(it.id)}<span class="st-acts" data-state="${esc(it.state)}">${acts}</span></div>
       ${Array.isArray(it.context) && it.context.length ? `<div class="dim st-ctx">context: ${esc(it.context.join(", "))}</div>` : ""}
       ${it.note ? `<div class="st-note">${esc(it.note)}</div>` : ""}</div>`;

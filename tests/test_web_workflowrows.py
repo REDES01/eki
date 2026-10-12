@@ -100,3 +100,65 @@ def test_a_resize_fits_again_until_the_person_moves_the_view(tmp_path):
     first, refit, dragged, kept = got["views"]
     assert refit != first and refit["k"] <= first["k"]
     assert dragged["tx"] == refit["tx"] + 40 and kept == dragged
+
+
+# ---- a rule that names tests (eki/web/workflowrules.js, cardworkflow.js) ----------------------------
+
+RULES_STUB = r"""
+const fs = require("fs");
+const [, , file, args] = process.argv;
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+global.window = global; global.md = { esc };
+eval(fs.readFileSync(file, "utf8"));
+const [command, edit] = JSON.parse(args);
+const st = workflowRules.start(command);
+const out = { runs: command.map(workflowRules.runs), eki: workflowRules.html(st, { eki: true, dis: " disabled" }),
+              html: workflowRules.html(st, {}), list: workflowRules.list(st.rows) };
+if (edit) out.saved = workflowRules.change(st, { wrRow: String(edit[0]), wrKey: edit[1] }, edit[2]);
+process.stdout.write(JSON.stringify(out));
+"""
+
+TESTS_RULES = [{"name": "core", "paths": ["bin/check", "eki/db.py"], "tests": "all"},
+               {"paths": ["eki/queue*.py"], "tests": ["tests/test_queue*.py", "tests/test_store_and_rules.py"]},
+               {"name": "web", "paths": ["eki/web/**"], "run": "npm run lint"}]
+
+
+def rules(tmp_path, command, edit=None):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "rules.js"
+    stub.write_text(RULES_STUB)
+    got = subprocess.run(["node", str(stub), str(WEB / "workflowrules.js"), json.dumps([command, edit])],
+                         capture_output=True, text=True, timeout=20)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_a_tests_rule_says_its_patterns_or_whole_suite(tmp_path):
+    got = rules(tmp_path, TESTS_RULES)
+    assert got["runs"] == ["whole suite", "tests/test_queue*.py, tests/test_store_and_rules.py", "npm run lint"]
+    assert ('<div class="wr-ro"><code>bin/check, eki/db.py</code> → whole suite</div>' in got["eki"]
+            and "eki/queue*.py</code> → tests/test_queue*.py, tests/test_store_and_rules.py" in got["eki"]
+            and "eki/web/**</code> → npm run lint" in got["eki"])                # eki's: read-only, no inputs
+    assert "<input" not in got["eki"] and "wr-add" not in got["eki"]
+    assert 'data-wr-key="tests"' in got["html"] and "tests/test_queue*.py\ntests/test_store_and_rules.py</textarea>" in got["html"]
+    assert got["html"].count('data-wr-key="run"') == 1
+
+
+def test_the_editor_keeps_a_tests_rule_on_save(tmp_path):
+    got = rules(tmp_path, TESTS_RULES, edit=[2, "name", "lint"])
+    assert got["list"] == TESTS_RULES                                          # round-trips, "all" stays "all"
+    assert got["saved"] == {"command": TESTS_RULES[:2] + [{**TESTS_RULES[2], "name": "lint"}]}
+    got = rules(tmp_path, TESTS_RULES, edit=[1, "tests", "tests/test_a.py, tests/test_b.py"])
+    assert got["saved"]["command"][1] == {"paths": ["eki/queue*.py"], "tests": ["tests/test_a.py", "tests/test_b.py"]}
+    assert rules(tmp_path, TESTS_RULES, edit=[1, "tests", " "])["saved"] is None   # no tests yet: nothing sent
+
+
+def test_each_change_says_a_tests_rule_like_the_server(tmp_path):
+    from eki import api_workflow
+    from test_web_cardworkflow import card, run as panel
+    spec = {"checks": ["self", "command"], "command": TESTS_RULES, "test_command": "bin/check -q"}
+    each = ("Each change: core → whole suite · eki/queue*.py → tests/test_queue*.py, "
+            "tests/test_store_and_rules.py · web → npm run lint")
+    assert f'<div class="cw-each">{each}</div>' in panel(tmp_path, card(**spec))["html"]
+    assert api_workflow._values(spec, False)["each"] == each

@@ -29,6 +29,8 @@ _CHECKS = {
               "eki builds itself, runs the drills, and swaps to the new build.\nA failure rolls it back."),
 }
 _MERGE = {"auto": "auto — eki lands it", "pr": "PR on GitHub", "person": "person merges"}
+#: goal states held at Acceptance (eki/acceptance.py); `judgment` needs you
+_ACCEPT = ("accepting", "judgment")
 #: item states that are over: never listed (landed is over except on eki, where train holds it)
 _ENDED = ("applied", "live", "dropped")
 _ALERT = ("left", "unfit", "locked", "proposed", "rolled back")
@@ -140,6 +142,9 @@ def stages(v: Dict[str, Any], eki: bool, cap: Optional[Dict[str, Any]] = None) -
     out.append(_stage("merge", "Merge", _MERGE.get(v["merge"], v["merge"]),
                       "How a fit change lands: eki merges it, a pull request on GitHub,\n"
                       "or it waits for the person to merge.", True, ["merge"]))
+    out.append(_stage("acceptance", "Acceptance", "a judge checks the goal's checks",
+                      "Once every item of a goal with checks has landed, a judge on another backend\n"
+                      "judges each check. A red dot: a check it couldn't settle needs you.", True, []))
     out.append(_stage("after_merge", "After-merge", v["after_merge"] or "nothing runs after merge",
                       "A shell command eki runs in the person's folder right after it lands a change\n"
                       "(e.g. npm run build). It never blocks or undoes the landing.",
@@ -167,7 +172,8 @@ def _goal(conn, g) -> Dict[str, Any]:
     thread = selfview._thread(conn, g["draft_run"]) or selfview._thread(conn, g["plan_run"]) or g["thread_id"]
     return {"id": g["id"], "kind": "goal", "title": ((g["text"] or "").splitlines() or [""])[0],
             "state": g["state"], "since": g["created_at"], "where": "", "note": g["error"] or "",
-            "thread": thread or "", "goal": g["id"], "error": g["error"] or "", "needs_look": g["state"] == "failed"}
+            "thread": thread or "", "goal": g["id"], "error": g["error"] or "",
+            "needs_look": g["state"] in ("failed", "judgment")}
 
 
 def _item(conn, it) -> Dict[str, Any]:
@@ -206,6 +212,9 @@ def place(conn: sqlite3.Connection, pid: str, eki: bool, out: List[Dict[str, Any
     for g in conn.execute(f"SELECT * FROM goals g WHERE {own} AND g.state IN ('drafting','planning','failed') "
                           "ORDER BY g.created_at DESC", args).fetchall():
         by["plan"]["items"].append(_goal(conn, g))
+    for g in conn.execute(f"SELECT * FROM goals g WHERE {own} AND g.state IN ({','.join('?' * len(_ACCEPT))}) "
+                          "ORDER BY g.created_at DESC", args + _ACCEPT).fetchall():
+        by["acceptance"]["items"].append(_goal(conn, g))
     ended = _ENDED + (() if eki else ("landed",))
     marks = ",".join("?" * len(ended))
     rows = conn.execute(f"SELECT i.* FROM items i JOIN goals g ON g.id = i.goal_id WHERE {own} "

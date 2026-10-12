@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import (asking, db, gallery, github, paths, projectchats, projectdelete, projectgithub, projectlands,
-               projects, projectstart, store)
+               projects, projectstart, store, verdicts)
 
 #: what the page's "Have an agent write instructions" asks for
 INSTRUCTIONS_PROMPT = (
@@ -109,7 +109,8 @@ def _chats(conn: sqlite3.Connection, pid: str) -> List[Dict[str, Any]]:
 
 
 def _background(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
-    """The project's goals with their state, its standing goals, and its open PRs."""
+    """The project's goals with their state and checks (eki/verdicts.py view), its standing goals,
+    and its open PRs."""
     own = "project IS NULL" if pid == projectchats.SELF else "project = ?"
     args = () if pid == projectchats.SELF else (pid,)
     goals = conn.execute(f"SELECT id, text, state, created_at FROM goals WHERE {own} "
@@ -119,7 +120,8 @@ def _background(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
     prs = conn.execute(f"SELECT i.id, i.title, i.pr FROM items i JOIN goals g ON g.id = i.goal_id "
                        f"WHERE g.{own} AND i.pr_state = 'open' ORDER BY i.updated_at DESC",
                        args).fetchall()
-    return {"goals": [dict(g) for g in goals], "standing": [dict(s) for s in standing],
+    return {"goals": [dict(g, checks=verdicts.view(conn, g["id"])) for g in goals],
+            "standing": [dict(s) for s in standing],
             "prs": [{"item": p["id"], "title": p["title"], "url": p["pr"]} for p in prs]}
 
 

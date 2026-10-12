@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Callable, List, Optional, Tuple
 
-from . import (api, api_artifacts, api_chathistory, api_cardadd, api_carddetail, api_cardedit, api_cardinstructions, api_cardknowledge,
+from . import (api, api_artifacts, api_checks, api_chathistory, api_cardadd, api_carddetail, api_cardedit, api_cardinstructions, api_cardknowledge,
                api_cardmcp, api_cardrun, api_cards, api_cardsessions, api_cardskills, api_comfyui, api_components,
                api_customize, api_doc, api_docsearch, api_history, api_projectlands, api_projects, api_schedule,
                api_sensitive, api_sync, api_workflow)
@@ -29,7 +29,7 @@ def routes() -> List[Route]:
             + api_carddetail.ROUTES + api_cardinstructions.ROUTES + api_cardrun.ROUTES + api_cardsessions.ROUTES
             + api_cardskills.ROUTES + api_cardknowledge.ROUTES + api_cardmcp.ROUTES + api_doc.ROUTES + api_docsearch.ROUTES
             + api_workflow.ROUTES + api_projectlands.ROUTES + api_comfyui.ROUTES + api_sync.ROUTES + api_sensitive.ROUTES
-            + api_history.ROUTES + api_chathistory.ROUTES + MACHINE)
+            + api_history.ROUTES + api_chathistory.ROUTES + api_checks.ROUTES + MACHINE)
 
 
 ROUTES: List[Route] = routes()

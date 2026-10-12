@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from eki import apiroutes, builds, components, machinecaps, workflow
+from eki import api_projects, apiroutes, builds, components, machinecaps, verdicts, workflow
 
 ORDER = ["request", "router", "plan", "build", "self", "review", "command", "batch", "playtester",
-         "merge", "after_merge"]
+         "merge", "acceptance", "after_merge"]
 
 
 def call(conn, method, path, body=None):
@@ -50,7 +50,7 @@ def test_stages_in_order_with_titles_from_the_card(conn, proj):
     assert [s["id"] for s in g["stages"]] == ORDER
     assert [s["title"] for s in g["stages"]] == [
         "Request in", "Router", "Planner", "Build", "Self check", "Review", "Check command", "Batch",
-        "Playtester", "Merge", "After-merge"]
+        "Playtester", "Merge", "Acceptance", "After-merge"]
     assert g["project"] == "game" and g["name"] == "holo-cards" and g["card"] == "workflow"
     assert g["error"] == "" and g["editable"] is True and g["eki"] is False and g["locked"] == []
     assert all(s["on"] for s in g["stages"]) and not any(s["locked"] for s in g["stages"])
@@ -287,3 +287,77 @@ def test_items_that_need_a_look_carry_their_error_and_the_stage_counts_them(conn
     goal = by["plan"]["items"][0]
     assert goal["error"] == "it broke" and goal["needs_look"] is True and by["plan"]["alert_count"] == 1
     assert by["merge"]["alert_count"] == 0 and by["merge"]["alert"] is False
+
+
+def test_accepting_and_judgment_goals_sit_at_acceptance(conn, proj):
+    _project(conn, "game", proj)
+    _goal(conn, "ga", "accepting")
+    _goal(conn, "gj", "judgment")
+    _goal(conn, "gd", "accepted")                        # done: not listed
+    conn.execute("UPDATE goals SET error=? WHERE id='gj'", ("needs you: c2: no screen to look at",))
+    conn.commit()
+    by = stages(graph(conn))
+    acc = by["acceptance"]
+    assert acc["title"] == "Acceptance" and acc["on"] and acc["keys"] == []
+    assert sorted(i["id"] for i in acc["items"]) == ["ga", "gj"] and acc["count"] == 2
+    looks = {i["id"]: i["needs_look"] for i in acc["items"]}
+    assert looks == {"ga": False, "gj": True}                 # judgment: the red dot
+    assert acc["alert"] is True and acc["alert_count"] == 1
+    assert next(i for i in acc["items"] if i["id"] == "gj")["error"] == "needs you: c2: no screen to look at"
+    assert not any(i["id"] in ("ga", "gj", "gd") for s in by.values() if s["id"] != "acceptance" for i in s["items"])
+
+
+def test_acceptance_follows_merge_on_eki_too(conn, tmp_path, monkeypatch):
+    eki = tmp_path / "eki"
+    shutil.copytree(builds.source() / "components" / "workflow", eki / "components" / "workflow")
+    monkeypatch.setenv("EKI_SOURCE", str(eki))
+    _goal(conn, "gj", "judgment", project=None)
+    conn.commit()
+    g = graph(conn, "eki")
+    ids = [s["id"] for s in g["stages"]]
+    assert ids.index("train") < ids.index("merge") and ids.index("acceptance") == ids.index("merge") + 1
+    assert [i["id"] for i in stages(g)["acceptance"]["items"]] == ["gj"] and stages(g)["acceptance"]["alert"]
+
+
+def _verdict(conn, vid, gid, cid, verdict, at, scope="final", **kw):
+    conn.execute("INSERT INTO verdicts(id, run_id, goal_id, item_id, check_id, scope, round, verdict, evidence, "
+                 "reasoning, counter_evidence, limitation, suggestion, provider, model, created_at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (vid, "run-" + vid, gid, kw.get("item"), cid, scope, kw.get("round", 1), verdict,
+                  "ran bin/check: 12 passed", "the tests cover it", "none found", kw.get("limitation", ""),
+                  kw.get("suggestion", ""), kw.get("provider", "codex"), "gpt-5", at))
+
+
+def test_the_checks_endpoint_returns_every_field_newest_first(conn, proj):
+    _project(conn, "game", proj)
+    _goal(conn, "g0", "accepting")
+    verdicts.store_checks(conn, "g0", [("c1", "bin/check passes"), ("c2", "the title screen shows the logo")])
+    _verdict(conn, "v1", "g0", "c1", "failed", 100.0, suggestion="fix the import", item="i1", scope="item")
+    _verdict(conn, "v2", "g0", "c1", "passed", 200.0, round=2)
+    conn.commit()
+    got = call(conn, "GET", "/api/goals/g0/checks")
+    assert got["goal"] == "g0" and [c["id"] for c in got["checks"]] == ["c1", "c2"]
+    c1, c2 = got["checks"]
+    assert c1["verdict"] == "passed" and c1["scope"] == "final" and c1["round"] == 2 and c1["provider"] == "codex"
+    assert [r["id"] for r in c1["records"]] == ["v2", "v1"]         # newest first
+    old = c1["records"][1]
+    assert old == {"id": "v1", "run_id": "run-v1", "goal_id": "g0", "item_id": "i1", "check_id": "c1",
+                   "scope": "item", "round": 1, "verdict": "failed", "evidence": "ran bin/check: 12 passed",
+                   "reasoning": "the tests cover it", "counter_evidence": "none found", "limitation": "",
+                   "suggestion": "fix the import", "provider": "codex", "model": "gpt-5", "created_at": 100.0}
+    assert c2["verdict"] is None and c2["records"] == [] and c2["text"] == "the title screen shows the logo"
+    with pytest.raises(KeyError):
+        call(conn, "GET", "/api/goals/nope/checks")
+
+
+def test_the_project_background_carries_each_goals_checks(conn, proj):
+    _project(conn, "game", proj)
+    _goal(conn, "g0", "accepting")
+    _goal(conn, "g1", "planned")
+    verdicts.store_checks(conn, "g0", [("c1", "bin/check passes")])
+    _verdict(conn, "v1", "g0", "c1", "passed", 100.0)
+    conn.commit()
+    bg = {g["id"]: g for g in api_projects.show(conn, "game")["sections"]["background"]["goals"]}
+    assert bg["g0"]["checks"] == [{"id": "c1", "text": "bin/check passes", "verdict": "passed", "scope": "final",
+                                   "round": 1, "provider": "codex", "model": "gpt-5", "at": 100.0}]
+    assert bg["g1"]["checks"] == []

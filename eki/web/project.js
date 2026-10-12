@@ -1,6 +1,6 @@
 // #project/<id>: one project's page — its description (Edit opens a textarea, Enter saves), a box
 // for a new chat in its folder (its unsent text kept by ekiDrafts under `new:<id>`, when attach.js is in), then Chats,
-// Background, Pictures, Files and Changes (projecthistory.js), each one summary line
+// Background (each goal's checks under it: projectchecks.js), Pictures, Files and Changes (projecthistory.js), each one summary line
 // that opens on click; the header's ⋯ menu deletes it (projectmenu.js). The list of projects is projectspage.js. Everything comes from
 // /api/projects (eki/api_projects.py); the page reloads every 5 s while shown and keeps nothing.
 // A fresh project (no chats yet) shows "Start here" above the sections: the ask box ("Ask for the first thing")
@@ -213,7 +213,8 @@
     put("pj-background-sum", `${plural(p.goals, "goal")} · ${p.prs} PR${p.prs === 1 ? "" : "s"} open`);
     const goals = [...(bg.standing || []).map((g) => ({ ...g, standing: true })), ...(bg.goals || [])];
     put("pj-background-body", (goals.map((g) => `<div class="pj-item"><span class="pj-state">${esc(g.state)}</span>
-        <span class="grow">${esc(g.text)}</span>${g.standing ? '<span class="dim">standing</span>' : ""}</div>`).join("") ||
+        <span class="grow">${esc(g.text)}</span>${g.standing ? '<span class="dim">standing</span>' : ""}</div>` +
+        (window.projectChecks ? window.projectChecks.html(g) : "")).join("") ||   // its checks, one line each (projectchecks.js)
         '<div class="dim">No background work.</div>') +
       (bg.prs || []).map((r) => `<div class="pj-item">${prs.link(r.url)} <span class="grow">${esc(r.title)}</span></div>`).join(""));
     put("pj-pictures-sum", plural(pics.length, "picture"));

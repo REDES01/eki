@@ -211,3 +211,83 @@ def test_sending_the_first_ask_clears_its_draft(tmp_path):
     got = page(tmp_path, {"project": FRESH, "ask": True})
     assert ["/api/ask", {"prompt": "make a title screen", "project": "p1"}] in got["calls"]
     assert ["clear", "new:p1"] in got["drafts"] and got["went"] == ["t9"]
+
+
+# projectchecks.js then project.js on stub elements: #project/p1 renders its background payload, then a click on
+# the first check line fetches /api/goals/<id>/checks and opens the record under it.
+CHECKS_PAGE = r"""
+const input = JSON.parse(process.argv[4]);
+const els = {}, docL = {};
+const mk = (id) => ({ id, dataset: {}, value: "", innerHTML: "", textContent: "", hidden: false, placeholder: "",
+  parentNode: null, l: {}, classList: { toggle() {} },
+  addEventListener(t, f) { this.l[t] = f; }, appendChild(c) { c.parentNode = this; }, insertBefore() {}, focus() {} });
+global.window = { addEventListener() {} };
+global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
+global.document = { addEventListener(t, f) { docL[t] = f; }, querySelector: () => true, head: mk("head"),
+  createElement: () => mk("project-view"),
+  getElementById: (id) => id === "project-view" ? null : (els[id] || (els[id] = mk(id))) };
+global.setInterval = () => 0;
+const calls = [];
+global.nav = { register() {}, go() {} };
+global.fetch = async (url) => {
+  calls.push(url);
+  const d = url === "/api/projects/p1" ? input.project : url.endsWith("/checks") ? input.checks : { suggestions: [] };
+  return { ok: true, json: async () => d };
+};
+require(process.argv[2]);
+require(process.argv[3]);
+const tick = () => new Promise((r) => setTimeout(r, 10));
+(async () => {
+  window.projects.show("p1");
+  await tick(); await tick();
+  const body = els["pj-background-body"].innerHTML;
+  const line = { dataset: { check: "c1", checkGoal: "g1" } };
+  docL.click({ target: { closest: (s) => (s === "[data-check]" ? line : null) }, preventDefault() {} });
+  await tick(); await tick();
+  console.log(JSON.stringify({ body, calls, rec: (els["pjc-g1-c1"] || {}).innerHTML || "" }));
+  process.exit(0);
+})();
+"""
+
+CHECKED = dict(FRESH, chats=1, goals=1, sections=dict(FRESH["sections"], chats=[{"id": "t1", "title": "x", "updated": 0}],
+    background={"standing": [], "prs": [], "goals": [{"id": "g1", "text": "make the title screen", "state": "accepting",
+        "checks": [{"id": "c1", "text": "bin/check passes and the title screen shows the logo over the starfield background",
+                    "verdict": "passed", "scope": "final", "round": 1, "provider": "codex", "model": "gpt-5", "at": 5},
+                   {"id": "c2", "text": "the menu opens", "verdict": None, "scope": None, "round": None,
+                    "provider": None, "model": None, "at": None}]}]}))
+RECORD = {"id": "v1", "run_id": "r1", "goal_id": "g1", "item_id": None, "check_id": "c1", "scope": "final", "round": 1,
+          "verdict": "passed", "evidence": "eki slot -- bin/check: 12 passed", "reasoning": "the logo test covers it",
+          "counter_evidence": "none found", "limitation": "", "suggestion": "", "provider": "codex", "model": "gpt-5",
+          "created_at": 5}
+
+
+def test_the_project_page_loads_projectchecks_before_project_js(web):
+    page = get(web + "/")[1]
+    assert page.index("/ui/projectchecks.js") < page.index("/ui/project.js")
+    code, js = get(web + "/ui/projectchecks.js")
+    assert code == 200 and '"/api/goals/"' in js and '"/checks"' in js and "window.projectChecks" in js
+    assert "window.projectChecks.html(g)" in get(web + "/ui/project.js")[1]
+
+
+def test_a_goals_checks_render_one_line_each_and_open_the_record(tmp_path):
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    stub = tmp_path / "checks.js"
+    stub.write_text(CHECKS_PAGE)
+    data = {"project": CHECKED, "checks": {"goal": "g1", "checks": [dict(CHECKED["sections"]["background"]["goals"][0]
+                                                                         ["checks"][0], records=[RECORD])]}}
+    out = subprocess.run(["node", str(stub), str(WEB / "projectchecks.js"), str(WEB / "project.js"), json.dumps(data)],
+                         capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    body = got["body"]
+    assert body.count('class="pj-item pj-check"') == 2
+    assert 'data-check="c1"' in body and 'data-check-goal="g1"' in body
+    assert "bin/check passes and the title screen shows the logo over t…" in body    # cut to 60
+    assert "final · codex · round 1" in body and ">passed<" in body and ">—<" in body
+    assert body.index("make the title screen") < body.index('data-check="c1"') < body.index('data-check="c2"')
+    assert "/api/goals/g1/checks" in got["calls"]
+    rec = got["rec"]
+    for want in ("passed", "eki slot -- bin/check: 12 passed", "the logo test covers it", "none found",
+                 "counter-evidence", "limitation", "suggestion", "codex gpt-5", "run r1"):
+        assert want in rec, want

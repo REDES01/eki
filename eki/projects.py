@@ -80,6 +80,18 @@ def set_autonomy(conn: sqlite3.Connection, pid: str, mode: str) -> None:
         conn.execute("UPDATE projects SET autonomy=? WHERE id=?", (mode, pid))
 
 
+def chat_history(project: sqlite3.Row) -> bool:
+    """Whether the project's chat turns are recorded as commits (eki/chatcommit.py); on by default."""
+    return "chat_history" not in project.keys() or project["chat_history"] is None or bool(project["chat_history"])
+
+
+def set_chat_history(conn: sqlite3.Connection, pid: str, on: bool) -> None:
+    if get(conn, pid) is None:
+        raise KeyError(f"no project {pid}")
+    with db.tx(conn):
+        conn.execute("UPDATE projects SET chat_history=? WHERE id=?", (1 if on else 0, pid))
+
+
 def clone_path(repo: str) -> Path:
     """Where eki keeps its own clone of OWNER/REPO."""
     owner, name = repo.split("/", 1)

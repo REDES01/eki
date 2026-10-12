@@ -1027,6 +1027,20 @@ repos listed when gh is signed in): cloned to `~/Projects/<repo>`, shown
 before cloning, an existing clone reused. A local project switches later
 from its workflow card (add the remote, choose PRs) without being re-made.
 
+**A project's history covers its chats** (`eki/chatcommit.py`). After a
+chat turn in the project's own folder (on its branch; never a worktree,
+eki itself or a chore) changes files, the worker commits them as
+`eki: chat — <the request's first line>`; what you changed by hand since
+is committed first, on its own, as `eki: your edits` (on the run's first
+attempt only). Ignored files never go in; a git failure is a note on the
+run and the next turn picks the changes up. Goal items rebase onto these
+commits instead of waiting on local changes, and the window goes back to
+before any of them with a new commit, never a reset. The project setting
+`chat_history` (on by default) turns it off. An assets card git-ignores
+its pool when it is added (untracking what was tracked, kept on disk);
+the pool has no history by design, but can have a backup target that
+housekeeping copies new and changed files to.
+
 - **eki is built in.** `projectchats.SELF = "eki"`, named `eki`, its folder
   `builds.source()`, its background work the self goals (`goals.project IS
   NULL`). It has no row, so nothing that loops over `projects` sees it.

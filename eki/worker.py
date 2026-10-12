@@ -21,7 +21,7 @@ import time
 import traceback
 from typing import Any, Dict
 
-from . import (asks, browsershim, capacity, components, files, db, memnotes, models, observe, paths, providers,
+from . import (asks, browsershim, capacity, chatcommit, components, files, db, memnotes, models, observe, paths, providers,
                quota, routing, skills, store, syncstate, transient)
 from .components import knowledge, mcpserver, serve, skillcard
 from .providers.base import Outcome, Turn
@@ -298,7 +298,9 @@ def main(rid: str) -> int:
             return 0
         if kind == "codex":
             skills.sync_codex()
+        chatcommit.before_turn(conn, r)        # the person's hand edits first, then the turn's own
         out = providers.get(provider).take(turn, emit)
+        chatcommit.after_turn(conn, r)
         made = {json.loads(e["data"]).get("path") for e in store.events_after(conn, rid)
                 if e["kind"] == "tool"}
         for path in files.named_in(store.answer(conn, rid)):

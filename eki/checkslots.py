@@ -80,7 +80,9 @@ def first_wide(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
                         "AND instr(prompt, ?) > 0 ORDER BY "
                         "CASE priority WHEN 'now' THEN 0 ELSE 1 END, created_at",
                         (db.now(), WIDE)).fetchall()
-    return next((r for r in rows if is_wide(r)), None)
+    wide = [r for r in rows if is_wide(r)]
+    wide.sort(key=lambda r: rank(conn, r))          # the train's before gate 2's, whichever came first
+    return wide[0] if wide else None
 
 
 def reserved(conn: sqlite3.Connection) -> int:
@@ -100,7 +102,8 @@ def waiting(conn: sqlite3.Connection, run: sqlite3.Row) -> bool:
     if run["state"] != "queued" or not is_judge(run):
         return False
     first = first_wide(conn)
-    held_for = weight(first) if first is not None and first["id"] != run["id"] else 0
+    held_for = (weight(first) if first is not None and first["id"] != run["id"]
+                and rank(conn, run) >= rank(conn, first) else 0)   # never held back for a run ranked after it
     return not _fits(run, busy(conn), held_for, limit())
 
 
@@ -112,11 +115,15 @@ class Tick:
         self.cap = limit()
         self.used = sum(weight(r) for r in active if is_judge(r)) + testslots.held()
         first = first_wide(conn)
+        self.conn = conn
         self.first = first["id"] if first is not None else None
+        self.first_rank = rank(conn, first) if first is not None else 0
         self.held_for = weight(first) if first is not None else 0
 
     def fits(self, run: sqlite3.Row) -> bool:
-        return _fits(run, self.used, self.held_for, self.cap)
+        # the slots kept for the waiting wide run never hold back a run ranked before it (the train)
+        held = self.held_for if run["id"] != self.first and rank(self.conn, run) >= self.first_rank else 0
+        return _fits(run, self.used, held, self.cap)
 
     def took(self, run: sqlite3.Row) -> None:
         self.used += weight(run)

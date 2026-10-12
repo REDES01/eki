@@ -53,6 +53,17 @@ def find(worktree: str) -> List[Dict]:
 def ours() -> Set[int]:
     """Pids eki started itself: the servers in component-state and the
     browser slot holders. A source that can't be read adds nothing."""
+    out = _servers()
+    try:
+        from . import browserslots
+        out |= {p for p in browserslots.pids() if p > 0}
+    except Exception:           # noqa: BLE001 — spare nothing extra, never raise
+        pass
+    return out
+
+
+def _servers() -> Set[int]:
+    """The pids recorded in ~/.eki/component-state/*.json."""
     out: Set[int] = set()
     try:
         from .components import servers
@@ -65,18 +76,15 @@ def ours() -> Set[int]:
                 out.add(pid)
     except Exception:           # noqa: BLE001 — spare nothing extra, never raise
         pass
-    try:
-        from . import browserslots
-        out |= {p for p in browserslots.pids() if p > 0}
-    except Exception:           # noqa: BLE001
-        pass
     return out
 
 
 def _groups() -> Set[Tuple[str, int]]:
-    """The process groups and sessions of eki's servers: ("g"|"s", id)."""
+    """The process groups and sessions of eki's servers only: ("g"|"s", id).
+    Servers run detached in a session of their own, so these hold nothing
+    else; a slot holder shares the agent's session and is spared by pid alone."""
     out: Set[Tuple[str, int]] = set()
-    for pid in ours():
+    for pid in _servers():
         for tag, get in (("g", os.getpgid), ("s", os.getsid)):
             try:
                 out.add((tag, get(pid)))

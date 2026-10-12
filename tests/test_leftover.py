@@ -90,3 +90,17 @@ def test_is_eki_reads_command_lines():
     no = ["sleep 60", "npm run dev", "python3 -m http.server", "node /u/eki/web/x.js", ""]
     assert all(leftover._is_eki(c) for c in yes)
     assert not any(leftover._is_eki(c) for c in no)
+
+def test_a_browser_slot_holder_is_spared_but_not_its_session(home, tmp_path, monkeypatch):
+    from eki import browserslots
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    holder = subprocess.Popen(["sleep", "60"], cwd=wt)      # same session as the job: the agent's
+    job = subprocess.Popen(["sleep", "61"], cwd=wt)
+    monkeypatch.setattr(browserslots, "pids", lambda: {holder.pid})
+    try:
+        assert [f["pid"] for f in leftover.find(str(wt))] == [job.pid]
+    finally:
+        for p in (holder, job):
+            p.kill()
+            p.wait()

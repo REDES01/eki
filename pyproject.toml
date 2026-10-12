@@ -8,6 +8,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-xdist"]
+pictures = ["nudenet"]
 
 [project.scripts]
 eki = "eki.cli:main"

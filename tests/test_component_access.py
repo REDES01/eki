@@ -252,6 +252,7 @@ def test_a_missing_component_lets_the_run_start(conn, spawned, up):
 
 def agent_card(name="playtester", **spec):
     comp(name, kind="agent", target="claude:opus", **spec)
+    (components.pool_dir() / name / "prompt.md").write_text("Play it.")   # an agent needs one
 
 
 def claude_build(conn, pid=None):

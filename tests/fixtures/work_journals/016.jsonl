@@ -8,7 +8,7 @@
 {"at": 750.32, "data": {}, "item": "i7", "kind": "item_started"}
 {"at": 801.153, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i6", "kind": "item_finished"}
 {"at": 803.974, "data": {}, "item": "i8", "kind": "item_started"}
-{"at": 880.1, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 880.1, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 883.796, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i6", "kind": "check_verdict"}
 {"at": 935.503, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
 {"at": 935.681, "data": {"decision": "drop"}, "item": "i2", "kind": "person_decided"}

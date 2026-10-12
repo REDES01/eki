@@ -21,6 +21,7 @@
 {"at": 3003.989, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 3096.045, "data": {"outcome": "resolved"}, "item": "i3", "kind": "item_finished"}
 {"at": 3807.435, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 3868.665, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i3", "kind": "check_verdict"}
 {"at": 4332.438, "data": {"result": "rebased"}, "item": "i11", "kind": "merge_result"}
 {"at": 4332.438, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i11", "result": "green"}]}, "item": "i11", "kind": "check_verdict"}
 {"at": 4332.438, "data": {"went": "target"}, "item": "i11", "kind": "landed"}
@@ -37,10 +38,13 @@
 {"at": 4822.109, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 4822.109, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 4876.621, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 5082.435, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 5089.839, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 5133.39, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 5341.113, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 5489.071, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 5514.017, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 5642.434, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 5719.631, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
 {"at": 5719.631, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
 {"at": 5719.631, "data": {"went": "target"}, "item": "i1", "kind": "landed"}

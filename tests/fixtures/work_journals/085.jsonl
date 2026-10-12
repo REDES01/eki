@@ -1,4 +1,4 @@
-{"goal": "g85", "project_kind": "local", "settings": {"gates": ["check", "batch"], "kind": "local", "locked": [], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"expected": "a person ran it again (`eki self retry`), which leaves no row; the build after it has no recorded cause, so the replay doesn't start it", "goal": "g85", "project_kind": "local", "settings": {"gates": ["check", "batch"], "kind": "local", "locked": [], "merge": "auto", "parallel": 0, "plan": "on"}}
 {"at": 0.0, "data": {"draft": true, "plan": true}, "item": null, "kind": "goal_submitted"}
 {"at": 348.977, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
 {"at": 555.676, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18"], "id": "i1"}, {"deps": ["i1"], "files": ["f19", "f20", "f21", "f22"], "id": "i2"}, {"deps": ["i1"], "files": ["f5", "f6", "f23", "f24"], "id": "i3"}, {"deps": ["i1"], "files": ["f16"], "id": "i4"}, {"deps": ["i1"], "files": ["f25", "f26", "f27"], "id": "i5"}, {"deps": ["i1"], "files": ["f28", "f29", "f30", "f31", "f32", "f33", "f34", "f35"], "id": "i6"}, {"deps": ["i1"], "files": ["f36", "f37", "f38", "f39", "f40", "f41"], "id": "i7"}, {"deps": ["i1"], "files": ["f42", "f43", "f44", "f45", "f46", "f47", "f48", "f49", "f50", "f51", "f52"], "id": "i8"}, {"deps": ["i1"], "files": ["f53", "f54", "f55", "f56", "f57", "f58", "f59", "f60", "f61", "f62", "f63", "f64", "f65"], "id": "i9"}, {"deps": ["i1"], "files": ["f66", "f67", "f68", "f69", "f70", "f71"], "id": "i10"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
@@ -53,7 +53,6 @@
 {"at": 1838.507, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i10", "kind": "item_finished"}
 {"at": 1844.199, "data": {"can_fix": false, "ended": "failed", "result": "red", "review": null}, "item": "i10", "kind": "check_verdict"}
 {"at": 1845.956, "data": {}, "item": "i10", "kind": "item_started"}
-{"at": 1877.572, "data": {"decision": "retry"}, "item": "i4", "kind": "person_decided"}
 {"at": 1877.572, "data": {}, "item": "i4", "kind": "item_started"}
 {"at": 1943.068, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i4", "kind": "item_finished"}
 {"at": 1955.446, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i10", "kind": "item_finished"}

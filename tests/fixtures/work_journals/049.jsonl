@@ -7,10 +7,13 @@
 {"at": 692.54, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 692.54, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 755.035, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 960.296, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 961.711, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 988.231, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 1349.622, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 1351.32, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 1409.234, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 1670.465, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 2073.653, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
 {"at": 2073.653, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
 {"at": 2073.653, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
@@ -33,6 +36,7 @@
 {"at": 2499.979, "data": {"outcome": "resolved"}, "item": "i3", "kind": "item_finished"}
 {"at": 2663.369, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i5", "kind": "check_verdict"}
 {"at": 2663.596, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
+{"at": 2698.801, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i3", "kind": "check_verdict"}
 {"at": 2769.065, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 2769.065, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
 {"at": 2769.065, "data": {"went": "target"}, "item": "i2", "kind": "landed"}

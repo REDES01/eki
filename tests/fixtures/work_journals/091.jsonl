@@ -28,7 +28,7 @@
 {"at": 3232.327, "data": {}, "item": "i3", "kind": "item_started"}
 {"at": 4008.366, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
 {"at": 4010.481, "data": {}, "item": "i4", "kind": "item_started"}
-{"at": 4179.661, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 4179.661, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i4", "kind": "item_finished"}
 {"at": 4185.899, "data": {}, "item": "i6", "kind": "item_started"}
 {"at": 4393.508, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i3", "kind": "check_verdict"}
 {"at": 4393.998, "data": {"queueable": true}, "item": "i3", "kind": "seen"}

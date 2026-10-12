@@ -14,7 +14,7 @@
 {"at": 1084.023, "data": {}, "item": "i3", "kind": "item_started"}
 {"at": 1084.915, "data": {}, "item": "i4", "kind": "item_started"}
 {"at": 1085.867, "data": {}, "item": "i5", "kind": "item_started"}
-{"at": 1205.592, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 1205.592, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 1212.608, "data": {}, "item": "i6", "kind": "item_started"}
 {"at": 1294.821, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
 {"at": 1298.572, "data": {}, "item": "i7", "kind": "item_started"}
@@ -31,7 +31,7 @@
 {"at": 1725.035, "data": {"went": "target"}, "item": "i5", "kind": "landed"}
 {"at": 1726.035, "data": {"went": "live"}, "item": "i5", "kind": "landed"}
 {"at": 1738.537, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i9", "kind": "item_finished"}
-{"at": 1753.523, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 1753.523, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i4", "kind": "item_finished"}
 {"at": 1810.864, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i9", "kind": "check_verdict"}
 {"at": 1811.002, "data": {"queueable": true}, "item": "i9", "kind": "seen"}
 {"at": 1813.335, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i3", "kind": "check_verdict"}

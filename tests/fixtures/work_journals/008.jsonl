@@ -58,6 +58,7 @@
 {"at": 10151.914, "data": {"queueable": true}, "item": "i7", "kind": "seen"}
 {"at": 10151.914, "data": {"files": ["f?"], "result": "conflict"}, "item": "i7", "kind": "merge_result"}
 {"at": 10229.056, "data": {"outcome": "resolved"}, "item": "i7", "kind": "item_finished"}
+{"at": 10289.129, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i7", "kind": "check_verdict"}
 {"at": 10296.528, "data": {"result": "rebased"}, "item": "i7", "kind": "merge_result"}
 {"at": 10296.528, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i7", "result": "green"}]}, "item": "i7", "kind": "check_verdict"}
 {"at": 10296.528, "data": {"went": "target"}, "item": "i7", "kind": "landed"}

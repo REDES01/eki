@@ -29,6 +29,7 @@
 {"at": 1248.716, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 1248.716, "data": {"files": ["f?"], "result": "conflict"}, "item": "i2", "kind": "merge_result"}
 {"at": 1301.782, "data": {"outcome": "resolved"}, "item": "i2", "kind": "item_finished"}
+{"at": 1388.153, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 1478.437, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 1478.437, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
 {"at": 1478.437, "data": {"went": "target"}, "item": "i2", "kind": "landed"}

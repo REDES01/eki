@@ -12,7 +12,7 @@
 {"at": 3528.398, "data": {}, "item": "i2", "kind": "item_started"}
 {"at": 3642.647, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 3645.931, "data": {}, "item": "i3", "kind": "item_started"}
-{"at": 3820.384, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
+{"at": 3820.384, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i3", "kind": "item_finished"}
 {"at": 4159.373, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "no: (objection)"}, "item": "i2", "kind": "check_verdict"}
 {"at": 4361.407, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i3", "kind": "check_verdict"}
 {"at": 4361.909, "data": {"queueable": true}, "item": "i3", "kind": "seen"}

@@ -16,6 +16,7 @@
 {"at": 2563.187, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
 {"at": 2564.187, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
 {"at": 3068.878, "data": {"outcome": "resolved"}, "item": "i2", "kind": "item_finished"}
+{"at": 3553.212, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 4248.73, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 4248.73, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
 {"at": 4248.73, "data": {"went": "target"}, "item": "i2", "kind": "landed"}

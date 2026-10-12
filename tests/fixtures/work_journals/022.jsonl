@@ -17,7 +17,7 @@
 {"at": 1504.252, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 1508.012, "data": {}, "item": "i6", "kind": "item_started"}
 {"at": 1808.035, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
-{"at": 1889.953, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 1889.953, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i4", "kind": "item_finished"}
 {"at": 1929.63, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
 {"at": 1945.023, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i2", "kind": "check_verdict"}
 {"at": 1946.238, "data": {"queueable": true}, "item": "i2", "kind": "seen"}

@@ -8,6 +8,7 @@
 {"at": 923.107, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 923.107, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 1007.151, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 1354.568, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 1920.075, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
 {"at": 1920.075, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
 {"at": 1920.075, "data": {"went": "target"}, "item": "i1", "kind": "landed"}

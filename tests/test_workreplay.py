@@ -21,6 +21,7 @@ from eki.workstep import Refused, step
 HERE = Path(__file__).parent / "fixtures" / "work_journals"
 JOURNALS = sorted(HERE.glob("*.jsonl"))
 
+
 def read(path):
     lines = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
     return lines[0], lines[1:-1], lines[-1]
@@ -57,15 +58,20 @@ def by_item(roles):
 
 
 def test_there_are_enough_journals():
-    assert sum(1 for p in JOURNALS if not read(p)[0].get("expected")) >= 30
-    kinds = {read(p)[0]["project_kind"] for p in JOURNALS}
+    """Enough journals that must match, and between them the paths that matter."""
+    sure = [p for p in JOURNALS if not read(p)[0].get("expected")]
+    assert len(sure) >= 30
+    kinds = {read(p)[0]["project_kind"] for p in sure}
     assert "eki" in kinds and kinds - {"eki"}, "eki and project goals both"
-    finals = {v for p in JOURNALS for v in read(p)[2]["final"].values()}
+    finals = {v for p in sure for v in read(p)[2]["final"].values()}
     assert {"live", "applied", "unfit", "left", "dropped"} <= finals
-    seen = {(e["kind"], k) for p in JOURNALS for e in read(p)[1] for k in e["data"]}
+    seen = {(e["kind"], k) for p in sure for e in read(p)[1] for k in e["data"]}
     assert ("item_finished", "calls") in seen, "a build waited on its calls"
-    decided = {e["data"]["decision"] for p in JOURNALS for e in read(p)[1] if e["kind"] == "person_decided"}
+    assert ("item_finished", "outcome") in seen, "a conflict was resolved"
+    decided = {e["data"]["decision"] for p in sure for e in read(p)[1] if e["kind"] == "person_decided"}
     assert {"retry", "drop", "apply"} <= decided
+    failed = {e["data"]["kind"] for p in sure for e in read(p)[1] if e["kind"] == "item_failed"}
+    assert "environment" in failed, "a run that lost its sign-in"
 
 
 def test_journals_hold_no_names():

@@ -43,7 +43,7 @@
 {"at": 1069.676, "data": {"went": "target"}, "item": "i4", "kind": "landed"}
 {"at": 1070.676, "data": {"went": "live"}, "item": "i4", "kind": "landed"}
 {"at": 1074.374, "data": {}, "item": "i5", "kind": "item_started"}
-{"at": 1238.644, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
+{"at": 1238.644, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i5", "kind": "item_finished"}
 {"at": 1285.917, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i5", "kind": "check_verdict"}
 {"at": 1342.476, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
 {"at": 1396.199, "data": {"result": "rebased"}, "item": "i5", "kind": "merge_result"}

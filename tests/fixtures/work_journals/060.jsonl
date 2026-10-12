@@ -39,6 +39,7 @@
 {"at": 2016.843, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i4", "result": "green"}]}, "item": "i4", "kind": "check_verdict"}
 {"at": 2016.843, "data": {"went": "target"}, "item": "i4", "kind": "landed"}
 {"at": 2017.843, "data": {"went": "live"}, "item": "i4", "kind": "landed"}
+{"at": 2079.782, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 2253.539, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 2253.539, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
 {"at": 2253.539, "data": {"went": "target"}, "item": "i2", "kind": "landed"}

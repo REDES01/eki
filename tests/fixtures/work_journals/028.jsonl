@@ -33,6 +33,7 @@
 {"at": 2932.734, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
 {"at": 3157.206, "data": {"outcome": "resolved"}, "item": "i4", "kind": "item_finished"}
 {"at": 3347.729, "data": {}, "item": "i8", "kind": "item_started"}
+{"at": 3572.881, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i4", "kind": "check_verdict"}
 {"at": 3869.748, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i8", "kind": "item_finished"}
 {"at": 3883.242, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 3883.242, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
@@ -52,6 +53,7 @@
 {"at": 5099.673, "data": {"files": ["f?"], "result": "conflict"}, "item": "i8", "kind": "merge_result"}
 {"at": 5131.072, "data": {"outcome": "resolved"}, "item": "i8", "kind": "item_finished"}
 {"at": 5191.655, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i7", "kind": "item_finished"}
+{"at": 5316.806, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i8", "kind": "check_verdict"}
 {"at": 5402.215, "data": {}, "item": "i6", "kind": "item_started"}
 {"at": 5478.069, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i6", "kind": "item_finished"}
 {"at": 5488.298, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i7", "kind": "check_verdict"}

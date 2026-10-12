@@ -5,12 +5,12 @@
 {"at": 160.523, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 160.894, "data": {}, "item": "i2", "kind": "item_started"}
 {"at": 267.899, "data": {"can_fix": false, "changed": true, "touched": ["bin/check"]}, "item": "i1", "kind": "item_finished"}
-{"at": 299.569, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 299.569, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 575.256, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i2", "kind": "check_verdict"}
 {"at": 575.622, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 604.4, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "no: (objection)"}, "item": "i1", "kind": "check_verdict"}
 {"at": 604.492, "data": {}, "item": "i1", "kind": "item_started"}
-{"at": 624.453, "data": {"can_fix": false, "changed": true, "touched": ["bin/check"]}, "item": "i1", "kind": "item_finished"}
+{"at": 624.453, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": ["bin/check"]}, "item": "i1", "kind": "item_finished"}
 {"at": 907.096, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
 {"at": 994.132, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 994.132, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}

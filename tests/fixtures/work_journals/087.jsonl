@@ -68,7 +68,21 @@
 {"at": 16688.389, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
 {"at": 16688.389, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
 {"at": 19407.634, "data": {"stage": "building"}, "item": "i6", "kind": "item_started"}
-{"at": 21443.376, "data": {"can_fix": false, "changed": false}, "item": "i6", "kind": "item_finished"}
+{"at": 21443.376, "data": {"can_fix": false, "changed": true, "reason": "(the agent asked for a person)", "touched": [], "verdict": "person"}, "item": "i6", "kind": "item_finished"}
 {"at": 23493.007, "data": {"calls": ["c"], "wakes": 0}, "item": "i8", "kind": "item_finished"}
 {"at": 27115.439, "data": {"stage": "building"}, "item": "i8", "kind": "item_started"}
-{"final": {"i1": "applied", "i10": "applied", "i11": "applied", "i12": "waiting", "i2": "applied", "i3": "applied", "i4": "applied", "i5": "applied", "i6": "left", "i7": "applied", "i8": "building", "i9": "building"}, "roles": [[null, "plan"], ["i1", "build"], ["i4", "build"], ["i5", "build"], ["i7", "build"], ["i10", "build"], ["i11", "build"], ["i2", "build"], ["i3", "build"], ["i6", "build"], ["i8", "build"], ["i9", "build"], ["i1", "build"], ["i3", "build"], ["i3", "resolve"], ["i6", "build"], ["i8", "build"]]}
+{"at": 27261.069, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i8", "kind": "item_finished"}
+{"at": 27338.927, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i8", "kind": "check_verdict"}
+{"at": 27344.157, "data": {"queueable": true}, "item": "i8", "kind": "seen"}
+{"at": 27344.157, "data": {"files": ["f?"], "result": "conflict"}, "item": "i8", "kind": "merge_result"}
+{"at": 27431.669, "data": {"outcome": "resolved"}, "item": "i8", "kind": "item_finished"}
+{"at": 27555.613, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i9", "kind": "item_finished"}
+{"at": 27799.298, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i9", "kind": "check_verdict"}
+{"at": 27810.244, "data": {"queueable": true}, "item": "i9", "kind": "seen"}
+{"at": 27916.294, "data": {"result": "rebased"}, "item": "i8", "kind": "merge_result"}
+{"at": 27916.294, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i8", "result": "green"}]}, "item": "i8", "kind": "check_verdict"}
+{"at": 27916.294, "data": {"went": "target"}, "item": "i8", "kind": "landed"}
+{"at": 28301.461, "data": {"result": "rebased"}, "item": "i9", "kind": "merge_result"}
+{"at": 28301.461, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i9", "result": "green"}]}, "item": "i9", "kind": "check_verdict"}
+{"at": 28301.461, "data": {"went": "target"}, "item": "i9", "kind": "landed"}
+{"final": {"i1": "applied", "i10": "applied", "i11": "applied", "i12": "waiting", "i2": "applied", "i3": "applied", "i4": "applied", "i5": "applied", "i6": "left", "i7": "applied", "i8": "applied", "i9": "applied"}, "roles": [[null, "plan"], ["i1", "build"], ["i4", "build"], ["i5", "build"], ["i7", "build"], ["i10", "build"], ["i11", "build"], ["i2", "build"], ["i3", "build"], ["i6", "build"], ["i8", "build"], ["i9", "build"], ["i1", "build"], ["i3", "build"], ["i3", "resolve"], ["i6", "build"], ["i8", "build"], ["i8", "resolve"]]}

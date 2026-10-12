@@ -2,7 +2,7 @@
 {"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
 {"at": 98.928, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23"], "id": "i1"}, {"deps": ["i1"], "files": ["f24", "f25", "f26", "f27", "f28", "f29", "f30", "f31", "f32"], "id": "i2"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 100.27, "data": {}, "item": "i1", "kind": "item_started"}
-{"at": 993.645, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 993.645, "data": {"can_fix": false, "changed": true, "ended_early": true, "no_review": "(not reviewed)", "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 1000.162, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i1", "kind": "check_verdict"}
 {"at": 1002.127, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 1002.496, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}

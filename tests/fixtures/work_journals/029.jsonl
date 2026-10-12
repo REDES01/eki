@@ -3,7 +3,7 @@
 {"at": 170.807, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
 {"at": 253.169, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4"], "id": "i1"}, {"deps": ["i1"], "files": ["f5", "f6", "f7"], "id": "i2"}, {"deps": ["i1"], "files": ["f2", "f4"], "id": "i3"}, {"deps": ["i1"], "files": ["f8", "f9"], "id": "i4"}, {"deps": ["i1"], "files": ["f10", "f11"], "id": "i5"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 254.926, "data": {}, "item": "i1", "kind": "item_started"}
-{"at": 598.629, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 598.629, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 868.641, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
 {"at": 869.163, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 2092.444, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
@@ -19,10 +19,10 @@
 {"at": 2926.351, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
 {"at": 3171.104, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i4", "kind": "check_verdict"}
 {"at": 3171.516, "data": {"queueable": true}, "item": "i4", "kind": "seen"}
-{"at": 3391.628, "data": {"ended": "cancelled"}, "item": "i3", "kind": "item_finished"}
+{"at": 3391.628, "data": {"can_fix": false, "fix": null, "kind": "judgment", "retry_at": null, "why": "the run ended cancelled"}, "item": "i3", "kind": "item_failed"}
 {"at": 3490.974, "data": {"decision": "retry"}, "item": "i3", "kind": "person_decided"}
 {"at": 3490.974, "data": {}, "item": "i3", "kind": "item_started"}
-{"at": 3510.669, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
+{"at": 3510.669, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i3", "kind": "item_finished"}
 {"at": 3726.762, "data": {"result": "rebased"}, "item": "i5", "kind": "merge_result"}
 {"at": 3726.762, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i5", "result": "green"}]}, "item": "i5", "kind": "check_verdict"}
 {"at": 3726.762, "data": {"went": "target"}, "item": "i5", "kind": "landed"}

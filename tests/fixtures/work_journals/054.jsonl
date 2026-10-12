@@ -7,7 +7,7 @@
 {"at": 215.132, "data": {"can_fix": false, "ended": "failed", "result": "red", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
 {"at": 215.157, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 239.32, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
-{"at": 272.564, "data": {"ended": "failed"}, "item": "i3", "kind": "item_finished"}
+{"at": 272.564, "data": {"can_fix": false, "fix": null, "kind": "environment", "retry_at": null, "why": "the run ended failed"}, "item": "i3", "kind": "item_failed"}
 {"at": 374.532, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
 {"at": 374.679, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 437.836, "data": {"decision": "retry"}, "item": "i3", "kind": "person_decided"}

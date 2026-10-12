@@ -20,6 +20,7 @@
 {"at": 2570.862, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 2570.862, "data": {"files": ["f?"], "result": "conflict"}, "item": "i2", "kind": "merge_result"}
 {"at": 2656.067, "data": {"outcome": "resolved"}, "item": "i2", "kind": "item_finished"}
+{"at": 3034.562, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 3080.003, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
 {"at": 3080.003, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
 {"at": 3080.003, "data": {"went": "target"}, "item": "i3", "kind": "landed"}

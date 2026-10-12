@@ -5,7 +5,7 @@
 {"at": 187.339, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 188.891, "data": {}, "item": "i2", "kind": "item_started"}
 {"at": 379.478, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
-{"at": 399.669, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 399.669, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 481.811, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i2", "kind": "check_verdict"}
 {"at": 481.948, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 495.77, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}

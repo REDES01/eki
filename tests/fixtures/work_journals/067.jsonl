@@ -4,7 +4,7 @@
 {"at": 254.634, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 400.77, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 412.441, "data": {}, "item": "i2", "kind": "item_started"}
-{"at": 500.098, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 500.098, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 510.048, "data": {}, "item": "i3", "kind": "item_started"}
 {"at": 862.026, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
 {"at": 1194.597, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
@@ -15,6 +15,7 @@
 {"at": 1388.889, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
 {"at": 1388.889, "data": {"files": ["f?"], "result": "conflict"}, "item": "i3", "kind": "merge_result"}
 {"at": 1469.225, "data": {"outcome": "resolved"}, "item": "i3", "kind": "item_finished"}
+{"at": 1871.406, "data": {"can_fix": false, "ended": "failed", "result": "red", "review": "none: no review"}, "item": "i3", "kind": "check_verdict"}
 {"at": 3053.809, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
 {"at": 3053.809, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
 {"at": 3053.809, "data": {"went": "target"}, "item": "i1", "kind": "landed"}

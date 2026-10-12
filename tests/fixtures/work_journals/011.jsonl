@@ -31,6 +31,7 @@
 {"at": 4424.355, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
 {"at": 4424.355, "data": {"files": ["f?"], "result": "conflict"}, "item": "i3", "kind": "merge_result"}
 {"at": 4750.235, "data": {"outcome": "resolved"}, "item": "i3", "kind": "item_finished"}
+{"at": 5662.681, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i3", "kind": "check_verdict"}
 {"at": 5809.243, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
 {"at": 5809.243, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
 {"at": 5809.243, "data": {"went": "target"}, "item": "i3", "kind": "landed"}

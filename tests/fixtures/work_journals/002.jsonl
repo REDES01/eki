@@ -28,14 +28,14 @@
 {"at": 1019.683, "data": {"in_target": true}, "item": "i7", "kind": "seen"}
 {"at": 1019.946, "data": {}, "item": "i8", "kind": "item_started"}
 {"at": 1408.21, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i6", "kind": "item_finished"}
-{"at": 1409.068, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i8", "kind": "item_finished"}
+{"at": 1409.068, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i8", "kind": "item_finished"}
 {"at": 1516.598, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i6", "kind": "check_verdict"}
 {"at": 1566.189, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i8", "kind": "check_verdict"}
 {"at": 1570.9, "data": {"in_target": true}, "item": "i6", "kind": "seen"}
 {"at": 1682.839, "data": {"in_target": true}, "item": "i8", "kind": "seen"}
 {"at": 1683.101, "data": {}, "item": "i9", "kind": "item_started"}
 {"at": 1683.31, "data": {}, "item": "i10", "kind": "item_started"}
-{"at": 2117.449, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i10", "kind": "item_finished"}
+{"at": 2117.449, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i10", "kind": "item_finished"}
 {"at": 2290.232, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i10", "kind": "check_verdict"}
 {"at": 2325.825, "data": {"in_target": true}, "item": "i10", "kind": "seen"}
 {"at": 2444.871, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i9", "kind": "item_finished"}

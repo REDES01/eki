@@ -11,6 +11,7 @@
 {"at": 603.011, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 603.011, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
 {"at": 625.964, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 867.305, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 963.345, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
 {"at": 963.345, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
 {"at": 963.345, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
@@ -25,8 +26,10 @@
 {"at": 1823.323, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 1823.323, "data": {"files": ["f?"], "result": "conflict"}, "item": "i2", "kind": "merge_result"}
 {"at": 1863.111, "data": {"outcome": "resolved"}, "item": "i2", "kind": "item_finished"}
+{"at": 2068.25, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 2069.418, "data": {"files": ["f?"], "result": "conflict"}, "item": "i2", "kind": "merge_result"}
 {"at": 2106.578, "data": {"outcome": "resolved"}, "item": "i2", "kind": "item_finished"}
+{"at": 2290.937, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i2", "kind": "check_verdict"}
 {"at": 2722.872, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
 {"at": 2722.872, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
 {"at": 2722.872, "data": {"went": "target"}, "item": "i2", "kind": "landed"}

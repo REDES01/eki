@@ -3,7 +3,7 @@
 {"at": 240.489, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15"], "id": "i1"}, {"deps": [], "files": ["f16", "f17", "f18", "f19", "f20", "f21", "f22"], "id": "i2"}, {"deps": ["i1", "i2"], "files": ["f23", "f24", "f25", "f26", "f27", "f28", "f29", "f9", "f10", "f8", "f7", "f13", "f14"], "id": "i3"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 244.388, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 246.68, "data": {}, "item": "i2", "kind": "item_started"}
-{"at": 592.121, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 592.121, "data": {"can_fix": false, "changed": true, "ended_early": true, "no_review": "(not reviewed)", "touched": []}, "item": "i2", "kind": "item_finished"}
 {"at": 605.06, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i2", "kind": "check_verdict"}
 {"at": 622.271, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
 {"at": 623.599, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}

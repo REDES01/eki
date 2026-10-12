@@ -44,7 +44,7 @@
 {"at": 2782.534, "data": {"went": "live"}, "item": "i4", "kind": "landed"}
 {"at": 2983.5, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "no: (objection)"}, "item": "i5", "kind": "check_verdict"}
 {"at": 3284.969, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
-{"at": 3284.969, "data": {"decision": "apply", "yes": true}, "item": "i5", "kind": "person_decided"}
+{"at": 3284.969, "data": {"decision": "apply"}, "item": "i5", "kind": "person_decided"}
 {"at": 3336.833, "data": {"result": "rebased"}, "item": "i5", "kind": "merge_result"}
 {"at": 3336.833, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i5", "result": "green"}]}, "item": "i5", "kind": "check_verdict"}
 {"at": 3336.833, "data": {"went": "target"}, "item": "i5", "kind": "landed"}

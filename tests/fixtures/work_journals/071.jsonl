@@ -1,4 +1,4 @@
-{"goal": "g71", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"expected": "a person ran it again (`eki self retry`), which leaves no row; the build after it has no recorded cause, so the replay doesn't start it", "goal": "g71", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
 {"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
 {"at": 285.451, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13"], "id": "i1"}, {"deps": ["i1"], "files": ["f14", "f15", "f16"], "id": "i2"}, {"deps": [], "files": ["f17", "f18", "f19", "f20", "f21"], "id": "i3"}, {"deps": ["i1"], "files": ["f22", "f23", "f24", "f25"], "id": "i4"}, {"deps": ["i1"], "files": ["f26", "f7", "f27", "f28", "f29", "f30", "f31", "f32", "f13", "f33", "f34"], "id": "i5"}, {"deps": ["i1"], "files": ["f35", "f36", "f37", "f38", "f39", "f40"], "id": "i6"}, {"deps": [], "files": ["f41"], "id": "i7"}, {"deps": ["i1"], "files": ["f42", "f43", "f44"], "id": "i8"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 508.098, "data": {}, "item": "i1", "kind": "item_started"}
@@ -17,6 +17,8 @@
 {"at": 2229.67, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
 {"at": 2251.413, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i3", "kind": "check_verdict"}
 {"at": 2251.763, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
+{"at": 2731.534, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i7", "kind": "check_verdict"}
+{"at": 3139.95, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
 {"at": 3404.254, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
 {"at": 3404.254, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
 {"at": 3404.254, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
@@ -58,7 +60,6 @@
 {"at": 8141.866, "data": {"went": "target"}, "item": "i6", "kind": "landed"}
 {"at": 8142.866, "data": {"went": "live"}, "item": "i6", "kind": "landed"}
 {"at": 10179.907, "data": {"decision": "drop"}, "item": "i8", "kind": "person_decided"}
-{"at": 10297.082, "data": {"decision": "retry"}, "item": "i5", "kind": "person_decided"}
 {"at": 10297.082, "data": {}, "item": "i5", "kind": "item_started"}
 {"at": 10410.111, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
 {"at": 11497.831, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i5", "kind": "check_verdict"}

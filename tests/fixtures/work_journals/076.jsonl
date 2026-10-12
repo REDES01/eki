@@ -8,4 +8,9 @@
 {"at": 6370.667, "data": {}, "item": "i1", "kind": "item_started"}
 {"at": 6497.793, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 7506.235, "data": {"can_fix": false, "ended": "failed", "result": "red", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
+{"at": 9532.526, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 9984.22, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 9984.22, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
+{"at": 9984.22, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 9985.22, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
 {"final": {"i1": "live"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i1", "review"], ["i1", "build"], ["i1", "review"]]}

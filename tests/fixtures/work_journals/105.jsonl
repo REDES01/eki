@@ -3,7 +3,7 @@
 {"at": 375.967, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
 {"at": 529.657, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13"], "id": "i1"}, {"deps": ["i1"], "files": ["f7", "f14", "f15", "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", "f24", "f25", "f26"], "id": "i2"}, {"deps": ["i1"], "files": ["f8", "f27", "f28", "f29", "f30", "f14", "f31", "f32", "f33", "f34", "f35", "f36", "f37"], "id": "i3"}, {"deps": ["i1"], "files": ["f38", "f39", "f40"], "id": "i4"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 531.315, "data": {}, "item": "i1", "kind": "item_started"}
-{"at": 1845.819, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 1845.819, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i1", "kind": "item_finished"}
 {"at": 2529.278, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
 {"at": 2529.682, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
 {"at": 2529.682, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
@@ -16,4 +16,7 @@
 {"at": 4040.47, "data": {}, "item": "i2", "kind": "item_started"}
 {"at": 4041.698, "data": {}, "item": "i3", "kind": "item_started"}
 {"at": 4514.922, "data": {}, "item": "i4", "kind": "item_started"}
-{"final": {"i1": "live", "i2": "building", "i3": "building", "i4": "building"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i1", "review"], ["i1", "resolve"], ["i1", "resolve"], ["i2", "build"], ["i3", "build"], ["i4", "build"]]}
+{"at": 5553.642, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 6367.816, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "no: (objection)"}, "item": "i4", "kind": "check_verdict"}
+{"at": 6367.843, "data": {}, "item": "i4", "kind": "item_started"}
+{"final": {"i1": "live", "i2": "building", "i3": "building", "i4": "building"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i1", "review"], ["i1", "resolve"], ["i1", "resolve"], ["i2", "build"], ["i3", "build"], ["i4", "build"], ["i4", "review"], ["i4", "build"]]}

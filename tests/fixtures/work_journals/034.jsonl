@@ -4,7 +4,7 @@
 {"at": 614.985, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3"], "id": "i1"}, {"deps": ["i1"], "files": ["f4", "f2", "f5"], "id": "i2"}, {"deps": ["i1"], "files": ["f6", "f7", "f8", "f9"], "id": "i3"}, {"deps": [], "files": ["f10", "f11"], "id": "i4"}, {"deps": [], "files": ["f12"], "id": "i5"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
 {"at": 618.862, "data": {}, "item": "i4", "kind": "item_started"}
 {"at": 621.368, "data": {}, "item": "i5", "kind": "item_started"}
-{"at": 686.104, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
+{"at": 686.104, "data": {"can_fix": false, "changed": true, "ended_early": true, "touched": []}, "item": "i5", "kind": "item_finished"}
 {"at": 689.366, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
 {"at": 787.27, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
 {"at": 787.339, "data": {"decision": "drop"}, "item": "i2", "kind": "person_decided"}

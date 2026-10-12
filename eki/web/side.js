@@ -50,6 +50,7 @@
     }
   });
   window.addEventListener("eki:view", () => loadThreads().catch(() => {}));
+  window.addEventListener("eki:drafts", draw);   // a draft appeared or went: its mark
 
   setInterval(() => loadThreads().catch(() => {}), 4000);
   window.side = { loadThreads, render, list: () => lastList.concat(lastArchived) };   // list: threadmenu.js

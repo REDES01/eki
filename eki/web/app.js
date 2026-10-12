@@ -1,9 +1,11 @@
 // eki's chat: the thread view and the composer (nav.js routes, side.js is the sidebar).
-// Everything comes from the engine's API; nothing is kept here
-// that the engine doesn't have, so a refresh or an engine restart loses nothing.
+// Everything comes from the engine's API; nothing is kept here that the engine doesn't have, so a refresh or an
+// engine restart loses nothing. The one exception is the composer's unsent text and pictures: a draft per
+// conversation, kept in this window's localStorage only (ekiDrafts in attach.js), never sent or synced.
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { thread: null, project: null, after: 0, polling: false, answers: {}, whys: new Set(), live: null };   // answers/whys: what the page shows, not keeps
+  const state = { thread: null, project: null, after: 0, polling: false, answers: {}, whys: new Set(), live: null, draft: null };   // answers/whys: what the page shows, not keeps
+  // draft: the key of the conversation the composer's text belongs to (a thread's id, or "new")
 
   const LIVE = ["queued", "starting", "running"];
 
@@ -160,7 +162,18 @@
     state.polling = false;
   }
 
+  // The composer's draft goes with its conversation: kept under the old key, the new one's put back.
+  function swapDraft(key) {
+    if (state.draft) ekiDrafts.save(state.draft, $("prompt").value, ekiAttach.paths());
+    state.draft = key;
+    const d = ekiDrafts.get(key);
+    $("prompt").value = d ? d.text : "";
+    ekiAttach.restore(d ? d.attachments : []);
+    autosize();
+  }
+
   function open(id) {
+    swapDraft(id || "new");
     state.thread = id || null;
     state.project = null;
     state.after = 0;
@@ -221,6 +234,7 @@
     if (!prompt) return;
     if (ekiAttach.busy()) return alertLine("A picture is still uploading.");
     $("send").disabled = true;
+    const key = state.draft;
     try {
       const got = await call("/api/ask", {
         prompt, thread: state.thread, to: $("to").value, cwd: state.project ? "" : $("cwd").value.trim(),
@@ -228,6 +242,7 @@
       });
       $("prompt").value = "";
       ekiAttach.clear();
+      ekiDrafts.clear(key);
       autosize();
       menu(false);
       if (got.thread !== state.thread) { location.hash = got.thread; } else { await loadThread(true); }
@@ -250,6 +265,7 @@
   });
   function autosize() { const t = $("prompt"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; t.classList.toggle("tall", t.scrollHeight > 240); }
   $("prompt").addEventListener("input", autosize);
+  ekiDrafts.bind($("prompt"), () => state.draft, ekiAttach.paths);
 
   document.addEventListener("click", async (e) => {
     const c = e.target.closest("[data-cancel]");

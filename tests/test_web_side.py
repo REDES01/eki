@@ -21,6 +21,9 @@ global.fetch = () => new Promise(() => {});
 global.setInterval = () => 0;
 global.md = { esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;") };
 global.nav = { current: () => null };
+const drafts = JSON.parse(process.argv[5] || "null");
+if (drafts) window.ekiDrafts = { has: (id) => drafts.includes(id) };
+global.ekiDrafts = window.ekiDrafts;
 global.prs = { lines: () => "", total: () => 0 };
 require(process.argv[2]);
 global.sidelist = window.sidelist;
@@ -31,13 +34,13 @@ process.stdout.write(archived ? window.side.render(list, cur, groups, archived) 
 """
 
 
-def render(tmp_path, threads, cur=None, groups=None, archived=None, open_archived=False):
+def render(tmp_path, threads, cur=None, groups=None, archived=None, open_archived=False, drafts=None):
     if not shutil.which("node"):
         pytest.skip("node is not installed")
     stub = tmp_path / "stub.js"
     stub.write_text(STUB)
     args = json.dumps([threads, cur, groups or [], archived, open_archived])
-    out = subprocess.run(["node", str(stub), str(WEB / "sidelist.js"), str(WEB / "side.js"), args],
+    out = subprocess.run(["node", str(stub), str(WEB / "sidelist.js"), str(WEB / "side.js"), args, json.dumps(drafts)],
                          capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stderr
     return out.stdout
@@ -135,6 +138,19 @@ def test_an_unread_chat_has_its_own_dot(tmp_path):
     assert html.index('class="dot unread"') < html.index('href="#b"')
     busy = render(tmp_path, [thread("a", 10, unread=True, working=True)])
     assert "dot unread" not in busy and 'class="dot"' in busy            # working wins over unread
+
+
+def test_a_chat_with_an_unsent_draft_has_its_mark(tmp_path):
+    tok = {"id": "p1", "name": "tokenbar"}
+    html = render(tmp_path, [thread("a", 10), thread("b", 20), thread("c", 30, tok), thread("g", 40, group={"id": "g1"})],
+                  cur="c", drafts=["a", "c", "g"])
+    assert html.count('<span class="draft" title="Unsent draft">draft</span>') == 3
+    row = lambda tid: html[html.index(f'href="#{tid}"'):html.index("</a>", html.index(f'href="#{tid}"'))]
+    assert 'class="draft"' in row("a") and 'class="draft"' not in row("b")
+    assert 'class="draft"' in row("c") and 'class="draft"' in row("g")   # in a project and in a group too
+    assert 'class="draft"' not in render(tmp_path, [thread("a", 10)])     # no ekiDrafts on the page: no mark
+    assert '"eki:drafts", draw' in (WEB / "side.js").read_text()
+    assert ".thread .draft" in (WEB / "chat.css").read_text()
 
 
 def test_each_chat_has_a_more_button(tmp_path):

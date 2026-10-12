@@ -209,3 +209,5 @@
 .tmnote { padding: 5px 10px; }
 .thread .t.editing { outline: 1px solid var(--teal); border-radius: 4px; padding: 0 3px; background: var(--card);
   text-overflow: clip; cursor: text; -webkit-mask-image: none; mask-image: none; margin-right: 0; }
+/* a chat with unsent text or pictures (sidelist.js) */
+.thread .draft { color: var(--dim); font-style: italic; opacity: .8; }

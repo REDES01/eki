@@ -26,12 +26,15 @@
     return "";
   }
 
+  // a small mark on a chat with unsent text or pictures (ekiDrafts, attach.js)
+  const draft = (t) => window.ekiDrafts && ekiDrafts.has(t.id) ? '<span class="draft" title="Unsent draft">draft</span> ' : "";
+
   function threadLink(t, cur) {
     return `
       <a href="#${t.id}" class="thread ${t.id === cur ? "on" : ""}" data-id="${t.id}">
         ${dot(t)}
         <span class="t">${md.esc(t.title || "(untitled)")}</span>
-        <span class="when dim">${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
+        <span class="when dim">${draft(t)}${t.provider ? md.esc(t.provider) + " · " : ""}${ago(t.updated)}</span>
         <button type="button" class="tmore" data-tmore="${t.id}" title="More" aria-label="More">…</button>
       </a>`;
   }

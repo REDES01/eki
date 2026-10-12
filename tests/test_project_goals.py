@@ -67,6 +67,8 @@ def planned(conn, tmp_path, monkeypatch, proj, check):
     assert workspace.head(wt) == workspace.head(proj)
     says(tmp_path, monkeypatch, PLAN)
     run_inline(conn, plan["id"])
+    if g["dry_run"]:                    # a card whose check builds gets a dry build: the plan waits for it
+        run_inline(conn, g["dry_run"])
     said = selfwork.tick(conn)
     assert any("1 item(s) planned" in s for s in said)
     assert not workspace.git(proj, "branch", "--list", f"eki/plan-{gid}")

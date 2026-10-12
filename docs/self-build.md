@@ -101,6 +101,19 @@ dependency chain, width the most items on one level, `chained` the deps
 between disjoint write-sets — and stores it in `goals.shape`; the `eki self`
 board shows it on the goal line as "5 items · 2 deep · 4 wide".
 
+**Hot spots are warned about before the plan fans out** (`eki/hotspots.py`).
+A file in 3 or more items' write-sets, or a tracked file the build makes —
+rewritten by the dry build at plan start, or tracked yet matched by
+`.gitignore` — is a hot spot: parallel items would conflict on it. When the
+plan concludes (and the dry build has ended), the spots are stored in
+`goals.hot` and written as a note on the plan run, so the goal's thread, the
+Station and the `eki self` board show "q.json is in 7 items — split it first,
+or they will conflict" with a proposed first item that splits the file (one
+file per part, the build joins them) or untracks the generated output. Under
+the workflow's plan 'split' (or no card) the planner puts that item first and
+every other item depends on it; under any other plan only the warning is
+written. A plan without hot spots is left as it was.
+
 **Each item's context is the planner's pick.** When the project has
 knowledge cards, the plan brief lists them (name, about line, read mode,
 files) and each `ITEMS` entry carries a `"context"` list — the cards that

@@ -30,6 +30,8 @@ def board(c) -> int:
             print(f"           {drafting(c, g)}")
         if g["error"]:
             print(f"           ! {g['error'][:200]}")
+        for w in selfview.hot(g):
+            print(f"           hot: {w}")
         for it in selfview.items(c, g["id"]):
             print(f"  {it['id']}  {it['state']:<9} {selfview.where(it):<22} {it['title'][:52]}")
             note = selfview.note(c, it)

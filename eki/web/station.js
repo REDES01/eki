@@ -133,6 +133,7 @@
         ${busy ? "" : `<span class="dim">${live}/${n} live</span>`}${tlink(g.thread)}</div>
       ${open ? `${g.drafting ? `<div class="st-note">${esc(g.drafting).replace(/\n\s*/g, "<br>")}</div>` : ""}
       ${g.error ? `<div class="st-note bad">! ${esc(g.error.slice(0, 200))}</div>` : ""}
+      ${(g.hot || []).map((w) => `<div class="st-note warn" style="color: var(--amber)">⚠ ${esc(w)}</div>`).join("")}
       ${g.items.map(item).join("")}` : ""}</div>`;
   }
 

@@ -5,7 +5,8 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from . import asks, callwait, checkslots, db, doccheck, fixer, itemhold, notifygoals, projects, queue, selfwork, store
+from . import (asks, callwait, checkslots, db, doccheck, fixer, hotspots, itemhold, notifygoals, projects, queue,
+               selfwork, store)
 
 
 def board(c: sqlite3.Connection) -> Dict[str, Any]:
@@ -60,7 +61,16 @@ def _goal(c, g) -> Dict[str, Any]:
             "drafting": drafting(c, g) if g["state"] == "drafting" else None,
             "created_at": g["created_at"], "draft_run": g["draft_run"], "plan_run": g["plan_run"],
             "thread": _thread(c, g["draft_run"]) or _thread(c, g["plan_run"]),
-            "items": [_item(c, it) for it in items(c, g["id"])]}
+            "hot": hot(g), "items": [_item(c, it) for it in items(c, g["id"])]}
+
+
+def hot(g) -> List[str]:
+    """The plan's hot-spot warnings (eki/hotspots.py); [] when it has none."""
+    try:
+        spots = json.loads(g["hot"] or "[]") if "hot" in g.keys() else []
+    except ValueError:
+        return []
+    return [hotspots.warning(s) for s in spots if isinstance(s, dict)]
 
 
 def stands(c, g) -> str:

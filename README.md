@@ -87,8 +87,9 @@ objective, mostly without a person touching the code.
   CPU budget.
 - **Repository hygiene decides how parallel a project can be.** Generated files
   in git and single shared files (one tags table, one quest list) made every
-  item conflict until they were split. The planner should warn about files many
-  items will touch before fanning out.
+  item conflict until they were split. The planner now warns about files many
+  items will touch (and generated files tracked in git) before fanning out,
+  and under plan 'split' puts an item that splits them first.
 - **One place to see everything.** The Station shows eki's own work; a project's
   work is on its page. (Being built: every project on the Station.)
 - **Checks prove it builds, not that it's good.** Player-facing quality still

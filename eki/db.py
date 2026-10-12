@@ -241,6 +241,16 @@ CREATE TABLE IF NOT EXISTS verdicts (       -- one judgment of one check by one 
 CREATE INDEX IF NOT EXISTS verdicts_goal ON verdicts(goal_id, check_id, created_at);
 CREATE TABLE IF NOT EXISTS sensitive (path TEXT PRIMARY KEY, state TEXT NOT NULL, by TEXT NOT NULL, score REAL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS mem_estimates (kind TEXT PRIMARY KEY, gb REAL NOT NULL, samples INTEGER NOT NULL, at REAL NOT NULL);  -- what each kind of work was learned to need (eki/memadmit.py)
+CREATE TABLE IF NOT EXISTS work_actions (   -- what eki/workstep.py decided, carried out once by eki/workrun.py
+    id INTEGER PRIMARY KEY,
+    goal_id TEXT,
+    item_id TEXT,
+    action TEXT NOT NULL,                   -- JSON {kind, item, data}
+    why TEXT,
+    created_at REAL NOT NULL,
+    done_at REAL                            -- NULL: still to do
+);
+CREATE INDEX IF NOT EXISTS work_actions_undone ON work_actions(done_at);
 CREATE TABLE IF NOT EXISTS mem_peaks (key TEXT PRIMARY KEY, kind TEXT NOT NULL, peak_gb REAL NOT NULL, at REAL NOT NULL);  -- the peak seen so far of each running process tree (eki/memlearn.py)
 """
 
@@ -322,6 +332,8 @@ ADDED = [
     ("goals", "accept", "TEXT"),        # JSON {round, runs, fixes, by?}: final acceptance (eki/acceptance.py)
     ("runs", "stop", "TEXT"),           # JSON {kind, retry_at, fix, since, n}: why it last stopped (eki/stopkind.py record)
     ("items", "hold", "TEXT"),          # JSON: a runs.stop record plus "run" while held for a broken setup
+    ("items", "work", "TEXT"),          # JSON workmodel.ItemState, written with state by eki/workrun.py
+    ("goals", "work", "TEXT"),          # JSON workmodel.GoalState, written with state by eki/workrun.py
 ]
 
 

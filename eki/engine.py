@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import IO, Optional
 
-from . import aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc
+from . import aftermerge, builds, checkslots, db, fixer, housekeep, machine, memadmit, models, observe, paths, projectqueue, queue, quota, selfwork, shellbuild, store, train, webproc, workrun
 from .components import access
 
 log = logging.getLogger("eki.engine")
@@ -257,6 +257,12 @@ def tick(conn) -> bool:
     refresh_quota()
     if time.time() - _last_self[0] > SELF_EVERY:
         _last_self[0] = time.time()
+        try:                                             # actions saved before a restart are done first, once
+            for line in workrun.carry(conn):
+                log.info("work: %s", line)
+        except Exception:                                # noqa: BLE001 — never stops the work ticks
+            log.exception("work carry failed")
+            observe.fault(conn, "workrun.carry")
         try:
             for line in selfwork.tick(conn):
                 log.info("self: %s", line)

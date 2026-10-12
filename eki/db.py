@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS schedules (      -- a prompt sent on a clock (eki/sch
     why TEXT,                               -- why the last firing was skipped
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sensitive (path TEXT PRIMARY KEY, state TEXT NOT NULL, by TEXT NOT NULL, score REAL, at REAL NOT NULL);
 """
 
 

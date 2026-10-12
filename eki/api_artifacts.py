@@ -9,14 +9,15 @@ from . import artifacts
 
 
 def listing(conn: sqlite3.Connection, m: "re.Match[str]", q: Dict[str, str], body: dict) -> Dict[str, Any]:
-    """GET /api/artifacts?kind=all|picture|page|document&q=&before=&limit="""
+    """GET /api/artifacts?kind=all|picture|page|document&q=&before=&limit=&hide_sensitive=1"""
     try:
         limit = max(1, min(500, int(q.get("limit") or 60)))
         before = float(q["before"]) if q.get("before") else None
     except ValueError:
         raise ValueError("limit must be a whole number and before an event time")
     return artifacts.listing(conn, kind=q.get("kind") or "all", q=q.get("q") or "",
-                             limit=limit, before=before)
+                             limit=limit, before=before,
+                             hide_sensitive=(q.get("hide_sensitive") or "") not in ("", "0", "false"))
 
 
 #: (method, regex, fn) — see eki/apiroutes.py

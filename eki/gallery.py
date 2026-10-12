@@ -14,6 +14,8 @@ import os
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from . import sensitive
+
 #: how many events are read at a time while looking for pictures still on disk
 _BATCH = 200
 
@@ -22,7 +24,9 @@ def pictures(conn: sqlite3.Connection, limit: int = 60,
              before: Optional[float] = None, project: Optional[str] = None) -> List[Dict[str, Any]]:
     """Up to `limit` pictures still on disk, newest first; `before` (an event
     time) pages back past the ones already shown; `project` keeps the ones
-    drawn in that project's chats (`threads.project`)."""
+    drawn in that project's chats (`threads.project`). Each says whether
+    it is marked `sensitive`."""
+    hidden = sensitive.paths(conn)
     out: List[Dict[str, Any]] = []
     where, args = "", []                     # type: str, List[Any]
     if before is not None:
@@ -40,7 +44,8 @@ def pictures(conn: sqlite3.Connection, limit: int = 60,
             if path and os.path.isfile(path):
                 out.append({"path": path, "run": e["run"], "thread": e["thread_id"],
                             "thread_title": e["title"] or "", "prompt": e["prompt"],
-                            "row": e["row"], "provider": e["provider"], "created_at": e["t"]})
+                            "row": e["row"], "provider": e["provider"], "created_at": e["t"],
+                            "sensitive": os.path.normpath(path) in hidden})
                 if len(out) >= limit:
                     break
         if len(rows) < _BATCH:

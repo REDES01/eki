@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from . import paths
+from . import paths, sensitive
 
 KINDS: Dict[str, Set[str]] = {
     "picture": {"svg", "png", "jpg", "jpeg", "gif", "webp"},
@@ -70,16 +70,18 @@ def _matches(q: str, name: str, title: str, prompt: str) -> bool:
 
 
 def listing(conn: sqlite3.Connection, kind: str = "all", q: str = "", limit: int = 60,
-            before: Optional[float] = None) -> Dict[str, Any]:
+            before: Optional[float] = None, hide_sensitive: bool = False) -> Dict[str, Any]:
     """Up to `limit` artifacts of `kind` (all | picture | page | document),
     newest first; `q` keeps those whose file name, thread title or prompt
     holds it; `before` (an event time) pages back past the ones shown.
-    `more` says another page may exist."""
+    `more` says another page may exist. Each item says whether it is marked
+    `sensitive`; `hide_sensitive` leaves those out."""
     if kind != "all" and kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}: all, picture, page or document")
     q = (q or "").strip().lower()
     out: List[Dict[str, Any]] = []
     seen: Set[str] = set()
+    hidden = sensitive.paths(conn)
     where, args = "", []                     # type: str, List[Any]
     if before is not None:
         where, args = " AND e.t < ?", [float(before)]
@@ -89,6 +91,9 @@ def listing(conn: sqlite3.Connection, kind: str = "all", q: str = "", limit: int
         for e in rows:
             item = _item(conn, e, kind, q, seen, before)
             if item:
+                item["sensitive"] = item["path"] in hidden
+                if hide_sensitive and item["sensitive"]:
+                    continue
                 out.append(item)
                 if len(out) > limit:
                     break

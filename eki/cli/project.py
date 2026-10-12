@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-from .. import db, projectchats, projectdelete, projects, projectsetup
+from .. import api_projects, db, projectchats, projectdelete, projects, projectsetup
 from . import projectlist
 from .common import conn, err
 
@@ -202,5 +202,6 @@ def run(args) -> int:
             print(e["name"])
             if p is not None:
                 print(f"  autonomy: {projects.autonomy(p)}")
+                print(f"  lands: {api_projects.landing_line(p)}")
         print("\n".join(projectlist.details(e)))
     return 0

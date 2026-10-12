@@ -72,7 +72,30 @@ def show(conn: sqlite3.Connection, pid: str) -> Dict[str, Any]:
             "sections": {"chats": _chats(conn, pid), "background": _background(conn, pid),
                          "pictures": {"count": len(pics), "items": pics},
                          "files": _files(conn, pid)},
-            "cloning": _cloning(conn, pid)}
+            "cloning": _cloning(conn, pid),
+            "landing": None if pid == projectchats.SELF else landing_line(projects.get(conn, pid))}
+
+
+def landing_line(project: Optional[sqlite3.Row]) -> Optional[str]:
+    """How a local project's work lands, in plain words; None for a GitHub row (or no row).
+    The GitHub remote is read from the folder's config, never asked of the network."""
+    if project is None or project["repo"] or "lands" in project.keys() and project["lands"] == "github":
+        return None                                 # pull requests chosen: not a local project
+    folder = projectchats.norm(project["folder"] or project["path"])
+    branch = project["branch"]
+    if not branch:
+        line = "No background work yet: eki will land on the branch your folder is on when you add a goal."
+    elif projects.autonomy(project) == "propose":
+        line = (f"eki leaves each change on an eki/<id> branch for you to merge into {branch}; "
+                "it never pushes a local project.")
+    else:
+        line = (f"eki lands finished work on {branch} in your folder ({folder}), fast-forward only, "
+                "and never pushes a local project.")
+    remote = github.repo_of(folder) if os.path.isdir(folder) else None
+    if remote:
+        line += (f" It has a GitHub remote ({remote}), but stays local: eki opens pull requests "
+                 "only if you choose them for this project.")
+    return line
 
 
 def _chats(conn: sqlite3.Connection, pid: str) -> List[Dict[str, Any]]:

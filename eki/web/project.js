@@ -85,7 +85,8 @@
       `<a class="pj-wf" href="#project/${encodeURIComponent(p.id)}/workflow">Workflow</a>`);   // the graph (workflowpage.js)
     if (!S.editing) put("pj-desc", desc(p));
     put("pj-head", `<div>${p.folder ? `Chats work in <code>${esc(p.folder)}</code> — your real folder.` : "Chats need a folder — none yet."}</div>
-      <div class="dim">Background: ${esc(p.background || "none")}</div>`);
+      <div class="dim">Background: ${esc(p.background || "none")}</div>
+      ${p.landing ? `<div class="dim pj-landing">${esc(p.landing)}</div>` : ""}`);   // how a local project lands
     put("pj-setup", setup(p));
     $("pj-ask").hidden = !p.folder_ok;
     fresh(p);

@@ -1,7 +1,7 @@
-"""Every run of a planned item — build, rebuild, resolve, review — gets the item's chosen context."""
+"""Every run of a planned item — build, rebuild, resolve, judge — gets the item's chosen context."""
 import json
 
-from eki import components, db, review, store, worker
+from eki import components, db, judge, store, worker
 from eki.components import knowledge
 from tests.test_item_context import _cards, _first
 
@@ -42,14 +42,14 @@ def test_resolve_and_rebuild_in_the_same_thread_get_the_same_note(conn, proj):
     assert _note(conn, tid, "the checks failed; fix it") == first
 
 
-def test_the_review_prompt_carries_the_same_brief(conn, proj):
+def test_the_judge_prompt_carries_the_same_brief(conn, proj):
     _cards(proj)
     _item(conn, proj, "i1", ARCH)
     it = conn.execute("SELECT * FROM items WHERE id='i1'").fetchone()
-    out = review.prompt(conn, it)
+    out = judge.prompt(conn, it, "item", [("spec", judge.SPEC_TEXT)])
     told = knowledge.brief(str(proj), conn, context=["architecture"])
     assert told and f"What the builder was told to read:\n\n{told}\n" in out
-    assert out.index("the spec") < out.index(told) < out.index("The diff")
+    assert out.index("the spec") < out.index(told) < out.index("The checks to judge")
 
 
 def test_an_item_without_context_gets_the_full_brief(conn, proj):
@@ -59,7 +59,7 @@ def test_an_item_without_context_gets_the_full_brief(conn, proj):
     assert knowledge.brief(str(proj), conn) in note
     assert "k/voices.md" in note and "Also available" not in note
     it = conn.execute("SELECT * FROM items WHERE id='i1'").fetchone()
-    assert knowledge.brief(str(proj), conn) in review.prompt(conn, it)
+    assert knowledge.brief(str(proj), conn) in judge.prompt(conn, it, "item", [("spec", judge.SPEC_TEXT)])
 
 
 def test_a_chat_in_the_project_gets_todays_note(conn, proj):
@@ -71,8 +71,8 @@ def test_a_chat_in_the_project_gets_todays_note(conn, proj):
     assert "Also available" not in want
 
 
-def test_a_review_prompt_without_cards_is_unchanged(conn, tmp_path):
+def test_a_judge_prompt_without_cards_is_unchanged(conn, tmp_path):
     conn.execute("INSERT INTO items(id, goal_id, title, worktree, created_at, updated_at) "
                  "VALUES ('e1', 'g', 't', ?, ?, ?)", (str(tmp_path), db.now(), db.now()))
-    out = review.prompt(conn, conn.execute("SELECT * FROM items WHERE id='e1'").fetchone())
+    out = judge.prompt(conn, conn.execute("SELECT * FROM items WHERE id='e1'").fetchone(), "item", [])
     assert "What the builder was told to read" not in out

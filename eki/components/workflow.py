@@ -3,6 +3,11 @@
 `command` is gate 1's check: text, or a list of path rules (eki/pathrules.py) so a change runs
 only the checks for what it touched; `batch_command` is gate 2's, defaulting to a text command.
 
+`review` in `checks` means a judge reads each item: an independent run on another backend
+than the builder's files one verdict per check (eki/judge.py); leaving it out keeps the goal's
+final acceptance. `playtester` gives the item's checks to the playtester, who says a verdict
+on each.
+
 A passive card the engine reads through eki/workflow.py; at most one per project. `checks`
 always holds `self`; `train` belongs to eki's own project only, and there the stages in
 workflow.LOCKED can't be dropped: they protect eki itself.
@@ -39,6 +44,16 @@ PARALLEL = 4
 #: one line on a setting the card's page explains (parallel stays a number: cardworkflow.js draws it)
 FIELD_HELP = {'parallel': "this project's ceiling; the machine setting can be lower"}
 PLAYTESTER = 'playtester'
+#: what each check means, in plain words
+CHECK_HELP = {
+    'self': "the builder's own word: it says when it's done",
+    'review': "a judge reads each item: another agent, on another backend than the builder's, checks it "
+              "against its spec and the goal's checks and files a verdict on each; a failed check sends it "
+              "back once",
+    'command': "the project's check command runs on each change; red sends it back",
+    'batch': 'the queued changes are checked together before they land',
+    'playtester': 'the playtester card plays each change and says a verdict on each of its checks',
+    'train': "eki's own: a build, the drills and a swap before a change goes live"}
 
 
 def _second(folder: Path) -> str:

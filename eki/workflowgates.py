@@ -3,8 +3,10 @@
 selfwork asks here and keeps doing the moving. A goal with no card is None everywhere here
 and selfwork does today's thing. With a card, gate 1 is one command run made of the chosen
 checks in order — `command` (the card's check command), then `playtester` (`eki use
-<playtester>` plays the change; a non-zero exit is red). With `review` only, the review
-judges alone and gate 1 just says so; with `self` only there is no gate run at all and the
+<playtester>` plays the change; a non-zero exit is red). An item that carries goal checks
+gives them to the playtester and pipes its answer into `eki verdict --lines`: that gate run
+is a `play` judge run (eki/judge.py play, which registers it). With `review` only, a judge
+run (eki/judge.py) judges alone and gate 1 just says so; with `self` only there is no gate run at all and the
 item is proposed as the builder left it. The board says once per goal which checks run.
 
 eki's own goals keep their gate 1 (bin/check): what the card changes for eki is read by
@@ -18,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import builds, pathrules, projectwork, workflow
+from . import builds, judgebrief, pathrules, projectwork, workflow
 
 #: what an item says for the review when the project's card doesn't choose it
 NO_REVIEW = "not in this project's workflow"
@@ -62,22 +64,25 @@ def single(conn: sqlite3.Connection, project: Optional[str]) -> bool:
     return wf is not None and wf.plan == "single"
 
 
-def gate(wf: workflow.Workflow, title: str, touched: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
+def gate(wf: workflow.Workflow, title: str, touched: Optional[List[str]] = None,
+         checks: Optional[List[Tuple[str, str]]] = None) -> Optional[Tuple[str, str]]:
     """Gate 1 for a project item under its card: (command run argv JSON, what it runs),
     or None when the card chooses no gate run (self only). A card with path rules runs the
-    rules matching `touched` (the item's changed files) all in one run."""
+    rules matching `touched` (the item's changed files) all in one run. With the item's goal
+    `checks` [(id, text)] the playtester is asked for a verdict on each (judgebrief.play_line)."""
     lines, says = [], []
     if workflow.has(wf, "command") and (wf.command.strip() or wf.rules):
         lines.append(workflow.check_line(wf, touched or []))
         says.append(_chosen(wf, touched or []) if wf.rules else wf.command)
     if workflow.has(wf, "playtester"):
-        lines.append(f"eki use {shlex.quote(wf.playtester)} {shlex.quote(f'play the change: {title}')}")
+        lines.append(judgebrief.play_line(wf, title, checks) if checks else
+                     f"eki use {shlex.quote(wf.playtester)} {shlex.quote(f'play the change: {title}')}")
         says.append(lines[-1])
     if len(lines) > 1:                     # the command as written, whatever its own operators
         line = f"( {lines[0]}\n) && {lines[1]}"
     elif lines:
         line = lines[0]
-    elif workflow.has(wf, "review"):       # the review judges alone: gate 1 only says so
+    elif workflow.has(wf, "review"):       # the judge run judges alone: gate 1 only says so
         line = f"echo {shlex.quote(workflow.said(wf))}"
     else:
         return None

@@ -48,6 +48,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "start_detached", lambda: 0)
     from eki import workflowgates          # this checkout's own workflow card is the running eki's, not a
     monkeypatch.setattr(workflowgates, "own", lambda: None)   # test's (tests/test_workflow_gates.py)
+    from eki import judge                  # a judge run per built item would hold every item judging on the
+    monkeypatch.setattr(judge, "start_item", lambda conn, it: (None, "no judge in tests"))   # fakes: the
+    # tests that judge put the real one back (tests/test_judge_item.py, tests/test_review.py)
     real = Path("~").expanduser()
     assert not str(h).startswith(str(real / ".eki")), "tests must never use the real eki home"
     (h / "providers.json").write_text(json.dumps({

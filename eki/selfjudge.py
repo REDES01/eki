@@ -1,13 +1,15 @@
-"""Gate 1 and the review have ended for a `judging` eki item: move it on
-(docs/self-build.md). Green goes by the review's word; red gets one more
-build, then one fixer run (eki/fixer.py), then it is unfit — left for you
-with what the fixer tried."""
+"""Gate 1 and the judge have ended for a `judging` eki item: move it on
+(docs/self-build.md). Green goes by the judge's word (eki/review.py,
+eki/judge.py); red gets one more build, then one fixer run (eki/fixer.py),
+then it is unfit — left for you with what the fixer tried. A judge that is
+uncertain gets one second judge on another backend (judge.second); still
+uncertain, the item is proposed for you and the queue never takes it."""
 from __future__ import annotations
 
 import sqlite3
 from typing import List, Optional
 
-from . import db, fixer, itemhold, review, selfwork, store
+from . import db, fixer, itemhold, judge, review, selfwork, store
 
 
 def conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
@@ -19,13 +21,15 @@ def conclude(conn: sqlite3.Connection, it: sqlite3.Row) -> List[str]:
     if run["state"] != "done":
         tail = (tail + f"\n(checks {run['state']}: {selfwork.failure_tail(run['error'] or '', 6)})").strip()
     with db.tx(conn):
-        cur = conn.execute("SELECT state, reviews FROM items WHERE id=?", (it["id"],)).fetchone()
-        if cur is None or cur["state"] != "judging":
-            return []
+        cur = conn.execute("SELECT state, reviews, review_run FROM items WHERE id=?", (it["id"],)).fetchone()
+        if cur is None or cur["state"] != "judging" or cur["review_run"] != it["review_run"]:
+            return []                                        # moved, or a second judge started: next tick
         seen = it["review"]
-        if it["review_run"]:
-            said, why = review.read(conn, it)                # closes the chore (eki/review.py)
-            seen = f"{said}: {why}" if said == "no" else said or f"none: {why}"
+        if it["review_run"] or judge.played(conn, it):
+            said, why = review.read(conn, it)                # the judge's verdicts (eki/judge.py)
+            if said == "uncertain" and run["state"] == "done":
+                return unsure(conn, it, tail, why)
+            seen = f"{said}: {why}" if said in ("no", "uncertain") else said or f"none: {why}"
         if run["state"] == "done":
             return judged(conn, it, tail, seen, cur["reviews"])
         if (h := itemhold.settle(conn, it, run)):           # a broken setup: held, no try spent
@@ -57,3 +61,17 @@ def judged(conn: sqlite3.Connection, it: sqlite3.Row, tail: str, seen: Optional[
         return [f"item {it['id']}: the review says no — {why[:120]}; rebuilding once"]
     selfwork._set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
     return [f"item {it['id']}: the review says no again — proposed; `eki self apply {it['id']}` if you agree"]
+
+
+def unsure(conn: sqlite3.Connection, it: sqlite3.Row, tail: str, why: str) -> List[str]:
+    """Gate 1 green, a check uncertain (under the caller's tx): one second judge on another
+    backend; after it, or with none to ask, the item is proposed for you."""
+    if not judge.is_second(conn, it):
+        rid = judge.second(conn, it)
+        if rid:
+            return [f"item {it['id']}: a judge is uncertain — {why[:120]}; a second judge looks ({rid[:8]})"]
+    seen = f"uncertain: {why}"
+    selfwork._set(conn, it["id"], state="proposed", verdict=tail[-800:], review=seen)
+    selfwork.needs_you(conn, it, "proposed", f"no judge could settle {why}", f"eki self show {it['id']}", "judgment")
+    return [f"item {it['id']}: a judge is still uncertain — {why[:120]}; proposed, "
+            f"`eki self apply {it['id']}` if you agree"]

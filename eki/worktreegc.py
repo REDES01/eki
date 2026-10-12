@@ -10,6 +10,8 @@ and removed when nothing will need it again (docs/self-build.md: worktrees):
   old, so the person can look first — its branch is kept;
 - plan-<gid> and draft-<gid> once the goal is past drafting and planning — branch too;
 - gate2-<iid> and train-* once nothing is checking in them;
+- judge-<iid> once the item is past judging, accept-<gid> once the goal is past
+  accepting (the judges' read-only trees: eki/judge.py, eki/judgerun.py) — branch too;
 - a folder no row knows of, KEEP_FAILED_DAYS after it was last changed.
 
 Never one an active run is in (an item's run, gate-2 run or review run, or any
@@ -54,6 +56,9 @@ FAILED = ("left", "unfit", "rolled back")
 BUSY = ("building", "judging", "reviewing", "queued", "resolving", "rechecking", "waiting on calls")
 #: a goal in one of these still uses its plan- / draft- tree
 GOAL_BUSY = ("drafting", "planning")
+#: an item in this state may still be judged in its judge- tree; a goal in this one in its accept- tree
+JUDGE_BUSY = "judging"
+ACCEPT_BUSY = "accepting"
 
 #: the measuring thread, while one runs (in memory only: a restart just measures again)
 _thread: List[Optional[threading.Thread]] = [None]
@@ -165,11 +170,31 @@ def _verdict(conn: sqlite3.Connection, d: Path, seen: Dict[str, Any]):
         if age < GRACE or it["state"] in BUSY or it["gate2_run"] in seen["active"]:
             return None
         return f"gate 2 done, item {it['state']}", None, _item_repo(conn, it)
+    got = _judge_verdict(conn, key, age, seen)
+    if got is not False:
+        return got
     if key.startswith(("gate2-", "train-")):
         return ("no check running in it", None, _own_repo()) if age > GRACE else None
     if age > KEEP_FAILED_DAYS * 86400:
         return f"no row knows it, untouched {int(age // 86400)} days", None, _own_repo()
     return None
+
+
+def _judge_verdict(conn: sqlite3.Connection, key: str, age: float, seen: Dict[str, Any]):
+    """A judge's tree: (why, branch, repo) when it may go, None while it is used, False when `key`
+    is no judge tree of a known item or goal."""
+    if key.startswith("judge-") and seen["items"].get(key[6:]) is not None:
+        it = seen["items"][key[6:]]
+        if age < GRACE or it["state"] == JUDGE_BUSY or it["review_run"] in seen["active"]:
+            return None
+        return f"judged, item {it['state']}", f"eki/{key}", _item_repo(conn, it)
+    if key.startswith("accept-"):
+        g = conn.execute("SELECT * FROM goals WHERE id=?", (key[7:],)).fetchone()
+        if g is not None:
+            if age < GRACE or g["state"] == ACCEPT_BUSY:
+                return None
+            return f"accepted or not, goal {g['state']}", f"eki/{key}", _goal_repo(conn, g)
+    return False
 
 
 def _item_verdict(conn: sqlite3.Connection, it: sqlite3.Row, active: set, repo: Optional[Path]):

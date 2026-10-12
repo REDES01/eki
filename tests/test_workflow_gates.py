@@ -1,17 +1,13 @@
 """The engine follows a project's workflow card: its plan and the gates after a build (eki/workflowgates.py)."""
 import json
 
-import pytest
-
-from eki import projects, selfwork, store, workflow, workflowgates
+from eki import judge, projects, selfwork, store, verdicts, workflow, workflowgates
 from conftest import run_inline
 from test_project_goals import built, planned, says, src  # noqa: F401 — the source fixture
 from test_resolve_project import conflicted, repo, resolved  # noqa: F401 — the repo fixture
-from test_review import settle
+from test_review import START, filed, rec
 from test_workflow_card import card
 
-#: the fake stands in for the local model on the review chore
-pytestmark = pytest.mark.usefixtures("text_fake")
 #: the real reader of eki's own card (the home fixture hides this checkout's card from every test)
 OWN = workflowgates.own
 
@@ -30,28 +26,31 @@ def test_self_only_proposes_with_no_gate_run_and_no_review(conn, src, proj, tmp_
 
 
 def test_command_is_gate_one_and_no_reviewer_without_review(conn, src, proj, tmp_path, monkeypatch):
+    monkeypatch.setattr(judge, "start_item", START)
     card(proj, checks=["self", "command"], command="echo judged")
     pid, it = planned(conn, tmp_path, monkeypatch, proj, "false")     # the card's command, not the row's
     it = built(conn, tmp_path, monkeypatch, it)
     assert it["state"] == "judging" and it["judged_by"] == "echo judged"
     assert json.loads(store.run(conn, it["run_id"])["prompt"]) == ["/bin/sh", "-c", "echo judged", "eki-judge"]
     assert it["review_run"] is None and it["review"] == "none: not in this project's workflow"
+    assert not conn.execute("SELECT 1 FROM judgings").fetchone()     # no judge run per item
     run_inline(conn, it["run_id"])
     selfwork.tick(conn)
     assert selfwork.store_item(conn, it["id"])["state"] == "proposed"
 
 
-def test_review_alone_starts_the_reader_and_judges_by_it(conn, src, proj, tmp_path, monkeypatch):
-    settle(local="bare")                   # a local model to read with
+def test_review_alone_starts_the_judge_and_judges_by_it(conn, src, proj, tmp_path, monkeypatch):
+    monkeypatch.setattr(judge, "start_item", START)
     card(proj, checks=["self", "review"])
     pid, it = planned(conn, tmp_path, monkeypatch, proj, "false")
     it = built(conn, tmp_path, monkeypatch, it)
     assert it["state"] == "judging" and it["review_run"]
+    assert verdicts.judging(conn, it["review_run"])["scope"] == "item"
+    assert store.cwd_of(conn, store.run(conn, it["review_run"])["thread_id"]).endswith(f"judge-{it['id']}")
     gate = json.loads(store.run(conn, it["run_id"])["prompt"])
     assert gate[:2] == ["/bin/sh", "-c"] and gate[2] == "echo 'checks: self, review'"
     run_inline(conn, it["run_id"])
-    says(tmp_path, monkeypatch, "Looked.\nREVIEW: ok\n")
-    run_inline(conn, it["review_run"])
+    filed(conn, tmp_path, monkeypatch, it["review_run"], rec("spec"))
     selfwork.tick(conn)
     it = selfwork.store_item(conn, it["id"])
     assert it["state"] == "proposed" and it["review"] == "ok"
@@ -63,6 +62,32 @@ def test_playtester_plays_the_change_after_the_command(conn, src, proj, tmp_path
     it = built(conn, tmp_path, monkeypatch, it)
     line = json.loads(store.run(conn, it["run_id"])["prompt"])[2]
     assert line == "( make test || exit 1\n) && eki use playtester 'play the change: Add greet'"
+    assert not conn.execute("SELECT 1 FROM judgings").fetchone()     # no checks: played as today
+
+
+def test_a_playtester_gets_the_items_checks_and_its_gate_is_a_play_judge_run(conn, src, proj, tmp_path,
+                                                                             monkeypatch):
+    card(proj, checks=["self", "command", "playtester"], command="make test")
+    pid, it = planned(conn, tmp_path, monkeypatch, proj, None)
+    verdicts.store_checks(conn, it["goal_id"], [("c1", "the greeting shows on the title screen"),
+                                                ("c2", "the docs mention it")])
+    conn.execute("UPDATE items SET checks='[\"c1\"]' WHERE id=?", (it["id"],))
+    it = built(conn, tmp_path, monkeypatch, it)
+    assert it["state"] == "judging" and it["review_run"] is None        # no review in this card
+    line = json.loads(store.run(conn, it["run_id"])["prompt"])[2]
+    assert line.startswith("( make test\n) && eki use playtester ") and line.endswith(" | eki verdict --lines")
+    assert "Focus:\n- c1: the greeting shows on the title screen" in line and "c2" not in line
+    assert "VERDICT: {" in line and it["judged_by"].endswith("| eki verdict --lines")
+    j = verdicts.judging(conn, it["run_id"])
+    assert (j["scope"], j["item_id"], json.loads(j["checks"])) == ("play", it["id"], ["c1"])
+    verdicts.submit(conn, it["run_id"], rec("c1", "failed", suggestion="draw the greeting above the logo"))
+    monkeypatch.setenv("EKI_TEST_CHECK_EXIT", "0")
+    store.update_run(conn, it["run_id"], prompt=json.dumps(["/bin/sh", "-c", "true", "eki-judge"]))
+    run_inline(conn, it["run_id"])                 # the pipe ends green: the verdict still says no
+    selfwork.tick(conn)
+    it = selfwork.store_item(conn, it["id"])
+    assert it["state"] == "building" and it["review"] == "no: c1: draw the greeting above the logo"
+    assert "A judge found check c1 failed: draw the greeting above the logo" in store.run(conn, it["run_id"])["prompt"]
 
 
 def test_plan_single_is_one_item_with_no_planner_and_says_its_checks_once(conn, src, proj, tmp_path, monkeypatch):

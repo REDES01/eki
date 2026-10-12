@@ -3,8 +3,8 @@
 `command` is gate 1's check: text, or a list of path rules (eki/pathrules.py) so a change runs
 only the checks for what it touched; `batch_command` is gate 2's, defaulting to a text command.
 
-`review` in `checks` means a judge reads each item: an independent run on another backend
-than the builder's files one verdict per check (eki/judge.py); leaving it out keeps the goal's
+`review` in `checks` means a judge reads each item: an independent run of its own (the judge
+role's pick, the builder's provider or not) files one verdict per check (eki/judge.py); leaving it out keeps the goal's
 final acceptance. `playtester` gives the item's checks to the playtester, who says a verdict
 on each.
 
@@ -47,7 +47,7 @@ PLAYTESTER = 'playtester'
 #: what each check means, in plain words
 CHECK_HELP = {
     'self': "the builder's own word: it says when it's done",
-    'review': "a judge reads each item: another agent, on another backend than the builder's, checks it "
+    'review': "a judge reads each item: another agent, in a fresh session of its own, checks it "
               "against its spec and the goal's checks and files a verdict on each; a failed check sends it "
               "back once",
     'command': "the project's check command runs on each change; red sends it back",

@@ -31,7 +31,9 @@ are done with, a few a pass, and measure the disk they take
 (eki/worktreegc.py), and keep the browser shim's mirror of Playwright's browsers
 folder current, so a newly installed browser version waits for a slot too
 (eki/browsershim.py), and note browsers open in eki worktrees that hold no
-browser slot (eki/browserstrays.py), and let the local classifier look at each new
+browser slot (eki/browserstrays.py), and measure the peak memory of each
+run's, browser's and test hold's process tree and learn each kind's estimate
+from it (eki/memlearn.py), and let the local classifier look at each new
 picture once and mark it sensitive or not (eki/picturecheck.py). Nothing here is
 state that matters: the hour between prunes and the last list tries live in
 memory, and losing them on a restart only means an early prune or an early try.
@@ -44,7 +46,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Tuple
 
-from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, modellist, noindex, notify, notifygoals, observe, picturecheck,
+from . import (browsershim, browserstrays, db, digest, digestprose, faults, issues, memlearn, modellist, noindex, notify, notifygoals, observe, picturecheck,
                prfollow, prmirror, projectdelete, projectlands, projectsetup, prs, schedule, score, selfpick, standing, syncstate,
                threadkeep, worktreegc)
 from .components import assets, assetsbackup, serve, servers
@@ -131,6 +133,7 @@ STEPS: List[Tuple[str, Callable[[sqlite3.Connection], List[str]]]] = [
     ("worktrees", worktreegc.tick),
     ("browsershim", lambda conn: browsershim.ensure() and []),
     ("browserstrays", lambda conn: browserstrays.note()),
+    ("memory", memlearn.tick),
     ("schedule", schedule.tick),
     ("schedulenotify", schedule.settle),
     ("notifygoals", notifygoals.tick),

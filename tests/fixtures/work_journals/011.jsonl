@@ -1,0 +1,38 @@
+{"goal": "g11", "project_kind": "eki", "settings": {"gates": ["check", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 91.017, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2"], "id": "i1"}, {"deps": [], "files": ["f3", "f4"], "id": "i2"}, {"deps": ["i1", "i2"], "files": ["f5", "f6", "f7"], "id": "i3"}, {"deps": [], "files": ["f8", "f9", "f10", "f11"], "id": "i4"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 92.764, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 94.176, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 95.587, "data": {}, "item": "i4", "kind": "item_started"}
+{"at": 192.818, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 247.401, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 364.134, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i1", "kind": "check_verdict"}
+{"at": 404.586, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 428.115, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i2", "kind": "check_verdict"}
+{"at": 487.704, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i4", "kind": "check_verdict"}
+{"at": 1814.307, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 1814.362, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
+{"at": 1814.418, "data": {"queueable": true}, "item": "i4", "kind": "seen"}
+{"at": 2241.122, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 2241.122, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
+{"at": 2241.122, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 2242.122, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
+{"at": 2376.062, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
+{"at": 2376.062, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
+{"at": 2376.062, "data": {"went": "target"}, "item": "i2", "kind": "landed"}
+{"at": 2377.062, "data": {"went": "live"}, "item": "i2", "kind": "landed"}
+{"at": 2385.543, "data": {"result": "rebased"}, "item": "i4", "kind": "merge_result"}
+{"at": 2385.543, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i4", "result": "green"}]}, "item": "i4", "kind": "check_verdict"}
+{"at": 2385.543, "data": {"went": "target"}, "item": "i4", "kind": "landed"}
+{"at": 2386.543, "data": {"went": "live"}, "item": "i4", "kind": "landed"}
+{"at": 2804.19, "data": {}, "item": "i3", "kind": "item_started"}
+{"at": 3083.943, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
+{"at": 3160.231, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i3", "kind": "check_verdict"}
+{"at": 4424.355, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
+{"at": 4424.355, "data": {"files": ["f?"], "result": "conflict"}, "item": "i3", "kind": "merge_result"}
+{"at": 4750.235, "data": {"outcome": "resolved"}, "item": "i3", "kind": "item_finished"}
+{"at": 5809.243, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
+{"at": 5809.243, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
+{"at": 5809.243, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
+{"at": 5810.243, "data": {"went": "live"}, "item": "i3", "kind": "landed"}
+{"final": {"i1": "live", "i2": "live", "i3": "live", "i4": "live"}, "roles": [[null, "plan"], ["i1", "build"], ["i2", "build"], ["i4", "build"], ["i3", "build"], ["i3", "resolve"]]}

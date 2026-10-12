@@ -1,0 +1,6 @@
+{"goal": "g70", "project_kind": "eki", "settings": {"gates": ["check", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "person", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 130.045, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3"], "id": "i1"}, {"deps": ["i1"], "files": ["f4", "f5", "f6", "f7", "f8", "f9"], "id": "i2"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 226.282, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
+{"at": 226.355, "data": {"decision": "drop"}, "item": "i2", "kind": "person_decided"}
+{"final": {"i1": "dropped", "i2": "dropped"}, "roles": [[null, "plan"]]}

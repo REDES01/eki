@@ -1,0 +1,53 @@
+{"goal": "g15", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": true, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 297.834, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
+{"at": 403.322, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2"], "id": "i1"}, {"deps": ["i1"], "files": ["f3", "f4", "f5", "f6"], "id": "i2"}, {"deps": ["i1", "i2"], "files": ["f7", "f8", "f9"], "id": "i3"}, {"deps": ["i2"], "files": ["f10", "f11"], "id": "i4"}, {"deps": ["i1"], "files": ["f12", "f13", "f14", "f15"], "id": "i5"}, {"deps": ["i1"], "files": ["f16", "f17"], "id": "i6"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 404.379, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 556.778, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 691.658, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
+{"at": 691.803, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 744.478, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 744.478, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
+{"at": 744.478, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 745.478, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
+{"at": 748.524, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 749.467, "data": {}, "item": "i5", "kind": "item_started"}
+{"at": 750.456, "data": {}, "item": "i6", "kind": "item_started"}
+{"at": 843.854, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i5", "kind": "item_finished"}
+{"at": 871.032, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i6", "kind": "item_finished"}
+{"at": 931.15, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i6", "kind": "check_verdict"}
+{"at": 932.241, "data": {"queueable": true}, "item": "i6", "kind": "seen"}
+{"at": 943.759, "data": {"result": "rebased"}, "item": "i6", "kind": "merge_result"}
+{"at": 943.759, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i6", "result": "green"}]}, "item": "i6", "kind": "check_verdict"}
+{"at": 943.759, "data": {"went": "target"}, "item": "i6", "kind": "landed"}
+{"at": 944.759, "data": {"went": "live"}, "item": "i6", "kind": "landed"}
+{"at": 1015.481, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 1025.662, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i5", "kind": "check_verdict"}
+{"at": 1026.454, "data": {"queueable": true}, "item": "i5", "kind": "seen"}
+{"at": 1148.444, "data": {"result": "rebased"}, "item": "i5", "kind": "merge_result"}
+{"at": 1148.444, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i5", "result": "green"}]}, "item": "i5", "kind": "check_verdict"}
+{"at": 1148.444, "data": {"went": "target"}, "item": "i5", "kind": "landed"}
+{"at": 1149.444, "data": {"went": "live"}, "item": "i5", "kind": "landed"}
+{"at": 1295.384, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i2", "kind": "check_verdict"}
+{"at": 1295.523, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
+{"at": 1349.138, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
+{"at": 1349.138, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
+{"at": 1349.138, "data": {"went": "target"}, "item": "i2", "kind": "landed"}
+{"at": 1350.138, "data": {"went": "live"}, "item": "i2", "kind": "landed"}
+{"at": 1353.105, "data": {}, "item": "i3", "kind": "item_started"}
+{"at": 1354.025, "data": {}, "item": "i4", "kind": "item_started"}
+{"at": 1418.752, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i4", "kind": "item_finished"}
+{"at": 1495.827, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
+{"at": 1507.762, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i4", "kind": "check_verdict"}
+{"at": 1508.316, "data": {"queueable": true}, "item": "i4", "kind": "seen"}
+{"at": 1595.983, "data": {"result": "rebased"}, "item": "i4", "kind": "merge_result"}
+{"at": 1595.983, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i4", "result": "green"}]}, "item": "i4", "kind": "check_verdict"}
+{"at": 1595.983, "data": {"went": "target"}, "item": "i4", "kind": "landed"}
+{"at": 1596.983, "data": {"went": "live"}, "item": "i4", "kind": "landed"}
+{"at": 1678.651, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i3", "kind": "check_verdict"}
+{"at": 1678.741, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
+{"at": 1729.106, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
+{"at": 1729.106, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i3", "result": "green"}]}, "item": "i3", "kind": "check_verdict"}
+{"at": 1729.106, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
+{"at": 1730.106, "data": {"went": "live"}, "item": "i3", "kind": "landed"}
+{"final": {"i1": "live", "i2": "live", "i3": "live", "i4": "live", "i5": "live", "i6": "live"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i1", "review"], ["i2", "build"], ["i5", "build"], ["i6", "build"], ["i6", "review"], ["i5", "review"], ["i2", "review"], ["i3", "build"], ["i4", "build"], ["i4", "review"], ["i3", "review"]]}

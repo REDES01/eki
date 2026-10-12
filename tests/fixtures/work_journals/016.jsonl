@@ -1,0 +1,23 @@
+{"expected": "before f57c65b the review ran after a green gate 1, so a red or cancelled check had none; today it runs beside gate 1", "goal": "g16", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": true, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 624.19, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
+{"at": 746.217, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5"], "id": "i1"}, {"deps": [], "files": ["f6", "f7"], "id": "i2"}, {"deps": ["i1"], "files": ["f8", "f9", "f10"], "id": "i3"}, {"deps": ["i1"], "files": ["f11", "f12", "f13", "f14"], "id": "i4"}, {"deps": ["i1"], "files": ["f15", "f16", "f17", "f18", "f19"], "id": "i5"}, {"deps": [], "files": ["f20", "f21"], "id": "i6"}, {"deps": [], "files": ["f22"], "id": "i7"}, {"deps": [], "files": ["f23", "f24", "f25", "f26", "f27", "f28", "f29"], "id": "i8"}, {"deps": ["i1", "i2", "i3", "i4"], "files": ["f30", "f31", "f4", "f32"], "id": "i9"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 747.35, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 748.264, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 749.297, "data": {}, "item": "i6", "kind": "item_started"}
+{"at": 750.32, "data": {}, "item": "i7", "kind": "item_started"}
+{"at": 801.153, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i6", "kind": "item_finished"}
+{"at": 803.974, "data": {}, "item": "i8", "kind": "item_started"}
+{"at": 880.1, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 883.796, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i6", "kind": "check_verdict"}
+{"at": 935.503, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
+{"at": 935.681, "data": {"decision": "drop"}, "item": "i2", "kind": "person_decided"}
+{"at": 935.959, "data": {"decision": "drop"}, "item": "i3", "kind": "person_decided"}
+{"at": 936.032, "data": {"decision": "drop"}, "item": "i4", "kind": "person_decided"}
+{"at": 936.086, "data": {"can_fix": false, "ended": "cancelled", "result": "red", "review": "none: no review"}, "item": "i1", "kind": "check_verdict"}
+{"at": 936.108, "data": {"decision": "drop"}, "item": "i5", "kind": "person_decided"}
+{"at": 936.187, "data": {"decision": "drop"}, "item": "i6", "kind": "person_decided"}
+{"at": 936.364, "data": {"decision": "drop"}, "item": "i7", "kind": "person_decided"}
+{"at": 936.553, "data": {"decision": "drop"}, "item": "i8", "kind": "person_decided"}
+{"at": 936.799, "data": {"decision": "drop"}, "item": "i9", "kind": "person_decided"}
+{"final": {"i1": "dropped", "i2": "dropped", "i3": "dropped", "i4": "dropped", "i5": "dropped", "i6": "dropped", "i7": "dropped", "i8": "dropped", "i9": "dropped"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i2", "build"], ["i6", "build"], ["i7", "build"], ["i8", "build"], ["i6", "review"]]}

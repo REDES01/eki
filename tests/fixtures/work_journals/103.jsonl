@@ -1,0 +1,19 @@
+{"goal": "g103", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": true, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 352.044, "data": {"ended": "done", "of": "draft"}, "item": null, "kind": "plan_ready"}
+{"at": 504.772, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3"], "id": "i1"}, {"deps": ["i1"], "files": ["f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16"], "id": "i2"}, {"deps": ["i1"], "files": ["f17", "f18", "f19", "f20", "f21", "f22", "f23", "f24", "f25", "f26", "f27"], "id": "i3"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 506.816, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 2094.773, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 2552.978, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
+{"at": 2553.357, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 2553.357, "data": {"files": ["f?"], "result": "conflict"}, "item": "i1", "kind": "merge_result"}
+{"at": 2579.356, "data": {"outcome": "resolved"}, "item": "i1", "kind": "item_finished"}
+{"at": 4036.252, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 4036.252, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
+{"at": 4036.252, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 4037.252, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
+{"at": 4040.419, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 4041.719, "data": {}, "item": "i3", "kind": "item_started"}
+{"at": 4538.647, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 4579.466, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i3", "kind": "item_finished"}
+{"final": {"i1": "live", "i2": "judging", "i3": "judging"}, "roles": [[null, "draft"], [null, "plan"], ["i1", "build"], ["i1", "review"], ["i1", "resolve"], ["i2", "build"], ["i3", "build"], ["i2", "review"], ["i3", "review"]]}

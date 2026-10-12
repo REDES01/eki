@@ -1,0 +1,11 @@
+{"goal": "g1", "project_kind": "eki", "settings": {"gates": ["check", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "person", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 24.192, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2"], "id": "i1"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 24.532, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 145.494, "data": {"can_fix": false, "changed": true, "touched": ["bin/check"]}, "item": "i1", "kind": "item_finished"}
+{"at": 148.929, "data": {"can_fix": false, "ended": "failed", "result": "red", "review": null}, "item": "i1", "kind": "check_verdict"}
+{"at": 150.473, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 658.292, "data": {"can_fix": false, "changed": true, "touched": ["bin/check"]}, "item": "i1", "kind": "item_finished"}
+{"at": 736.332, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i1", "kind": "check_verdict"}
+{"at": 1111.07, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
+{"final": {"i1": "dropped"}, "roles": [[null, "plan"], ["i1", "build"], ["i1", "build"]]}

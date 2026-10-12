@@ -1,0 +1,9 @@
+{"goal": "g55", "project_kind": "local", "settings": {"gates": [], "kind": "local", "locked": [], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 52.75, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2"], "id": "i1"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 54.205, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 2549.772, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 2552.228, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 2552.53, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 2552.53, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"final": {"i1": "applied"}, "roles": [[null, "plan"], ["i1", "build"]]}

@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""Rebuild each goal's work journal from a copy of eki's database, for
+tests/test_workreplay.py (docs/work-model.md). Run by hand, never by a test:
+
+    bin/export-work-journals [--db ~/.eki/eki.db] [--out tests/fixtures/work_journals] [--goal ID ...]
+
+It copies the database with sqlite's backup API into a temporary file and
+reads only the copy. From `goals`, `items`, `runs` and the review chores it
+rebuilds, per goal, the events eki's executors would feed `step` today: the
+runs each item had (builds, wakes, gate-1 checks, resolves, fixers), their
+outcomes, the review verdicts, the queue and landed facts. Today's signals
+map to failure kinds as docs/work-model.md says (`transient.looks_transient`
+→ transient, held until the next run started). A run that starts while the
+item stood stopped was a person's retry; an item dropped was a person's drop.
+
+Nothing that names or describes the work is kept: no titles, specs, texts,
+errors, paths, shas or project names. Goals become g<n>, items i<n>, files
+f<n> — but a file eki locks keeps its name, since the lock rule reads it.
+
+Each journal is one JSON object per line: first {settings, project_kind,
+goal}, then the events {item, kind, at, data}, then {final: {item: the
+recorded items.state}, roles: [[item, role], ...]} — the runs started, in
+order (item null for the goal's own draft and plan runs).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+HERE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HERE))
+
+from eki import callwait, fixerbrief, locks, transient, workmodel, workstep   # noqa: E402
+
+#: how a resolve brief begins: today's resolvebrief.FIRST_LINE and the older "... in eki — ..."
+RESOLVE = "You are resolving a rebase conflict in "
+
+#: goals whose history step no longer repeats, and why: the rules changed under them. The replay
+#: checks these still differ (tests/test_workreplay.py); a goal that matches again leaves the list.
+FIT_THEN = "history predates selfwork.FIT: a dependent started once its dependency was proposed"
+REVIEW_CAME = "the review came in while this goal ran (e1b02a7): its earlier items were never reviewed"
+REVIEW_AFTER = ("before f57c65b the review ran after a green gate 1, so a red or cancelled check had none; "
+                "today it runs beside gate 1")
+UNFIT_ON = ("an unfit item (two red gate-1 checks) was put in the queue and went live; "
+            "`eki self apply` takes only proposed or locked items now")
+NO_RECHECK = "older code put a build after a failed resolve back in the queue without gate 1 or a review"
+KNOWN = {
+    "5f9507ccd7": FIT_THEN,
+    "786e85a70a": REVIEW_CAME, "ea988b7c5e": REVIEW_CAME, "a1ca1fc46f": REVIEW_CAME,
+    "312b13c1a9": REVIEW_AFTER, "eecb3324a7": REVIEW_AFTER, "1d8017a2ea": REVIEW_AFTER, "f0b1e963f9": REVIEW_AFTER,
+    "1a36752c8d": UNFIT_ON, "299a50dbb4": UNFIT_ON, "207215e97b": UNFIT_ON,
+    "76d1b38edf": NO_RECHECK,
+}
+
+
+def copy_db(src: Path) -> Tuple[sqlite3.Connection, Path]:
+    """The database copied into a temporary file, and the file; the source is opened read-only."""
+    fd, tmp = tempfile.mkstemp(prefix="eki-journals-", suffix=".db")
+    os.close(fd)
+    s = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    d = sqlite3.connect(tmp)
+    s.backup(d)
+    s.close()
+    d.row_factory = sqlite3.Row
+    return d, Path(tmp)
+
+
+def role_of(run: sqlite3.Row) -> str:
+    """What an item-thread run was: gate1 (a command), fix, resolve, wake or build."""
+    p = run["prompt"] or ""
+    if run["provider"] == "command":
+        return "gate1"
+    if p.startswith(fixerbrief.FIRST_LINE):
+        return "fix"
+    if p.startswith(RESOLVE):
+        return "resolve"
+    if p.startswith(callwait.FIRST_LINE):
+        return "wake"
+    return "build"
+
+
+def review_word(chore: sqlite3.Row) -> str:
+    """The review's word as items.review holds it: ok | no: <why> | none: <why>."""
+    res = chore["result"] or ""
+    if chore["state"] == "done" and res.startswith("no:"):
+        return "no: (objection)"
+    if chore["state"] == "done" and res.startswith("ok"):
+        return "ok"
+    return "none: the review failed"
+
+
+class Journal:
+    """One goal's events, its names hidden."""
+
+    def __init__(self, t0: float) -> None:
+        self.t0 = t0
+        self.events: List[Tuple[float, int, Dict[str, Any]]] = []
+        self.roles: List[Tuple[float, int, Optional[str], str]] = []
+        self.files: Dict[str, str] = {}
+        self.n = 0
+
+    def at(self, t: Optional[float]) -> float:
+        return round(max((t or self.t0) - self.t0, 0.0), 3)
+
+    def add(self, t: Optional[float], iid: Optional[str], kind: str, **data: Any) -> None:
+        self.n += 1
+        self.events.append((self.at(t), self.n, {"item": iid, "kind": kind, "at": self.at(t), "data": data}))
+
+    def role(self, t: Optional[float], item: Optional[str], role: str) -> None:
+        self.n += 1
+        self.roles.append((self.at(t), self.n, item, role))
+
+    def file(self, f: str) -> str:
+        if locks.locked_in([f]):
+            return f
+        return self.files.setdefault(f, f"f{len(self.files) + 1}")
+
+
+def settings_of(conn: sqlite3.Connection, goal: sqlite3.Row, items: List[sqlite3.Row],
+                runs: Dict[str, List[sqlite3.Row]], reviews: Dict[str, List[sqlite3.Row]]) -> Dict[str, Any]:
+    """The settings the goal's history shows it ran under (cards and settings changed over time,
+    so today's are not the ones its decisions were made with)."""
+    eki = not goal["project"]
+    kind = "eki"
+    if not eki:
+        row = conn.execute("SELECT * FROM projects WHERE id=?", (goal["project"],)).fetchone()
+        kind = "github" if row is not None and "repo" in row.keys() and row["repo"] else "local"
+    checked = any(role_of(r) == "gate1" for it in items for r in runs[it["id"]])
+    reviewed = any(reviews[it["id"]] for it in items)
+    batched = eki or any(it["gate2_run"] for it in items)
+    gates = tuple(g for g, on in (("check", checked or eki), ("review", reviewed), ("batch", batched)) if on)
+    return {"plan": "on" if goal["plan_run"] else "single", "gates": list(gates),
+            "merge": "auto" if any(it["queued_at"] for it in items) else "person", "parallel": 0,
+            "locked": list(locks.HARD_LOCKED) if eki else [], "kind": kind}
+
+
+def export_goal(conn: sqlite3.Connection, goal: sqlite3.Row) -> Optional[List[Dict[str, Any]]]:
+    items = conn.execute("SELECT * FROM items WHERE goal_id=? ORDER BY created_at, rowid", (goal["id"],)).fetchall()
+    if not items:
+        return None
+    runs = {it["id"]: (conn.execute("SELECT * FROM runs WHERE thread_id=? ORDER BY seq", (it["thread_id"],)).fetchall()
+                       if it["thread_id"] else []) for it in items}
+    reviews = {it["id"]: conn.execute("SELECT * FROM chores WHERE kind='review' AND subject=? ORDER BY created_at",
+                                      (it["id"],)).fetchall() for it in items}
+    s = settings_of(conn, goal, items, runs, reviews)
+    j = Journal(goal["created_at"])
+    ids = {it["id"]: f"i{n + 1}" for n, it in enumerate(items)}
+    planned = [{"id": ids[it["id"]], "deps": [ids[d] for d in json.loads(it["deps"] or "[]") if d in ids],
+                "files": [j.file(f) for f in json.loads(it["files"] or "[]")]} for it in items]
+    t = goal["created_at"]
+    if goal["plan_run"]:
+        j.add(t, None, "goal_submitted", plan=True, draft=bool(goal["draft_run"]))
+        if goal["draft_run"]:
+            j.role(t, None, "draft")
+            j.add(goal["drafted_at"] or t, None, "plan_ready", of="draft", ended="done")
+        j.role(goal["drafted_at"] or t, None, "plan")
+        j.add(min(it["created_at"] for it in items), None, "plan_ready", of="plan", ended="done", items=planned)
+    else:
+        if len(planned) > 1:                        # never seen: a goal without a plan has one item
+            return None
+        j.add(t, None, "goal_submitted", plan=False, item=planned[0]["id"], files=planned[0]["files"])
+    for it in items:
+        Item(j, s, it, ids[it["id"]], runs[it["id"]], reviews[it["id"]]).walk()
+    first = {"settings": s, "project_kind": s["kind"], "goal": goal["id"]}
+    if goal["id"] in KNOWN:
+        first["expected"] = KNOWN[goal["id"]]
+    last = {"final": {ids[it["id"]]: it["state"] for it in items},
+            "roles": [[i, r] for _, _, i, r in sorted(j.roles)]}
+    return [first] + [e for _, _, e in sorted(j.events, key=lambda e: (e[0], e[1]))] + [last]
+
+
+class Item:
+    """One item's runs, read as the events its executor feeds today. Its stage is kept by `step`
+    on the item alone, so a run that today's rules would not start reads as a person's retry."""
+
+    def __init__(self, j: Journal, s: Dict[str, Any], it: sqlite3.Row, iid: str, runs: List[sqlite3.Row],
+                 reviews: List[sqlite3.Row]) -> None:
+        self.j, self.s, self.it, self.id = j, s, it, iid
+        self.runs, self.reviews = runs, list(reviews)
+        self.settings = workmodel.Settings(plan=s["plan"], gates=tuple(s["gates"]), merge=s["merge"],
+                                           parallel=0, locked=tuple(s["locked"]), kind=s["kind"])
+        self.st = workmodel.item(iid)
+        self.resolves = 0
+
+    @property
+    def stage(self) -> str:
+        return self.st.stage
+
+    def add(self, t: Optional[float], kind: str, **data: Any) -> None:
+        self.j.add(t, self.id, kind, **data)
+        ev = workmodel.Event(kind, self.j.at(t), {**data, "item": self.id})
+        try:
+            _, (self.st,), _ = workstep.step(workmodel.goal("planned"), (self.st,), self.settings, ev)
+        except workstep.Refused:
+            pass
+
+    def walk(self) -> None:
+        """The events of its runs; the roles it really started are read from the rows alone."""
+        runs = self.runs
+        for r in runs:
+            if role_of(r) != "gate1":
+                self.j.role(r["created_at"], self.id, ROLES[role_of(r)])
+        for c in self.reviews:
+            self.j.role(c["created_at"], self.id, "review")
+        for k, r in enumerate(runs):
+            nxt = runs[k + 1] if k + 1 < len(runs) else None
+            getattr(self, role_of(r))(r, nxt)
+        self.queue()
+
+    # ---- building ----------------------------------------------------------------------------
+
+    def build(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        if self.stage != "waiting":                         # today's rules would not build it: a person did
+            self.add(r["created_at"], "person_decided", decision="retry")
+        self.add(r["created_at"], "item_started")
+        self.ended(r, nxt)
+
+    def wake(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        if self.stage != "waiting on calls":
+            return self.build(r, nxt)
+        self.add(r["created_at"], "item_started", stage="building")
+        self.ended(r, nxt)
+
+    def fix(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        self.ended(r, nxt)
+
+    def ended(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        """A build, wake or fixer run ended: what came after it tells how it was read."""
+        if not r["ended_at"] or r["state"] not in ENDED:
+            return                                          # still going
+        then = role_of(nxt) if nxt is not None else None
+        final = self.it["state"]
+        if r["state"] != "done":
+            if nxt is None and final == "dropped":
+                return                                      # the person dropped it mid-run
+            if then == "build" and transient.looks_transient(r["error"]):
+                self.add(r["ended_at"], "item_failed", kind="transient", retry_at=self.j.at(nxt["created_at"]),
+                         fix=None, why="transient")
+                return
+            self.add(r["ended_at"], "item_finished", ended=r["state"])
+            return
+        if then == "wake" or (nxt is None and final == "waiting on calls"):
+            self.add(r["ended_at"], "item_finished", calls=["c"], wakes=0)
+        elif nxt is None and final in ("left", "unfit"):
+            self.add(r["ended_at"], "item_finished", changed=False, can_fix=False)
+        elif nxt is None and final in ("building", "dropped"):
+            return                                          # not read yet, or dropped before it was
+        else:
+            self.finished(r)
+            if self.stage == "judging" and then != "gate1" and self.went_on():
+                seen, t = self.review_for(nxt)          # its check isn't in the thread; it went on, so it passed
+                self.add(max(r["ended_at"], t or 0), "check_verdict", result="green", ended="done",
+                         review=seen or ("none: no review" if "review" in self.s["gates"] else None), can_fix=False)
+
+    def went_on(self) -> bool:
+        it = self.it
+        return bool(it["queued_at"] or it["gate2"] or it["landed_at"]) or it["state"] in ("applied", "landed", "live")
+
+    def finished(self, r: sqlite3.Row) -> None:
+        review = self.it["review"] or ""
+        data: Dict[str, Any] = {"changed": True, "can_fix": False,
+                                "touched": locks.locked_in(json.loads(self.it["touched"] or "[]"))}   # what a rule reads
+        if review.startswith("none:") and "review" not in self.s["gates"]:
+            data["no_review"] = "(not reviewed)"
+        self.add(r["ended_at"], "item_finished", **data)
+
+    def gate1(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        if self.stage != "judging" or not r["ended_at"] or r["state"] not in ENDED:
+            return                                          # an older recheck after a resolve, or running
+        seen, t = self.review_for(nxt)
+        if seen is None and "review" in self.s["gates"]:
+            if self.it["state"] == "judging":
+                return                                      # the review is still out
+            seen = "none: no review"
+        self.add(max(r["ended_at"], t or 0), "check_verdict", result="green" if r["state"] == "done" else "red",
+                 ended=r["state"], review=seen, can_fix=False)
+
+    def review_for(self, nxt: Optional[sqlite3.Row]) -> Tuple[Optional[str], Optional[float]]:
+        """The review of this build, taken off the list: (its word, when it ended). It ran beside
+        gate 1, or (older history) after a green one; either way before the item's next run."""
+        if not self.reviews or (nxt is not None and self.reviews[0]["created_at"] > nxt["created_at"]):
+            return None, None
+        c = self.reviews.pop(0)
+        if c["state"] not in ("done", "failed"):
+            return None, None
+        return review_word(c), c["ended_at"]
+
+    # ---- the queue ---------------------------------------------------------------------------
+
+    def resolve(self, r: sqlite3.Row, nxt: Optional[sqlite3.Row]) -> None:
+        if self.stage == "proposed":
+            self.admit(r["created_at"])
+        if self.stage == "queued":
+            self.add(r["created_at"], "merge_result", result="conflict", files=["f?"])
+        if self.stage != "resolving":
+            return
+        if not r["ended_at"] or r["state"] not in ENDED:
+            return
+        if r["state"] != "done":
+            self.add(r["ended_at"], "item_finished", ended=r["state"], can_fix=False)
+        elif nxt is not None and role_of(nxt) == "resolve":
+            self.resolves += 1
+            self.add(r["ended_at"], "item_finished", outcome="stopped", runs=self.resolves, files=["f?"],
+                     can_fix=False)
+        else:
+            self.resolves = 0
+            self.add(r["ended_at"], "item_finished", outcome="resolved")
+
+    def admit(self, t: float) -> None:
+        self.add(t, "seen", queueable=True)
+        if self.stage in ("locked", "proposed"):            # held, or objected twice: a person queued it
+            self.add(t, "person_decided", decision="apply", yes=True)
+
+    def queue(self) -> None:
+        it, final = self.it, self.it["state"]
+        if final == "dropped":
+            if self.stage != "dropped":
+                self.add(it["updated_at"], "person_decided", decision="drop")
+            return
+        if self.stage == "proposed" and final == "applied" and not it["gate2"] and not it["landed_at"]:
+            self.add(it["updated_at"], "seen", in_target=True)      # a person merged it
+            return
+        if self.stage == "proposed" and (it["queued_at"] or it["gate2"]):
+            self.admit(it["queued_at"] or it["updated_at"])
+        if self.stage != "queued":
+            return
+        t = it["landed_at"] or it["updated_at"]
+        self.add(t, "merge_result", result="rebased")
+        if it["gate2"] and "batch" in self.s["gates"]:
+            self.add(t, "check_verdict", gate=2, stack=[{"id": self.id, "result": it["gate2"]}], can_fix=False)
+        if it["gate2"] == "green" and it["landed_at"]:
+            self.add(t, "landed", went="target")
+            if final in ("live", "rolled back"):
+                self.add(t + 1, "landed", went=final)
+
+
+ROLES = {"build": "build", "wake": "build", "fix": "fix", "resolve": "resolve"}
+ENDED = ("done", "failed", "cancelled", "stopped", "lost")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(description="Rebuild work journals from a copy of eki's database.")
+    ap.add_argument("--db", default=str(Path("~/.eki/eki.db").expanduser()))
+    ap.add_argument("--out", default=str(HERE / "tests" / "fixtures" / "work_journals"))
+    ap.add_argument("--goal", action="append", help="only these goals (repeatable)")
+    a = ap.parse_args(argv)
+    conn, tmp = copy_db(Path(a.db))
+    try:
+        return export(conn, a)
+    finally:
+        conn.close()
+        tmp.unlink()
+
+
+def export(conn: sqlite3.Connection, a: argparse.Namespace) -> int:
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    goals = conn.execute("SELECT * FROM goals ORDER BY created_at").fetchall()
+    n = 0
+    for g in goals:
+        if a.goal and g["id"] not in a.goal:
+            continue
+        lines = export_goal(conn, g)
+        if lines is None:
+            continue
+        n += 1
+        lines[0]["goal"] = f"g{n}"
+        (out / f"{n:03d}.jsonl").write_text("".join(json.dumps(x, sort_keys=True) + "\n" for x in lines))
+    print(f"{n} journals in {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

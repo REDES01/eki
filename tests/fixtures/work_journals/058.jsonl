@@ -1,0 +1,14 @@
+{"goal": "g58", "project_kind": "local", "settings": {"gates": [], "kind": "local", "locked": [], "merge": "person", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 110.359, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1"], "id": "i1"}, {"deps": [], "files": ["f2", "f3", "f4", "f5"], "id": "i2"}, {"deps": [], "files": ["f6", "f7", "f8", "f9"], "id": "i3"}, {"deps": [], "files": ["f10", "f11"], "id": "i4"}, {"deps": [], "files": ["f12", "f13", "f14"], "id": "i5"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 110.978, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 111.43, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 111.877, "data": {}, "item": "i3", "kind": "item_started"}
+{"at": 112.304, "data": {}, "item": "i4", "kind": "item_started"}
+{"at": 112.738, "data": {}, "item": "i5", "kind": "item_started"}
+{"at": 118.212, "data": {"decision": "drop"}, "item": "i1", "kind": "person_decided"}
+{"at": 118.449, "data": {"decision": "drop"}, "item": "i2", "kind": "person_decided"}
+{"at": 118.691, "data": {"decision": "drop"}, "item": "i3", "kind": "person_decided"}
+{"at": 118.946, "data": {"decision": "drop"}, "item": "i4", "kind": "person_decided"}
+{"at": 119.201, "data": {"decision": "drop"}, "item": "i5", "kind": "person_decided"}
+{"final": {"i1": "dropped", "i2": "dropped", "i3": "dropped", "i4": "dropped", "i5": "dropped"}, "roles": [[null, "plan"], ["i1", "build"], ["i2", "build"], ["i3", "build"], ["i4", "build"], ["i5", "build"]]}

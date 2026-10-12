@@ -1,0 +1,20 @@
+{"goal": "g61", "project_kind": "eki", "settings": {"gates": ["check", "review", "batch"], "kind": "eki", "locked": ["bin/eki-launcher", "eki/launchd.py", "bin/check", "eki/drill.py", "eki/providers/base.py", "eki/quota.py", "LICENSE"], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 72.091, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2"], "id": "i1"}, {"deps": ["i1"], "files": ["f3", "f4", "f5", "f6", "f7", "f8", "f9"], "id": "i2"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 72.465, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 143.013, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 222.735, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i1", "kind": "check_verdict"}
+{"at": 222.854, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 321.306, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 321.306, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i1", "result": "green"}]}, "item": "i1", "kind": "check_verdict"}
+{"at": 321.306, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 322.306, "data": {"went": "live"}, "item": "i1", "kind": "landed"}
+{"at": 325.034, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 430.948, "data": {"can_fix": false, "changed": true, "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 607.93, "data": {"can_fix": false, "ended": "done", "result": "green", "review": "ok"}, "item": "i2", "kind": "check_verdict"}
+{"at": 608.35, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
+{"at": 934.222, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
+{"at": 934.222, "data": {"can_fix": false, "gate": 2, "stack": [{"id": "i2", "result": "green"}]}, "item": "i2", "kind": "check_verdict"}
+{"at": 934.222, "data": {"went": "target"}, "item": "i2", "kind": "landed"}
+{"at": 935.222, "data": {"went": "live"}, "item": "i2", "kind": "landed"}
+{"final": {"i1": "live", "i2": "live"}, "roles": [[null, "plan"], ["i1", "build"], ["i1", "review"], ["i2", "build"], ["i2", "review"]]}

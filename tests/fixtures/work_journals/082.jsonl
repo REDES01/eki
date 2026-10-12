@@ -1,0 +1,22 @@
+{"goal": "g82", "project_kind": "local", "settings": {"gates": ["check"], "kind": "local", "locked": [], "merge": "auto", "parallel": 0, "plan": "on"}}
+{"at": 0.0, "data": {"draft": false, "plan": true}, "item": null, "kind": "goal_submitted"}
+{"at": 240.489, "data": {"ended": "done", "items": [{"deps": [], "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15"], "id": "i1"}, {"deps": [], "files": ["f16", "f17", "f18", "f19", "f20", "f21", "f22"], "id": "i2"}, {"deps": ["i1", "i2"], "files": ["f23", "f24", "f25", "f26", "f27", "f28", "f29", "f9", "f10", "f8", "f7", "f13", "f14"], "id": "i3"}], "of": "plan"}, "item": null, "kind": "plan_ready"}
+{"at": 244.388, "data": {}, "item": "i1", "kind": "item_started"}
+{"at": 246.68, "data": {}, "item": "i2", "kind": "item_started"}
+{"at": 592.121, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i2", "kind": "item_finished"}
+{"at": 605.06, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i2", "kind": "check_verdict"}
+{"at": 622.271, "data": {"queueable": true}, "item": "i2", "kind": "seen"}
+{"at": 623.599, "data": {"result": "rebased"}, "item": "i2", "kind": "merge_result"}
+{"at": 623.599, "data": {"went": "target"}, "item": "i2", "kind": "landed"}
+{"at": 899.916, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i1", "kind": "item_finished"}
+{"at": 905.786, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i1", "kind": "check_verdict"}
+{"at": 907.287, "data": {"queueable": true}, "item": "i1", "kind": "seen"}
+{"at": 907.98, "data": {"result": "rebased"}, "item": "i1", "kind": "merge_result"}
+{"at": 907.98, "data": {"went": "target"}, "item": "i1", "kind": "landed"}
+{"at": 911.073, "data": {}, "item": "i3", "kind": "item_started"}
+{"at": 1511.779, "data": {"can_fix": false, "changed": true, "no_review": "(not reviewed)", "touched": []}, "item": "i3", "kind": "item_finished"}
+{"at": 1515.717, "data": {"can_fix": false, "ended": "done", "result": "green", "review": null}, "item": "i3", "kind": "check_verdict"}
+{"at": 1517.644, "data": {"queueable": true}, "item": "i3", "kind": "seen"}
+{"at": 1517.943, "data": {"result": "rebased"}, "item": "i3", "kind": "merge_result"}
+{"at": 1517.943, "data": {"went": "target"}, "item": "i3", "kind": "landed"}
+{"final": {"i1": "applied", "i2": "applied", "i3": "applied"}, "roles": [[null, "plan"], ["i1", "build"], ["i2", "build"], ["i3", "build"]]}

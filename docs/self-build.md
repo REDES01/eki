@@ -125,7 +125,9 @@ conflict) — up to the room the machine and the subscriptions give (`machine.ro
 (`routing.json`, default 12, set in Settings → Machine or with `eki
 machine`) across all projects, and it wins; and each project's workflow
 card `parallel`, for that project's own items — eki's card for eki's items,
-and no longer for anyone else's. Test runs are limited by `machine.checks`
+and no longer for anyone else's. The pages show both limits and the one in force through `eki/buildcap.py`
+("5 building · up to 6 now (machine) · this project allows 24"), the scheduler's
+own project cap read from the same place. Test runs are limited by `machine.checks`
 (Check slots, below). Other runs aren't counted against either limit, and
 the engine has no overall cap unless `EKI_MAX_PARALLEL` is set.
 Only an item with no write-set waits, until nothing else builds in its

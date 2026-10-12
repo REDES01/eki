@@ -24,7 +24,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from . import db, machinecaps, projects, workflow, workflowgates, workspace
+from . import buildcap, db, machinecaps, projects, workspace
 
 NO_WRITE_SET = "no write-set: waits until its repo is quiet"
 
@@ -57,13 +57,9 @@ def start_ready(conn: sqlite3.Connection) -> List[str]:
 
     def cap_of(pid: Optional[str]) -> Tuple[str, Optional[int]]:
         if pid not in caps:
-            if pid is None:                               # eki itself: its own card
-                wf = workflowgates.own()
-                caps[pid] = ("eki", wf.parallel if wf is not None else int(settings["parallel"]))
-            else:
-                row = projects.get(conn, pid)
-                wf = workflow.of_project(conn, row) if row is not None else None
-                caps[pid] = (row["name"] if row is not None else pid, wf.parallel if wf is not None else None)
+            row = projects.get(conn, pid) if pid is not None else None
+            name = "eki" if pid is None else (row["name"] if row is not None else pid)
+            caps[pid] = (name, buildcap.project_cap(conn, pid))
         return caps[pid]
 
     def project_of(gid: str) -> Optional[str]:

@@ -127,6 +127,11 @@ def _run_gate(conn: sqlite3.Connection, project: Any, action: Action) -> List[st
 
 def _start_run(conn: sqlite3.Connection, project: Any, action: Action) -> List[str]:
     role = action.data.get("role")
+    if role == "resolve" and action.data.get("again"):
+        from . import callwait, selfwork
+        it = selfwork.store_item(conn, action.item)
+        if it is not None and callwait.waits_of(it):     # its calls are back: the waiting run's next turn
+            return _theirs("start_run")(conn, project, action)
     if role == "resolve":
         from . import resolve
         return resolve.begin(conn, project, action)

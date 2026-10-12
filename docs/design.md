@@ -1581,7 +1581,8 @@ items tables; it holds nothing. Where a goal or item is drawn:
 
 **Goal states with checks.** A goal whose draft wrote checks (docs/self-build.md,
 "Checks and verdicts") is not done when its items land: it goes `planned` →
-`accepting` (a final judge run, on another backend than its builders, files
+`accepting` (a final judge run of its own — the judge role's pick, by default the same
+provider as its builders in a fresh session — files
 one verdict per check) → `accepted` when every check passed, the only done
 state it has; or `judgment` when a check stays uncertain after a second
 judge, or fails again after its fix items — the person decides (`eki self
@@ -1603,7 +1604,7 @@ accept`, `eki self retry`). A goal with no checks ends as before.
 - `checks`: an ordered list, each optional but `self`:
   `self` (the building agent verifies its own work — screenshots, its tests —
   before it finishes; always on), `review` (a judge reads each item: an
-  independent judge run on another backend files one verdict per check —
+  independent judge run (its own run and context, never the builder's) files one verdict per check —
   the item's spec and the goal checks it delivers — docs/self-build.md
   "Checks and verdicts"; off, items get no per-item judge but the goal still
   gets final acceptance), `command` (the project's check command,

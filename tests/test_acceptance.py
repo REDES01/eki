@@ -59,6 +59,13 @@ def judges(conn, gid, scope=None):
     return conn.execute(q, (gid, scope) if scope else (gid,)).fetchall()
 
 
+def only_one_backend(home, name="fake"):
+    """The code row holds one provider: no other backend for a second opinion."""
+    routing = json.loads((home / "routing.json").read_text())
+    routing["rows"][1]["targets"] = [name]
+    (home / "routing.json").write_text(json.dumps(routing))
+
+
 def judge(conn, rid, *recs, end="done"):
     """The judge run runs, files its verdicts, and ends."""
     store.update_run(conn, rid, state="running")
@@ -83,7 +90,8 @@ def test_a_builders_word_never_accepts_only_a_judge_does(conn, at_proj):
     j = judges(conn, gid)
     assert [x["scope"] for x in j] == ["final"] and verdicts.listed(j[0]) == ["c1", "c2"]
     run = store.run(conn, j[0]["run_id"])
-    assert run["provider"] == "fake2" and json.loads(j[0]["avoid"]) == ["fake"]    # never the builder
+    # the judge role's pick — the builder's provider (the person's choice, 2026-10-12) — in a run of its own
+    assert run["provider"] == "fake" and run["fresh"] == 1 and run["thread_id"] != it["thread_id"]
     assert store.thread(conn, run["thread_id"])["cwd"].endswith(f"accept-{gid}")
     assert acceptance.tick(conn) == [] and g_of(conn, gid)["state"] == "accepting"   # still judging
 
@@ -122,8 +130,9 @@ def test_one_uncertain_check_keeps_the_goal_open(conn, at_proj, home, notify_on)
     assert "c3 uncertain — a second judge" in said[0]
     sec = judges(conn, gid, "second")[0]
     run = store.run(conn, sec["run_id"])
-    assert run["provider"] == "fake3"                       # off the builder (fake) and the first judge (fake2)
-    assert json.loads(sec["avoid"]) == ["fake", "fake2"] and verdicts.listed(sec) == ["c3"]
+    assert store.run(conn, first)["provider"] == "fake"     # the first judge: the role's pick
+    assert run["provider"] == "fake2"                       # the second: off the builder and the first judge
+    assert json.loads(sec["avoid"]) == ["fake"] and verdicts.listed(sec) == ["c3"]
     assert "the first judge could not settle it: no screen to look at" in run["prompt"]
     assert g_of(conn, gid)["state"] == "accepting"
 
@@ -138,13 +147,14 @@ def test_one_uncertain_check_keeps_the_goal_open(conn, at_proj, home, notify_on)
     assert [r["id"] for r in ended] == [gid]                     # its end: judgment, not its items landing
 
 
-def test_no_other_backend_for_the_second_judge_is_judgment(conn, at_proj):
+def test_no_other_backend_for_the_second_judge_is_judgment(conn, at_proj, home):
+    only_one_backend(home)
     gid = goal(conn)
     acceptance.tick(conn)
     judge(conn, judges(conn, gid)[0]["run_id"], good("c1"))      # c2: no verdict at all
     acceptance.tick(conn)
     g = g_of(conn, gid)
-    assert g["state"] == "judgment"                              # fake and fake2 both kept off
+    assert g["state"] == "judgment"                              # fake is the only backend, kept off
     assert g["error"].startswith("needs you: c2: the judge filed no verdict")
 
 
@@ -233,7 +243,8 @@ def test_accepting_with_no_judge_run_starts_again(conn, at_proj):
     assert g_of(conn, gid)["state"] == "accepting" and len(judges(conn, gid)) == 1
 
 
-def test_accept_by_you_and_rerun(conn, at_proj):
+def test_accept_by_you_and_rerun(conn, at_proj, home):
+    only_one_backend(home)
     gid = goal(conn)
     with pytest.raises(ValueError):
         acceptance.accept_by_you(conn, gid)

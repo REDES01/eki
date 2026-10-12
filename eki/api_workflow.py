@@ -143,7 +143,7 @@ def stages(v: Dict[str, Any], eki: bool, cap: Optional[Dict[str, Any]] = None) -
                       "How a fit change lands: eki merges it, a pull request on GitHub,\n"
                       "or it waits for the person to merge.", True, ["merge"]))
     out.append(_stage("acceptance", "Acceptance", "a judge checks the goal's checks",
-                      "Once every item of a goal with checks has landed, a judge on another backend\n"
+                      "Once every item of a goal with checks has landed, a judge in a run of its own\n"
                       "judges each check. A red dot: a check it couldn't settle needs you.", True, []))
     out.append(_stage("after_merge", "After-merge", v["after_merge"] or "nothing runs after merge",
                       "A shell command eki runs in the person's folder right after it lands a change\n"

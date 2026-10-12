@@ -165,7 +165,9 @@ def test_the_brief_and_the_play_line():
     assert "Focus:" in line and "c1: it shows" in line and "VERDICT: {" in line
 
 
-def test_judgerun_registers_the_run_on_another_backend(conn, proj):
+def test_judgerun_registers_a_fresh_run_on_the_judge_roles_pick(conn, proj):
+    """The first judge is the role's pick even when it built the change (the person's
+    choice, 2026-10-12); a second opinion is kept off the backends before it."""
     with db.tx(conn):
         conn.execute("INSERT INTO goals(id, text, created_at) VALUES ('g1','a goal',?)", (db.now(),))
     rid, why = judgerun.start(conn, goal_id="g1", item_id=None, scope="final", checks=["c1"], round=1,
@@ -173,7 +175,11 @@ def test_judgerun_registers_the_run_on_another_backend(conn, proj):
                               background=True)
     assert why == "" and rid
     run = store.run(conn, rid)
-    assert run["provider"] == "fake2" and run["fresh"] == 1 and run["priority"] == "background"
+    assert run["provider"] == "fake" and run["fresh"] == 1 and run["priority"] == "background"
+    sec, why = judgerun.start(conn, goal_id="g1", item_id=None, scope=judgerun.SECOND, checks=["c1"], round=1,
+                              avoid=["fake"], tree="accept2-g1", repo=str(proj), ref="HEAD", prompt="judge",
+                              background=True)
+    assert why == "" and store.run(conn, sec)["provider"] == "fake2"
     j = verdicts.judging(conn, rid)
     assert (j["scope"], verdicts.listed(j), json.loads(j["avoid"])) == ("final", ["c1"], ["fake"])
     assert store.thread(conn, run["thread_id"])["cwd"].endswith("accept-g1")

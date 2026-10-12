@@ -18,8 +18,9 @@ A pick is recomputed from the settings at every use, and its model and
 effort are checked against the read model list (targets.choose()): when the
 target can't run, the role falls back to its default and says why; when that can't run
 either, the pick has no provider. Timings of the calls made for a role live
-in the role_calls table. `pick_other` keeps a role off given providers: a
-judge never runs on the backend whose work it judges.
+in the role_calls table. `pick_other` keeps a role off given providers: the
+second opinion on an uncertain check runs on another backend than before (the
+first judge is the role's own pick, the builder's provider or not).
 
 This module reads routing.json itself and never imports eki.routing.
 """

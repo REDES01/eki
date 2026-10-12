@@ -4,7 +4,8 @@ Pure git, no database. `land` moves refs/heads/<branch> forward to a commit
 that contains its tip. When the branch is checked out in a folder, the folder
 moves with it through `git merge --ff-only`, and only when no file the change
 touches has local changes there; otherwise nothing moves and the why names
-the files. Never a reset, a force, a checkout of another branch or a clean:
+the files. When the person's folder is on another branch (or a detached HEAD),
+nothing moves either: landing waits until they switch back. Never a reset, a force, a checkout of another branch or a clean:
 untracked and ignored files are never touched. Every call is safe to make
 again after a kill: a branch that already contains the commit is done.
 """
@@ -77,6 +78,11 @@ def _contains(repo: str | Path, ancestor: str, tip: str) -> bool:
     return _ok(repo, "merge-base", "--is-ancestor", ancestor, tip) is None
 
 
+def _on(repo: str | Path) -> Optional[str]:
+    """The branch the folder has checked out, or None on a detached HEAD."""
+    return workspace.git(repo, "symbolic-ref", "--short", "-q", "HEAD", check=False) or None
+
+
 def land(repo: str | Path, branch: str, new: str) -> Optional[str]:
     """Move refs/heads/<branch> forward to `new`. None once landed (or already there); otherwise
     why it waits, with nothing changed. Raises NotFastForward when `new` doesn't contain the tip."""
@@ -84,6 +90,10 @@ def land(repo: str | Path, branch: str, new: str) -> Optional[str]:
     tip = workspace.git(repo, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
     if _contains(repo, new, tip):
         return None
+    other = _on(repo)
+    if other != branch:
+        other = other or "a detached HEAD"
+        return f"is on {other}, not {branch}: eki lands on {branch} once you switch back"
     if not _contains(repo, tip, new):
         raise NotFastForward(f"{new[:12]} doesn't contain the tip of {branch} ({tip[:12]})")
     folder = checked_out(repo, branch)

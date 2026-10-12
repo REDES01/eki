@@ -54,11 +54,13 @@ def test_landing_with_the_branch_checked_out_moves_the_folder(repo):
     assert workspace.git(repo, "status", "--porcelain") == ""
 
 
-def test_landing_with_the_branch_not_checked_out_moves_only_the_ref(repo):
+def test_landing_with_the_folder_on_another_branch_waits(repo):
+    old = tip(repo)
     workspace.git(repo, "checkout", "-q", "-b", "other")
     new = side(repo, {"src/x.js": "x2\n"})
-    assert projectland.land(repo, "master", new) is None
-    assert tip(repo) == new
+    assert projectland.land(repo, "master", new) == (
+        "is on other, not master: eki lands on master once you switch back")
+    assert tip(repo) == old
     assert workspace.git(repo, "symbolic-ref", "--short", "HEAD") == "other"
     assert (repo / "src" / "x.js").read_text() == "x1\n"
 

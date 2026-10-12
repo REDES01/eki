@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import db, integration, projectbrief, projects, roles, selfbrief, store, targets, workspace
+from . import db, drybuild, integration, projectbrief, projects, roles, selfbrief, store, targets, workspace
 
 #: the old eki, read as reference by a draft when it is there
 OLD = "~/eki-2026-09-26"
@@ -83,6 +83,7 @@ def start_plan(conn: sqlite3.Connection, gid: str, text: str, base: str, owner: 
     rid = store.create_run(conn, tid, brief, provider=provider, model=model, effort=effort,
                            row="code", priority=_priority(owner))
     conn.execute("UPDATE goals SET thread_id=?, plan_run=?, state='planning' WHERE id=?", (tid, rid, gid))
+    drybuild.start(conn, gid, project, base, text, _priority(owner))
     return rid
 
 
